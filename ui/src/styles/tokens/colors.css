@@ -1,0 +1,89 @@
+/* Спецформа — Color tokens.
+ *
+ * Дословная копия `tokens/colors.css` дизайн-системы, привязанной к проекту
+ * Claude Design «Typsidian: Typst Editor Design» (b7a3b1f6-608f-403d-8c07-8101d15dce66).
+ * Копия, а не переосмысление: расхождение с макетом должно быть видно как
+ * построчный diff, а не как «кажется, оттенок другой».
+ *
+ * Семантические алиасы внизу заданы для СВЕТЛОГО контекста — таковы они в
+ * дизайн-системе. Приложение живёт в тёмном (handoff: «reused here for a dark
+ * developer-tool context»), поэтому их переопределяет `../app.css`.
+ */
+:root {
+  /* ---- Steel neutrals (base) ---- */
+  --steel-950: #14171a;
+  --steel-900: #1b1f24;
+  --steel-800: #262b31;
+  --steel-700: #353c44;
+  --steel-600: #4a525b;
+  --steel-500: #6b757f;
+  --steel-400: #9aa3ac;
+  --steel-300: #c2c8ce;
+  --steel-200: #dde1e5;
+  --steel-100: #eceff1;
+  --steel-50: #f6f7f8;
+  --white: #ffffff;
+
+  /* ---- Safety orange (brand accent) ---- */
+  --orange-700: #b34000;
+  --orange-600: #d94f00;
+  --orange-500: #ff6a00;
+  --orange-400: #ff8a33;
+  --orange-200: #ffc7a3;
+  --orange-100: #ffe7d6;
+
+  /* ---- Hi-vis yellow (secondary signal) ---- */
+  --hivis-600: #d4ad00;
+  --hivis-500: #ffd400;
+  --hivis-400: #ffe14d;
+  --hivis-100: #fff6cc;
+
+  /* ---- Semantic status (base) ---- */
+  --green-600: #2e7d4f;
+  --green-100: #d9efe2;
+  --amber-600: #e8a300;
+  --amber-100: #fcefcf;
+  --red-600: #c8331f;
+  --red-100: #fadcd7;
+  --blue-600: #2f6fb0;
+  --blue-100: #dbe9f6;
+
+  /* ====== Semantic aliases ====== */
+  /* Text */
+  --text-primary: var(--steel-900);
+  --text-secondary: var(--steel-600);
+  --text-muted: var(--steel-500);
+  --text-inverse: var(--white);
+  --text-accent: var(--orange-600);
+
+  /* Surfaces */
+  --surface-page: var(--steel-50);
+  --surface-card: var(--white);
+  --surface-sunken: var(--steel-100);
+  --surface-inverse: var(--steel-950);
+  --surface-accent: var(--orange-500);
+  --surface-accent-soft: var(--orange-100);
+
+  /* Borders */
+  --border-subtle: var(--steel-100);
+  --border-default: var(--steel-200);
+  --border-strong: var(--steel-300);
+  --border-inverse: var(--steel-700);
+
+  /* Interactive accent */
+  --accent: var(--orange-500);
+  --accent-hover: var(--orange-600);
+  --accent-active: var(--orange-700);
+  --accent-text: var(--white);
+  --focus-ring: var(--orange-500);
+
+  /* Status semantics */
+  --success: var(--green-600);
+  --success-bg: var(--green-100);
+  --warning: var(--amber-600);
+  --warning-bg: var(--amber-100);
+  --danger: var(--red-600);
+  --danger-bg: var(--red-100);
+  --info: var(--blue-600);
+  --info-bg: var(--blue-100);
+}

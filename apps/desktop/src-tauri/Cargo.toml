@@ -1,0 +1,23 @@
+[package]
+name = "typsidian-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Typsidian desktop shell (Tauri)"
+
+# Оболочка, а не второе ядро: вся логика приходит из `typsidian-core` по пути,
+# как того требует plan.md → Project Structure. Здесь только команды-обёртки и
+# пересылка событий в окно (001 T112-T115, принцип I).
+
+[lib]
+name = "typsidian_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+typsidian-core = { path = "../../../packages/core" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }

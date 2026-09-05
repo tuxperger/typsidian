@@ -1,0 +1,1178 @@
+use crate::vault::backend::{
+    valid_note_name, CreateError, DeleteError, OpenError, ReadError, RenameError, ResolveError,
+    VaultBackend, WriteError,
+};
+use crate::vault::cache::{record_links, IndexCache, SqliteCache};
+use crate::vault::conflict::{line_diff, ConflictRegistry, ConflictStatus, DiffLine, EditConflict};
+use crate::vault::events::{links_invalidated, wrap_bulk_if_needed, VaultEvent};
+use crate::vault::index::{FileStamp, Index, Note};
+use crate::vault::{AccessState, NOTE_SIZE_LIMIT_BYTES, SUPPORTED_NOTE_COUNT};
+use notify::event::{ModifyKind, RenameMode};
+use notify::{RecursiveMode, Watcher};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, DebouncedEvent, FileIdMap};
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::Mutex as AsyncMutex;
+
+const HIDDEN_OR_VCS: &[&str] = &[".git", ".svn", ".hg"];
+
+fn is_excluded(entry_name: &str) -> bool {
+    entry_name.starts_with('.') || HIDDEN_OR_VCS.contains(&entry_name)
+}
+
+/// Попадает ли файл в дерево. Правило одно на оба backend — `super::classify`
+/// (research.md §3 фичи 002): заметки и доски да, снимки и посторонние файлы
+/// нет.
+fn is_listed(path: &Path) -> bool {
+    super::classify(path).is_listed()
+}
+
+fn stamp_for(path: &Path) -> std::io::Result<FileStamp> {
+    let content = std::fs::read(path)?;
+    let metadata = std::fs::metadata(path)?;
+    let mtime_millis = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    Ok(FileStamp::from_content(mtime_millis, &content))
+}
+
+/// Читает файл ровно один раз и отдаёт всё, что из этого чтения нужно: снимок
+/// для индекса и исходящие ссылки для таблицы `links` (T085). Раздельные обходы
+/// «сначала метаданные, потом ссылки» стоили бы второго полного чтения vault на
+/// каждом открытии (SC-002).
+fn note_and_links_from_path(root: &Path, path: &Path) -> Option<(Note, Vec<PathBuf>)> {
+    let content = std::fs::read(path).ok()?;
+    let metadata = std::fs::metadata(path).ok()?;
+    let mtime_millis = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let rel = path.strip_prefix(root).ok()?.to_path_buf();
+    let links = crate::graph::links_in(&rel, &String::from_utf8_lossy(&content));
+    let stamp = FileStamp::from_content(mtime_millis, &content);
+    Some((Note::new(rel, stamp), links))
+}
+
+/// Обновляет индекс свежими метаданными файла, не сбрасывая
+/// `has_unsaved_edits`, если заметка уже была в индексе. Внешний конвейер
+/// (`watch()`/сверка) не имеет права затирать состояние открытой в
+/// редакторе сессии — backend обязан не терять и не откатывать локальное
+/// состояние сам по себе (FR-035), даже когда обновляет метаданные по
+/// внешнему изменению; фактическое поднятие `ConflictDetected` вместо
+/// тихого `NoteUpdated` при наличии несохранённых правок — предмет US4
+/// (T071+), эта функция лишь не допускает регресса до неё.
+fn upsert_preserving_unsaved_edits(index: &mut Index, mut fresh: Note) {
+    if let Some(existing) = index.get(&fresh.path) {
+        fresh.has_unsaved_edits = existing.has_unsaved_edits;
+    }
+    index.insert(fresh);
+}
+
+/// Классифицированное сырое изменение на диске, полученное из потока
+/// `notify`/`notify-debouncer-full` — абсолютные пути, ещё не сверенные с
+/// индексом (это делает `spawn_change_processor`). Отдельный от
+/// `VaultEvent` тип нужен, потому что один `RawChange` может породить ноль
+/// событий (например, `Created`/`Updated` файла, уже исчезнувшего к моменту
+/// обработки — временный файл atomic-write, T046) или потребовать сверки с
+/// текущим индексом, чтобы решить Created-vs-Updated.
+#[derive(Debug, Clone)]
+enum RawChange {
+    Created(PathBuf),
+    Updated(PathBuf),
+    Deleted(PathBuf),
+    Renamed(PathBuf, PathBuf),
+}
+
+/// Классифицирует один `DebouncedEvent` в ноль или более [`RawChange`],
+/// отправляемых в `tx`. Ключевое отличие от наивного матчинга по
+/// `EventKind` — явная обработка `ModifyKind::Name(RenameMode::*)`
+/// (research.md §2, FR-016):
+///
+/// - `RenameMode::Both` — дебаунсер (или сам ОС-бэкенд `notify`, см.
+///   `notify::inotify`) уже скоррелировал пару `From`/`To` в одно событие с
+///   двумя путями `[from, to]` (`push_rename_event` в
+///   `notify-debouncer-full`, `paths` в порядке `(from, to)` по контракту
+///   `RenameMode::Both`). Если обе стороны — заметки (`.typ`), это честный
+///   `NoteRenamed`. Если ровно одна сторона — заметка, а другая нет
+///   (например, `atomic.typ.tmp` -> `atomic.typ`), это не переименование
+///   заметки, а появление/исчезновение заметки под тем именем, которое нас
+///   интересует — трактуется как `Created`/`Deleted` соответственно.
+/// - `RenameMode::From`/`RenameMode::To` без пары — ОС не смогла
+///   скоррелировать (перемещение за пределы watched-дерева, обрезанный
+///   от/to у забюджеченного backend) — деградируем до `Deleted`/`Created`
+///   вместо переименования, не теряя сам факт изменения.
+fn dispatch_debounced_event(ev: &DebouncedEvent, tx: &UnboundedSender<RawChange>) {
+    match &ev.event.kind {
+        notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+            if let [from, to] = ev.event.paths.as_slice() {
+                match (is_listed(from), is_listed(to)) {
+                    (true, true) => {
+                        let _ = tx.send(RawChange::Renamed(from.clone(), to.clone()));
+                    }
+                    (true, false) => {
+                        let _ = tx.send(RawChange::Deleted(from.clone()));
+                    }
+                    (false, true) => {
+                        let _ = tx.send(RawChange::Created(to.clone()));
+                    }
+                    (false, false) => {}
+                }
+            }
+        }
+        notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+            if let Some(path) = ev.event.paths.first() {
+                if is_listed(path) {
+                    let _ = tx.send(RawChange::Deleted(path.clone()));
+                }
+            }
+        }
+        notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+            if let Some(path) = ev.event.paths.first() {
+                if is_listed(path) {
+                    let _ = tx.send(RawChange::Created(path.clone()));
+                }
+            }
+        }
+        notify::EventKind::Create(_) => {
+            for path in &ev.event.paths {
+                if is_listed(path) {
+                    let _ = tx.send(RawChange::Created(path.clone()));
+                }
+            }
+        }
+        notify::EventKind::Modify(_) => {
+            for path in &ev.event.paths {
+                if is_listed(path) {
+                    let _ = tx.send(RawChange::Updated(path.clone()));
+                }
+            }
+        }
+        notify::EventKind::Remove(_) => {
+            for path in &ev.event.paths {
+                if is_listed(path) {
+                    let _ = tx.send(RawChange::Deleted(path.clone()));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Период опроса доступности vault (T056, FR-020, FR-036) — не привязан ни
+/// к одному SC-порогу напрямую (в spec.md нет отдельного бюджета для
+/// обнаружения потери доступа), выбран достаточно коротким для отзывчивого
+/// UI-уведомления и достаточно длинным, чтобы не создавать заметной
+/// фоновой нагрузки (сама проверка — дешёвые `metadata`/`read_dir`, не
+/// полный обход).
+const ACCESS_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Определяет `AccessState` по фактическому состоянию `root` на диске:
+/// путь недоступен для чтения (удалён, отключён диск, отозвано разрешение
+/// на уровне ОС) -> `Unavailable` (FR-020); путь читается, но не
+/// принимает записи (биты доступа запрещают запись) -> `ReadOnly`
+/// (FR-036); иначе -> `ReadWrite`. Не имеет побочных эффектов — не
+/// создаёт/не удаляет файлы-пробники (в отличие от гипотетической
+/// probe-write стратегии), чтобы не полагаться на то, что диск не заполнен
+/// под конец теста Edge Case «диск заполнен».
+fn probe_access_state(root: &Path) -> AccessState {
+    let Ok(metadata) = std::fs::metadata(root) else {
+        return AccessState::Unavailable;
+    };
+    if !metadata.is_dir() {
+        return AccessState::Unavailable;
+    }
+    if std::fs::read_dir(root).is_err() {
+        return AccessState::Unavailable;
+    }
+    if metadata.permissions().readonly() {
+        AccessState::ReadOnly
+    } else {
+        AccessState::ReadWrite
+    }
+}
+
+/// Рекурсивный обход vault (FR-002/FR-003), исключающий скрытые/служебные
+/// каталоги (FR-004); символические ссылки не раскрываются (Assumptions).
+///
+/// `limit` — предел числа заметок (FR-038). Обход прерывается, как только
+/// найденных заметок стало **больше** предела, и возвращает [`Err`]: считать
+/// весь оставшийся vault только ради того, чтобы отказать, бессмысленно, а на
+/// достаточно большой папке — ещё и долго. `limit: usize::MAX` отключает
+/// проверку (сверка уже открытого vault, где предел применён при открытии).
+fn walk(root: &Path, limit: usize) -> Result<Vec<(Note, Vec<PathBuf>)>, TooManyNotes> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                continue;
+            }
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(path);
+            } else if file_type.is_file() && is_listed(&path) {
+                if let Some(entry) = note_and_links_from_path(root, &path) {
+                    found.push(entry);
+                    if found.len() > limit {
+                        return Err(TooManyNotes);
+                    }
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Обход прерван по пределу FR-038.
+struct TooManyNotes;
+
+/// Считает заметки, не читая их, и останавливается сразу за `limit`.
+///
+/// Нужен для быстрого пути SC-003: там полного обхода нет, список берётся из
+/// кэша, — а кэш производен и неавторитетен (принцип VI конституции), поэтому
+/// решать по нему «vault в пределах лимита» нельзя. Vault мог вырасти за
+/// предел, пока приложение было закрыто, и без этой проверки открылся бы в
+/// обход FR-038.
+///
+/// Стоит существенно дешевле `walk`: только `read_dir`/`file_type`, без
+/// чтения содержимого и вычисления снимков, — поэтому бюджет SC-003 (≤1 с) он
+/// не съедает.
+fn exceeds_note_limit(root: &Path, limit: usize) -> bool {
+    let mut count = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() && is_listed(&entry.path()) {
+                count += 1;
+                if count > limit {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Нативная реализация `VaultBackend`: прямой `std::fs` + `notify` внутри
+/// процесса приложения — без обращения к Tauri fs-плагину по IPC (research.md §1).
+/// `index`/`cache`/`access_state` — за `Arc<Mutex<_>>`, потому что фоновая сверка
+/// при быстром повторном открытии (T026, FR-018), `watch()`-пайплайн (T053/T058)
+/// и периодическая проверка доступности (T056) обновляют их конкурентно с уже
+/// выданными вызывающему методами и друг с другом.
+pub struct NativeBackend {
+    root_path: PathBuf,
+    access_state: Arc<StdMutex<AccessState>>,
+    index: Arc<AsyncMutex<Index>>,
+    cache: Arc<AsyncMutex<Option<SqliteCache>>>,
+    /// Несохранённые буферы и активные конфликты (US4). За `std::sync::Mutex`,
+    /// а не `AsyncMutex`: все обращения к нему точечные и не пересекают
+    /// `.await`, а `pending_conflict`/`has_unsaved_edits` вызываются из
+    /// синхронного кода UI.
+    conflicts: Arc<StdMutex<ConflictRegistry>>,
+    events: Arc<StdMutex<VecDeque<VaultEvent>>>,
+    /// Сигнал «в очереди событий что-то появилось» (001 T114).
+    ///
+    /// Нужен оболочке рабочего стола: обнаружение здесь push-овое (`notify` +
+    /// дебаунсер), и пересылать события в окно по таймеру означало бы добавить
+    /// поллинг там, где его нет. `notify_one`, а не `notify_waiters`: если в
+    /// момент публикации никто не ждёт, разрешение сохраняется, и следующий
+    /// `notified().await` вернётся сразу — иначе события залежались бы в
+    /// очереди до следующего изменения файла.
+    events_ready: Arc<tokio::sync::Notify>,
+    _watcher: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, FileIdMap>>,
+    _access_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl NativeBackend {
+    fn cache_db_path(root: &Path) -> PathBuf {
+        root.join(".typsidian-cache.sqlite")
+    }
+
+    /// Единственный гейт записи для всех четырёх операций, названных в FR-036
+    /// (сохранение, создание, переименование, удаление). Общий предикат, а не
+    /// повторённое условие: разъехавшиеся копии этой проверки — ровно тот
+    /// дефект, из-за которого `create`/`rename`/`delete` пропускали её вовсе.
+    fn write_denied(&self) -> bool {
+        *self.access_state.lock().unwrap() != AccessState::ReadWrite
+    }
+
+    /// Запускает нативный FS-watcher (T053): `notify` + дебаунсер
+    /// (research.md §2) классифицирует сырые ОС-события в [`RawChange`]
+    /// (включая корреляцию rename — см. `dispatch_debounced_event`) и
+    /// передаёт их через `tokio::mpsc` в фоновую задачу
+    /// (`spawn_change_processor`), которая уже обновляет `index`/`cache` и
+    /// публикует итоговые `VaultEvent` (T058).
+    fn start_watch(&mut self) {
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<RawChange>();
+        let mut debouncer = match new_debouncer(
+            Duration::from_millis(400),
+            None,
+            move |result: DebounceEventResult| {
+                if let Ok(debounced_events) = result {
+                    for ev in &debounced_events {
+                        dispatch_debounced_event(ev, &raw_tx);
+                    }
+                }
+                // `Err(errors)` — сбои самого watcher-бэкенда (например,
+                // переполнение очереди ОС-событий). Обнаружение
+                // недоступности vault (T056) идёт отдельным периодическим
+                // опросом (`spawn_access_watch`), а не через этот канал:
+                // ошибки watcher'а не всегда означают потерю доступа
+                // (могут быть транзиентными), а периодический опрос даёт
+                // единообразную (в том числе с web) политику определения
+                // access_state.
+            },
+        ) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        // Сидируем `FileIdMap` корнем vault: без явного `add_root` кэш
+        // file-id не знает о уже существующих на момент `open()` файлах, и
+        // rename одного из них в первые же секунды после открытия не
+        // сможет матчиться по file id на бэкендах ОС, не дающих rename
+        // cookie (см. notify-debouncer-full README/lib.rs пример).
+        debouncer
+            .cache()
+            .add_root(&self.root_path, RecursiveMode::Recursive);
+        if debouncer
+            .watcher()
+            .watch(&self.root_path, RecursiveMode::Recursive)
+            .is_ok()
+        {
+            self.spawn_change_processor(raw_rx);
+            self._watcher = Some(debouncer);
+        }
+    }
+
+    /// Фоновая задача (T058), обрабатывающая поток [`RawChange`] из
+    /// `start_watch`: обновляет `index`/`cache` и публикует итоговые
+    /// `VaultEvent` в общую очередь `events` — тот же канал, что и
+    /// `spawn_reconciliation`, чтобы UI не различал источник события.
+    fn spawn_change_processor(
+        &mut self,
+        mut raw_rx: UnboundedReceiver<RawChange>,
+    ) -> tokio::task::JoinHandle<()> {
+        let root = self.root_path.clone();
+        let index = self.index.clone();
+        let cache = self.cache.clone();
+        let conflicts = self.conflicts.clone();
+        let events = self.events.clone();
+        let events_ready = self.events_ready.clone();
+        tokio::spawn(async move {
+            while let Some(first) = raw_rx.recv().await {
+                // Забираем всё, что уже скопилось в канале, одной пачкой —
+                // это и есть точка, где массовое внешнее изменение (T048,
+                // T055) становится одной пачкой `VaultEvent`, а не потоком
+                // одиночных пар Started/Settled на каждое отдельное
+                // изменение.
+                let mut batch = vec![first];
+                while let Ok(next) = raw_rx.try_recv() {
+                    batch.push(next);
+                }
+
+                // Стамп-вычисления (чтение содержимого + метаданных с
+                // диска) — блокирующий I/O, выносится в пул блокирующих
+                // потоков (тот же приём, что и в `spawn_reconciliation`/
+                // `open()` для `walk()`), иначе один из worker-потоков
+                // tokio удерживался бы на время обработки всей пачки
+                // (FR-019, SC-005: backend должен оставаться отзывчивым).
+                let root_for_blocking = root.clone();
+                let to_stamp: Vec<PathBuf> = batch
+                    .iter()
+                    .filter_map(|c| match c {
+                        RawChange::Created(p) | RawChange::Updated(p) => Some(p.clone()),
+                        RawChange::Renamed(_, to) => Some(to.clone()),
+                        RawChange::Deleted(_) => None,
+                    })
+                    .collect();
+                let stamped: HashMap<PathBuf, Option<(Note, Vec<PathBuf>)>> =
+                    tokio::task::spawn_blocking(move || {
+                        to_stamp
+                            .into_iter()
+                            .map(|abs| {
+                                let entry = note_and_links_from_path(&root_for_blocking, &abs);
+                                (abs, entry)
+                            })
+                            .collect()
+                    })
+                    .await
+                    .unwrap_or_default();
+
+                let mut idx = index.lock().await;
+                let mut cache_guard = cache.lock().await;
+                let mut pending = Vec::with_capacity(batch.len());
+                // Пути, появление/исчезновение/переезд которых меняет статус
+                // входящих на них ссылок (FR-030, T087).
+                let mut link_targets_touched: Vec<PathBuf> = Vec::new();
+                for change in batch {
+                    match change {
+                        RawChange::Created(abs) | RawChange::Updated(abs) => {
+                            let Some(rel) = abs.strip_prefix(&root).ok().map(Path::to_path_buf)
+                            else {
+                                continue;
+                            };
+                            // Файл уже исчез к моменту обработки (например,
+                            // временный файл atomic-write, T046) — не
+                            // ошибка, просто нет события для этого пути.
+                            let Some((note, links)) = stamped.get(&abs).cloned().flatten() else {
+                                continue;
+                            };
+                            let known_stamp = idx.get(&rel).map(|n| n.stamp.clone());
+                            let is_new = known_stamp.is_none();
+                            // US4/T074: конфликт вместо тихого обновления, если
+                            // у заметки есть несохранённые правки и содержимое
+                            // на диске действительно разошлось (FR-021).
+                            // Блокировка не пересекает `.await` — иначе
+                            // `std::sync::MutexGuard` не был бы Send.
+                            let conflicted = match &known_stamp {
+                                Some(known) => conflicts
+                                    .lock()
+                                    .unwrap()
+                                    .observe_disk_change(&rel, known, &note.stamp),
+                                None => false,
+                            };
+                            upsert_preserving_unsaved_edits(&mut idx, note.clone());
+                            if let Some(c) = cache_guard.as_mut() {
+                                c.upsert_note(&note).await;
+                                c.set_links(&rel, &links).await;
+                            }
+                            if is_new {
+                                link_targets_touched.push(rel.clone());
+                            }
+                            pending.push(if conflicted {
+                                VaultEvent::ConflictDetected {
+                                    note_path: rel,
+                                    disk_snapshot: note.stamp.clone(),
+                                }
+                            } else if is_new {
+                                VaultEvent::NoteCreated { path: rel }
+                            } else {
+                                VaultEvent::NoteUpdated { path: rel }
+                            });
+                        }
+                        RawChange::Deleted(abs) => {
+                            let Some(rel) = abs.strip_prefix(&root).ok().map(Path::to_path_buf)
+                            else {
+                                continue;
+                            };
+                            if idx.get(&rel).is_some() {
+                                // FR-025: удаление снаружи заметки с
+                                // несохранёнными правками предупреждает, а не
+                                // молча уносит буфер вместе с файлом.
+                                let had_edits =
+                                    conflicts.lock().unwrap().observe_disk_deletion(&rel);
+                                idx.remove(&rel);
+                                if let Some(c) = cache_guard.as_mut() {
+                                    c.remove_note(&rel).await;
+                                }
+                                link_targets_touched.push(rel.clone());
+                                pending.push(if had_edits {
+                                    VaultEvent::NoteDeletedWithUnsavedEdits { note_path: rel }
+                                } else {
+                                    VaultEvent::NoteDeleted { path: rel }
+                                });
+                            }
+                        }
+                        RawChange::Renamed(from_abs, to_abs) => {
+                            let (Some(from_rel), Some(to_rel)) = (
+                                from_abs.strip_prefix(&root).ok().map(Path::to_path_buf),
+                                to_abs.strip_prefix(&root).ok().map(Path::to_path_buf),
+                            ) else {
+                                continue;
+                            };
+                            // `Index::rename` сохраняет `has_unsaved_edits`
+                            // заметки (FR-015) — здесь дополнительно
+                            // обновляется только `stamp`, если удалось
+                            // прочитать актуальное содержимое по новому
+                            // пути (контент мог измениться в рамках того
+                            // же atomic move, T046).
+                            idx.rename(&from_rel, &to_rel);
+                            if let Some((fresh, links)) = stamped.get(&to_abs).cloned().flatten() {
+                                if let Some(entry) = idx.get_mut(&to_rel) {
+                                    entry.stamp = fresh.stamp.clone();
+                                }
+                                if let Some(c) = cache_guard.as_mut() {
+                                    c.rename_note(&from_rel, &to_rel).await;
+                                    c.upsert_note(&fresh).await;
+                                    c.set_links(&to_rel, &links).await;
+                                }
+                            } else if let Some(c) = cache_guard.as_mut() {
+                                c.rename_note(&from_rel, &to_rel).await;
+                            }
+                            // Переезд гасит входящие ссылки на старый путь и
+                            // может починить ссылки на новый (FR-030).
+                            link_targets_touched.push(from_rel.clone());
+                            link_targets_touched.push(to_rel.clone());
+                            pending.push(VaultEvent::NoteRenamed {
+                                from_path: from_rel,
+                                to_path: to_rel,
+                            });
+                        }
+                    }
+                }
+                let mut affected_by_links: Vec<PathBuf> = Vec::new();
+                if let Some(c) = cache_guard.as_ref() {
+                    for target in &link_targets_touched {
+                        affected_by_links.extend(c.backlinks(target).await);
+                    }
+                }
+                drop(idx);
+                drop(cache_guard);
+                if !pending.is_empty() {
+                    let mut batch = wrap_bulk_if_needed(pending);
+                    batch.extend(links_invalidated(affected_by_links));
+                    events.lock().unwrap().extend(batch);
+                    events_ready.notify_one();
+                }
+            }
+        })
+    }
+
+    /// Периодическая проверка доступности vault (T056, FR-020, FR-036):
+    /// единственный источник переходов `access_state` на native. Дешёвая
+    /// (`metadata`/`read_dir`, без полного обхода), поэтому вынесена в
+    /// `spawn_blocking` только на время самой проверки, не постоянно.
+    /// Останавливается сама, как только один раз обнаружила `Unavailable` —
+    /// по data-model.md восстановление из `Unavailable` возможно только
+    /// через явное переоткрытие (FR-018), дальнейший опрос этим же
+    /// экземпляром `NativeBackend` бессмыслен.
+    fn spawn_access_watch(&mut self) -> tokio::task::JoinHandle<()> {
+        let root = self.root_path.clone();
+        let access_state = self.access_state.clone();
+        let events = self.events.clone();
+        let events_ready = self.events_ready.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(ACCESS_CHECK_INTERVAL);
+            // Первый тик срабатывает немедленно — пропускаем его, `open()`
+            // уже установил начальное состояние синхронно.
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let root_for_probe = root.clone();
+                let observed =
+                    tokio::task::spawn_blocking(move || probe_access_state(&root_for_probe))
+                        .await
+                        .unwrap_or(AccessState::Unavailable);
+                let previous = *access_state.lock().unwrap();
+                if observed != previous {
+                    *access_state.lock().unwrap() = observed;
+                    events
+                        .lock()
+                        .unwrap()
+                        .push_back(VaultEvent::VaultAccessChanged {
+                            access_state: observed,
+                        });
+                    events_ready.notify_one();
+                }
+                if observed == AccessState::Unavailable {
+                    break;
+                }
+            }
+        })
+    }
+
+    /// Публикует `LinksInvalidated` для заметок, ссылающихся на любой из
+    /// `targets` (FR-030, T087). Вызывается локальными create/rename/delete:
+    /// их сами по себе видит и watch()-пайплайн, но к моменту его срабатывания
+    /// заметки уже нет в индексе, поэтому обратные ссылки надо собрать здесь.
+    async fn publish_links_invalidated(&self, targets: &[PathBuf]) {
+        let mut affected = Vec::new();
+        if let Some(cache) = self.cache.lock().await.as_ref() {
+            for target in targets {
+                affected.extend(cache.backlinks(target).await);
+            }
+        }
+        if let Some(event) = links_invalidated(affected) {
+            self.events.lock().unwrap().push_back(event);
+            self.events_ready.notify_one();
+        }
+    }
+
+    /// Сигнал «в очереди событий что-то появилось» (001 T114).
+    ///
+    /// Оболочка рабочего стола ждёт его и пересылает `poll_events()` в окно,
+    /// вместо того чтобы опрашивать ядро по таймеру: обнаружение на native
+    /// push-овое, и превращать его в поллинг на границе процесса значило бы
+    /// добавить задержку, которой в самом ядре нет.
+    pub fn events_ready(&self) -> Arc<tokio::sync::Notify> {
+        self.events_ready.clone()
+    }
+
+    /// Фоновая сверка кэша с реальным состоянием диска (FR-018): полный обход,
+    /// диффинг против уже отданного (из кэша) индекса, публикация расхождений
+    /// как обычных `VaultEvent` через тот же канал, что и `watch()` — UI не
+    /// обязан знать, что событие пришло из сверки, а не из FS-watcher.
+    fn spawn_reconciliation(&self) {
+        let root = self.root_path.clone();
+        let index = self.index.clone();
+        let cache = self.cache.clone();
+        let conflicts = self.conflicts.clone();
+        let events = self.events.clone();
+        let events_ready = self.events_ready.clone();
+        tokio::spawn(async move {
+            let fresh = tokio::task::spawn_blocking(move || {
+                // Если root уже недоступен на момент самой сверки (гонка
+                // между `open()` и потерей доступа сразу после него,
+                // либо просто задержка фонового планирования) — не
+                // трактуем «ничего не нашли» как «всё удалено» (FR-020):
+                // об истинной потере доступа сообщит отдельно
+                // `spawn_access_watch`, а эта сверка просто пропускает
+                // текущий проход, не трогая индекс.
+                if std::fs::read_dir(&root).is_err() {
+                    None
+                } else {
+                    // Предел FR-038 применён при открытии; здесь vault уже
+                    // открыт, и сверка не может «закрыть» его задним числом —
+                    // поэтому обход без ограничения.
+                    walk(&root, usize::MAX).ok()
+                }
+            })
+            .await
+            .unwrap_or(None);
+            let Some(fresh) = fresh else {
+                return;
+            };
+            let mut idx = index.lock().await;
+            let known_paths: std::collections::HashSet<_> =
+                idx.all().into_iter().map(|n| n.path).collect();
+            let fresh_paths: std::collections::HashSet<_> =
+                fresh.iter().map(|(n, _)| n.path.clone()).collect();
+            let mut link_targets_touched: Vec<PathBuf> = Vec::new();
+
+            let mut cache_guard = cache.lock().await;
+            // Собираем события в локальный Vec и берём std::sync::Mutex только
+            // в самом конце, одним разом — иначе MutexGuard пришлось бы
+            // удерживать через `.await` (cache.upsert_note), а std::sync::Mutex
+            // не Send через точки await.
+            let mut pending = Vec::new();
+            for (note, links) in &fresh {
+                let changed = match idx.get(&note.path) {
+                    Some(existing) => existing.stamp != note.stamp,
+                    None => true,
+                };
+                if changed {
+                    let known_stamp = idx.get(&note.path).map(|n| n.stamp.clone());
+                    let is_new = !known_paths.contains(&note.path);
+                    // Тот же разбор, что и в `spawn_change_processor`: сверка —
+                    // равноправный источник внешних изменений, и расхождение,
+                    // накопившееся пока приложение было закрыто, не имеет права
+                    // молча затереть открытый буфер (FR-018 + FR-021).
+                    let conflicted = match &known_stamp {
+                        Some(known) => conflicts.lock().unwrap().observe_disk_change(
+                            &note.path,
+                            known,
+                            &note.stamp,
+                        ),
+                        None => false,
+                    };
+                    upsert_preserving_unsaved_edits(&mut idx, note.clone());
+                    if let Some(c) = cache_guard.as_mut() {
+                        c.upsert_note(note).await;
+                        c.set_links(&note.path, links).await;
+                    }
+                    if is_new {
+                        link_targets_touched.push(note.path.clone());
+                    }
+                    pending.push(if conflicted {
+                        VaultEvent::ConflictDetected {
+                            note_path: note.path.clone(),
+                            disk_snapshot: note.stamp.clone(),
+                        }
+                    } else if is_new {
+                        VaultEvent::NoteCreated {
+                            path: note.path.clone(),
+                        }
+                    } else {
+                        VaultEvent::NoteUpdated {
+                            path: note.path.clone(),
+                        }
+                    });
+                }
+            }
+            for stale_path in known_paths.difference(&fresh_paths) {
+                let had_edits = conflicts.lock().unwrap().observe_disk_deletion(stale_path);
+                idx.remove(stale_path);
+                if let Some(c) = cache_guard.as_mut() {
+                    c.remove_note(stale_path).await;
+                }
+                link_targets_touched.push(stale_path.clone());
+                pending.push(if had_edits {
+                    VaultEvent::NoteDeletedWithUnsavedEdits {
+                        note_path: stale_path.clone(),
+                    }
+                } else {
+                    VaultEvent::NoteDeleted {
+                        path: stale_path.clone(),
+                    }
+                });
+            }
+            let mut affected_by_links: Vec<PathBuf> = Vec::new();
+            if let Some(c) = cache_guard.as_ref() {
+                for target in &link_targets_touched {
+                    affected_by_links.extend(c.backlinks(target).await);
+                }
+            }
+            if !pending.is_empty() {
+                let mut batch = wrap_bulk_if_needed(pending);
+                batch.extend(links_invalidated(affected_by_links));
+                events.lock().unwrap().extend(batch);
+                events_ready.notify_one();
+            }
+        });
+    }
+}
+
+impl Drop for NativeBackend {
+    fn drop(&mut self) {
+        // `_watcher` (Debouncer) останавливает свой внутренний поток и
+        // закрывает `raw_tx` в собственном `Drop` — `spawn_change_processor`
+        // естественно завершится, когда `raw_rx.recv()` вернёт `None`,
+        // отдельная отмена не нужна. Периодическая проверка доступности не
+        // имеет такого естественного сигнала (не привязана к закрытию
+        // канала), поэтому останавливается явно.
+        if let Some(handle) = self._access_task.take() {
+            handle.abort();
+        }
+    }
+}
+
+impl VaultBackend for NativeBackend {
+    async fn open(root_path: &Path) -> Result<Self, OpenError> {
+        if !root_path.exists() {
+            return Err(OpenError::NotFound);
+        }
+        if !root_path.is_dir() {
+            return Err(OpenError::NotADirectory);
+        }
+        if std::fs::read_dir(root_path).is_err() {
+            return Err(OpenError::AccessDenied);
+        }
+
+        // FR-007 («предложить последний открытый vault при запуске») с фичи 004
+        // обслуживается настройками: `Settings::current_vault` вместе со
+        // списком известных vault. Прежний вызов `last_vault::remember` снят
+        // вместе с самим модулем — он был вторым источником истины об одном и
+        // том же факте и существовал только под native (research.md §10 фичи
+        // 004). Запоминание текущего vault теперь делает вызывающая сторона,
+        // применяя `SettingsChange::current_vault` после успешного открытия.
+
+        let mut cache = SqliteCache::open(&Self::cache_db_path(root_path))
+            .await
+            .ok();
+        let cached_notes = match &cache {
+            Some(c) => c.load_notes().await,
+            None => Vec::new(),
+        };
+
+        // SC-003: если валидный кэш уже есть, отдаём его немедленно и сверяем
+        // с диском в фоне (spawn_reconciliation ниже) — вместо полного
+        // синхронного обхода на каждое открытие.
+        let notes = if !cached_notes.is_empty() {
+            // Быстрый путь SC-003 не должен становиться лазейкой в обход
+            // FR-038: кэш производен и неавторитетен (принцип VI), а vault мог
+            // вырасти за предел, пока приложение было закрыто. Считаем по
+            // диску — дёшево, без чтения содержимого.
+            let owned_root = root_path.to_path_buf();
+            let over_limit = tokio::task::spawn_blocking(move || {
+                exceeds_note_limit(&owned_root, SUPPORTED_NOTE_COUNT)
+            })
+            .await
+            .unwrap_or(false);
+            if over_limit {
+                return Err(OpenError::TooManyNotes);
+            }
+            cached_notes
+        } else {
+            // FR-005: обход MUST NOT блокировать поток исполнения.
+            let owned_root = root_path.to_path_buf();
+            let Ok(found) =
+                tokio::task::spawn_blocking(move || walk(&owned_root, SUPPORTED_NOTE_COUNT))
+                    .await
+                    .unwrap_or(Ok(Vec::new()))
+            else {
+                // FR-038: обход прерван на превышении предела. Ни индекс, ни
+                // кэш не наполняются — частичное дерево не должно пережить
+                // отказ и попасть в быстрый путь следующего открытия.
+                return Err(OpenError::TooManyNotes);
+            };
+            // Холодный обход MUST наполнить кэш, иначе следующее открытие не
+            // получит быстрый путь SC-003. Ссылки пишутся из того же обхода —
+            // второго чтения vault ради таблицы `links` не происходит.
+            if let Some(c) = cache.as_mut() {
+                for (note, links) in &found {
+                    c.upsert_note(note).await;
+                    c.set_links(&note.path, links).await;
+                }
+            }
+            found.into_iter().map(|(note, _)| note).collect()
+        };
+
+        let mut index = Index::new();
+        for note in notes {
+            index.insert(note);
+        }
+
+        let mut backend = Self {
+            root_path: root_path.to_path_buf(),
+            access_state: Arc::new(StdMutex::new(AccessState::ReadWrite)),
+            index: Arc::new(AsyncMutex::new(index)),
+            cache: Arc::new(AsyncMutex::new(cache)),
+            conflicts: Arc::new(StdMutex::new(ConflictRegistry::new())),
+            events: Arc::new(StdMutex::new(VecDeque::new())),
+            events_ready: Arc::new(tokio::sync::Notify::new()),
+            _watcher: None,
+            _access_task: None,
+        };
+        backend.start_watch();
+        backend.spawn_reconciliation();
+        backend._access_task = Some(backend.spawn_access_watch());
+        Ok(backend)
+    }
+
+    fn root_path(&self) -> &Path {
+        &self.root_path
+    }
+
+    fn access_state(&self) -> AccessState {
+        *self.access_state.lock().unwrap()
+    }
+
+    async fn list(&self) -> Vec<Note> {
+        self.index.lock().await.all()
+    }
+
+    async fn list_folder(&self, folder: &Path) -> Vec<Note> {
+        self.index.lock().await.in_folder(folder)
+    }
+
+    async fn read(&self, path: &Path) -> Result<String, ReadError> {
+        let full = self.root_path.join(path);
+        // Порог проверяется по метаданным, ДО чтения: весь смысл предела в
+        // том, чтобы не втягивать в память файл, который мы всё равно
+        // отказываемся открывать (spec Assumptions, Edge Cases). Заметка при
+        // этом остаётся в индексе и видна в дереве — отказ касается только
+        // открытия.
+        if std::fs::metadata(&full).is_ok_and(|m| m.len() > NOTE_SIZE_LIMIT_BYTES) {
+            return Err(ReadError::TooLarge);
+        }
+        // Отсутствие файла — отдельная причина, а не общий отказ ввода-вывода
+        // (FR-008, FR-014 фичи 001): пользователю показывается «заметку удалили
+        // или переименовали снаружи», и эта формулировка недостижима, если
+        // схлопнуть всё в `Io`. `WebBackend::read` различает эти случаи с
+        // самого начала — принцип II требует одинакового поведения.
+        std::fs::read_to_string(&full).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ReadError::NotFound,
+            _ => ReadError::Io,
+        })
+    }
+
+    async fn write(
+        &mut self,
+        path: &Path,
+        content: &str,
+        expected: Option<FileStamp>,
+    ) -> Result<(), WriteError> {
+        if self.write_denied() {
+            return Err(WriteError::AccessDenied);
+        }
+        let full = self.root_path.join(path);
+        if let Some(expected) = expected {
+            if let Ok(current) = stamp_for(&full) {
+                if current != expected {
+                    return Err(WriteError::Conflict);
+                }
+            }
+        }
+        std::fs::write(&full, content).map_err(|_| WriteError::Io)?;
+        // Сохранение снимает несохранённое состояние вместе со всем, что от
+        // него зависело: версия пользователя теперь на диске, и конфликт по
+        // ней больше не о чем (FR-021 — конфликт существует, только пока
+        // расходятся буфер и диск).
+        self.conflicts.lock().unwrap().clear(path);
+        // В дерево попадает только то, что в дереве показывается: снимок
+        // вставки — обычный файл vault, но не запись дерева (FR-021 фичи 002).
+        // Без этого гейта первая же вставка добавляла бы свой `.svg` в дерево, а
+        // `record_links` разбирал бы SVG как Typst-заметку.
+        if let (Ok(stamp), true) = (stamp_for(&full), crate::vault::classify(path).is_listed()) {
+            let note = Note::new(path.to_path_buf(), stamp);
+            self.index.lock().await.insert(note.clone());
+            if let Some(cache) = self.cache.lock().await.as_mut() {
+                cache.upsert_note(&note).await;
+                // FR-031: исходящие ссылки заметки обновляются в том же шаге,
+                // что и её содержимое, — иначе таблица `links` отстаёт от диска
+                // до ближайшего внешнего события.
+                record_links(cache, path, content).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_folder(&mut self, path: &Path) -> Result<(), WriteError> {
+        if self.write_denied() {
+            return Err(WriteError::AccessDenied);
+        }
+        std::fs::create_dir_all(self.root_path.join(path)).map_err(|_| WriteError::Io)
+    }
+
+    async fn create(&mut self, path: &Path) -> Result<(), CreateError> {
+        // FR-036: отклоняется КАЖДАЯ попытка записи, а не только `write` —
+        // создание названо в перечне наравне с сохранением, переименованием и
+        // удалением. При `Unavailable` — тем более: до явного переоткрытия
+        // приложение к vault не обращается (FR-020).
+        if self.write_denied() {
+            return Err(CreateError::AccessDenied);
+        }
+        // FR-013: имя проверяется первым, до любого обращения к диску —
+        // в частности, до `full.exists()`, иначе пустой путь (совпадающий с
+        // самим `root_path`) ошибочно читался бы как «конфликт имён» вместо
+        // «недопустимое имя».
+        let name = valid_note_name(path)
+            .ok_or(CreateError::InvalidName)?
+            .to_string();
+        let full = self.root_path.join(path);
+        if full.exists() {
+            return Err(CreateError::NameConflict);
+        }
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| CreateError::Io)?;
+        }
+        std::fs::write(&full, "").map_err(|_| CreateError::Io)?;
+        if let Ok(stamp) = stamp_for(&full) {
+            let note = Note::with_name(path.to_path_buf(), name, stamp);
+            self.index.lock().await.insert(note.clone());
+            if let Some(cache) = self.cache.lock().await.as_mut() {
+                cache.upsert_note(&note).await;
+                record_links(cache, path, "").await;
+            }
+        }
+        // Появление заметки чинит ранее битые ссылки на неё (FR-030).
+        self.publish_links_invalidated(&[path.to_path_buf()]).await;
+        Ok(())
+    }
+
+    async fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
+        // FR-036 и FR-020: переименование прямо названо среди действий,
+        // запрещённых при недоступном vault, и среди попыток записи,
+        // отклоняемых при отозванных правах.
+        if self.write_denied() {
+            return Err(RenameError::AccessDenied);
+        }
+        // FR-013: тот же порядок, что и в `create` — имя валидируется прежде
+        // любой проверки существования на диске.
+        if valid_note_name(to).is_none() {
+            return Err(RenameError::InvalidName);
+        }
+        let full_from = self.root_path.join(from);
+        let full_to = self.root_path.join(to);
+        if !full_from.exists() {
+            return Err(RenameError::NotFound);
+        }
+        if full_to.exists() {
+            return Err(RenameError::NameConflict);
+        }
+        std::fs::rename(&full_from, &full_to).map_err(|_| RenameError::Io)?;
+        self.index.lock().await.rename(from, to);
+        if let Some(cache) = self.cache.lock().await.as_mut() {
+            cache.rename_note(from, to).await;
+        }
+        // FR-028/FR-030: ссылки на старое имя стали битыми, на новое — могли
+        // починиться. Само подтверждение операции — забота вызывающей стороны
+        // (contracts/vault-backend-trait.md), здесь только факт изменения.
+        self.publish_links_invalidated(&[from.to_path_buf(), to.to_path_buf()])
+            .await;
+        Ok(())
+    }
+
+    async fn delete(&mut self, path: &Path) -> Result<(), DeleteError> {
+        // FR-036 и FR-020: удаление — второе из двух действий, которые US3 AS6
+        // называет разрушительными, и запрещено при недоступном vault явно.
+        if self.write_denied() {
+            return Err(DeleteError::AccessDenied);
+        }
+        let full = self.root_path.join(path);
+        if !full.exists() {
+            return Err(DeleteError::NotFound);
+        }
+        let trashed = trash::delete(&full).is_ok();
+        if !trashed {
+            std::fs::remove_file(&full).map_err(|_| DeleteError::Io)?;
+        }
+        self.index.lock().await.remove(path);
+        if let Some(cache) = self.cache.lock().await.as_mut() {
+            cache.remove_note(path).await;
+        }
+        self.publish_links_invalidated(&[path.to_path_buf()]).await;
+        Ok(())
+    }
+
+    async fn backlinks(&self, path: &Path) -> Vec<Note> {
+        // Два замка берутся строго последовательно, а не вложенно. Фоновые
+        // конвейеры (`spawn_change_processor`, `spawn_reconciliation`) держат
+        // порядок index -> cache; удержание здесь cache во время взятия index
+        // дало бы инверсию порядка и взаимную блокировку с ними, как только
+        // обратные ссылки запрашиваются одновременно с обработкой внешнего
+        // изменения. Промежуточный `sources` дешёв (пути, не содержимое).
+        let sources = {
+            let cache_guard = self.cache.lock().await;
+            let Some(cache) = cache_guard.as_ref() else {
+                return Vec::new();
+            };
+            cache.backlinks(path).await
+        };
+        let index = self.index.lock().await;
+        sources
+            .into_iter()
+            .filter_map(|p| index.get(&p).cloned())
+            .collect()
+    }
+
+    async fn broken_links(&self, path: &Path) -> Vec<PathBuf> {
+        // Тот же последовательный порядок замков, что и в `backlinks`.
+        let targets = {
+            let cache_guard = self.cache.lock().await;
+            let Some(cache) = cache_guard.as_ref() else {
+                return Vec::new();
+            };
+            cache.links_from(path).await
+        };
+        let index = self.index.lock().await;
+        targets
+            .into_iter()
+            .filter(|target| index.get(target).is_none())
+            .collect()
+    }
+
+    fn poll_events(&mut self) -> Vec<VaultEvent> {
+        let mut queue = self.events.lock().unwrap();
+        queue.drain(..).collect()
+    }
+
+    async fn begin_edit(&mut self, path: &Path, buffer: String) {
+        self.conflicts.lock().unwrap().set_buffer(path, buffer);
+        if let Some(note) = self.index.lock().await.get_mut(path) {
+            note.has_unsaved_edits = true;
+        }
+    }
+
+    async fn discard_edit(&mut self, path: &Path) {
+        self.conflicts.lock().unwrap().clear(path);
+        if let Some(note) = self.index.lock().await.get_mut(path) {
+            note.has_unsaved_edits = false;
+        }
+    }
+
+    fn has_unsaved_edits(&self, path: &Path) -> bool {
+        self.conflicts.lock().unwrap().has_unsaved_edits(path)
+    }
+
+    fn pending_conflict(&self, path: &Path) -> Option<EditConflict> {
+        self.conflicts.lock().unwrap().conflict(path).cloned()
+    }
+
+    fn unresolved_edit_paths(&self) -> Vec<PathBuf> {
+        self.conflicts.lock().unwrap().unresolved_paths()
+    }
+
+    async fn conflict_diff(&self, path: &Path) -> Vec<DiffLine> {
+        let Some(local) = self.conflicts.lock().unwrap().buffer(path).map(str::to_string) else {
+            return Vec::new();
+        };
+        // Внешняя сторона читается с диска, а не берётся из `disk_snapshot`:
+        // снимок хранит хэш, а не содержимое (research.md §5). Файла может уже
+        // не быть (FR-025) — тогда внешняя сторона пуста, и весь буфер
+        // показывается как локальные строки.
+        let external = self.read(path).await.unwrap_or_default();
+        line_diff(&local, &external)
+    }
+
+    async fn resolve_conflict_keep_local(&mut self, path: &Path) -> Result<(), ResolveError> {
+        let buffer = self.conflicts.lock().unwrap().buffer(path).map(str::to_string);
+        let Some(buffer) = buffer else {
+            return Err(ResolveError::NoPendingConflict);
+        };
+        // `expected = None` намеренно: пользователь уже увидел внешнюю версию
+        // и явно выбрал перезаписать её (US4 AS2) — повторная проверка снимка
+        // отклонила бы ровно то действие, ради которого диалог и показан.
+        self.write(path, &buffer, None).await?;
+        self.conflicts
+            .lock()
+            .unwrap()
+            .resolve(path, ConflictStatus::ResolvedKeepLocal);
+        Ok(())
+    }
+
+    async fn resolve_conflict_accept_external(
+        &mut self,
+        path: &Path,
+    ) -> Result<Option<String>, ResolveError> {
+        {
+            let registry = self.conflicts.lock().unwrap();
+            if !registry.has_unsaved_edits(path)
+                && registry.conflict(path).is_none()
+                && !registry.was_deleted_with_edits(path)
+            {
+                return Err(ResolveError::NoPendingConflict);
+            }
+        }
+        // FR-025: отсутствие внешней версии — не ошибка чтения, а сам смысл
+        // ответа: «принять внешнюю» для удалённой заметки означает принять
+        // удаление, поэтому `ReadError` схлопывается в `None`.
+        let external = self.read(path).await.ok();
+        // Отбрасывание буфера происходит здесь и только здесь — то есть после
+        // явного действия пользователя (FR-023).
+        self.conflicts
+            .lock()
+            .unwrap()
+            .resolve(path, ConflictStatus::ResolvedAcceptExternal);
+        if let Some(note) = self.index.lock().await.get_mut(path) {
+            note.has_unsaved_edits = false;
+        }
+        Ok(external)
+    }
+}
+
+/// Аналог `SystemTime::now()`, вынесен отдельно ради единообразия с web-стороной,
+/// где `SystemTime::now()` в некоторых WASM-рантаймах недоступен напрямую.
+pub fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}

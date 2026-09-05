@@ -1,0 +1,22 @@
+{
+  "name": "@typsidian/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./styles/app.css": "./dist/styles/app.css",
+    "./*": "./dist/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && rm -rf dist/wasm-core && cp -R src/wasm-core dist/wasm-core && rm -rf dist/styles && cp -R src/styles dist/styles"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,99 @@
+[package]
+name = "typsidian-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# `FakeBridge` виден интеграционным тестам в tests/ только через фичу:
+# они линкуются с крейтом как с внешней зависимостью, собранной БЕЗ cfg(test)
+# (research.md §15). Включается ниже через dev-dependency на самого себя.
+test-support = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# Разбор содержимого доски ровно в объёме нормализации для хэша (фича 002,
+# research.md §5, §9). Модель Excalidraw ядром не воспроизводится: содержимое
+# доски пересекает границу непрозрачными байтами. Ключи `Map` по умолчанию
+# отсортированы — это и даёт канонический порядок без отдельного кода.
+serde_json = "1"
+blake3 = "1"
+thiserror = "1"
+# Чтение настроек (`toml` + serde) и форматосохраняющая запись (`toml_edit`):
+# файл настроек — пользовательский артефакт, его комментарии и порядок ключей
+# обязаны переживать запись приложения (research.md §2). Оба таргета.
+toml = "0.8"
+toml_edit = "0.22"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+notify = "6"
+notify-debouncer-full = "0.3"
+# Каталог конфигурации по правилам платформы (research.md §1): путь показывается
+# пользователю (FR-036), поэтому обязан быть тем, который он ожидает на своей ОС.
+directories = "5"
+sqlx = { version = "0.7", default-features = false, features = ["sqlite", "runtime-tokio", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "sync", "time"] }
+jwalk = "0.8"
+trash = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+tsify-next = { version = "0.5", default-features = false, features = ["js"] }
+web-sys = { version = "0.3", features = [
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemRemoveOptions",
+    "Window",
+    # Хранилище настроек в OPFS и атомарная запись с фиксацией на close()
+    # (research.md §1, §5).
+    "Navigator",
+    "StorageManager",
+    "FileSystemWritableFileStream",
+    "FileSystemCreateWritableOptions",
+    # Реестр ссылок на папки vault: FileSystemDirectoryHandle невозможно
+    # сериализовать в TOML, поэтому хендлы живут в IndexedDB под ключом VaultId
+    # (research.md §1, §10). Значения настроек сюда не попадают.
+    "IdbFactory",
+    "IdbDatabase",
+    "IdbObjectStore",
+    "IdbRequest",
+    "IdbOpenDbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbVersionChangeEvent",
+    "DomException",
+    "Event",
+    "EventTarget",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+# Зависимость крейта на самого себя с включённой `test-support` — так
+# интеграционные тесты в tests/ видят `FakeBridge` (research.md §15). Cargo
+# такой цикл через dev-dependencies допускает намеренно.
+typsidian-core = { path = ".", features = ["test-support"] }
+
+# `harness = false` — бенчмарки меряют сквозные сценарии (SC-002, SC-003,
+# SC-005), а не микрооперации: встроенный harness `#[bench]` требует nightly,
+# а criterion добавил бы зависимость ради одного `Instant::now()`.
+[[bench]]
+name = "vault_scale"
+harness = false
+
+[[bench]]
+name = "vault_bulk_change"
+harness = false
+
+# Нормализация и хэш доски на пределе в 2 000 элементов (фича 002, SC-005).
+[[bench]]
+name = "board_digest"
+harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Права окна оболочки: нативный диалог выбора папки (001 T115) и события ядра. Файловый доступ идёт через команды поверх NativeBackend, а не через плагин fs, поэтому разрешений на файловую систему здесь нет — путь записи существует ровно один, и он в ядре.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "dialog:allow-open"
+  ]
+}

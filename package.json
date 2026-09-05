@@ -1,0 +1,11 @@
+{
+  "name": "typsidian",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build:wasm": "wasm-pack build packages/core --target web && rm -rf ui/src/wasm-core && cp -R packages/core/pkg ui/src/wasm-core",
+    "build": "pnpm --filter @typsidian/web build",
+    "dev": "pnpm --filter @typsidian/web dev"
+  }
+}

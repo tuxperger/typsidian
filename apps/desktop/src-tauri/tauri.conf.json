@@ -1,0 +1,30 @@
+{
+  "productName": "Typsidian",
+  "version": "0.1.0",
+  "identifier": "dev.typsidian.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev:vite",
+    "beforeBuildCommand": "pnpm build:vite"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Typsidian",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 880,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "icon": ["icons/icon.png"]
+  }
+}

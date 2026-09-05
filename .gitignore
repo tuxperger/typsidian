@@ -1,0 +1,49 @@
+# --- Зависимости ---
+node_modules/
+
+# --- Rust ---
+# Один паттерн покрывает и корневой target/, и apps/desktop/src-tauri/target/.
+target/
+*.rs.bk
+
+# --- wasm-pack ---
+# packages/core/pkg — вывод `pnpm build:wasm`; остальные два — его копии,
+# которые раскладывают по местам скрипты сборки.
+packages/core/pkg/
+ui/src/wasm-core/
+ui/dist/wasm-core/
+
+# --- Сборка пакетов ---
+# ui/dist собирается из ui/src через `pnpm --filter @typsidian/ui build`,
+# apps/desktop/dist — вывод Vite.
+ui/dist/
+apps/desktop/dist/
+
+# --- Next.js ---
+.next/
+out/
+
+# --- TypeScript ---
+*.tsbuildinfo
+
+# --- Tauri ---
+# gen/schemas перегенерируется на каждой сборке из capabilities/.
+apps/desktop/src-tauri/gen/schemas/
+
+# --- Локальное состояние ---
+.claude/settings.local.json
+.env
+.env.local
+.env.*.local
+
+# --- Логи ---
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# --- ОС и редакторы ---
+.DS_Store
+Thumbs.db
+*.swp
+*~

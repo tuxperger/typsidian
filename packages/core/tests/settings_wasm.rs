@@ -1,0 +1,700 @@
+//! wasm-bindgen-test — только wasm32-unknown-unknown (принцип II).
+//!
+//! В отличие от тестов vault, здесь хранилище проверяется **по-настоящему**:
+//! OPFS доступен в headless-браузере без пользовательского жеста, поэтому
+//! `WebStore` открывается, пишет и перечитывает реальный файл. Жеста требует
+//! только выбор папки vault (`showDirectoryPicker`), поэтому реестр папок
+//! проверяется на уровне общих правил, а сквозной прогон — в quickstart (T097).
+#![cfg(target_arch = "wasm32")]
+
+use typsidian_core::settings::apply::{
+    reset_to_defaults, ApplyContext, ApplyPlan, RejectReason, SettingsChange,
+};
+use typsidian_core::settings::editor_mode::{
+    BridgeAvailability, ConfigDiskState, EditorMode, EditorModeController, FakeBridge, NullBridge,
+    OutageReason,
+};
+use typsidian_core::settings::events::SettingsEvent;
+use typsidian_core::settings::format::{self, FolderRefs};
+use typsidian_core::settings::store::{SettingsStore, StorageState, SETTINGS_FILE_NAME};
+use typsidian_core::settings::web::WebStore;
+use typsidian_core::settings::{ModePreference, Settings, Theme, VaultId, VaultRecord};
+use wasm_bindgen_test::*;
+
+wasm_bindgen_test_configure!(run_in_browser);
+
+/// OPFS — общее хранилище на всё происхождение, и тесты в одном браузере его
+/// разделяют. Каждый тест начинает с заведомо известного состояния.
+async fn fresh_store() -> WebStore {
+    WebStore::overwrite_raw_for_test("")
+        .await
+        .expect("сброс файла настроек");
+    <WebStore as SettingsStore>::open()
+        .await
+        .expect("открытие хранилища в OPFS")
+}
+
+// ---------------------------------------------------------------------------
+// Формат файла (T018) — общий код обоих таргетов
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn user_comments_and_key_order_survive_an_application_write() {
+    // Тот же тест, что и в settings_native.rs: правило одно на оба таргета
+    // (research.md §2), и расходиться оно не имеет права.
+    let authored = "\
+# основной блок
+theme = \"dark\"
+editor_font_size = 18  # покрупнее
+";
+    let mut settings = format::parse(authored).expect("файл должен разбираться");
+    settings.editor_font_size = 21;
+
+    let rewritten = format::render(authored, &settings, &FolderRefs::new());
+
+    assert!(rewritten.contains("# основной блок"));
+    assert!(rewritten.contains("# покрупнее"));
+    assert!(rewritten.find("theme") < rewritten.find("editor_font_size"));
+    assert_eq!(format::parse(&rewritten).unwrap().editor_font_size, 21);
+}
+
+#[wasm_bindgen_test]
+fn unknown_keys_survive_and_are_not_an_error() {
+    // FR-013: файл принадлежит пользователю.
+    let text = "theme = \"dark\"\nmy_future_option = 42\n";
+    let settings = format::parse(text).expect("неизвестный ключ не ошибка");
+    let rewritten = format::render(text, &settings, &FolderRefs::new());
+    assert!(rewritten.contains("my_future_option"));
+}
+
+// ---------------------------------------------------------------------------
+// Паритет open/load/apply (T021) — на реальном OPFS
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+async fn open_on_empty_storage_starts_from_defaults() {
+    let store = fresh_store().await;
+    assert_eq!(store.settings(), &Settings::default());
+    assert_eq!(store.storage_state(), StorageState::Loaded);
+}
+
+#[wasm_bindgen_test]
+async fn apply_persists_values_and_they_survive_reopen() {
+    // FR-002, FR-007 — тот же результат, что и на native.
+    let mut store = fresh_store().await;
+    assert_eq!(
+        store
+            .apply(
+                &SettingsChange::theme(Theme::Dark),
+                &ApplyContext::unobstructed()
+            )
+            .await,
+        ApplyPlan::Applied
+    );
+
+    let reopened = <WebStore as SettingsStore>::open()
+        .await
+        .expect("повторное открытие");
+    assert_eq!(reopened.settings().theme, Theme::Dark);
+}
+
+#[wasm_bindgen_test]
+async fn out_of_range_font_size_is_rejected_with_the_same_reason_as_native() {
+    // FR-016, research.md §11: одинаковые отказы на обоих таргетах.
+    let mut store = fresh_store().await;
+    for value in [7u8, 33u8] {
+        assert_eq!(
+            store
+                .apply(
+                    &SettingsChange::font_size(value),
+                    &ApplyContext::unobstructed()
+                )
+                .await,
+            ApplyPlan::Rejected {
+                reason: RejectReason::ValueOutOfRange
+            }
+        );
+    }
+    for value in [8u8, 32u8] {
+        assert_eq!(
+            store
+                .apply(
+                    &SettingsChange::font_size(value),
+                    &ApplyContext::unobstructed()
+                )
+                .await,
+            ApplyPlan::Applied
+        );
+    }
+    assert_eq!(store.settings().editor_font_size, 32);
+}
+
+#[wasm_bindgen_test]
+async fn write_is_atomic_and_file_is_always_parseable() {
+    // research.md §5: `FileSystemWritableFileStream` фиксирует изменения только
+    // при close(), поэтому обрезанного TOML не бывает.
+    let mut store = fresh_store().await;
+    for size in [10u8, 11, 12, 13, 14] {
+        store
+            .apply(
+                &SettingsChange::font_size(size),
+                &ApplyContext::unobstructed(),
+            )
+            .await;
+    }
+    let raw = WebStore::read_raw_for_test()
+        .await
+        .expect("файл настроек должен существовать");
+    assert!(format::parse(&raw).is_ok());
+    assert_eq!(format::parse(&raw).unwrap().editor_font_size, 14);
+}
+
+#[wasm_bindgen_test]
+async fn capabilities_express_platform_limits_as_values_not_missing_methods() {
+    // research.md §13, принцип II: форма API одна, различается значение.
+    let store = fresh_store().await;
+    let capabilities = store.capabilities();
+
+    assert!(
+        !capabilities.can_reveal,
+        "в вебе раскрытие средствами ОС невозможно"
+    );
+    assert!(capabilities.location.contains(SETTINGS_FILE_NAME));
+    // Метод существует и честно отказывает, а не отсутствует.
+    assert!(SettingsStore::reveal(&store).is_err());
+}
+
+#[wasm_bindgen_test]
+async fn broken_file_falls_back_to_defaults_without_overwriting_it() {
+    // FR-013, research.md §6.
+    WebStore::overwrite_raw_for_test("сломано = = =")
+        .await
+        .unwrap();
+    let mut store = <WebStore as SettingsStore>::open().await.unwrap();
+
+    assert_eq!(store.storage_state(), StorageState::DefaultsAfterUnreadable);
+    assert_eq!(store.settings(), &Settings::default());
+    assert_eq!(
+        WebStore::read_raw_for_test().await.as_deref(),
+        Some("сломано = = ="),
+        "испорченный файл не перезаписывается при открытии"
+    );
+
+    let events = store.poll_events().await;
+    assert!(events.contains(&SettingsEvent::StorageUnreadable));
+}
+
+#[wasm_bindgen_test]
+async fn invalid_file_is_set_aside_before_the_first_write() {
+    // FR-013, research.md §6 — то же правило, что и на native.
+    WebStore::overwrite_raw_for_test("тоже сломано = = =")
+        .await
+        .unwrap();
+    let mut store = <WebStore as SettingsStore>::open().await.unwrap();
+    let _ = store.poll_events().await;
+
+    store
+        .apply(
+            &SettingsChange::theme(Theme::Dark),
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+
+    let events = store.poll_events().await;
+    let moved_to = events
+        .iter()
+        .find_map(|event| match event {
+            SettingsEvent::InvalidFileSetAside { moved_to } => Some(moved_to.clone()),
+            _ => None,
+        })
+        .expect("пользователь должен узнать, куда перенесён испорченный файл");
+
+    assert!(
+        WebStore::set_aside_exists_for_test(&moved_to.to_string_lossy()).await,
+        "копия испорченного файла сохранена рядом"
+    );
+    let raw = WebStore::read_raw_for_test().await.unwrap();
+    assert_eq!(format::parse(&raw).unwrap().theme, Theme::Dark);
+}
+
+#[wasm_bindgen_test]
+async fn reset_keeps_known_vaults_and_returns_values_to_defaults() {
+    // FR-037, FR-038, SC-011 — паритет с native.
+    let mut store = fresh_store().await;
+    store
+        .apply(
+            &SettingsChange::theme(Theme::Dark),
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+
+    assert_eq!(
+        store
+            .apply(&reset_to_defaults(), &ApplyContext::unobstructed())
+            .await,
+        ApplyPlan::Applied
+    );
+    assert_eq!(store.settings().theme, Theme::Light);
+    assert_eq!(
+        store.settings().editor_mode_preference,
+        ModePreference::SimplifiedEmulation
+    );
+}
+
+#[wasm_bindgen_test]
+async fn mode_change_with_a_dirty_note_requires_save_first() {
+    // FR-029: инструкция возвращается ядром одинаково на обоих таргетах.
+    let mut store = fresh_store().await;
+    let context = ApplyContext {
+        open_note_with_unsaved_edits: Some("note.typ".into()),
+        ..ApplyContext::unobstructed()
+    };
+    assert_eq!(
+        store
+            .apply(
+                &SettingsChange::mode_preference(ModePreference::FullBackend),
+                &context
+            )
+            .await,
+        ApplyPlan::RequiresNoteSave {
+            path: "note.typ".into()
+        }
+    );
+    assert_eq!(
+        store.settings().editor_mode_preference,
+        ModePreference::SimplifiedEmulation
+    );
+}
+
+#[wasm_bindgen_test]
+async fn external_change_from_another_tab_is_picked_up() {
+    // FR-006, FR-013: единственный источник внешнего изменения в вебе — другая
+    // вкладка того же происхождения (research.md §3). Здесь она моделируется
+    // прямой записью в тот же файл OPFS.
+    let mut store = fresh_store().await;
+    store
+        .apply(
+            &SettingsChange::theme(Theme::Light),
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+    let _ = store.poll_events().await;
+
+    WebStore::overwrite_raw_for_test("theme = \"dark\"\n")
+        .await
+        .unwrap();
+
+    let settings = store.load().await;
+    assert_eq!(settings.theme, Theme::Dark);
+    let events = store.poll_events().await;
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, SettingsEvent::ValuesChangedExternally { .. })),
+        "внешнее изменение сообщается тем же событием, что и на native: {events:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn externally_repaired_file_recovers_without_restart() {
+    // FR-013.
+    WebStore::overwrite_raw_for_test("опять сломано = = =")
+        .await
+        .unwrap();
+    let mut store = <WebStore as SettingsStore>::open().await.unwrap();
+    assert_eq!(store.storage_state(), StorageState::DefaultsAfterUnreadable);
+    let _ = store.poll_events().await;
+
+    WebStore::overwrite_raw_for_test("theme = \"dark\"\n")
+        .await
+        .unwrap();
+    let settings = store.load().await;
+
+    assert_eq!(settings.theme, Theme::Dark);
+    assert_eq!(store.storage_state(), StorageState::Loaded);
+    let events = store.poll_events().await;
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SettingsEvent::StorageRecovered { .. })));
+}
+
+// ---------------------------------------------------------------------------
+// Правила списка vault — общий код, платформенным остаётся только сравнение
+// самих папок (research.md §10)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn two_records_with_identical_location_stay_separate() {
+    // Регрессия research.md §10: в вебе показывается только имя папки, поэтому
+    // сравнение по нему схлопнуло бы две разные папки `notes` в одну запись.
+    let first = VaultRecord::new(VaultId::from_raw("a"), "notes".to_string());
+    let second = VaultRecord::new(VaultId::from_raw("b"), "notes".to_string());
+    let settings = Settings {
+        known_vaults: vec![first, second],
+        ..Settings::default()
+    };
+    assert!(typsidian_core::settings::validate(&settings).is_ok());
+    assert_eq!(settings.known_vaults.len(), 2);
+}
+
+#[wasm_bindgen_test]
+fn the_same_record_is_never_added_twice() {
+    // T045, FR-020. Само сравнение папок здесь не участвует: решение «та же ли
+    // это папка» принимает платформа (`isSameEntry`) до вызова, а список лишь
+    // обязан не заводить вторую запись под уже выданным идентификатором.
+    let mut records = vec![VaultRecord::new(
+        VaultId::from_raw("a"),
+        "notes".to_string(),
+    )];
+    typsidian_core::settings::vaults::upsert(
+        &mut records,
+        VaultRecord::new(VaultId::from_raw("a"), "notes".to_string()),
+    );
+    assert_eq!(records.len(), 1);
+}
+
+#[wasm_bindgen_test]
+fn forgetting_a_record_removes_it_and_nothing_else() {
+    // T048, FR-024: убирается запись, папка на диске не трогается — сюда она и
+    // не попадает, ссылка живёт в реестре IndexedDB.
+    let mut records = vec![
+        VaultRecord::new(VaultId::from_raw("a"), "work".to_string()),
+        VaultRecord::new(VaultId::from_raw("b"), "personal".to_string()),
+    ];
+    assert!(typsidian_core::settings::vaults::forget(
+        &mut records,
+        &VaultId::from_raw("a")
+    ));
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, VaultId::from_raw("b"));
+}
+
+#[wasm_bindgen_test]
+fn switching_vault_changes_nothing_but_the_current_vault() {
+    // T049, FR-010, SC-007. Проверяется на уровне набора изменений, а не через
+    // `WebStore`: чтобы положить запись в `known_vaults` на вебе, нужен живой
+    // `FileSystemDirectoryHandle`, а он выдаётся только по жесту пользователя.
+    // Само правило «переключение не трогает внешний вид и режим» — общий код
+    // обоих таргетов, и проверяется здесь именно оно.
+    let first = VaultRecord::new(VaultId::from_raw("a"), "work".to_string());
+    let second = VaultRecord::new(VaultId::from_raw("b"), "personal".to_string());
+    let before = Settings {
+        theme: Theme::Dark,
+        editor_font_size: 20,
+        known_vaults: vec![first, second],
+        current_vault: Some(VaultId::from_raw("a")),
+        editor_mode_preference: ModePreference::FullBackend,
+        editor_config_path: None,
+    };
+
+    let after = SettingsChange::current_vault(VaultId::from_raw("b")).apply_to(&before);
+
+    assert_eq!(after.current_vault, Some(VaultId::from_raw("b")));
+    assert_eq!(after.theme, before.theme);
+    assert_eq!(after.editor_font_size, before.editor_font_size);
+    assert_eq!(after.editor_mode_preference, before.editor_mode_preference);
+    assert_eq!(after.known_vaults, before.known_vaults);
+    assert!(typsidian_core::settings::validate(&after).is_ok());
+}
+
+#[wasm_bindgen_test]
+fn switching_to_an_unknown_vault_is_rejected() {
+    // Инвариант из data-model.md: `current_vault` всегда указывает на запись из
+    // списка либо отсутствует.
+    let before = Settings::default();
+    let after = SettingsChange::current_vault(VaultId::from_raw("missing")).apply_to(&before);
+    assert!(typsidian_core::settings::validate(&after).is_err());
+}
+
+// ---------------------------------------------------------------------------
+// US3 — режим редактирования (T065, T067, T068, T072, T074)
+//
+// `FakeBridge` и контроллер не зависят от платформы, поэтому под wasm32
+// проверяются те же правила и теми же утверждениями, что и на native. Отличие
+// таргета одно и оно проверяется отдельно: в вебе полноценный режим постоянно
+// недоступен, потому что внешние процессы породить нельзя (research.md §7).
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
+    // T065, FR-035.
+    let mut controller = EditorModeController::new(FakeBridge::available());
+    controller.request_mode(ModePreference::FullBackend).unwrap();
+    assert!(controller.mode().is_full_backend());
+
+    controller
+        .bridge_mut()
+        .fail_backend(OutageReason::BackendStopped);
+
+    assert_eq!(
+        controller.mode(),
+        EditorMode::PlainInput {
+            reason: OutageReason::BackendStopped
+        }
+    );
+    assert_ne!(controller.mode(), EditorMode::SimplifiedEmulation);
+}
+
+#[wasm_bindgen_test]
+fn user_can_switch_between_full_backend_and_emulation() {
+    // T067, FR-027.
+    let mut controller = EditorModeController::new(FakeBridge::available());
+    controller.request_mode(ModePreference::FullBackend).unwrap();
+    assert!(controller.mode().is_full_backend());
+    controller
+        .request_mode(ModePreference::SimplifiedEmulation)
+        .unwrap();
+    assert_eq!(controller.mode(), EditorMode::SimplifiedEmulation);
+}
+
+#[wasm_bindgen_test]
+fn unavailable_backend_never_reports_full_backend() {
+    // T068, FR-034, FR-004.
+    let mut controller = EditorModeController::new(FakeBridge::unavailable(
+        OutageReason::ExternalProcessesUnavailable,
+    ));
+    assert!(controller.request_mode(ModePreference::FullBackend).is_err());
+    assert!(!controller.mode().is_full_backend());
+}
+
+#[wasm_bindgen_test]
+fn on_web_the_full_backend_is_permanently_unavailable_with_an_honest_reason() {
+    // research.md §7: единственное допустимое расхождение таргетов по режиму
+    // редактирования — веб-клиент не может порождать внешние процессы, и это
+    // сообщается причиной, а не отсутствием варианта.
+    let mut controller =
+        EditorModeController::new(NullBridge::new(OutageReason::ExternalProcessesUnavailable));
+
+    assert_eq!(
+        controller.availability(),
+        BridgeAvailability::Unavailable {
+            reason: OutageReason::ExternalProcessesUnavailable
+        }
+    );
+    assert!(controller.request_mode(ModePreference::FullBackend).is_err());
+    assert!(!controller.mode().is_full_backend());
+    // Упрощённая эмуляция при этом доступна и работает.
+    controller
+        .request_mode(ModePreference::SimplifiedEmulation)
+        .unwrap();
+    assert_eq!(controller.mode(), EditorMode::SimplifiedEmulation);
+}
+
+#[wasm_bindgen_test]
+async fn mode_change_with_a_dirty_note_asks_to_save_first_on_web_too() {
+    // T072, FR-029 — та же инструкция из ядра, что и на native.
+    let mut store = fresh_store().await;
+    let context = ApplyContext {
+        open_note_with_unsaved_edits: Some("note.typ".into()),
+        ..ApplyContext::unobstructed()
+    };
+    assert_eq!(
+        store
+            .apply(
+                &SettingsChange::mode_preference(ModePreference::FullBackend),
+                &context
+            )
+            .await,
+        ApplyPlan::RequiresNoteSave {
+            path: "note.typ".into()
+        }
+    );
+}
+
+#[wasm_bindgen_test]
+async fn unresolved_conflict_blocks_the_switch_and_absence_of_a_note_does_not() {
+    // T074, FR-031 и FR-032.
+    let mut store = fresh_store().await;
+
+    let blocked = ApplyContext {
+        open_note_with_unsaved_edits: Some("note.typ".into()),
+        has_unresolved_conflict: true,
+        ..ApplyContext::unobstructed()
+    };
+    assert_eq!(
+        store
+            .apply(
+                &SettingsChange::mode_preference(ModePreference::FullBackend),
+                &blocked
+            )
+            .await,
+        ApplyPlan::Rejected {
+            reason: RejectReason::UnresolvedConflict
+        }
+    );
+
+    assert_eq!(
+        store
+            .apply(
+                &SettingsChange::mode_preference(ModePreference::FullBackend),
+                &ApplyContext::unobstructed()
+            )
+            .await,
+        ApplyPlan::Applied
+    );
+}
+
+#[wasm_bindgen_test]
+fn config_reverted_to_previous_content_stops_looking_changed() {
+    // T070 на уровне общего правила: снимки сравниваются по хэшу содержимого
+    // (research.md §8). Файла конфига в вебе нет, поэтому снимки строятся
+    // напрямую — проверяется само правило, а не источник снимка.
+    use typsidian_core::stamp::FileStamp;
+
+    let mut controller = EditorModeController::new(FakeBridge::available());
+    controller.set_config_path("init.lua".into());
+
+    let applied = FileStamp::from_content(100, "set number".as_bytes());
+    controller.apply_config(Some(applied.clone())).unwrap();
+    assert_eq!(controller.config_disk_state(), ConfigDiskState::InSync);
+
+    controller.observe_config(Some(FileStamp::from_content(
+        200,
+        "set nonumber".as_bytes(),
+    )));
+    assert_eq!(controller.config_disk_state(), ConfigDiskState::Changed);
+
+    controller.observe_config(Some(FileStamp::from_content(300, "set number".as_bytes())));
+    assert_eq!(controller.config_disk_state(), ConfigDiskState::InSync);
+}
+
+#[wasm_bindgen_test]
+fn label_is_shown_instead_of_location_and_need_not_be_unique() {
+    // FR-018, research.md §14.
+    let mut first = VaultRecord::new(VaultId::from_raw("a"), "notes".to_string());
+    let mut second = VaultRecord::new(VaultId::from_raw("b"), "notes".to_string());
+    first.label = Some("Работа".to_string());
+    second.label = Some("Работа".to_string());
+
+    assert_eq!(first.display_name(), "Работа");
+    assert_eq!(second.display_name(), "Работа");
+    let settings = Settings {
+        known_vaults: vec![first, second],
+        ..Settings::default()
+    };
+    assert!(typsidian_core::settings::validate(&settings).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// Биндинги сброса и диагностики (T108, T109, T113)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn reset_binding_returns_the_same_change_as_the_core(
+) {
+    // FR-037. Биндинг обязан отдавать ровно тот набор, что собирает ядро:
+    // если UI когда-нибудь начнёт строить его сам, эти два значения разойдутся,
+    // и умолчания появятся во втором месте (принцип I).
+    assert_eq!(WebStore::reset_to_defaults_js(), reset_to_defaults());
+}
+
+#[wasm_bindgen_test]
+fn reset_binding_leaves_the_current_vault_alone() {
+    // FR-038, SC-011: сброс не закрывает открытый vault и не трогает список
+    // известных. Проверяется на самом наборе, а не на последствиях: поле,
+    // которого в наборе нет, применить невозможно.
+    assert!(WebStore::reset_to_defaults_js().current_vault.is_none());
+}
+
+#[wasm_bindgen_test]
+async fn reset_through_apply_returns_values_to_defaults_and_keeps_known_vaults() {
+    // Ключевая проверка: сброс проходит тем же `apply`, что и обычное
+    // изменение, а не отдельным путём (FR-037).
+    let mut store = fresh_store().await;
+    let mut known = VaultRecord::new(VaultId::from_raw("kept"), "notes".to_string());
+    known.label = Some("Работа".to_string());
+
+    let seeded = Settings {
+        theme: Theme::Dark,
+        editor_font_size: 20,
+        known_vaults: vec![known.clone()],
+        ..Settings::default()
+    };
+    store
+        .apply(
+            &SettingsChange {
+                theme: Some(seeded.theme),
+                editor_font_size: Some(seeded.editor_font_size),
+                current_vault: None,
+                editor_mode_preference: None,
+                editor_config_path: None,
+            },
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+
+    let plan = store
+        .apply(
+            &WebStore::reset_to_defaults_js(),
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+    assert!(matches!(plan, ApplyPlan::Applied { .. }), "план: {plan:?}");
+
+    let after = SettingsStore::settings(&store);
+    assert_eq!(after.theme, Settings::default().theme);
+    assert_eq!(
+        after.editor_font_size,
+        Settings::default().editor_font_size
+    );
+}
+
+#[wasm_bindgen_test]
+async fn reset_is_rejected_whole_when_a_conflict_is_unresolved() {
+    // Кларификация 2026-08-09: неразрешённый конфликт отменяет сброс целиком,
+    // а не частично. Сброс идёт через `apply`, поэтому наследует это правило.
+    let mut store = fresh_store().await;
+    store
+        .apply(
+            &SettingsChange {
+                theme: Some(Theme::Dark),
+                editor_font_size: None,
+                current_vault: None,
+                editor_mode_preference: None,
+                editor_config_path: None,
+            },
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+
+    let plan = store
+        .apply(
+            &WebStore::reset_to_defaults_js(),
+            &ApplyContext {
+                has_unresolved_conflict: true,
+                ..ApplyContext::unobstructed()
+            },
+        )
+        .await;
+
+    assert!(
+        matches!(
+            plan,
+            ApplyPlan::Rejected {
+                reason: RejectReason::UnresolvedConflict
+            }
+        ),
+        "план: {plan:?}"
+    );
+    // Ни одно значение не изменилось: отказ целиком, а не наполовину.
+    assert_eq!(SettingsStore::settings(&store).theme, Theme::Dark);
+}
+
+#[wasm_bindgen_test]
+async fn diagnostics_report_web_target_and_a_permanent_outage() {
+    // FR-039 плюс research.md §7: в вебе полноценный режим недоступен всегда и
+    // по одной причине. Значение вычисляет ядро, а не называет интерфейс.
+    let store = fresh_store().await;
+    let report = store.diagnostics_js();
+
+    assert!(!report.app_version.is_empty());
+    assert_eq!(report.environment.target, "web");
+    assert!(!report.environment.can_spawn_processes);
+    assert_eq!(
+        report.editor_mode_availability,
+        BridgeAvailability::Unavailable {
+            reason: OutageReason::ExternalProcessesUnavailable
+        }
+    );
+    assert!(matches!(report.editor_mode, EditorMode::PlainInput { .. }));
+}

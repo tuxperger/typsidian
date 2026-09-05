@@ -1,0 +1,47 @@
+/* Спецформа — Typography tokens.
+ * Копия `tokens/typography.css` дизайн-системы — см. шапку `colors.css`.
+ *
+ * Единственное намеренное отступление: семейства подставляются из
+ * `next/font/google` (переменные `--font-ibm-plex-sans`/`--font-ibm-plex-mono`,
+ * задаются в `apps/web/app/layout.tsx`). Дизайн-система тянет IBM Plex ссылкой
+ * на Google Fonts, но FR-042 (фича 004) запрещает приложению любые сетевые
+ * обращения во время работы, а `next/font` кладёт шрифт в статику и раздаёт со
+ * своего же origin. Стек дизайн-системы остаётся запасным вариантом.
+ */
+:root {
+  /* Families */
+  --font-sans: var(--font-ibm-plex-sans), "IBM Plex Sans", system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", "SF Mono", ui-monospace, Menlo,
+    monospace;
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Type scale (industrial, tight rhythm) */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+  --text-3xl: 38px;
+  --text-4xl: 48px;
+  --text-5xl: 64px;
+
+  /* Line heights */
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Letter spacing */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.08em; /* uppercase labels / eyebrows */
+}
