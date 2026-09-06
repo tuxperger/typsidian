@@ -30,6 +30,8 @@ import { useBoardConflict } from "../boards/useBoardConflict.js";
 import { useBoardDocument } from "../boards/useBoardDocument.js";
 import { isBoard } from "../vault-tree/fileKind.js";
 import { NoteEditor } from "../editor/NoteEditor.js";
+import { PreviewPane } from "../preview/PreviewPane.js";
+import type { PreviewClient } from "../preview-client.js";
 
 export interface WorkspaceProps {
   /**
@@ -47,6 +49,14 @@ export interface WorkspaceProps {
    * отсутствие, чем настройки, уходящие не туда.
    */
   settings?: React.ReactNode;
+  /**
+   * Компилятор предпросмотра (фича 005). Приходит извне по той же причине, что
+   * и панель настроек: на web это wasm в том же процессе, на рабочем столе —
+   * команда Tauri. Пока клиент не передан, колонка предпросмотра честно
+   * сообщает, что сборка недоступна, вместо того чтобы делать вид, что она
+   * есть.
+   */
+  preview?: PreviewClient | null;
 }
 
 /**
@@ -63,16 +73,19 @@ export interface WorkspaceProps {
  *
  * Каркас — из макета Claude Design «Typsidian: Typst Editor Design»
  * (`design_handoff_typsidian/README.md` → Screens § 1 Workspace): шапка 44px,
- * боковая панель 248px, дальше две гибкие колонки. Колонка предпросмотра
- * оставлена пустой намеренно — компилятора Typst в `packages/core` пока нет,
- * а рисовать вместо результата компиляции заглушку значило бы выдавать
- * несуществующее за работающее.
+ * боковая панель 248px, дальше две гибкие колонки. В колонке предпросмотра
+ * теперь настоящий свёрстанный документ (фича 005): её заполняет
+ * `PreviewPane`, собирая заметку из буфера редактора через `PreviewClient`.
  */
 export function Workspace({
   openVaultFolder,
   settings,
+  preview = null,
 }: WorkspaceProps): React.JSX.Element {
   const [openNote, setOpenNote] = useState<Note | null>(null);
+  // Текст открытой заметки из буфера редактора: предпросмотр собирается из
+  // него, а не из файла на диске (FR-002).
+  const [editorText, setEditorText] = useState("");
   const [operationError, setOperationError] = useState<VaultOperationError | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   // Последнее изменение файла в vault. Передаётся вниз, а не обрабатывается
@@ -312,19 +325,14 @@ export function Workspace({
               externalChange={lastChange}
               onOpenBoard={openBoard}
               onCreateBoard={() => void createBoard()}
+              onContentChange={setEditorText}
             />
 
-            <section className="ts-pane ts-pane--preview" aria-label="Предпросмотр">
-              <div className="ts-pane__toolbar">
-                <span className="ts-eyebrow">Предпросмотр</span>
-              </div>
-              <div className="ts-placeholder">
-                <p>
-                  Компилятор Typst ещё не подключён к ядру, поэтому показывать здесь
-                  нечего.
-                </p>
-              </div>
-            </section>
+            <PreviewPane
+              client={preview}
+              notePath={openNote?.path ?? null}
+              text={editorText}
+            />
           </>
         )}
       </div>

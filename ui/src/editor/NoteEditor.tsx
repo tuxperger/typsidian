@@ -32,6 +32,14 @@ export interface NoteEditorProps {
   onOpenBoard?: (boardPath: string) => void;
   /** Создать доску, когда вставлять пока нечего (US2 AS2). */
   onCreateBoard?: () => void;
+  /**
+   * Текущий текст буфера — для предпросмотра (фича 005, FR-002).
+   *
+   * Именно буфер, а не файл на диске: требование «без кнопки сохранить»
+   * (FR-006) иначе невыполнимо. Панель предпросмотра живёт выше по дереву,
+   * поэтому текст объявляется наверх, а не читается ею с диска.
+   */
+  onContentChange?: (text: string) => void;
 }
 
 /**
@@ -51,6 +59,7 @@ export function NoteEditor({
   externalChange = null,
   onOpenBoard,
   onCreateBoard,
+  onContentChange,
 }: NoteEditorProps): React.JSX.Element {
   const [content, setContent] = useState("");
   const [readError, setReadError] = useState<ReadError | null>(null);
@@ -63,6 +72,14 @@ export function NoteEditor({
 
   const notePath = note?.path ?? null;
   const embeds = useNoteEmbeds(client, notePath, content);
+
+  // Объявляем буфер наверх одним местом, а не в каждом `setContent`: путей
+  // изменения текста четыре (набор, чтение с диска, вставка доски, закрытие
+  // заметки), и любой пропущенный означал бы предпросмотр, молча отставший от
+  // текста (FR-002).
+  useEffect(() => {
+    onContentChange?.(content);
+  }, [content, onContentChange]);
 
   // Изменение файла в vault — повод пересчитать состояние вставок. Затрагивает
   // ли оно эту заметку, решает ядро внутри `fileChanged` (T056).

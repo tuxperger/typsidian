@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { WebStore } from "../wasm-core/typsidian_core.js";
+import type { WasmCallQueue } from "../wasm-call-queue.js";
 
 // Принцип I: ни одна функция здесь не решает, «та ли это папка» и можно ли
 // переключаться. Выбор папки — жест пользователя, который обязан произойти в
@@ -47,7 +48,17 @@ export type ConfirmSwitch = (nextVaultId: string) => boolean | Promise<boolean>;
 
 export function useVaultList(
   store: WebStore | null,
-  options: { onChanged: () => void | Promise<void>; confirmSwitch?: ConfirmSwitch },
+  options: {
+    onChanged: () => void | Promise<void>;
+    /**
+     * Очередь доступа к `store` — та же, что у `useSettings`. Методы store'а
+     * заимствуют объект ядра на всё время своей future, поэтому звать их в
+     * обход очереди значит наложиться на цикл опроса настроек
+     * (`wasm-call-queue.ts`).
+     */
+    queue: WasmCallQueue;
+    confirmSwitch?: ConfirmSwitch;
+  },
 ): {
   error: VaultActionError | null;
   addFolder: () => Promise<void>;
@@ -57,7 +68,7 @@ export function useVaultList(
   dismissError: () => void;
 } {
   const [error, setError] = useState<VaultActionError | null>(null);
-  const { onChanged, confirmSwitch } = options;
+  const { onChanged, confirmSwitch, queue } = options;
 
   const addFolder = useCallback(async () => {
     if (!store) return;
@@ -78,12 +89,12 @@ export function useVaultList(
       // Ссылка передаётся ядру **не разбирая** её. Повторное добавление той же
       // папки ядро само сведёт к существующей записи (FR-020), а две разные
       // папки с одинаковым именем останутся двумя записями.
-      await store.addVault(handle, handle.name);
+      await queue.run(() => store.addVault(handle, handle.name));
       await onChanged();
     } catch (cause) {
       setError(classify(cause));
     }
-  }, [store, onChanged]);
+  }, [store, onChanged, queue]);
 
   const switchTo = useCallback(
     async (id: string) => {
@@ -96,13 +107,15 @@ export function useVaultList(
         if (!allowed) return;
       }
       try {
-        const plan = await store.apply({
-          theme: undefined,
-          editor_font_size: undefined,
-          current_vault: id,
-          editor_mode_preference: undefined,
-          editor_config_path: undefined,
-        });
+        const plan = await queue.run(() =>
+          store.apply({
+            theme: undefined,
+            editor_font_size: undefined,
+            current_vault: id,
+            editor_mode_preference: undefined,
+            editor_config_path: undefined,
+          }),
+        );
         if (plan.outcome === "Rejected") {
           setError({ kind: "SwitchBlocked", message: describeReject(plan.reason.kind) });
           return;
@@ -112,7 +125,7 @@ export function useVaultList(
         setError(classify(cause));
       }
     },
-    [store, onChanged, confirmSwitch],
+    [store, onChanged, confirmSwitch, queue],
   );
 
   const setLabel = useCallback(
@@ -120,13 +133,13 @@ export function useVaultList(
       if (!store) return;
       setError(null);
       try {
-        await store.setVaultLabel(id, label ?? undefined);
+        await queue.run(() => store.setVaultLabel(id, label ?? undefined));
         await onChanged();
       } catch (cause) {
         setError(classify(cause));
       }
     },
-    [store, onChanged],
+    [store, onChanged, queue],
   );
 
   const forget = useCallback(
@@ -136,13 +149,13 @@ export function useVaultList(
       try {
         // FR-024: убирается запись и ссылка на неё; папка и заметки на диске
         // не трогаются — ядро к ним и не обращается.
-        await store.forgetVault(id);
+        await queue.run(() => store.forgetVault(id));
         await onChanged();
       } catch (cause) {
         setError(classify(cause));
       }
     },
-    [store, onChanged],
+    [store, onChanged, queue],
   );
 
   const dismissError = useCallback(() => setError(null), []);

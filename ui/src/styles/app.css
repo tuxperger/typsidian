@@ -801,3 +801,63 @@ body {
   text-transform: none;
   letter-spacing: var(--tracking-normal);
 }
+
+/* ── Предпросмотр (фича 005) ─────────────────────────────────────────────
+ *
+ * Страницы — прокручиваемая колонка листов на подложке колонки. Границы между
+ * страницами обязаны быть различимы (FR-003), поэтому лист светлый, с тенью и
+ * зазором, а не сливается с фоном панели. */
+.ts-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ts-preview__page {
+  width: 100%;
+  max-width: 720px;
+  background: var(--white);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* SVG приходит от компилятора со своими размерами; растягиваем его по ширине
+ * листа, сохраняя пропорции страницы. */
+.ts-preview__page > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Замечания к заметке. Ошибки и предупреждения обязаны быть отличимы
+ * (FR-018), поэтому различаются цветом текста, а не только порядком. */
+.ts-diagnostics {
+  flex: 0 0 auto;
+  max-height: 30%;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  border-top: var(--border-width) solid var(--border-default);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ts-diagnostics__error {
+  color: var(--danger);
+}
+
+.ts-diagnostics__warning {
+  color: var(--text-accent);
+}
+
+.ts-diagnostics__place {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

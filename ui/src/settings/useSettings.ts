@@ -12,6 +12,7 @@ import init, {
   type StoreCapabilities,
   type VaultRecord,
 } from "../wasm-core/typsidian_core.js";
+import { createWasmCallQueue, type WasmCallQueue } from "../wasm-call-queue.js";
 
 // Принцип I конституции: этот хук не переизобретает логику настроек — он только
 // вызывает ядро (contracts/settings-store-trait.md) и разбирает уже готовые
@@ -162,23 +163,40 @@ export function useSettings(): {
   resetToDefaults: () => Promise<ApplyPlan | null>;
   refresh: () => Promise<void>;
   dismissNotice: (kind: StorageNotice["kind"]) => void;
+  /**
+   * Очередь доступа к `state.store`. Отдаётся наружу, потому что владелец
+   * store'а обязан быть один: любой другой код, зовущий его методы напрямую
+   * (`useVaultList`), обязан встать в ту же очередь, иначе наложится на цикл
+   * опроса — см. `wasm-call-queue.ts`.
+   */
+  queue: WasmCallQueue;
 } {
   const [state, setState] = useState<SettingsState>(INITIAL_STATE);
   const storeRef = useRef<WebStore | null>(null);
 
+  // `WebStore` — такой же объект за границей wasm-bindgen, как `WebBackend`:
+  // его `async`-методы с `&mut self` (`apply`, `pollEvents`, `addVault`, …)
+  // держат заимствование до конца future, и наложение цикла опроса на жест
+  // пользователя падает с «recursive use of an object detected». Поэтому все
+  // обращения к экземпляру идут через очередь (см. `wasm-call-queue.ts`);
+  // синхронные геттеры вроде `settings()` читаются внутри той же операции, а не
+  // рядом с ней — иначе они попадут в чужое окно заимствования.
+  const queueRef = useRef<WasmCallQueue | null>(null);
+  if (queueRef.current === null) queueRef.current = createWasmCallQueue();
+  const queue = queueRef.current;
+
   const refresh = useCallback(async () => {
     const store = storeRef.current;
     if (!store) return;
-    const knownVaults = (await store.knownVaults()) as VaultRecord[];
-    setState((prev) => ({
-      ...prev,
+    const snapshot = await queue.run(async () => ({
+      knownVaults: (await store.knownVaults()) as VaultRecord[],
       settings: store.settings(),
       capabilities: store.capabilities(),
       storageState: store.storageState(),
       diagnostics: store.diagnostics(),
-      knownVaults,
     }));
-  }, []);
+    setState((prev) => ({ ...prev, ...snapshot }));
+  }, [queue]);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,23 +205,25 @@ export function useSettings(): {
       const store = await WebStore.create();
       if (cancelled) return;
       storeRef.current = store;
-      const knownVaults = (await store.knownVaults()) as VaultRecord[];
-      if (cancelled) return;
-      setState({
-        ...INITIAL_STATE,
-        store,
+      const snapshot = await queue.run(async () => ({
+        knownVaults: (await store.knownVaults()) as VaultRecord[],
         settings: store.settings(),
         capabilities: store.capabilities(),
         storageState: store.storageState(),
         diagnostics: store.diagnostics(),
-        knownVaults,
+      }));
+      if (cancelled) return;
+      setState({
+        ...INITIAL_STATE,
+        store,
+        ...snapshot,
         isLoading: false,
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queue]);
 
   // Сверка с диском и разбор событий (FR-013, SC-014). Опрос, а не подписка:
   // ядро отдаёт события pull-методом, чтобы не требовать object-safe Stream.
@@ -217,7 +237,9 @@ export function useSettings(): {
       if (!store || inFlight || cancelled) return;
       inFlight = true;
       try {
-        const events = (await store.pollEvents()) as SettingsEvent[];
+        const events = (await queue.runInternal(() =>
+          store.pollEvents(),
+        )) as SettingsEvent[];
         if (cancelled || events.length === 0) return;
         setState((prev) => events.reduce(reduceSettingsEvent, prev));
       } finally {
@@ -230,24 +252,26 @@ export function useSettings(): {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [state.store]);
+  }, [state.store, queue]);
 
   const apply = useCallback(
     async (change: SettingsChange): Promise<ApplyPlan | null> => {
       const store = storeRef.current;
       if (!store) return null;
-      const plan = await store.apply(change);
-      setState((prev) => ({
-        ...prev,
-        settings: store.settings(),
-        storageState: store.storageState(),
-        capabilities: store.capabilities(),
-        diagnostics: store.diagnostics(),
-        lastPlan: plan,
-      }));
-      return plan;
+      const applied = await queue.run(async () => {
+        const plan = await store.apply(change);
+        return {
+          settings: store.settings(),
+          storageState: store.storageState(),
+          capabilities: store.capabilities(),
+          diagnostics: store.diagnostics(),
+          lastPlan: plan,
+        };
+      });
+      setState((prev) => ({ ...prev, ...applied }));
+      return applied.lastPlan;
     },
-    [],
+    [queue],
   );
 
   // Набор изменений строит ядро, а не этот хук: собрать его здесь значило бы
@@ -264,5 +288,5 @@ export function useSettings(): {
     }));
   }, []);
 
-  return { state, apply, resetToDefaults, refresh, dismissNotice };
+  return { state, apply, resetToDefaults, refresh, dismissNotice, queue };
 }

@@ -56,9 +56,11 @@ export function SettingsPanel({
   saveNote,
   fullBackendUnavailableReason = null,
 }: SettingsPanelProps = {}): React.JSX.Element {
-  const { state, apply, resetToDefaults, refresh, dismissNotice } = useSettings();
+  const { state, apply, resetToDefaults, refresh, dismissNotice, queue } =
+    useSettings();
   const vaults = useVaultList(state.store, {
     onChanged: refresh,
+    queue,
     ...(confirmSwitch ? { confirmSwitch } : {}),
   });
   const [modeMessage, setModeMessage] = useState<string | null>(null);
