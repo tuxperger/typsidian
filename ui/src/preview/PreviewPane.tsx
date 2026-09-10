@@ -12,10 +12,10 @@ import {
 import type {
   CompiledDocument,
   Diagnostic,
-  RenderedPage,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
+import { PreviewPage } from "./PreviewPage.js";
 
 // Принцип I: панель ничего не решает про документ. «Собрался или нет»,
 // «где ошибка», «какие страницы» — всё приходит из ядра готовым. Здесь только
@@ -354,24 +354,6 @@ function shiftZoom(
 ): void {
   setZoomIndex((index) =>
     Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction)),
-  );
-}
-
-/**
- * Одна страница.
- *
- * SVG вставляется как разметка: это вывод компилятора, а не пользовательский
- * ввод — он порождён ядром из текста заметки и никуда наружу не ходит
- * (принцип IX: содержимое заметок не покидает устройство).
- */
-function PreviewPage({ page }: { page: RenderedPage }): React.JSX.Element {
-  return (
-    <article
-      className="ts-preview__page"
-      aria-label={`Страница ${page.number}`}
-      style={{ aspectRatio: `${page.width_pt} / ${page.height_pt}` }}
-      dangerouslySetInnerHTML={{ __html: page.svg }}
-    />
   );
 }
 

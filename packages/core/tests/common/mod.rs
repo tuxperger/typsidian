@@ -313,4 +313,5 @@ pub mod package_cases;
 pub mod placement_cases;
 pub mod search_cases;
 pub mod template_cases;
+pub mod textlayer_cases;
 pub mod vault_settings_cases;

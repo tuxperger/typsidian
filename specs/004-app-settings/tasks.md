@@ -479,15 +479,15 @@ description: "Task list for Application Settings implementation"
       `ui/src/settings/` значение не расходится с фактически действующим ни в одном из
       состояний — недоступный vault, отсутствующий конфиг, недоступный полноценный режим, его
       отказ посреди сессии, изменённый на диске конфиг
-- [ ] T105 Прогнать `pnpm --dir ui typecheck`: TypeScript `strict` без `any`,
+- [X] T105 Прогнать `pnpm --dir ui typecheck`: TypeScript `strict` без `any`,
       `@ts-ignore`/`@ts-expect-error` (принцип IV); убедиться, что пропуск варианта
       `EditorMode` даёт ошибку компиляции
-- [ ] T106 Прогнать `cargo test -p typsidian-core` и `wasm-pack test packages/core` целиком,
+- [X] T106 Прогнать `cargo test -p typsidian-core` и `wasm-pack test packages/core` целиком,
       включая существующие `packages/core/tests/vault_native.rs` и
       `packages/core/tests/vault_wasm.rs`, — убедиться, что подъём `FileStamp` в
       `packages/core/src/stamp.rs` (T007) и изъятие `vault::last_vault` из
       `packages/core/src/vault/mod.rs` и `native.rs:577` (T062) ничего не сломали
-- [ ] T107 Зафиксировать в `research.md` результат проверки FR-017: полная валидация «в уже
+- [X] T107 Зафиксировать в `research.md` результат проверки FR-017: полная валидация «в уже
       открытых редакторе и preview» отложена до появления компонента редактора (см.
       обстоятельство 3 в шапке файла); отметить как известное ограничение, а не как
       выполненное требование

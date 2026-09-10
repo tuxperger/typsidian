@@ -183,30 +183,30 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Текстовый слой — тесты
 
-- [ ] T031 [P] [US1] Тест: текстовый прогон извлекается с ожидаемым текстом, позицией,
+- [X] T031 [P] [US1] Тест: текстовый прогон извлекается с ожидаемым текстом, позицией,
       кеглем и языком, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-031, FR-032)
-- [ ] T032 [P] [US1] Тест: прогон внутри `FrameItem::Group` с трансформацией приводится к
+- [X] T032 [P] [US1] Тест: прогон внутри `FrameItem::Group` с трансформацией приводится к
       системе координат страницы (самый вероятный дефект слоя), в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-031, contracts/text-layer.md обязательство 2)
-- [ ] T033 [P] [US1] Тест: порядок прогонов совпадает с порядком чтения на многоколоночной и
+- [X] T033 [P] [US1] Тест: порядок прогонов совпадает с порядком чтения на многоколоночной и
       многостраничной вёрстке, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-031)
-- [ ] T034 [P] [US1] Тест: сгенерированное содержимое (номер страницы в колонтитуле) попадает
+- [X] T034 [P] [US1] Тест: сгенерированное содержимое (номер страницы в колонтитуле) попадает
       в слой, хотя в исходнике заметки такого текста нет, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-031, SC-011)
 
 ### Текстовый слой — реализация
 
-- [ ] T035 [US1] Реализовать `TextRun` в `packages/core/src/preview/textlayer.rs` —
+- [X] T035 [US1] Реализовать `TextRun` в `packages/core/src/preview/textlayer.rs` —
       data-model.md «TextRun», contracts/text-layer.md
-- [ ] T036 [US1] Реализовать обход `Frame` с накоплением трансформаций групп и сбором
+- [X] T036 [US1] Реализовать обход `Frame` с накоплением трансформаций групп и сбором
       `FrameItem::Text(TextItem)` в `packages/core/src/preview/textlayer.rs` (FR-031)
-- [ ] T037 [US1] Реализовать вычисление ширины прогона из `glyphs[].x_advance` в
+- [X] T037 [US1] Реализовать вычисление ширины прогона из `glyphs[].x_advance` в
       `packages/core/src/preview/textlayer.rs` (FR-031)
-- [ ] T038 [US1] Реализовать перенос `TextItem::lang` в `TextRun::lang` в
+- [X] T038 [US1] Реализовать перенос `TextItem::lang` в `TextRun::lang` в
       `packages/core/src/preview/textlayer.rs` (FR-032)
 
 ### Поверхность ядра для UI
@@ -223,9 +223,9 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Панель предпросмотра
 
-- [ ] T043 [P] [US1] Реализовать `ui/src/preview/PreviewPage.tsx`: одна страница — SVG плюс
+- [X] T043 [P] [US1] Реализовать `ui/src/preview/PreviewPage.tsx`: одна страница — SVG плюс
       текстовый слой поверх, с общим множителем масштаба
-- [ ] T044 [P] [US1] Реализовать `ui/src/preview/TextLayer.tsx`: прозрачный выделяемый текст,
+- [X] T044 [P] [US1] Реализовать `ui/src/preview/TextLayer.tsx`: прозрачный выделяемый текст,
       позиционированный по `TextRun`, с объявленным `lang`. Слой **не** помечается
       декоративным и **не** скрывается от вспомогательных технологий (FR-032,
       contracts/text-layer.md обязательство 4)
@@ -621,3 +621,55 @@ T046 (`useCompiledDocument.ts`) отдельными файлами не зав�
 внутри `ui/src/preview/PreviewPane.tsx`; T062 (дебаунс) реализован там же, а не в
 `useCompiledDocument.ts`. При выполнении T046 это надо разнести по файлам, как предписывает
 plan.md → Project Structure.
+
+---
+
+## Текстовый слой закрыт (2026-09-10)
+
+Из «сознательно обойдённого» вертикального среза закрыт первый кусок: T031-T038
+(ядро), T043 и T044 (интерфейс). Текст в предпросмотре теперь выделяется,
+копируется и доступен программе чтения с экрана — FR-031, FR-032 и SC-011
+выполнены в той части, которую проверяет автоматика.
+
+**Ядро** — `packages/core/src/preview/textlayer.rs`: обход `Frame` с накоплением
+трансформаций групп, `TextRun` с координатами страницы, ширина из
+`TextItem::width()`, язык из `TextItem::lang`. Слой лежит в самом
+`RenderedPage` рядом с картинкой, а не приезжает отдельным событием: два слоя
+от разных сборок — запрещённое состояние (contracts/text-layer.md § 5).
+
+Правило composition координат взято из `typst-svg-0.15.1/src/lib.rs`
+(`render_frame`, `render_group`), а не подобрано: расхождение с ним и есть тот
+самый дефект, при котором картинка правильная, а выделение съехало.
+
+**Проверки** — общая таблица `packages/core/tests/common/textlayer_cases.rs`,
+прогоняется обоими таргетами (по 4 теста в `preview_native.rs` и
+`preview_wasm.rs`), все зелёные.
+
+**Интерфейс** — `ui/src/preview/TextLayer.tsx` и `ui/src/preview/PreviewPage.tsx`,
+вынесенный из `PreviewPane.tsx`, как и предписывал plan.md. Слой — `<svg>` с
+`viewBox` в пунктах страницы: браузер пересчитывает и позиции, и кегль тем же
+множителем, что применён к картинке, поэтому своего масштаба в JS нет и
+разъехаться слою неоткуда. Картинка помечена `aria-hidden`, слой — **нет**
+(contracts/text-layer.md § 4).
+
+### Отметки, отставшие от кода
+
+Ниже — задачи, чья реализация существует и покрыта, но чекбокс не переставлен.
+Как и в `004/tasks.md` § Phase 8, отметки не двигаются без прогона; прогон от
+2026-09-10 зелёный (383 теста `cargo test`, 147 `wasm-pack test`).
+
+| Задача | Свидетельство |
+|---|---|
+| T012, T013 | `resolve_iterations_are_bounded` на обоих таргетах; `MAX_RESOLVE_ITERATIONS` в `preview/snapshot.rs` |
+| T014-T016 | `preview/resolve.rs` (`ResolveError` со всеми вариантами), `compile_note_resolved` в `preview/compile.rs`. **Отступление**: T014 сделан свободной функцией `read_dependency`, а не трейтом `DependencyResolver` — по той же причине, что и в фиче 003, все операции асинхронны |
+| T080 | `preview/diagnostics.rs`: строка и колонка 1-based из `byte_to_line_column` |
+| T092, T094 | `missing_image_is_named_with_its_reason_and_does_not_spin_the_loop`, `path_escaping_the_vault_is_rejected_before_any_read` |
+| T095, T098 | `dependencies_list_every_file_that_entered_the_build`; `ResolveError::OutsideVault` до чтения |
+| T111 | `ResolveError::TooLarge` наследуется от `ReadError::TooLarge` фичи 001 |
+
+### T113 требует переформулировки, а не выполнения
+
+Задача просит «убедиться, что пакеты Typst из сети не поддерживаются». С тех пор
+фичи 006 и 007 добавили ровно обратное: `preview/packages.rs::fetch_and_install`
+скачивает внешний шаблон, ради чего в `Cargo.toml` стоят `reqwest`, `flate2` и
+`tar`. Выполнять задачу в прежней формулировке значило бы откатить две фичи.

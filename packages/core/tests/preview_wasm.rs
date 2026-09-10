@@ -375,3 +375,29 @@ async fn a_fresh_cache_does_not_see_another_sessions_templates() {
     assert_eq!(doc.outcome, CompileOutcome::Succeeded);
     assert!(vault.reads.borrow().values().sum::<u32>() > reads_before);
 }
+
+// ── Текстовый слой (US1, T031-T034, FR-031, FR-032) ─────────────────────
+//
+// Та же таблица, что в `preview_native.rs`, дословно.
+
+use common::textlayer_cases as textlayer;
+
+#[wasm_bindgen_test]
+fn a_run_carries_its_text_place_size_and_language() {
+    textlayer::a_run_carries_its_text_place_size_and_language();
+}
+
+#[wasm_bindgen_test]
+fn a_run_inside_a_transformed_group_lands_in_page_coordinates() {
+    textlayer::a_run_inside_a_transformed_group_lands_in_page_coordinates();
+}
+
+#[wasm_bindgen_test]
+fn runs_follow_reading_order_across_columns_and_pages() {
+    textlayer::runs_follow_reading_order_across_columns_and_pages();
+}
+
+#[wasm_bindgen_test]
+fn generated_content_reaches_the_layer() {
+    textlayer::generated_content_reaches_the_layer();
+}

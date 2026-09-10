@@ -11,6 +11,8 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 use typst_layout::{Page, PagedDocument};
 
+use super::textlayer::{text_runs, TextRun};
+
 /// Одна страница документа, готовая к показу.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
@@ -26,10 +28,15 @@ pub struct RenderedPage {
     /// Визуальный слой.
     ///
     /// Внимание: глифы здесь — контуры `<path>`, а не текст
-    /// (`typst-svg-0.15.1/src/text.rs`). Выделение и доступность обеспечивает
-    /// отдельный текстовый слой (contracts/text-layer.md), которого в этом
-    /// срезе ещё нет.
+    /// (`typst-svg-0.15.1/src/text.rs`). Выделение, копирование и доступность
+    /// обеспечивает [`Self::text_runs`].
     pub svg: String,
+    /// Текстовый слой этой же страницы (contracts/text-layer.md).
+    ///
+    /// Лежит рядом с картинкой, а не приезжает отдельным событием: оба слоя
+    /// обязаны относиться к одной и той же сборке одной и той же страницы,
+    /// и смешение слоёв от разных сборок — запрещённое состояние.
+    pub text_runs: Vec<TextRun>,
     /// Отпечаток страницы: единица сравнения между сборками.
     pub digest: String,
 }
@@ -44,6 +51,7 @@ impl RenderedPage {
             width_pt: size.x.to_pt(),
             height_pt: size.y.to_pt(),
             svg: typst_svg::svg(page, &options),
+            text_runs: text_runs(&page.frame),
             digest: digest_of(page),
         }
     }

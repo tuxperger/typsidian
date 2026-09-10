@@ -388,3 +388,30 @@ async fn a_fresh_cache_does_not_see_another_sessions_templates() {
         "пустой кэш обязан пойти за шаблоном в vault"
     );
 }
+
+// ── Текстовый слой (US1, T031-T034, FR-031, FR-032) ─────────────────────
+//
+// Таблица общая с `preview_wasm.rs`: слой считается из свёрстанного кадра и
+// файловой системы не касается, поэтому правило одно на оба таргета.
+
+use common::textlayer_cases as textlayer;
+
+#[test]
+fn a_run_carries_its_text_place_size_and_language() {
+    textlayer::a_run_carries_its_text_place_size_and_language();
+}
+
+#[test]
+fn a_run_inside_a_transformed_group_lands_in_page_coordinates() {
+    textlayer::a_run_inside_a_transformed_group_lands_in_page_coordinates();
+}
+
+#[test]
+fn runs_follow_reading_order_across_columns_and_pages() {
+    textlayer::runs_follow_reading_order_across_columns_and_pages();
+}
+
+#[test]
+fn generated_content_reaches_the_layer() {
+    textlayer::generated_content_reaches_the_layer();
+}

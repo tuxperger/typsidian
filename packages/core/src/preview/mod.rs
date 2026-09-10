@@ -26,6 +26,7 @@ pub mod packages;
 pub mod pages;
 pub mod resolve;
 pub mod snapshot;
+pub mod textlayer;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]
@@ -38,4 +39,5 @@ pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;
 pub use pages::{render_pages, RenderedPage};
 pub use snapshot::{DependencySnapshot, SnapshotError, MAX_RESOLVE_ITERATIONS};
+pub use textlayer::{text_runs, TextRun};
 pub use world::PreviewWorld;
