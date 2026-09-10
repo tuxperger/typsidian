@@ -12,7 +12,9 @@
 
 use super::digest::BoardDigest;
 use super::embed;
+use super::placement::{self, AssetsPlacement};
 use crate::vault::backend::{VaultBackend, WriteError};
+use crate::vault::sections::SectionMark;
 use crate::vault::{classify, FileKind, SNAPSHOT_FOLDER_SUFFIX};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -59,6 +61,11 @@ impl EmbedId {
 
     /// Восстанавливает идентификатор из имени файла снимка. `None` — файл в
     /// папке снимков создан не приложением: такой файл вставкой не считается.
+    ///
+    /// С фичи 006 это правило работает ещё и как **признак снимка** в
+    /// классификаторе: у общей папки `assets/` нет защитного суффикса, который
+    /// был у `*.assets`, и отличить снимок от картинки пользователя можно
+    /// только по имени файла — см. [`is_snapshot_file_name`].
     pub fn from_file_name(file_name: &str) -> Option<Self> {
         let stem = file_name.strip_suffix(&format!(".{SNAPSHOT_EXTENSION}"))?;
         if !stem.starts_with(EMBED_ID_PREFIX) || stem.len() <= EMBED_ID_PREFIX.len() {
@@ -68,6 +75,17 @@ impl EmbedId {
             value: stem.to_string(),
         })
     }
+}
+
+/// Похоже ли имя файла на снимок, созданный приложением (фича 006, FR-012).
+///
+/// Тонкая обёртка над [`EmbedId::from_file_name`] — намеренно, чтобы правило
+/// «что считать снимком» осталось в одном месте. Классификатор
+/// (`vault::classify`) спрашивает именно это: без проверки имени правило
+/// «файл внутри `assets/` — снимок» скрыло бы картинки, которые пользователь
+/// положил в папку с таким именем сам.
+pub fn is_snapshot_file_name(file_name: &str) -> bool {
+    EmbedId::from_file_name(file_name).is_some()
 }
 
 /// Метаданные снимка (data-model.md «Snapshot»).
@@ -148,10 +166,15 @@ pub struct EmbedPlan {
     pub markup_path: String,
 }
 
-/// Имя папки снимков для заметки: `<имя заметки без расширения>.assets`.
+/// Имя папки снимков для заметки по **прежнему** правилу:
+/// `<имя заметки без расширения>.assets`.
 ///
-/// `None` — путь не является путём заметки. Рядом с заметкой, а не в общей
-/// папке: при переносе заметки снимки едут вместе с ней (research.md §4).
+/// `None` — путь не является путём заметки.
+///
+/// Фича 006 таких папок больше не создаёт — расположение выбирает пользователь,
+/// а раскладка внутри корня единая (`boards::placement`). Функция осталась
+/// потому, что уже созданные папки обязаны продолжать работать (006 FR-009), и
+/// правило их именования должно жить в одном месте.
 pub fn assets_folder_name(note_path: &Path) -> Option<String> {
     if classify(note_path) != FileKind::Note {
         return None;
@@ -160,11 +183,18 @@ pub fn assets_folder_name(note_path: &Path) -> Option<String> {
     Some(format!("{stem}{SNAPSHOT_FOLDER_SUFFIX}"))
 }
 
-/// Путь снимка относительно корня vault.
-pub fn snapshot_path(note_path: &Path, embed_id: &EmbedId) -> Option<PathBuf> {
-    let folder = assets_folder_name(note_path)?;
-    let parent = note_path.parent().unwrap_or(Path::new(""));
-    Some(parent.join(folder).join(embed_id.file_name()))
+/// Путь снимка относительно корня vault по выбранной политике.
+///
+/// Тонкая обёртка над [`placement::snapshot_path`] — расчёт живёт там
+/// (contracts/asset-placement.md), здесь только точка входа для тех, кто уже
+/// работает со снимками.
+pub fn snapshot_path(
+    placement: AssetsPlacement,
+    note_path: &Path,
+    sections: &[SectionMark],
+    embed_id: &EmbedId,
+) -> Option<PathBuf> {
+    placement::snapshot_path(placement, note_path, sections, embed_id)
 }
 
 /// Планирует вставку доски в заметку (FR-018, FR-020, FR-023).
@@ -179,6 +209,8 @@ pub fn plan_embed(
     note_path: &Path,
     note_text: &str,
     board_path: &Path,
+    placement: AssetsPlacement,
+    sections: &[SectionMark],
 ) -> Result<EmbedPlan, EmbedError> {
     if classify(note_path) != FileKind::Note {
         return Err(EmbedError::NotANote);
@@ -186,7 +218,6 @@ pub fn plan_embed(
     if classify(board_path) != FileKind::Board {
         return Err(EmbedError::NotABoard);
     }
-    let folder = assets_folder_name(note_path).ok_or(EmbedError::NotANote)?;
     let taken: Vec<EmbedId> = embed::embeds_of(note_path, note_text)
         .into_iter()
         .map(|found| found.id)
@@ -201,10 +232,17 @@ pub fn plan_embed(
         attempt += 1;
     };
 
-    let markup_path = format!("{folder}/{}", embed_id.file_name());
-    let parent = note_path.parent().unwrap_or(Path::new(""));
+    // Расположение выбирает пользователь; расчёт живёт в `placement`
+    // (contracts/asset-placement.md). `NotANote` здесь недостижим — вид пути
+    // уже проверен выше, — но обрабатывается, чтобы отказ не превратился в
+    // панику при будущей правке классификатора.
+    let snapshot_path = placement::snapshot_path(placement, note_path, sections, &embed_id)
+        .ok_or(EmbedError::NotANote)?;
+    let markup_path = placement::markup_path(placement, note_path, sections, &embed_id)
+        .ok_or(EmbedError::NotANote)?;
+
     Ok(EmbedPlan {
-        snapshot_path: parent.join(&folder).join(embed_id.file_name()),
+        snapshot_path,
         board_path: board_path.to_path_buf(),
         embed_id,
         markup_path,
@@ -414,29 +452,35 @@ mod tests {
         snapshot_metadata(Path::new(board_path), &digest(BOARD.as_bytes()).unwrap())
     }
 
+    /// Планирование по умолчанию — политика «рядом с заметкой», без разделов.
+    fn plan(note: &str, text: &str, board: &str) -> Result<EmbedPlan, EmbedError> {
+        plan_embed(
+            Path::new(note),
+            text,
+            Path::new(board),
+            AssetsPlacement::NextToNote,
+            &[],
+        )
+    }
+
     #[test]
     fn snapshot_lives_next_to_its_note() {
-        // research.md §4: снимок едет вместе с заметкой при её переносе.
-        let plan = plan_embed(
-            Path::new("Проект/Идея.typ"),
-            "",
-            Path::new("Схема.excalidraw"),
-        )
-        .unwrap();
+        // 002 research.md §4: снимок едет вместе с заметкой при её переносе.
+        // Раскладка внутри папки заметки — по правилу 006 (FR-004): одна общая
+        // `assets/` с подпапкой на заметку вместо отдельной папки на каждую.
+        let plan = plan("Проект/Идея.typ", "", "Схема.excalidraw").unwrap();
         assert!(plan
             .snapshot_path
-            .starts_with(Path::new("Проект/Идея.assets")));
-        assert!(plan.markup_path.starts_with("Идея.assets/"));
+            .starts_with(Path::new("Проект/assets/Идея")));
+        assert!(plan.markup_path.starts_with("assets/Идея/"));
     }
 
     #[test]
     fn two_embeds_of_the_same_board_in_one_note_get_different_files() {
         // FR-020: у каждой вставки свой файл, даже если доска одна.
-        let note = Path::new("Идея.typ");
-        let board = Path::new("Схема.excalidraw");
-        let first = plan_embed(note, "", board).unwrap();
+        let first = plan("Идея.typ", "", "Схема.excalidraw").unwrap();
         let text = embed_markup(&first);
-        let second = plan_embed(note, &text, board).unwrap();
+        let second = plan("Идея.typ", &text, "Схема.excalidraw").unwrap();
         assert_ne!(first.embed_id, second.embed_id);
         assert_ne!(first.snapshot_path, second.snapshot_path);
     }
@@ -444,7 +488,7 @@ mod tests {
     #[test]
     fn markup_is_plain_typst() {
         // FR-022: никаких маркеров приложения в тексте заметки.
-        let plan = plan_embed(Path::new("Идея.typ"), "", Path::new("Схема.excalidraw")).unwrap();
+        let plan = plan("Идея.typ", "", "Схема.excalidraw").unwrap();
         let markup = embed_markup(&plan);
         assert!(markup.starts_with("#image(\""));
         assert!(markup.ends_with("\")"));
@@ -525,15 +569,11 @@ mod tests {
     #[test]
     fn a_board_cannot_be_embedded_into_a_board() {
         assert_eq!(
-            plan_embed(
-                Path::new("Схема.excalidraw"),
-                "",
-                Path::new("Другая.excalidraw")
-            ),
+            plan("Схема.excalidraw", "", "Другая.excalidraw"),
             Err(EmbedError::NotANote)
         );
         assert_eq!(
-            plan_embed(Path::new("Идея.typ"), "", Path::new("Картинка.png")),
+            plan("Идея.typ", "", "Картинка.png"),
             Err(EmbedError::NotABoard)
         );
     }

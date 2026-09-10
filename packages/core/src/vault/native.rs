@@ -316,13 +316,50 @@ pub struct NativeBackend {
     /// `notified().await` вернётся сразу — иначе события залежались бы в
     /// очереди до следующего изменения файла.
     events_ready: Arc<tokio::sync::Notify>,
+    /// Существовало ли `.typsidian/` до открытия (фича 006, FR-024).
+    ///
+    /// Снимок момента открытия, а не текущее состояние диска: открытие само
+    /// создаёт эту папку, поэтому спросить позже — значит всегда получить
+    /// `true` и никогда не сообщить пользователю об утрате настроек.
+    service_dir_existed: bool,
     _watcher: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, FileIdMap>>,
     _access_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl NativeBackend {
+    /// Кэш индекса внутри служебного места (фича 006, FR-020).
     fn cache_db_path(root: &Path) -> PathBuf {
-        root.join(".typsidian-cache.sqlite")
+        root.join(super::service_dir::cache_path())
+    }
+
+    /// Готовит служебное место к открытию vault (фича 006).
+    ///
+    /// Делает две вещи, обе — при открытии и обе только если папка доступна на
+    /// запись (FR-025):
+    ///
+    /// 1. Создаёт `.typsidian/`. Одинаково с web, где файла кэша нет вовсе
+    ///    (research.md §12): расхождение в том, что пользователь видит в своей
+    ///    папке, — не тот случай, где принцип II соблюдён «по форме API».
+    /// 2. Убирает файл кэша прежней версии из корня (FR-021). Содержимое не
+    ///    переносится: кэш производен и полностью восстановим, а код миграции
+    ///    схемы понадобился бы ровно один раз и остался бы навсегда
+    ///    (research.md §11).
+    ///
+    /// Отказ на любом шаге открытие **не** блокирует: vault остаётся рабочим,
+    /// а невозможность завести служебное место проявится там, где её надо
+    /// назвать пользователю, — при попытке записать настройки.
+    /// Возвращает, **существовало ли** служебное место до вызова: этот факт
+    /// нужен FR-024, а спросить его позже нельзя — здесь оно и создаётся.
+    fn prepare_service_dir(root: &Path) -> bool {
+        let service_dir = root.join(super::service_dir::service_dir());
+        let existed = service_dir.is_dir();
+
+        let legacy = root.join(super::service_dir::legacy_cache_path());
+        if legacy.exists() {
+            let _ = std::fs::remove_file(&legacy);
+        }
+        let _ = std::fs::create_dir_all(&service_dir);
+        existed
     }
 
     /// Единственный гейт записи для всех четырёх операций, названных в FR-036
@@ -793,6 +830,10 @@ impl VaultBackend for NativeBackend {
         // 004). Запоминание текущего vault теперь делает вызывающая сторона,
         // применяя `SettingsChange::current_vault` после успешного открытия.
 
+        // Служебное место готовится до открытия кэша: файл кэша лежит внутри
+        // него, а файл прежней версии обязан исчезнуть из корня (фича 006).
+        let service_dir_existed = Self::prepare_service_dir(root_path);
+
         let mut cache = SqliteCache::open(&Self::cache_db_path(root_path))
             .await
             .ok();
@@ -857,6 +898,7 @@ impl VaultBackend for NativeBackend {
             conflicts: Arc::new(StdMutex::new(ConflictRegistry::new())),
             events: Arc::new(StdMutex::new(VecDeque::new())),
             events_ready: Arc::new(tokio::sync::Notify::new()),
+            service_dir_existed,
             _watcher: None,
             _access_task: None,
         };
@@ -874,12 +916,60 @@ impl VaultBackend for NativeBackend {
         *self.access_state.lock().unwrap()
     }
 
+    fn service_dir_existed_at_open(&self) -> bool {
+        self.service_dir_existed
+    }
+
     async fn list(&self) -> Vec<Note> {
         self.index.lock().await.all()
     }
 
     async fn list_folder(&self, folder: &Path) -> Vec<Note> {
         self.index.lock().await.in_folder(folder)
+    }
+
+    /// Тот же приём, что у [`probe_access_state`], только про вложенную папку:
+    /// дешёвые `metadata`/`read_dir` без файлов-пробников.
+    async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {
+        use crate::vault::{FolderAccess, FolderProblem};
+
+        let full = self.root_path.join(folder);
+        let metadata = match std::fs::metadata(&full) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return FolderAccess::Absent
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                return FolderAccess::Unreadable {
+                    reason: FolderProblem::AccessDenied,
+                }
+            }
+            Err(_) => {
+                return FolderAccess::Unreadable {
+                    reason: FolderProblem::Io,
+                }
+            }
+        };
+        if !metadata.is_dir() {
+            return FolderAccess::Unreadable {
+                reason: FolderProblem::NotADirectory,
+            };
+        }
+        if let Err(error) = std::fs::read_dir(&full) {
+            return FolderAccess::Unreadable {
+                reason: if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    FolderProblem::AccessDenied
+                } else {
+                    FolderProblem::Io
+                },
+            };
+        }
+        if metadata.permissions().readonly() {
+            return FolderAccess::NotWritable {
+                reason: FolderProblem::AccessDenied,
+            };
+        }
+        FolderAccess::Present
     }
 
     async fn read(&self, path: &Path) -> Result<String, ReadError> {
@@ -901,6 +991,30 @@ impl VaultBackend for NativeBackend {
             std::io::ErrorKind::NotFound => ReadError::NotFound,
             _ => ReadError::Io,
         })
+    }
+
+    async fn read_bytes(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        let full = self.root_path.join(path);
+        // Тот же порядок проверок, что и в `read`: предел по метаданным до
+        // чтения, отсутствие файла — отдельной причиной.
+        if std::fs::metadata(&full).is_ok_and(|m| m.len() > NOTE_SIZE_LIMIT_BYTES) {
+            return Err(ReadError::TooLarge);
+        }
+        std::fs::read(&full).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ReadError::NotFound,
+            _ => ReadError::Io,
+        })
+    }
+
+    async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
+        if self.write_denied() {
+            return Err(WriteError::AccessDenied);
+        }
+        // Индекс и таблица ссылок не трогаются: байтами пишется то, что в
+        // дереве не показывается (файлы шаблонов), а `classify` для них всё
+        // равно вернул бы `Service`. Разбирать картинку как Typst-заметку было
+        // бы прямой ошибкой.
+        std::fs::write(self.root_path.join(path), bytes).map_err(|_| WriteError::Io)
     }
 
     async fn write(
@@ -1007,10 +1121,25 @@ impl VaultBackend for NativeBackend {
         if full_to.exists() {
             return Err(RenameError::NameConflict);
         }
+        // Спрашивается ДО переименования: после него исходного пути уже нет, а
+        // ответ нужен для переноса пометки раздела ниже (фича 006, FR-018).
+        let renamed_a_folder = full_from.is_dir();
         std::fs::rename(&full_from, &full_to).map_err(|_| RenameError::Io)?;
         self.index.lock().await.rename(from, to);
         if let Some(cache) = self.cache.lock().await.as_mut() {
             cache.rename_note(from, to).await;
+        }
+
+        // FR-018: пометка раздела едет за папкой, переименованной **средствами
+        // приложения**. Приложение об этом переименовании знает, и терять
+        // пометку было бы просто дефектом; переименование снаружи её
+        // по-прежнему теряет (FR-019), и розыска нет ни там, ни здесь.
+        //
+        // Отказ записи настроек переименование не отменяет: файлы уже
+        // переехали, и откатывать успешную операцию из-за служебного файла
+        // нельзя.
+        if renamed_a_folder {
+            let _ = super::vault_settings::move_sections(self, from, to).await;
         }
         // FR-028/FR-030: ссылки на старое имя стали битыми, на новое — могли
         // починиться. Само подтверждение операции — забота вызывающей стороны

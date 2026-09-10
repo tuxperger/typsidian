@@ -1,14 +1,17 @@
-import { useCallback, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type {
   CreateError,
   DeleteError,
   Note,
   RenameError,
+  Template,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import { fillFromTemplate } from "../templates/NewNoteFromTemplate.js";
 import { buildTree, type TreeFolder, type TreeNode } from "./buildTree.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
 import { isBoard } from "./fileKind.js";
+import { Icon } from "../icons/Icons.js";
 
 // Принцип I конституции: этот файл не переизобретает vault-логику —
 // create/rename/delete здесь всегда прямые вызовы `VaultClient`
@@ -111,10 +114,24 @@ function makeDefaultConfirmRename(client: VaultClient) {
   };
 }
 
-export interface VaultTreeActionsProps {
+/**
+ * Путь открытого файла — строкам дерева, чтобы отметить активную (макет §
+ * Sidebar). Контекст, а не проп: между `VaultTreeActions` и строкой заметки
+ * два промежуточных компонента, которым до открытого файла нет дела, и
+ * протаскивание через них добавило бы им по параметру ни за чем.
+ */
+const OpenPathContext = createContext<string | null>(null);
+
+/**
+ * Что нужно самому состоянию действий — им пользуется `useVaultTreeActions`.
+ *
+ * Отдельно от пропов компонента: с тех пор как кнопка создания переехала в
+ * шапку панели (макет «Typsidian Доски» § Sidebar), состояние заводит
+ * `Sidebar`, а дерево получает его готовым. Держать оба набора в одном
+ * интерфейсе значило бы требовать от дерева `client`, который ему не нужен.
+ */
+export interface VaultTreeActionsOptions {
   client: VaultClient;
-  notes: Note[];
-  onOpenNote: (note: Note) => void;
   /** Вызывается после успешного create/rename/delete — обычно `useVault().refresh`. */
   onNotesChanged: () => void | Promise<void>;
   /**
@@ -133,6 +150,30 @@ export interface VaultTreeActionsProps {
   confirmRename?: (note: Note, nextPath: string) => boolean | Promise<boolean>;
   /** То же для удаления (FR-027) — см. `makeDefaultConfirmDelete`. */
   confirmDelete?: (note: Note) => boolean | Promise<boolean>;
+
+  /**
+   * Пути папок, помеченных как разделы (фича 006, FR-014).
+   *
+   * Приходят снаружи, а не читаются здесь: тот же набор нужен панели настроек,
+   * и второе место, спрашивающее ядро о разделах, разошлось бы с первым при
+   * первой же правке.
+   */
+  sections?: string[];
+  /**
+   * Пометить папку разделом или снять пометку (FR-013). `undefined` — vault не
+   * открыт либо возможность не подключена: пункт меню тогда не показывается,
+   * а не показывается неработающим.
+   */
+  onToggleSection?: (folder: string, marked: boolean) => void | Promise<void>;
+}
+
+/** Что нужно самому дереву: список, открытие записи и готовое состояние. */
+export interface VaultTreeActionsProps {
+  notes: Note[];
+  onOpenNote: (note: Note) => void;
+  /** Какой файл сейчас открыт — он выделяется в дереве (FR-004 макета). */
+  openPath?: string | null;
+  actions: VaultTreeActionsController;
 }
 
 type MenuTarget =
@@ -144,6 +185,13 @@ interface ActionsState {
   renameDraft: string;
   creatingInFolder: string | null;
   createDraft: string;
+  /**
+   * Заготовка, выбранная в меню создания (фича 003, FR-020). `null` — обычная
+   * пустая заметка. Живёт рядом с черновиком имени, потому что относится к тому
+   * же незавершённому действию: пользователь уже выбрал заготовку, но ещё не
+   * назвал файл.
+   */
+  createTemplate: Template | null;
   menu: MenuTarget | null;
   /** Путь заметки/будущей заметки, к которой сейчас идёт запрос к client. */
   pendingPath: string | null;
@@ -154,6 +202,7 @@ const INITIAL_STATE: ActionsState = {
   renameDraft: "",
   creatingInFolder: null,
   createDraft: DEFAULT_NEW_NOTE_NAME,
+  createTemplate: null,
   menu: null,
   pendingPath: null,
 };
@@ -173,15 +222,9 @@ export function useVaultTreeActions({
   onError,
   confirmRename,
   confirmDelete,
-}: Pick<
-  VaultTreeActionsProps,
-  | "client"
-  | "onNotesChanged"
-  | "onCreated"
-  | "onError"
-  | "confirmRename"
-  | "confirmDelete"
->) {
+  sections = [],
+  onToggleSection,
+}: VaultTreeActionsOptions) {
   const [state, setState] = useState<ActionsState>(INITIAL_STATE);
   // Значения по умолчанию зависят от `client` (им нужен `backlinks()`),
   // поэтому вычисляются здесь, а не в списке параметров.
@@ -274,18 +317,38 @@ export function useVaultTreeActions({
    * создано, решает расширение в итоговом имени — то же правило, что у ядра
    * (`classify`): если пользователь переименует черновик из `.excalidraw` в
    * `.typ`, получится заметка, и наоборот.
+   *
+   * `template` (фича 003, FR-020, FR-022) — заготовка, выбранная вторым уровнем
+   * меню создания. Она **не** меняет ни путь создания, ни правила имён: имя и
+   * расположение задаются тем же инлайн-вводом, что и у пустой заметки. Её
+   * содержимое дописывается уже после создания файла (`performCreate`).
+   * `null` — обычная пустая заметка (FR-024).
    */
-  const beginCreate = useCallback((folderPath: string, kind: "note" | "board" = "note") => {
-    setState((prev) => ({
-      ...prev,
-      creatingInFolder: folderPath,
-      createDraft: kind === "board" ? DEFAULT_NEW_BOARD_NAME : DEFAULT_NEW_NOTE_NAME,
-      menu: null,
-    }));
-  }, []);
+  const beginCreate = useCallback(
+    (
+      folderPath: string,
+      kind: "note" | "board" = "note",
+      template: Template | null = null,
+    ) => {
+      setState((prev) => ({
+        ...prev,
+        creatingInFolder: folderPath,
+        createDraft:
+          kind === "board" ? DEFAULT_NEW_BOARD_NAME : DEFAULT_NEW_NOTE_NAME,
+        createTemplate: template,
+        menu: null,
+      }));
+    },
+    [],
+  );
 
   const cancelCreate = useCallback(() => {
-    setState((prev) => ({ ...prev, creatingInFolder: null, createDraft: "" }));
+    setState((prev) => ({
+      ...prev,
+      creatingInFolder: null,
+      createDraft: "",
+      createTemplate: null,
+    }));
   }, []);
 
   const setCreateDraft = useCallback((value: string) => {
@@ -294,7 +357,7 @@ export function useVaultTreeActions({
 
   // Прямой вызов `client.create` — см. комментарий у `performRename`.
   const performCreate = useCallback(
-    async (path: string) => {
+    async (path: string, template: Template | null) => {
       if (state.pendingPath !== null) return;
       setState((prev) => ({ ...prev, pendingPath: path }));
       try {
@@ -306,17 +369,26 @@ export function useVaultTreeActions({
         const board = (await client.fileKind(path)) === "Board";
         if (board) await client.createBoard(path);
         else await client.create(path);
+
+        // Заготовка применяется **после** создания файла и только к заметке:
+        // выбрав заготовку и назвав файл `.excalidraw`, пользователь сказал
+        // «доска», и содержимое заготовки туда не поедет (фича 003, FR-021).
+        const filled = !board && template !== null;
+        if (filled) await fillFromTemplate(client, path, template);
+
         setState((prev) => ({
           ...prev,
           pendingPath: null,
           creatingInFolder: null,
           createDraft: DEFAULT_NEW_NOTE_NAME,
+          createTemplate: null,
         }));
         await onNotesChanged();
         // Доска открывается сразу: её содержимое видно только на полотне.
-        // Заметка — нет: она видна в дереве, и открывать её за пользователя
-        // значило бы решить за него, чем он занят.
-        if (board) onCreated?.(path);
+        // Пустая заметка — нет: она видна в дереве, и открывать её за
+        // пользователя значило бы решить за него, чем он занят. Заметка,
+        // созданная по заготовке, — да: он уже сказал, чем занят, выбрав её.
+        if (board || filled) onCreated?.(path);
       } catch (cause) {
         setState((prev) => ({ ...prev, pendingPath: null }));
         const error = asCreateError(cause);
@@ -334,9 +406,15 @@ export function useVaultTreeActions({
         cancelCreate();
         return;
       }
-      await performCreate(joinPath(folderPath, name));
+      await performCreate(joinPath(folderPath, name), state.createTemplate);
     },
-    [state.pendingPath, state.createDraft, performCreate, cancelCreate],
+    [
+      state.pendingPath,
+      state.createDraft,
+      state.createTemplate,
+      performCreate,
+      cancelCreate,
+    ],
   );
 
   // Прямой вызов `client.delete` — см. комментарий у `performRename`.
@@ -381,6 +459,8 @@ export function useVaultTreeActions({
     setCreateDraft,
     submitCreate,
     requestDelete,
+    sections,
+    onToggleSection,
   };
 }
 
@@ -432,14 +512,31 @@ function InlineTextInput({
  * от текстовой заметки с одного взгляда, без открытия файла. Вид приходит из
  * ядра вместе с записью (`Note.kind`), а не выводится из расширения здесь
  * (принцип I).
+ *
+ * Вид несёт **форма** иконки, а состояние — её цвет: активная строка красит
+ * иконку в оранжевый (шаблон § Sidebar), и если бы цветом обозначался ещё и
+ * вид, доска и открытая заметка выглядели бы одинаково.
  */
 function FileKindMark({ note }: { note: Note }): React.JSX.Element {
-  const board = isBoard(note);
   return (
-    <span className={board ? "ts-kind ts-kind--board" : "ts-kind"} aria-hidden="true">
-      {board ? "◈" : "▪"}
-    </span>
+    <Icon
+      name={isBoard(note) ? "board" : "file"}
+      size={13}
+      className={isBoard(note) ? "ts-kind ts-kind--board" : "ts-kind"}
+    />
   );
+}
+
+/** Имя без расширения — расширение рисуется отдельным хвостом. */
+function stemOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+/** Расширение вместе с точкой; пустая строка, если его нет. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot) : "";
 }
 
 function NoteRow({
@@ -455,6 +552,7 @@ function NoteRow({
   const isRenaming = actions.state.renamingPath === note.path;
   const isMenuOpen = menu !== null && menu.kind === "note" && menu.note.path === note.path;
   const isBusy = actions.state.pendingPath !== null;
+  const isOpen = useContext(OpenPathContext) === note.path.toString();
 
   if (isRenaming) {
     return (
@@ -474,14 +572,29 @@ function NoteRow({
   return (
     <li
       role="treeitem"
+      className="ts-tree__file"
       onContextMenu={(event) => {
         event.preventDefault();
         actions.openMenu({ kind: "note", note });
       }}
     >
-      <button type="button" onClick={() => onOpenNote(note)} disabled={isBusy}>
+      <button
+        type="button"
+        onClick={() => onOpenNote(note)}
+        disabled={isBusy}
+        aria-current={isOpen ? "true" : undefined}
+      >
         <FileKindMark note={note} />
-        {note.name}
+        <span className="ts-tree__name">{stemOf(note.name)}</span>
+      {/* Расширение отдельным приглушённым хвостом — макет досок § Sidebar:
+          имя обрезается многоточием, а вид файла остаётся виден. */}
+      <span className="ts-tree__ext">{extensionOf(note.name)}</span>
+        {/* Hi-vis жёлтая точка — только про несохранённые правки (handoff §
+            Design Tokens). Признак приходит из ядра вместе с записью, а не
+            выводится здесь из состояния редактора. */}
+        {note.has_unsaved_edits && (
+          <span className="ts-dot-unsaved" title="есть несохранённые изменения" />
+        )}
       </button>
       <button
         type="button"
@@ -536,15 +649,34 @@ function FolderRow({
   const menu = actions.state.menu;
   const isMenuOpen = menu !== null && menu.kind === "folder" && menu.path === folder.path;
   const isCreatingHere = actions.state.creatingInFolder === folder.path;
+  // Помечена ли папка как раздел (фича 006, FR-014). Сравнение по строке
+  // пути — ровно тому, что хранит ядро; выводить признак из имени папки
+  // нельзя, разделом её делает пометка, а не название.
+  const isSection = actions.sections.includes(folder.path);
   // Папка принудительно раскрыта, пока в ней создаётся заметка через меню —
   // иначе новый инлайн-инпут появлялся бы в свёрнутой, невидимой ветке.
   const showChildren = expanded || isCreatingHere;
   const isBusy = actions.state.pendingPath !== null;
 
   return (
-    <li role="treeitem" aria-expanded={showChildren}>
+    <li role="treeitem" aria-expanded={showChildren} className="ts-tree__folder">
+      {/* Строка папки по шаблону: иконка папки и имя. Шеврон в шаблоне не
+          нарисован — там папки декоративные заголовки, а здесь они
+          сворачиваются, и управляющий элемент без признака состояния был бы
+          хуже точного совпадения с картинкой. */}
       <button type="button" onClick={() => setExpanded((v) => !v)}>
-        {showChildren ? "▾" : "▸"} {folder.name || "/"}
+        <Icon
+          name="chevron"
+          size={11}
+          className={showChildren ? "ts-tree__twist ts-tree__twist--open" : "ts-tree__twist"}
+        />
+        <Icon name="folder" size={14} className="ts-tree__folder-icon" />
+        <span className="ts-tree__name">{folder.name || "/"}</span>
+        {isSection && (
+          <span className="ts-tree__section-badge" title="Корень раздела">
+            раздел
+          </span>
+        )}
       </button>
       <button
         type="button"
@@ -576,6 +708,20 @@ function FolderRow({
               Создать заметку
             </button>
           </li>
+          {actions.onToggleSection && (
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void actions.onToggleSection?.(folder.path, !isSection);
+                  actions.closeMenu();
+                }}
+              >
+                {isSection ? "Снять пометку раздела" : "Пометить как раздел"}
+              </button>
+            </li>
+          )}
         </ul>
       )}
       {showChildren && (
@@ -625,47 +771,28 @@ function TreeNodeRow({
  * переиспользуют ту же логику, что и read-only `VaultTree` из US1.
  */
 export function VaultTreeActions({
-  client,
   notes,
   onOpenNote,
-  onNotesChanged,
-  onCreated,
-  onError,
-  confirmRename,
-  confirmDelete,
+  openPath = null,
+  actions,
 }: VaultTreeActionsProps): React.JSX.Element {
-  const actions = useVaultTreeActions({
-    client,
-    onNotesChanged,
-    onError,
-    ...(onCreated ? { onCreated } : {}),
-    ...(confirmRename ? { confirmRename } : {}),
-    ...(confirmDelete ? { confirmDelete } : {}),
-  });
   const tree = useMemo(() => buildTree(notes), [notes]);
   const isCreatingAtRoot = actions.state.creatingInFolder === "";
   const isBusy = actions.state.pendingPath !== null;
 
   return (
+    <OpenPathContext.Provider value={openPath}>
     <div>
-      <div role="toolbar" aria-label="Действия vault">
-        <button type="button" disabled={isBusy} onClick={() => actions.beginCreate("")}>
-          + Новая заметка
-        </button>
-        {/* FR-001 фичи 002: доска создаётся в vault наравне с заметкой. Без
-            этой кнопки операция ядра `createBoard` недостижима из приложения. */}
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => actions.beginCreate("", "board")}
-        >
-          + Новая доска
-        </button>
-      </div>
       {notes.length === 0 && !isCreatingAtRoot ? (
         <p role="status">Vault пуст — создайте первую заметку или доску.</p>
       ) : (
-        <ul role="tree" aria-label="Дерево заметок">
+        <ul role="tree" aria-label="Дерево заметок" className="ts-tree__root">
+          {/* Заголовок группы из шаблона § Sidebar. `presentation`, потому что
+              для дерева это подпись, а не узел: своим `treeitem` он добавил бы
+              в обход с клавиатуры строку, которую нельзя открыть. */}
+          <li className="ts-tree__eyebrow" role="presentation">
+            Vault
+          </li>
           {isCreatingAtRoot && (
             <li role="treeitem">
               <InlineTextInput
@@ -684,5 +811,6 @@ export function VaultTreeActions({
         </ul>
       )}
     </div>
+    </OpenPathContext.Provider>
   );
 }

@@ -370,13 +370,32 @@ use typsidian_core::boards::{
 const NOTE: &str = "Идея.typ";
 const BOARD_FILE: &str = "Схема.excalidraw";
 
+/// Планирование вставки с политикой по умолчанию — «рядом с заметкой»
+/// (006 FR-003), без помеченных разделов.
+///
+/// Тесты этой фичи проверяют поведение вставок как таковых, а не выбор
+/// расположения: за него отвечает `placement_native.rs`.
+fn plan_next_to_note(
+    note: &Path,
+    text: &str,
+    board: &Path,
+) -> Result<typsidian_core::boards::EmbedPlan, EmbedError> {
+    plan_embed(
+        note,
+        text,
+        board,
+        typsidian_core::boards::AssetsPlacement::NextToNote,
+        &[],
+    )
+}
+
 #[test]
 fn every_embed_gets_its_own_snapshot_file() {
     // T036, FR-020, FR-023: идентификатор уникален для вставки, а не для доски.
-    let first = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let first = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let text = embed_markup(&first);
-    let second = plan_embed(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
-    let other_note = plan_embed(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
+    let second = plan_next_to_note(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
+    let other_note = plan_next_to_note(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
 
     assert_ne!(first.embed_id, second.embed_id, "две вставки в одну заметку");
     assert_ne!(first.snapshot_path, second.snapshot_path);
@@ -409,7 +428,7 @@ fn an_embed_is_recognised_by_its_address_not_by_a_marker() {
 #[test]
 fn markup_is_an_ordinary_typst_image_call() {
     // T038, FR-022: ни одного маркера приложения в тексте заметки.
-    let plan = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let markup = embed_markup(&plan);
     assert_eq!(markup, format!("#image(\"{}\")", plan.markup_path));
     assert!(!markup.to_lowercase().contains("typsidian"));
@@ -431,7 +450,7 @@ fn snapshot_metadata_survives_a_round_trip() {
 #[test]
 fn a_board_is_not_a_valid_host_for_an_embed() {
     assert_eq!(
-        plan_embed(Path::new(BOARD_FILE), "", Path::new("Другая.excalidraw")),
+        plan_next_to_note(Path::new(BOARD_FILE), "", Path::new("Другая.excalidraw")),
         Err(EmbedError::NotANote)
     );
 }
@@ -444,7 +463,7 @@ async fn a_snapshot_is_written_next_to_its_note_and_read_back() {
     create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
 
-    let plan = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let metadata = snapshot_metadata(Path::new(BOARD_FILE), &digest(REFERENCE_BOARD).unwrap());
     write_snapshot(&mut backend, &plan.snapshot_path, "<svg></svg>", &metadata)
         .await
@@ -472,7 +491,7 @@ async fn removing_the_call_from_the_note_touches_neither_the_board_nor_the_snaps
     create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
 
-    let plan = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let metadata = snapshot_metadata(Path::new(BOARD_FILE), &digest(REFERENCE_BOARD).unwrap());
     write_snapshot(&mut backend, &plan.snapshot_path, "<svg></svg>", &metadata)
         .await
@@ -522,7 +541,7 @@ async fn embed_board(
     board: &str,
     board_content: &str,
 ) -> (String, PathBuf) {
-    let plan = plan_embed(Path::new(note), "", Path::new(board)).unwrap();
+    let plan = plan_next_to_note(Path::new(note), "", Path::new(board)).unwrap();
     let metadata = snapshot_metadata(
         Path::new(board),
         &digest(board_content.as_bytes()).unwrap(),
@@ -605,7 +624,7 @@ async fn a_snapshot_without_metadata_is_undeterminable_not_up_to_date() {
     let mut backend = open_vault(&dir).await;
     create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let plan = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
 
     fs::create_dir_all(dir.path().join(plan.snapshot_path.parent().unwrap())).unwrap();
     fs::write(dir.path().join(&plan.snapshot_path), "<svg><desc>чужая подпись</desc></svg>").unwrap();
@@ -679,9 +698,9 @@ async fn updating_one_embed_leaves_the_other_snapshot_alone() {
             .unwrap();
 
     // Две вставки одной доски в одну заметку.
-    let first = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let first = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let text_with_first = embed_markup(&first);
-    let second = plan_embed(Path::new(NOTE), &text_with_first, Path::new(BOARD_FILE)).unwrap();
+    let second = plan_next_to_note(Path::new(NOTE), &text_with_first, Path::new(BOARD_FILE)).unwrap();
     let metadata = snapshot_metadata(
         Path::new(BOARD_FILE),
         &digest(board_content.as_bytes()).unwrap(),

@@ -63,6 +63,131 @@ body {
   outline-offset: 1px;
 }
 
+/* ── Полосы прокрутки ────────────────────────────────────────────────────── */
+
+/* Системная полоса в тёмной панели читается как чужая деталь: светлый жёлоб,
+ * своя ширина под 15px и скруглённый ползунок. Здесь она собрана из тех же
+ * токенов, что остальной хром: жёлоб прозрачный, ползунок стальной, оранжевый
+ * — только под курсором и при перетаскивании, как у любого другого органа
+ * управления в этом интерфейсе.
+ *
+ * Контейнеры перечислены поимённо, а не заданы как `.ts-app *`. Внутри окна
+ * живёт движок рисования со своими полосами (`.excalidraw ::-webkit-scrollbar`
+ * в его же стилях), и общий селектор залез бы туда — ровно тот случай, ради
+ * которого правила этого файла начинаются с `.ts-`.
+ *
+ * `scrollbar-width`/`scrollbar-color` — для движков без `::-webkit-scrollbar`;
+ * там, где работают оба набора, второй точнее, и он идёт ниже. */
+.ts-tree,
+.ts-preview,
+.ts-diagnostics,
+.ts-dialog,
+.ts-embeds,
+.ts-sheet,
+.ts-palette__list,
+.ts-insert__rail,
+.ts-insert__list,
+.ts-insert__code,
+.ts-insert__grid,
+.ts-editor .cm-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--steel-700) transparent;
+}
+
+.ts-tree::-webkit-scrollbar,
+.ts-preview::-webkit-scrollbar,
+.ts-diagnostics::-webkit-scrollbar,
+.ts-dialog::-webkit-scrollbar,
+.ts-embeds::-webkit-scrollbar,
+.ts-sheet::-webkit-scrollbar,
+.ts-palette__list::-webkit-scrollbar,
+.ts-insert__rail::-webkit-scrollbar,
+.ts-insert__list::-webkit-scrollbar,
+.ts-insert__code::-webkit-scrollbar,
+.ts-insert__grid::-webkit-scrollbar,
+.ts-editor .cm-scroller::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.ts-tree::-webkit-scrollbar-track,
+.ts-preview::-webkit-scrollbar-track,
+.ts-diagnostics::-webkit-scrollbar-track,
+.ts-dialog::-webkit-scrollbar-track,
+.ts-embeds::-webkit-scrollbar-track,
+.ts-sheet::-webkit-scrollbar-track,
+.ts-palette__list::-webkit-scrollbar-track,
+.ts-insert__rail::-webkit-scrollbar-track,
+.ts-insert__list::-webkit-scrollbar-track,
+.ts-insert__code::-webkit-scrollbar-track,
+.ts-insert__grid::-webkit-scrollbar-track,
+.ts-editor .cm-scroller::-webkit-scrollbar-track,
+.ts-tree::-webkit-scrollbar-corner,
+.ts-preview::-webkit-scrollbar-corner,
+.ts-diagnostics::-webkit-scrollbar-corner,
+.ts-dialog::-webkit-scrollbar-corner,
+.ts-embeds::-webkit-scrollbar-corner,
+.ts-sheet::-webkit-scrollbar-corner,
+.ts-palette__list::-webkit-scrollbar-corner,
+.ts-insert__rail::-webkit-scrollbar-corner,
+.ts-insert__list::-webkit-scrollbar-corner,
+.ts-insert__code::-webkit-scrollbar-corner,
+.ts-insert__grid::-webkit-scrollbar-corner,
+.ts-editor .cm-scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Прозрачная рамка с обрезкой фона по ней: полоса остаётся шириной 10px, чтобы
+ * в неё попадали курсором, а видно из неё 4px — толщину, при которой ползунок
+ * не спорит с содержимым. */
+.ts-tree::-webkit-scrollbar-thumb,
+.ts-preview::-webkit-scrollbar-thumb,
+.ts-diagnostics::-webkit-scrollbar-thumb,
+.ts-dialog::-webkit-scrollbar-thumb,
+.ts-embeds::-webkit-scrollbar-thumb,
+.ts-sheet::-webkit-scrollbar-thumb,
+.ts-palette__list::-webkit-scrollbar-thumb,
+.ts-insert__rail::-webkit-scrollbar-thumb,
+.ts-insert__list::-webkit-scrollbar-thumb,
+.ts-insert__code::-webkit-scrollbar-thumb,
+.ts-insert__grid::-webkit-scrollbar-thumb,
+.ts-editor .cm-scroller::-webkit-scrollbar-thumb {
+  background-color: var(--steel-700);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.ts-tree::-webkit-scrollbar-thumb:hover,
+.ts-preview::-webkit-scrollbar-thumb:hover,
+.ts-diagnostics::-webkit-scrollbar-thumb:hover,
+.ts-dialog::-webkit-scrollbar-thumb:hover,
+.ts-embeds::-webkit-scrollbar-thumb:hover,
+.ts-sheet::-webkit-scrollbar-thumb:hover,
+.ts-palette__list::-webkit-scrollbar-thumb:hover,
+.ts-insert__rail::-webkit-scrollbar-thumb:hover,
+.ts-insert__list::-webkit-scrollbar-thumb:hover,
+.ts-insert__code::-webkit-scrollbar-thumb:hover,
+.ts-insert__grid::-webkit-scrollbar-thumb:hover,
+.ts-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background-color: var(--steel-600);
+}
+
+.ts-tree::-webkit-scrollbar-thumb:active,
+.ts-preview::-webkit-scrollbar-thumb:active,
+.ts-diagnostics::-webkit-scrollbar-thumb:active,
+.ts-dialog::-webkit-scrollbar-thumb:active,
+.ts-embeds::-webkit-scrollbar-thumb:active,
+.ts-sheet::-webkit-scrollbar-thumb:active,
+.ts-palette__list::-webkit-scrollbar-thumb:active,
+.ts-insert__rail::-webkit-scrollbar-thumb:active,
+.ts-insert__list::-webkit-scrollbar-thumb:active,
+.ts-insert__code::-webkit-scrollbar-thumb:active,
+.ts-insert__grid::-webkit-scrollbar-thumb:active,
+.ts-editor .cm-scroller::-webkit-scrollbar-thumb:active {
+  background-color: var(--orange-500);
+}
+
 /* ── Каркас ──────────────────────────────────────────────────────────────── */
 
 .ts-app {
@@ -139,11 +264,13 @@ body {
   border-right: var(--border-width) solid var(--border-default);
 }
 
+/* Отступы области прокрутки — из шаблона § Sidebar: 4px сверху, 8px по бокам,
+ * 12px снизу, чтобы последняя строка не липла к подвалу. */
 .ts-tree {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-3);
 }
 
 .ts-sidebar__footer {
@@ -158,16 +285,67 @@ body {
   color: var(--steel-600);
 }
 
-/* Дерево рисуется `VaultTreeActions` семантической разметкой без классов —
- * скин навешивается по ролям, чтобы не переписывать компонент. */
+/* Дерево по шаблону § Sidebar: заголовок группы, строки папок и файлов с
+ * отступами из макета. Значения 26px/22px — размеры конструкции, а не шаг
+ * сетки: на них держится вертикальная линия имён под иконкой папки. */
 .ts-tree ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+/* Шаг вложенности — 20px на уровень. В шаблоне видно ровно одну ступень:
+ * папка с отступом 6px и файл под ней с 26px. Разница и есть шаг, поэтому он
+ * навешивается на ветку, а не на строку: так третий и четвёртый уровень
+ * получают ту же ступень, а не слипаются с первым. */
 .ts-tree ul[role="group"] {
-  padding-left: var(--space-4);
+  padding-left: 20px;
+}
+
+.ts-tree__eyebrow {
+  display: block;
+  padding: var(--space-2) var(--space-1) var(--space-1);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--steel-600);
+}
+
+/* Папка: между группами в шаблоне 6px. */
+.ts-tree__folder + .ts-tree__folder,
+.ts-tree__file + .ts-tree__folder {
+  margin-top: 6px;
+}
+
+.ts-tree__folder > button {
+  padding: 5px var(--space-2);
+  color: var(--steel-300);
+}
+
+.ts-tree__folder-icon {
+  color: var(--steel-500);
+}
+
+.ts-tree__twist {
+  color: var(--steel-600);
+  transition: transform 120ms ease;
+}
+
+.ts-tree__twist--open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-tree__twist {
+    transition: none;
+  }
+}
+
+/* Файл: собственный отступ 6px, как у папки. Ступень к 26px из шаблона даёт
+ * `ul[role="group"]` выше — файл лежит в ветке своей папки. */
+.ts-tree__file > button {
+  padding: var(--space-1) 6px;
 }
 
 .ts-tree li {
@@ -183,6 +361,9 @@ body {
 }
 
 .ts-tree li > button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   min-width: 0;
   padding: var(--space-1) var(--space-2);
   border: 0;
@@ -192,11 +373,69 @@ body {
   font: inherit;
   font-size: var(--text-sm);
   text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+/* Обрезка переехала внутрь: на flex-контейнере многоточие не работает, а имя
+ * файла — единственное, что имеет право обрезаться в строке. */
+.ts-tree__name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Пометка «корень раздела» (фича 006, FR-014). Признак папки, а не её имени,
+   поэтому и выглядит как отдельная метка, а не как часть названия. */
+.ts-tree__section-badge {
+  flex: none;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 10px;
+  color: var(--steel-600);
+  text-transform: lowercase;
+}
+
+/* Выбор расположения файлов вставок (фича 006, FR-001). */
+.ts-assets-placement {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.ts-assets-placement__intro {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-assets-placement__option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--space-2);
+  align-items: baseline;
+  margin-bottom: var(--space-2);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.ts-assets-placement__title {
+  font-weight: var(--weight-semibold);
+}
+
+.ts-assets-placement__hint {
+  grid-column: 2;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-assets-placement__sections {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
 }
 
 .ts-tree li > button:hover:not(:disabled) {
@@ -215,8 +454,17 @@ body {
 }
 
 .ts-tree [role="toolbar"] {
+  display: flex;
+  gap: var(--space-2);
   margin-bottom: var(--space-2);
   padding: 0 var(--space-1);
+}
+
+/* Обе кнопки делят ширину панели поровну: одна шире другой читалась бы как
+ * более важная, а заметка и доска в vault равноправны (FR-001 фичи 002). */
+.ts-tree [role="toolbar"] .ts-btn--outline {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .ts-tree [role="status"] {
@@ -302,25 +550,6 @@ body {
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
   color: var(--steel-600);
-}
-
-.ts-code {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  resize: none;
-  border: 0;
-  padding: var(--space-4) var(--space-5);
-  background: var(--steel-950);
-  color: var(--steel-200);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.7;
-  tab-size: 2;
-}
-
-.ts-code:focus {
-  outline: none;
 }
 
 .ts-statusbar {
@@ -425,6 +654,25 @@ body {
   color: var(--orange-400);
 }
 
+/* Канон дизайн-системы `btnGhost` (шаблон «Утилиты»): 30px, sans 12px,
+ * зазор 7px, рамка steel-700 на прозрачном фоне. Отличается от кнопок шапки
+ * (28px, подложка steel-900) — это разные роли, и макет их различает. */
+.ts-btn--outline {
+  height: 30px;
+  gap: 7px;
+  border-color: var(--steel-700);
+  background: transparent;
+  color: var(--steel-300);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.ts-btn--outline:hover:not(:disabled) {
+  border-color: var(--steel-500);
+  background: var(--steel-900);
+  color: var(--steel-100);
+}
+
 .ts-btn--accent {
   background: var(--orange-500);
   border-color: var(--orange-500);
@@ -448,7 +696,7 @@ body {
 .ts-sheet button:not([class]),
 .ts-welcome button:not([class]),
 .ts-tree [role="toolbar"] button:not([class]),
-[role="alertdialog"] button:not([class]) {
+.ts-dialog button:not([class]) {
   height: 28px;
   padding: 0 var(--space-3);
   border: var(--border-width) solid var(--border-strong);
@@ -465,7 +713,7 @@ body {
 .ts-sheet button:not([class]):hover:not(:disabled),
 .ts-welcome button:not([class]):hover:not(:disabled),
 .ts-tree [role="toolbar"] button:not([class]):hover:not(:disabled),
-[role="alertdialog"] button:not([class]):hover:not(:disabled) {
+.ts-dialog button:not([class]):hover:not(:disabled) {
   border-color: var(--orange-500);
   color: var(--orange-400);
 }
@@ -524,7 +772,14 @@ body {
 
 /* ── Модальные окна: конфликт правок и потеря доступа к vault ────────────── */
 
-[role="alertdialog"][aria-modal="true"] {
+/* Наши модальные окна отмечены классом, а не выбираются по роли.
+ *
+ * Раньше здесь стояло `[role="dialog"][aria-modal="true"]`, и это был прямой
+ * залёт внутрь DOM движка рисования (принцип VIII): Excalidraw вешает ту же
+ * роль на свой выбор цвета и шрифта, и правило утаскивало его панель в центр
+ * экрана, обрезая по ширине 460px. Заодно оно перебивало `.ts-palette` —
+ * селектор по двум атрибутам сильнее, чем по одному классу. */
+.ts-dialog {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -544,7 +799,7 @@ body {
   color: var(--steel-300);
 }
 
-[role="alertdialog"][aria-modal="true"] [role="group"] {
+.ts-dialog [role="group"] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
@@ -555,7 +810,7 @@ body {
 
 /* Шире обычного диалога: две превью рядом в 560px нечитаемы, а выбирать
  * пользователь должен по рисунку, а не по подписи. */
-.ts-board-conflict[aria-modal="true"] {
+.ts-dialog.ts-board-conflict {
   width: min(880px, 92vw);
 }
 
@@ -605,34 +860,13 @@ body {
 
 /* ── Выбор доски для вставки (FR-018, SC-007) ────────────────────────────── */
 
-/* Тот же вид, что у модальных окон выше: диалог выбора — не предупреждение,
- * поэтому `role="dialog"`, а оформление общее. */
-[role="dialog"][aria-modal="true"] {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 100;
+/* Диалог выбора — не предупреждение, но оформление общее: всё, кроме ширины,
+ * приходит из `.ts-dialog`, здесь только сужение под список из одной колонки. */
+.ts-dialog--choice {
   width: min(460px, 90vw);
-  max-height: 80vh;
-  overflow: auto;
-  padding: var(--space-5);
-  background: var(--steel-900);
-  border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl), 0 0 0 100vmax rgba(20, 23, 26, 0.6);
-  font-size: var(--text-xs);
-  color: var(--steel-300);
 }
 
-[role="dialog"][aria-modal="true"] [role="group"] {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
-}
-
-[role="dialog"][aria-modal="true"] ul {
+.ts-dialog--choice ul {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -641,7 +875,7 @@ body {
   list-style: none;
 }
 
-[role="dialog"][aria-modal="true"] li button {
+.ts-dialog--choice li button {
   width: 100%;
   text-align: left;
 }
@@ -781,17 +1015,31 @@ body {
 }
 
 /* Признак вида файла в дереве (фича 002, FR-004): доска отличима от текстовой
- * заметки с одного взгляда. Глиф, а не иконка: набора иконок в проекте пока
- * нет, а вводить его ради одной метки — отдельная работа. */
+ * заметки с одного взгляда. Носитель признака — форма иконки (лист против
+ * картинки); яркость лишь помогает. Цвет под вид не отдан намеренно: оранжевым
+ * шаблон красит **активную** строку, и доска в этом цвете была бы неотличима
+ * от открытой заметки. */
 .ts-kind {
-  display: inline-block;
-  width: 1em;
-  margin-right: var(--space-1);
-  color: var(--steel-700);
+  color: var(--steel-600);
 }
 
+/* Цвет доски — из макета «Typsidian Доски»: там строка доски помечена именно
+ * приглушённым hi-vis, а активная — ярким. Оранжевый занят состоянием. */
 .ts-kind--board {
-  color: var(--orange-500);
+  color: var(--hivis-600);
+}
+
+.ts-tree li > button[aria-current="true"] .ts-kind--board {
+  color: var(--hivis-500);
+}
+
+/* Расширение в строке дерева — приглушённый хвост за именем. */
+.ts-tree__ext {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: var(--tracking-wide);
+  color: var(--steel-600);
 }
 
 /* Отказ сохранения в тулбаре доски (FR-010): состояние названо словами и
@@ -811,19 +1059,40 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-3);
+  /* Асимметрия из макета: слева место под вертикальную линейку. */
+  padding: var(--space-5) var(--space-6) var(--space-10) 34px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
+
+  /* Ширина листа из макета (handoff § Preview pane), не шаг сетки. */
+  --ts-page-w: 520px;
+  /* Множитель ставит панель предпросмотра; значение здесь — на случай, если
+   * разметку соберут без неё. */
+  --ts-preview-zoom: 1;
+  /* Ширина листа с учётом масштаба. Одно выражение на лист и на линейку:
+   * разъехавшись, они превратили бы линейку в украшение. `min()` оставляет
+   * прежнее поведение при 100 % — лист вписывается в узкую колонку, а не
+   * вылезает за неё. */
+  --ts-page: calc(min(100%, var(--ts-page-w)) * var(--ts-preview-zoom));
+  /* 10 см на вертикальной линейке. Своей высоты у неё нет (деления —
+   * абсолютные), поэтому шаг считается от ширины листа: 10 из 21 см A4.
+   * Берётся базовая ширина, а не итоговая: `top` считает проценты от высоты
+   * родителя, и `min(100%, …)` дал бы здесь не ту величину. В колонке уже
+   * 520px деления окажутся чуть крупнее листа — тот же порядок допущения, что
+   * и раньше, когда они не зависели от листа вовсе. */
+  --ts-ruler-10cm: calc(var(--ts-page-w) * 0.4762 * var(--ts-preview-zoom));
+  /* Ширина вертикальной линейки; горизонтальная на неё отступает, чтобы
+   * нулевое деление стояло ровно над левым краем листа. */
+  --ts-ruler-w: 14px;
 }
 
 .ts-preview__page {
-  width: 100%;
-  max-width: 720px;
-  background: var(--white);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
-  border-radius: 2px;
+  width: var(--ts-page);
+  /* Лист крупнее колонки не сжимается — панель прокручивается вбок. */
+  flex: 0 0 auto;
+  background: #fbfaf7;
+  box-shadow: var(--shadow-xl);
+  border-radius: 1px;
   overflow: hidden;
 }
 
@@ -833,6 +1102,38 @@ body {
   display: block;
   width: 100%;
   height: auto;
+}
+
+/* Отказ сборки на месте документа (FR-013, FR-014, FR-016). Занимает ширину
+ * листа, чтобы читаться как «вместо страницы», а не как всплывшая плашка. */
+.ts-failure {
+  width: 100%;
+  max-width: 520px;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--danger);
+  border-left-width: var(--border-width-thick);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+}
+
+.ts-failure__head {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-100);
+}
+
+.ts-failure__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger);
 }
 
 /* Замечания к заметке. Ошибки и предупреждения обязаны быть отличимы
@@ -860,4 +1161,1937 @@ body {
 .ts-diagnostics__place {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Разделители и расширение в крошках приглушены сильнее самих сегментов —
+ * шаблон § Header bar: путь читается как одна строка, но имя файла в ней
+ * выделяется без жирности. */
+.ts-crumb__sep {
+  color: var(--steel-700);
+}
+
+.ts-crumb__ext {
+  color: var(--steel-600);
+}
+
+/* ── Статус сборки в шапке (handoff § Header bar) ────────────────────────── */
+
+.ts-compile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-compile__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-400);
+}
+
+.ts-compile__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--success);
+}
+
+/* Фирменный мотив макета — «опасная» диагональная полоса. Handoff требует
+ * переиспользовать ровно это оформление для любого индикатора занятости, а не
+ * заводить второй вид прогресса. */
+.ts-hazard {
+  width: 110px;
+  height: 6px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--steel-800);
+}
+
+.ts-hazard__fill {
+  width: 100%;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--orange-500) 0 8px,
+    var(--steel-900) 8px 16px
+  );
+  background-size: 28px 28px;
+  animation: ts-hazard-scroll 0.6s linear infinite;
+}
+
+@keyframes ts-hazard-scroll {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 28px 0;
+  }
+}
+
+/* Движение — украшение, а не смысл: причина занятости сказана словами рядом. */
+@media (prefers-reduced-motion: reduce) {
+  .ts-hazard__fill {
+    animation: none;
+  }
+}
+
+/* Квадратная кнопка-иконка 28×28 (пересборка в шапке, закрытие в палитре). */
+.ts-btn--icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Кнопка палитры: моноширинная и подсвечивается оранжевым, а не серым —
+ * единственная кнопка шапки с таким наведением (handoff § Header bar). */
+.ts-btn--cmd {
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-btn--cmd:hover:not(:disabled) {
+  border-color: var(--orange-500);
+  color: var(--orange-400);
+}
+
+/* Кнопка без рамки и подложки — для мест, где рамка спорит с окружением:
+ * подвал панели, закрытие палитры. */
+.ts-btn--ghost {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--steel-600);
+}
+
+.ts-btn--ghost:hover:not(:disabled) {
+  background: transparent;
+  color: var(--steel-300);
+}
+
+/* Шеврон «назад» — та же иконка, что «вперёд», развёрнутая. */
+.ts-icon--flip {
+  transform: rotate(180deg);
+}
+
+/* ── Поиск по vault в боковой панели (handoff § Sidebar) ─────────────────── */
+
+/* Шапка панели: поиск во всю ширину и «+» квадратом справа, зазор 8px —
+ * макет «Typsidian Доски» § Sidebar. */
+.ts-sidebar__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+.ts-sidebar__search .ts-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 10px;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-500);
+}
+
+.ts-search:focus-within {
+  border-color: var(--steel-600);
+}
+
+.ts-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.ts-search input::placeholder {
+  color: var(--steel-600);
+}
+
+/* ── Создание файла: «+» и меню выбора типа ──────────────────────────────── */
+
+/* Точка отсчёта для меню: оно висит над деревом, а не раздвигает панель. */
+.ts-create {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ts-create__plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-400);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.ts-create__plus:hover:not(:disabled),
+.ts-create__plus[aria-expanded="true"] {
+  border-color: var(--orange-500);
+  color: var(--orange-400);
+}
+
+.ts-create__plus:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Ширина и смещение из макета: меню накрывает верх дерева, а не всплывает
+ * сбоку от кнопки — так видно, куда именно попадёт новый файл. */
+.ts-create__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 5;
+  width: 228px;
+  overflow: hidden;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-create__head {
+  padding: var(--space-2) 10px 6px;
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-create__list {
+  padding: var(--space-1);
+}
+
+.ts-create__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-create__row[data-active="true"] {
+  background: var(--steel-800);
+}
+
+.ts-create__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-create__title {
+  font-size: 12.5px;
+  font-weight: var(--weight-medium);
+  color: var(--steel-100);
+}
+
+.ts-create__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+/* Подпись сочетания — «клавиша», а не текст: рамка отделяет её от описания. */
+.ts-create__key {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-400);
+}
+
+.ts-create__icon--note {
+  color: var(--orange-500);
+}
+
+.ts-create__icon--board {
+  color: var(--hivis-600);
+}
+
+.ts-create__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-top: var(--border-width) solid var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--steel-600);
+}
+
+.ts-create__foot span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ts-create__esc {
+  margin-left: auto;
+}
+
+/* ── Дерево: активный файл и несохранённое ───────────────────────────────── */
+
+/* Активная запись: оранжевая полоса слева, подложка и более светлый текст.
+ * Отступ уменьшен ровно на ширину полосы (6 − 2), чтобы имя не сдвигалось на
+ * два пикселя при открытии файла. Ступень вложенности при этом не трогается —
+ * она на ветке, а не на строке. */
+.ts-tree li > button[aria-current="true"] {
+  border-left: var(--border-width-thick) solid var(--orange-500);
+  padding-left: calc(6px - var(--border-width-thick));
+  background: var(--steel-900);
+  color: var(--steel-100);
+  font-weight: var(--weight-medium);
+}
+
+.ts-tree li > button[aria-current="true"] .ts-kind {
+  color: var(--orange-500);
+}
+
+/* Hi-vis жёлтый — только про несохранённое, больше ни про что (handoff §
+ * Design Tokens). Точка, а не текст: строка дерева и так тесная. */
+.ts-dot-unsaved {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-radius: var(--radius-full);
+  background: var(--hivis-500);
+}
+
+.ts-sidebar__footer .ts-btn--ghost {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--steel-500);
+}
+
+.ts-sidebar__footer .ts-btn--ghost:hover:not(:disabled) {
+  background: transparent;
+  color: var(--orange-400);
+}
+
+/* ── Предпросмотр: линейки и колонтитул (handoff § Preview pane) ─────────── */
+
+.ts-pane__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-pane__meta--sep {
+  color: var(--steel-700);
+}
+
+/* Линейки в сантиметрах — мотив макета: показывают, что это настоящий
+ * постраничный документ. Деления подписаны, потому что без подписей полоса
+ * читается как декоративная рамка.
+ *
+ * Горизонтальная повторяет ширину листа и его масштаб — иначе при увеличении
+ * она обещала бы 21 см там, где лист уже шире. Выражение то же, что у листа,
+ * но за вычетом колонки вертикальной линейки: у линейки другой родитель, и
+ * `100 %` у них считаются от разных ширин. */
+.ts-ruler-h {
+  position: relative;
+  height: 16px;
+  flex: 0 0 auto;
+  margin-bottom: var(--space-2);
+  margin-left: calc(var(--ts-ruler-w) + var(--space-2));
+  width: calc(
+    min(100% - var(--ts-ruler-w) - var(--space-2), var(--ts-page-w)) *
+      var(--ts-preview-zoom)
+  );
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-ruler-v {
+  position: relative;
+  flex: 0 0 var(--ts-ruler-w);
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-ruler-h span,
+.ts-ruler-v span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--steel-600);
+}
+
+.ts-preview__rows {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.ts-preview__stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Управление масштабом в тулбаре предпросмотра.
+ *
+ * Сегментированная группа, а не три отдельные кнопки: это одно значение с
+ * двумя стрелками, и общая рамка говорит это раньше подписей. Высота 20px —
+ * та же, что у остальных органов управления в 26px-строке.
+ *
+ * Блок обязан стоять ниже `.ts-pane__toolbar .ts-btn`: у правил внутри та же
+ * специфичность, и порядок решает, чьи отступы и кегль возьмутся. */
+.ts-pane__toolbar .ts-zoom {
+  display: flex;
+  align-items: stretch;
+  /* Не сжимается: в узкой колонке уступает место подписям слева, а не
+   * превращается в три полоски. */
+  flex: 0 0 auto;
+  gap: 0;
+  height: 20px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.ts-zoom .ts-btn {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ts-zoom .ts-btn:hover:not(:disabled) {
+  background: var(--steel-800);
+  color: var(--orange-400);
+}
+
+.ts-zoom .ts-zoom__step {
+  width: 20px;
+  padding: 0;
+  justify-content: center;
+  /* Глифы «−» и «+» при 10px превращаются в пыль. */
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.ts-zoom .ts-zoom__value {
+  min-width: 48px;
+  padding: 0 var(--space-1);
+  justify-content: center;
+  border-left: var(--border-width) solid var(--border-default);
+  border-right: var(--border-width) solid var(--border-default);
+  font-size: 10px;
+  /* Цифры одной ширины: иначе группа дёргается на каждом шаге. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Колонтитул и номер страницы принадлежат листу, а не документу: цвета взяты
+ * из палитры «бумаги» (handoff § Preview "paper"), а не из стального набора. */
+.ts-paper__runhead {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-6);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: #8a8f95;
+}
+
+.ts-paper__folio {
+  margin-top: 36px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #a8a49b;
+}
+
+/* ── Палитра команд ⌘K (handoff § Screens 3) ─────────────────────────────── */
+
+.ts-palette-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(20, 23, 26, 0.6);
+}
+
+.ts-palette {
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+  max-width: 90vw;
+  height: fit-content;
+  max-height: 60vh;
+  overflow: hidden;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-palette__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-default);
+  color: var(--steel-500);
+}
+
+.ts-palette__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.ts-palette__search input::placeholder {
+  color: var(--steel-600);
+}
+
+.ts-palette__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+}
+
+.ts-palette__group {
+  padding: var(--space-2) 10px var(--space-1);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--steel-600);
+}
+
+.ts-palette__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: var(--space-2) 10px;
+  border: 0;
+  list-style: none;
+  /* Полоса слева есть всегда, но прозрачная: у выбранной строки она окрашена,
+   * и от этого текст не съезжает на два пикселя при перемещении курсора. */
+  border-left: var(--border-width-thick) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--steel-200);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-palette__row:hover {
+  background: var(--steel-800);
+}
+
+.ts-palette__row[aria-selected="true"] {
+  border-left-color: var(--orange-500);
+  background: var(--steel-800);
+}
+
+.ts-palette__row .ts-palette__icon {
+  color: var(--steel-500);
+}
+
+.ts-palette__row--command .ts-palette__icon {
+  color: var(--orange-400);
+}
+
+.ts-palette__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-palette__meta {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-palette__empty {
+  padding: var(--space-6);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--steel-600);
+}
+
+.ts-palette__hints {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  padding: var(--space-2) 14px;
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-950);
+}
+
+.ts-palette__hints span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* ── Граф связей (handoff § Screens 2) ───────────────────────────────────── */
+
+.ts-graph {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--steel-950);
+}
+
+.ts-graph__bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 var(--ts-header-h);
+  height: var(--ts-header-h);
+  padding: 0 var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-graph__title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  color: var(--steel-200);
+}
+
+.ts-graph__count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-600);
+}
+
+.ts-graph__filter {
+  width: 220px;
+  height: 28px;
+}
+
+.ts-graph__legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+.ts-graph__legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ts-graph__legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+}
+
+.ts-graph__canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  /* Перетаскивание холста — курсор обязан об этом говорить до нажатия. */
+  cursor: grab;
+  touch-action: none;
+}
+
+.ts-graph__canvas[data-panning="true"] {
+  cursor: grabbing;
+}
+
+.ts-graph__canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ts-graph__node {
+  cursor: pointer;
+}
+
+.ts-graph__node:focus-visible {
+  outline: var(--border-width-thick) solid var(--focus-ring);
+}
+
+/* Узлы и подписи, не прошедшие фильтр, гаснут, а не исчезают: пропажа половины
+ * графа читалась бы как потеря связей. */
+.ts-graph__dim {
+  opacity: 0.22;
+}
+
+.ts-graph__label {
+  pointer-events: none;
+  user-select: none;
+}
+
+.ts-graph__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--steel-500);
+  font-size: var(--text-xs);
+}
+
+/* ── Редактор кода: CodeMirror (handoff § Editor pane) ───────────────────── */
+
+.ts-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ts-editor .cm-editor {
+  height: 100%;
+  background: var(--steel-950);
+  color: var(--steel-200);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.ts-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.ts-editor .cm-scroller {
+  font-family: var(--font-mono);
+  line-height: 1.7;
+  padding: 18px 0;
+}
+
+.ts-editor .cm-content {
+  padding: 0 20px 0 0;
+  caret-color: var(--orange-500);
+}
+
+/* Гуттер 42px с выключкой вправо — размер из макета, не шаг сетки. */
+.ts-editor .cm-gutters {
+  border: 0;
+  background: var(--steel-950);
+  color: var(--steel-700);
+  user-select: none;
+}
+
+.ts-editor .cm-lineNumbers .cm-gutterElement {
+  min-width: 42px;
+  padding: 0 14px 0 0;
+  text-align: right;
+}
+
+/* Текущая строка: подложка на всю ширину и оранжевый номер — в макете это
+ * единственное, что выделяет место работы. */
+.ts-editor .cm-activeLine {
+  background: var(--steel-900);
+}
+
+.ts-editor .cm-activeLineGutter {
+  background: var(--steel-950);
+  color: var(--orange-500);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-editor .cm-selectionBackground,
+.ts-editor .cm-content ::selection {
+  background: rgba(255, 106, 0, 0.35);
+}
+
+.ts-editor .cm-cursor {
+  border-left-color: var(--orange-500);
+  border-left-width: 2px;
+}
+
+/* Поле вставленного сниппета (макет «Typsidian Вставка» → § Панель): активное
+ * поле видно выделением, остальные — пунктиром, чтобы было понятно, что по ⇥
+ * есть куда идти. */
+.ts-editor .ts-snippet-field {
+  border-bottom: var(--border-width) dashed var(--orange-600);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 106, 0, 0.14);
+}
+
+/* ── Меню вставки элементов Typst ⌘E («Typsidian Вставка») ───────────────── */
+
+/* Всплывает у каретки, а не по центру экрана: вставка происходит в текст, и
+ * панель обязана быть рядом с местом вставки. Координаты считает компонент —
+ * здесь только размеры. `fixed`, потому что колонка редактора обрезает
+ * содержимое по `overflow: hidden`. */
+.ts-insert {
+  position: fixed;
+  z-index: 40; /* ниже палитры ⌘K: она модальная, это — нет */
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+  max-width: calc(100vw - 16px);
+  overflow: hidden;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-insert__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 40px;
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-default);
+  color: var(--steel-500);
+}
+
+.ts-insert__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.ts-insert__search input::placeholder {
+  color: var(--steel-600);
+}
+
+/* Та же косая, что в вордмарке: меню — продолжение команды `/`. */
+.ts-insert__slash {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  color: var(--orange-500);
+}
+
+.ts-insert__shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* Высота фиксированная: список фильтруется на каждый символ, и «дышащая»
+ * панель прыгала бы под курсором мыши. */
+.ts-insert__body {
+  display: flex;
+  flex: 0 0 288px;
+  min-height: 0;
+}
+
+.ts-insert__rail {
+  flex: 0 0 128px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  border-right: var(--border-width) solid var(--border-default);
+  list-style: none;
+}
+
+.ts-insert__section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 5px 7px;
+  border: 0;
+  /* Полоса слева есть всегда, но прозрачная: у выбранного раздела она
+   * окрашена, и от этого текст не съезжает на два пикселя. */
+  border-left: var(--border-width-thick) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-400);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-insert__section:hover {
+  background: var(--steel-800);
+}
+
+.ts-insert__section[aria-pressed="true"] {
+  border-left-color: var(--orange-500);
+  background: var(--steel-800);
+  color: var(--steel-100);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-insert__section span:first-child {
+  flex: 1;
+}
+
+.ts-insert__count {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--steel-600);
+}
+
+.ts-insert__list {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-insert__list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ts-insert__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px var(--space-2);
+  border-left: var(--border-width-thick) solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--steel-300);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ts-insert__row:hover {
+  background: var(--steel-800);
+}
+
+.ts-insert__row[aria-selected="true"] {
+  border-left-color: var(--orange-500);
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+.ts-insert__icon {
+  color: var(--steel-500);
+}
+
+.ts-insert__row[aria-selected="true"] .ts-insert__icon {
+  color: var(--orange-400);
+}
+
+.ts-insert__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-insert__meta {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-insert__empty {
+  padding: var(--space-5) 10px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--steel-600);
+  /* В сетке символов пустой ответ занимает всю строку, а не одну плитку. */
+  grid-column: 1 / -1;
+}
+
+/* Третья колонка — код, а не картинка отрисованного элемента: настоящая
+ * отрисовка требует компилятора, а нарисованный образец утверждал бы то, чего
+ * приложение не проверяло. */
+.ts-insert__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 0 0 190px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--steel-950);
+}
+
+.ts-insert__code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2) 9px;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--steel-300);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Поле сниппета в подсказке окрашено так же, как в редакторе после вставки. */
+.ts-insert__field {
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--orange-500);
+  color: var(--steel-950);
+}
+
+.ts-insert__fields {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--steel-600);
+}
+
+.ts-insert__grid {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.ts-insert__grid ul {
+  display: grid;
+  /* Столбцов ровно столько, сколькими шагает ↑↓ (`SYMBOL_COLUMNS`). */
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ts-insert__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 44px;
+  min-width: 0;
+  padding: 0 2px;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  cursor: pointer;
+}
+
+.ts-insert__tile:hover {
+  border-color: var(--steel-600);
+}
+
+.ts-insert__tile[aria-selected="true"] {
+  border-color: var(--orange-500);
+  background: var(--steel-800);
+}
+
+/* Глиф — засечный: в наборе он выглядит так же, как в свёрстанном документе. */
+.ts-insert__glyph {
+  font-family: var(--font-serif);
+  font-size: var(--text-base);
+  line-height: 1;
+  color: var(--steel-100);
+}
+
+.ts-insert__tile[aria-selected="true"] .ts-insert__glyph {
+  color: var(--orange-400);
+}
+
+.ts-insert__symbol {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--steel-600);
+}
+
+.ts-insert__hints {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  padding: var(--space-2) 14px;
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-950);
+}
+
+.ts-insert__hints span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* ── Vim-режим: заглушка статуса ─────────────────────────────────────────── */
+
+/* В макете это переключатель, здесь — надпись: моста к Neovim в web-сборке
+ * нет (research.md §7 фичи 001), а кликабельная пилюля утверждала бы, что
+ * режим переключается. Цвет NORMAL из макета сохранён. */
+.ts-vim {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--steel-800);
+  color: var(--steel-500);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+}
+
+/* ── Расширенный поиск (макет «Typsidian Утилиты» § Поиск) ───────────────── */
+
+/* Лист во всю высоту, а не карточка по центру: выдача поиска — это список
+ * произвольной длины, и обрезать её ради красивой рамки значило бы прятать
+ * найденное. Ширина 1080px — из макета, размер конструкции. */
+.ts-search {
+  display: flex;
+  flex-direction: column;
+  width: 1080px;
+  max-width: 96%;
+  height: 100%;
+  min-height: 0;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.ts-search__query {
+  flex: 0 0 46px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+  color: var(--steel-500);
+}
+
+.ts-search__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  outline: none;
+}
+
+.ts-search__input::placeholder {
+  color: var(--steel-600);
+}
+
+.ts-search__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
+}
+
+.ts-search__count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+  white-space: nowrap;
+}
+
+/* Чип-переключатель: одинаково для «regex», «Aa» и фильтров — включённый
+ * состояние показывает рамкой и оранжевым, как остальные нажатые органы. */
+.ts-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: 11px;
+  background: var(--steel-900);
+  color: var(--steel-400);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.ts-chip:hover:not(:disabled) {
+  border-color: var(--steel-600);
+  color: var(--steel-200);
+}
+
+.ts-chip[aria-pressed="true"] {
+  border-color: var(--orange-500);
+  background: rgba(255, 106, 0, 0.14);
+  color: var(--orange-400);
+}
+
+.ts-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ts-search__filters {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-search__chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ts-search__mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-search__mode-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* Сегментированный переключатель «И / ИЛИ». */
+.ts-seg {
+  display: flex;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ts-seg__item {
+  padding: 2px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--steel-500);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ts-seg__item[aria-pressed="true"] {
+  background: var(--orange-500);
+  color: var(--steel-950);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-search__echo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--steel-500);
+}
+
+.ts-search__echo-label {
+  color: var(--steel-600);
+}
+
+.ts-search__results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 12px;
+}
+
+.ts-search__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px 14px 5px;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  color: var(--steel-400);
+}
+
+.ts-search__group-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-regular);
+  color: var(--steel-600);
+}
+
+.ts-search__hit {
+  padding: 9px 14px;
+  border-bottom: var(--border-width) solid var(--steel-900);
+  cursor: pointer;
+}
+
+.ts-search__hit:hover {
+  background: var(--steel-900);
+}
+
+/* Выбранная строка — та, которую откроет ⏎. Полоса слева, как у активного
+ * файла в дереве: это то же «вы сейчас здесь». */
+.ts-search__hit--active {
+  background: var(--steel-900);
+  border-left: var(--border-width-thick) solid var(--orange-500);
+  padding-left: 12px;
+}
+
+.ts-search__hit-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+  color: var(--steel-600);
+}
+
+.ts-search__hit-name {
+  font-size: var(--text-sm);
+  color: var(--steel-100);
+  font-weight: var(--weight-medium);
+}
+
+.ts-search__hit-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-search__context {
+  padding-left: 20px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--steel-500);
+}
+
+.ts-search__line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ts-search__line--match {
+  color: var(--steel-300);
+}
+
+.ts-search__mark {
+  background: rgba(255, 106, 0, 0.22);
+  color: var(--orange-200);
+  padding: 0 2px;
+}
+
+.ts-search__empty,
+.ts-search__error {
+  margin: 0;
+  padding: var(--space-6) 14px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-search__error {
+  color: var(--danger);
+  font-family: var(--font-mono);
+}
+
+.ts-search__hints {
+  flex: 0 0 30px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-search__hints span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Шаблоны и сниппеты (макет «Typsidian Утилиты» § Шаблоны, фича 003) ──── */
+
+/* Лист галереи: та же геометрия, что у расширенного поиска, — оба открываются
+ * поверх рабочей области одним жестом и обязаны выглядеть одним семейством. */
+.ts-tpl {
+  display: flex;
+  flex-direction: column;
+  width: 1080px;
+  max-width: 96%;
+  height: 100%;
+  min-height: 0;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.ts-tpl__head {
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-tpl__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--steel-100);
+  white-space: nowrap;
+}
+
+.ts-tpl__path {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+  white-space: nowrap;
+}
+
+.ts-tpl__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  width: 200px;
+  padding: 0 9px;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-600);
+}
+
+.ts-tpl__filter-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+}
+
+.ts-tpl__filter-input::placeholder {
+  color: var(--steel-600);
+}
+
+.ts-tpl__notice {
+  margin: 0;
+  padding: var(--space-2) 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-size: 11.5px;
+  color: var(--steel-400);
+}
+
+.ts-tpl__notice--warn {
+  border-left: 3px solid var(--danger);
+  color: var(--steel-200);
+}
+
+.ts-tpl__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.ts-tpl__grid {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.ts-tpl__group + .ts-tpl__group {
+  margin-top: var(--space-4);
+}
+
+.ts-tpl__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-2) 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--steel-400);
+}
+
+.ts-tpl__group-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* Две колонки, как в макете; на узком окне — одна, иначе карточка перестаёт
+ * показывать хоть сколько-то исходного текста. */
+.ts-tpl__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.ts-tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 11px;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.ts-tpl-card:hover,
+.ts-tpl-card:focus-visible {
+  border-color: var(--steel-600);
+  outline: none;
+}
+
+.ts-tpl-card--selected {
+  border-color: var(--orange-500);
+}
+
+.ts-tpl-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--steel-500);
+}
+
+.ts-tpl-card__name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--steel-100);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-tpl-card__group {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--steel-500);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* Фрагмент исходного текста: высота фиксирована, чтобы карточки не прыгали,
+ * пока превью догружаются (SC-009 — интерфейс не дёргается во время работы). */
+.ts-tpl-card__source {
+  margin: 0;
+  height: 92px;
+  overflow: hidden;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: 2px;
+  background: var(--steel-950);
+  color: var(--steel-500);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ts-tpl-card__source--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--steel-700);
+}
+
+.ts-tpl-card__rendered {
+  height: 92px;
+  overflow: hidden;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: 2px;
+  background: var(--steel-100);
+}
+
+.ts-tpl-card__rendered svg {
+  width: 100%;
+  height: auto;
+}
+
+.ts-tpl-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-tpl-card__note {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-tpl-card__note--warn {
+  color: var(--warning);
+}
+
+.ts-tpl__side {
+  flex: 0 0 268px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  border-left: var(--border-width) solid var(--border-default);
+}
+
+.ts-tpl__side-label {
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+.ts-tpl__side-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-tpl__side-hint {
+  margin: var(--space-3) 0 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--steel-500);
+  text-wrap: pretty;
+}
+
+.ts-tpl__empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--steel-500);
+  text-wrap: pretty;
+}
+
+.ts-tpl__foot {
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* Второй уровень меню «+»: выбор заготовки прямо под «Заметка Typst». */
+.ts-create__sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 var(--space-2) 0;
+}
+
+.ts-create__subrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px var(--space-2) 3px 34px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-300);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-create__subrow:hover {
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+.ts-create__subrow--muted {
+  color: var(--steel-500);
+}
+
+.ts-create__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--orange-500);
+}
+
+/* Диалог сохранения: поле ввода и две подписи под ним. */
+.ts-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ts-field__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--steel-500);
+}
+
+.ts-field__input {
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-950);
+  color: var(--steel-100);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  outline: none;
+}
+
+.ts-field__input:focus {
+  border-color: var(--orange-500);
+}
+
+.ts-dialog__head {
+  margin-bottom: var(--space-3);
+}
+
+.ts-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ts-dialog__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.ts-dialog__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--steel-500);
+}
+
+.ts-dialog__error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+.ts-dialog__warn {
+  margin: 0;
+  padding: var(--space-2);
+  border-left: 3px solid var(--hivis-500);
+  background: var(--steel-950);
+  font-size: 11.5px;
+  color: var(--steel-300);
+}
+
+.ts-btn--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.ts-btn--danger:hover:not(:disabled) {
+  background: rgba(200, 51, 31, 0.12);
+}
+
+/* ── Панель настроек: меню слева (макет «Утилиты» § Настройки) ───────────── */
+
+.ts-settings {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+/* 216px — ширина из макета. Меню не сжимается: пункты в нём короткие, и
+ * перенос строки в «Дополнительно» выглядел бы поломкой. */
+.ts-settings__nav {
+  flex: 0 0 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px var(--space-2);
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-settings__nav .ts-eyebrow {
+  padding: var(--space-2) 10px var(--space-2) 10px;
+}
+
+.ts-settings__navitem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-400);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-settings__navitem:hover {
+  color: var(--steel-200);
+}
+
+/* Активный пункт: подложка, светлый текст и оранжевая полоса слева. Отступ
+ * слева уменьшен ровно на ширину полосы, чтобы текст не съезжал. */
+.ts-settings__navitem--active {
+  background: var(--steel-900);
+  color: var(--steel-100);
+  border-left: 2px solid var(--orange-500);
+  padding-left: 8px;
+}
+
+.ts-settings__foot {
+  padding: var(--space-2) 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--steel-600);
+}
+
+.ts-settings__body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 26px 40px 26px;
+}
+
+/* Колонка содержимого ограничена по ширине: строка длиной во весь экран
+ * нечитаема, и макет держит её в 760px. */
+.ts-settings__body > * {
+  max-width: 760px;
+}
+
+.ts-settings__body section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ts-settings__body h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--steel-100);
+}
+
+.ts-settings__body h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--steel-200);
+}
+
+/* Лист без внутренних отступов — под панель настроек, которая раскладывает
+ * себя сама. `min-height: 0` обязателен: без него флекс-ребёнок не даёт
+ * внутренней колонке прокручиваться и лист растягивается за экран. */
+.ts-sheet__body--flush {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
 }

@@ -39,29 +39,44 @@ async fn fresh_store() -> WebStore {
 // ---------------------------------------------------------------------------
 
 #[wasm_bindgen_test]
-fn user_comments_and_key_order_survive_an_application_write() {
+fn what_the_user_wrote_by_hand_survives_an_application_write() {
     // Тот же тест, что и в settings_native.rs: правило одно на оба таргета
-    // (research.md §2), и расходиться оно не имеет права.
-    let authored = "\
-# основной блок
-theme = \"dark\"
-editor_font_size = 18  # покрупнее
-";
+    // (research.md §2), и расходиться оно не имеет права. Комментариев в JSON
+    // нет, поэтому проверяется то, что осталось от требования, — дописанное
+    // пользователем не выбрасывается (FR-013).
+    let authored = r#"{
+  "theme": "dark",
+  "editor_font_size": 18,
+  "my_future_option": {"nested": true}
+}"#;
     let mut settings = format::parse(authored).expect("файл должен разбираться");
     settings.editor_font_size = 21;
 
     let rewritten = format::render(authored, &settings, &FolderRefs::new());
 
-    assert!(rewritten.contains("# основной блок"));
-    assert!(rewritten.contains("# покрупнее"));
-    assert!(rewritten.find("theme") < rewritten.find("editor_font_size"));
+    assert!(rewritten.contains("my_future_option"));
+    assert!(rewritten.contains("nested"));
     assert_eq!(format::parse(&rewritten).unwrap().editor_font_size, 21);
+    assert_eq!(
+        format::parse(&rewritten).unwrap().theme,
+        typsidian_core::settings::Theme::Dark
+    );
+}
+
+#[wasm_bindgen_test]
+fn the_key_order_is_stable_between_writes() {
+    // Порядок задаёт приложение, но он обязан быть одинаковым от записи к
+    // записи — иначе правка одной настройки давала бы diff на весь файл.
+    let settings = typsidian_core::settings::Settings::default();
+    let first = format::render("", &settings, &FolderRefs::new());
+    let second = format::render(&first, &settings, &FolderRefs::new());
+    assert_eq!(first, second);
 }
 
 #[wasm_bindgen_test]
 fn unknown_keys_survive_and_are_not_an_error() {
     // FR-013: файл принадлежит пользователю.
-    let text = "theme = \"dark\"\nmy_future_option = 42\n";
+    let text = r#"{"theme": "dark", "my_future_option": 42}"#;
     let settings = format::parse(text).expect("неизвестный ключ не ошибка");
     let rewritten = format::render(text, &settings, &FolderRefs::new());
     assert!(rewritten.contains("my_future_option"));
@@ -132,7 +147,7 @@ async fn out_of_range_font_size_is_rejected_with_the_same_reason_as_native() {
 #[wasm_bindgen_test]
 async fn write_is_atomic_and_file_is_always_parseable() {
     // research.md §5: `FileSystemWritableFileStream` фиксирует изменения только
-    // при close(), поэтому обрезанного TOML не бывает.
+    // при close(), поэтому обрезанного JSON не бывает.
     let mut store = fresh_store().await;
     for size in [10u8, 11, 12, 13, 14] {
         store
@@ -280,7 +295,7 @@ async fn external_change_from_another_tab_is_picked_up() {
         .await;
     let _ = store.poll_events().await;
 
-    WebStore::overwrite_raw_for_test("theme = \"dark\"\n")
+    WebStore::overwrite_raw_for_test("{\"theme\": \"dark\"}\n")
         .await
         .unwrap();
 
@@ -305,7 +320,7 @@ async fn externally_repaired_file_recovers_without_restart() {
     assert_eq!(store.storage_state(), StorageState::DefaultsAfterUnreadable);
     let _ = store.poll_events().await;
 
-    WebStore::overwrite_raw_for_test("theme = \"dark\"\n")
+    WebStore::overwrite_raw_for_test("{\"theme\": \"dark\"}\n")
         .await
         .unwrap();
     let settings = store.load().await;

@@ -61,7 +61,7 @@ export function BoardConflictDialog({
       role="alertdialog"
       aria-modal="true"
       aria-label={`Конфликт доски: ${boardPath}`}
-      className="ts-board-conflict"
+      className="ts-dialog ts-board-conflict"
     >
       <p>
         Доска «{boardPath}» изменена вне приложения, а на полотне есть

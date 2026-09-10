@@ -9,14 +9,13 @@
 //! больше нет, и уборки состояния не требуется (FR-024).
 
 use super::digest::DigestError;
-use super::snapshot::{
-    assets_folder_name, read_snapshot_metadata, EmbedId, SnapshotError, SNAPSHOT_EXTENSION,
-};
+use super::snapshot::{read_snapshot_metadata, EmbedId, SnapshotError};
 use super::store::read_board;
 use super::{EmbedState, ReadBoardError};
 use crate::vault::backend::VaultBackend;
+use crate::vault::{classify, FileKind, ASSETS_FOLDER_NAME, SNAPSHOT_FOLDER_SUFFIX};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Вызов, по которому опознаётся вставка.
 const IMAGE_CALL: &str = "#image";
@@ -76,18 +75,34 @@ pub struct Embed {
 /// Чистая функция: ни чтения файлов, ни записи, ни кэша — вызывающая сторона
 /// передаёт текст, который у неё и так открыт. Поэтому разбор проверяется
 /// таблицей входов и выходов на обоих таргетах, без файловой системы.
+///
+/// # Разбор не знает о текущей политике расположения — и не должен
+///
+/// Смена политики не двигает уже созданные файлы (006 FR-007), поэтому у одной
+/// заметки вставки могут одновременно лежать по прежнему правилу, по новому
+/// рядом с заметкой и по новому в корне. Если бы распознавание сверяло адрес с
+/// **расчётным** путём для текущей политики, заметка теряла бы собственные
+/// вставки сразу после переключения — прямо против FR-007 и FR-010.
+///
+/// Поэтому правило смотрит на сам адрес и на имя заметки, а не на настройку:
+/// вставкой считается вызов `#image`, ведущий в папку снимков **этой** заметки
+/// по любому из двух правил раскладки.
 pub fn embeds_of(note_path: &Path, note_text: &str) -> Vec<EmbedRef> {
-    let Some(folder) = assets_folder_name(note_path) else {
+    if classify(note_path) != FileKind::Note {
+        return Vec::new();
+    }
+    let Some(stem) = note_path.file_stem().and_then(|stem| stem.to_str()) else {
         return Vec::new();
     };
-    let parent = note_path.parent().unwrap_or(Path::new(""));
+    let note_folder = note_path.parent().unwrap_or(Path::new(""));
 
     image_calls(note_text)
         .into_iter()
         .filter_map(|call| {
-            let id = embed_id_in(&call.path, &folder)?;
+            let resolved = resolve_from(note_folder, &call.path)?;
+            let id = embed_id_at(&resolved, stem)?;
             Some(EmbedRef {
-                snapshot_path: parent.join(&folder).join(id.file_name()),
+                snapshot_path: resolved,
                 id,
                 note_path: note_path.to_path_buf(),
                 range: call.range,
@@ -268,20 +283,60 @@ fn first_string_argument(arguments: &str) -> Option<String> {
     None
 }
 
-/// Идентификатор вставки по пути из вызова `#image`.
+/// Приводит адрес из вызова `#image` к пути относительно корня vault.
 ///
-/// `None` — вызов ведёт не в папку снимков этой заметки: обычная картинка
-/// пользователя вставкой доски не является (FR-026, research.md §11).
-fn embed_id_in(image_path: &str, assets_folder: &str) -> Option<EmbedId> {
-    let normalized = image_path.strip_prefix("./").unwrap_or(image_path);
-    let (folder, file_name) = normalized.split_once('/')?;
-    if folder != assets_folder || file_name.contains('/') {
+/// `None` — адрес абсолютный либо выходит за корень vault: такой файл нашей
+/// вставкой быть не может, а молча «подтянуть» его до корня значило бы
+/// принять за вставку что-то из чужого дерева.
+fn resolve_from(note_folder: &Path, image_path: &str) -> Option<PathBuf> {
+    if image_path.starts_with('/') {
         return None;
     }
-    if !file_name.ends_with(&format!(".{SNAPSHOT_EXTENSION}")) {
-        return None;
+    let mut resolved: Vec<std::ffi::OsString> = note_folder
+        .components()
+        .map(|component| component.as_os_str().to_os_string())
+        .collect();
+
+    for component in Path::new(image_path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop()?;
+            }
+            Component::Normal(name) => resolved.push(name.to_os_string()),
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
     }
-    EmbedId::from_file_name(file_name)
+    Some(resolved.iter().collect())
+}
+
+/// Идентификатор вставки по пути снимка относительно корня vault.
+///
+/// `None` — путь ведёт не в папку снимков заметки со стволом `note_stem`:
+/// обычная картинка пользователя вставкой доски не является (FR-026,
+/// 002 research.md §11), как и снимок **другой** заметки.
+///
+/// Принимаются оба правила раскладки (006 FR-009):
+///
+/// ```text
+/// …/<ствол>.assets/board-<hex>.svg     — прежнее
+/// …/assets/<ствол>/board-<hex>.svg     — новое
+/// ```
+fn embed_id_at(snapshot_path: &Path, note_stem: &str) -> Option<EmbedId> {
+    let file_name = snapshot_path.file_name()?.to_str()?;
+    let id = EmbedId::from_file_name(file_name)?;
+    let parent = snapshot_path.parent()?;
+    let parent_name = parent.file_name()?.to_str()?;
+
+    let legacy = parent_name == format!("{note_stem}{SNAPSHOT_FOLDER_SUFFIX}");
+    let current = parent_name == note_stem
+        && parent
+            .parent()
+            .and_then(|assets| assets.file_name())
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == ASSETS_FOLDER_NAME);
+
+    (legacy || current).then_some(id)
 }
 
 #[cfg(test)]

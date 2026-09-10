@@ -67,6 +67,17 @@ impl SettingsChange {
         self.editor_mode_preference.is_some()
     }
 
+    /// Меняет ли набор что-то, кроме выбора текущего vault.
+    ///
+    /// Нужно маршрутизации: набор, состоящий **только** из `current_vault`,
+    /// целиком принадлежит устройству и в vault не пишется никогда (FR-028).
+    pub fn touches_vault_scoped_values(&self) -> bool {
+        self.theme.is_some()
+            || self.editor_font_size.is_some()
+            || self.editor_mode_preference.is_some()
+            || self.editor_config_path.is_some()
+    }
+
     /// Применяет набор к копии значений. Список известных vault не трогается
     /// никогда: он не входит в набор изменений (FR-038).
     pub fn apply_to(&self, base: &Settings) -> Settings {
@@ -102,6 +113,31 @@ pub fn reset_to_defaults() -> SettingsChange {
         current_vault: None,
         editor_mode_preference: Some(defaults.editor_mode_preference),
         editor_config_path: None,
+    }
+}
+
+/// Набор изменений, делающий **действующие сейчас** значения значениями
+/// устройства по умолчанию (фича 006, FR-031).
+///
+/// Применяется к хранилищу устройства и только к нему: это единственный способ
+/// изменить умолчания, потому что обычная правка при открытом vault уходит в
+/// сам vault и устройства не касается (FR-029). Отсюда предсказуемость: папка,
+/// у которой своих значений нет, открывается ровно с тем, что пользователь
+/// объявил умолчанием, а не с тем, что он последний раз где-то настроил.
+///
+/// `effective` — уже разрешённые слои ([`super::resolve`]), а не перекрытия
+/// vault: «сделать по умолчанию» означает «пусть устройство считает так же,
+/// как здесь», включая значения, которые сюда попали с самого устройства.
+///
+/// `current_vault` в набор не входит: выбор открытой папки умолчанием не
+/// является, и переносить его в этой операции незачем (FR-028).
+pub fn device_defaults_change(effective: &Settings) -> SettingsChange {
+    SettingsChange {
+        theme: Some(effective.theme),
+        editor_font_size: Some(effective.editor_font_size),
+        current_vault: None,
+        editor_mode_preference: Some(effective.editor_mode_preference),
+        editor_config_path: effective.editor_config_path.clone(),
     }
 }
 
@@ -153,6 +189,41 @@ pub enum ApplyPlan {
     /// Изменение не применено целиком — **ни одна** настройка из набора не
     /// меняется, включая не связанные с режимом (FR-030, FR-031).
     Rejected { reason: RejectReason },
+}
+
+/// В какое из двух хранилищ уходит набор изменений (фича 006, FR-029, FR-031).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(tag = "target")]
+pub enum ChangeTarget {
+    /// `.typsidian/vault.json` открытого vault.
+    OpenVault,
+    /// `settings.json` устройства.
+    Device,
+}
+
+/// Куда записать набор изменений (фича 006, FR-029).
+///
+/// **В оба хранилища одно действие не пишет никогда.** Именно это делает
+/// значения устройства предсказуемыми: пользователь, покрасивший один vault в
+/// тёмное, не меняет умолчание для всех остальных. Действие «сделать
+/// значениями по умолчанию» — отдельная операция, а не вариант этой, и потому
+/// пишет в устройство по построению, а не по ветке здесь.
+///
+/// Выбор текущего vault и список известных остаются на устройстве при любом
+/// раскладе (FR-028): набор, который их трогает, в vault не уйдёт.
+pub fn target_for(change: &SettingsChange, vault_is_open: bool) -> ChangeTarget {
+    if !vault_is_open {
+        // Перекрывать нечего: vault не открыт.
+        return ChangeTarget::Device;
+    }
+    if change.touches_vault_scoped_values() {
+        ChangeTarget::OpenVault
+    } else {
+        // Остался только `current_vault` — свойство устройства.
+        ChangeTarget::Device
+    }
 }
 
 /// Контекст, в котором принимается решение. Собирается вызывающей стороной:
@@ -230,6 +301,61 @@ mod tests {
 
     fn base() -> Settings {
         Settings::default()
+    }
+
+    #[test]
+    fn a_change_at_an_open_vault_goes_to_the_vault() {
+        // FR-029: и **не** в значения устройства. Именно это делает их
+        // предсказуемыми при нескольких открытых по очереди папках.
+        assert_eq!(
+            target_for(&SettingsChange::theme(Theme::Dark), true),
+            ChangeTarget::OpenVault
+        );
+        assert_eq!(
+            target_for(&SettingsChange::font_size(18), true),
+            ChangeTarget::OpenVault
+        );
+    }
+
+    #[test]
+    fn without_an_open_vault_there_is_nothing_to_override() {
+        assert_eq!(
+            target_for(&SettingsChange::theme(Theme::Dark), false),
+            ChangeTarget::Device
+        );
+    }
+
+    #[test]
+    fn making_current_values_the_device_defaults_carries_them_all() {
+        // FR-031: устройство начинает считать так же, как открытый vault.
+        let effective = Settings {
+            theme: Theme::Dark,
+            editor_font_size: 18,
+            editor_mode_preference: ModePreference::FullBackend,
+            editor_config_path: Some("/home/user/nvim".into()),
+            ..Settings::default()
+        };
+        let change = device_defaults_change(&effective);
+
+        assert_eq!(change.theme, Some(Theme::Dark));
+        assert_eq!(change.editor_font_size, Some(18));
+        assert_eq!(
+            change.editor_mode_preference,
+            Some(ModePreference::FullBackend)
+        );
+        assert_eq!(change.editor_config_path, Some("/home/user/nvim".into()));
+        // Выбор открытой папки умолчанием не является (FR-028).
+        assert_eq!(change.current_vault, None);
+    }
+
+    #[test]
+    fn choosing_the_current_vault_never_goes_into_a_vault() {
+        // FR-028: список известных vault и текущий — свойство устройства, и
+        // класть их внутрь одной из папок нельзя даже при открытом vault.
+        assert_eq!(
+            target_for(&SettingsChange::current_vault(VaultId::from_raw("a")), true),
+            ChangeTarget::Device
+        );
     }
 
     #[test]

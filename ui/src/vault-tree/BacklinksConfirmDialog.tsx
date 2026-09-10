@@ -68,6 +68,7 @@ export function BacklinksConfirmDialog({
 
   return (
     <div
+      className="ts-dialog"
       role="alertdialog"
       aria-modal="true"
       aria-label={`Ссылки на заметку ${request.note.name}`}

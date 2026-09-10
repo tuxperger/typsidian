@@ -24,7 +24,15 @@ use std::path::Path;
 /// здесь, а не во флаге интерфейса: `viewModeEnabled` у движка убирает
 /// инструменты, но не отменяет автосохранение, а отсутствие пути записи —
 /// отменяет (research.md §8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Профиль — свойство **оболочки**, а не вызова: его выбирает таргет при
+/// сборке, и с той стороны границы он доступен только на чтение. Поэтому тип
+/// пересекает границу — интерфейсу нужно знать, что рисование недоступно,
+/// чтобы объявить это пользователю (FR-034), — но точкой, где профиль
+/// назначается, интерфейс не становится.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum BoardWriteProfile {
     ReadWrite,
     ViewOnly,
@@ -103,7 +111,7 @@ pub async fn create_board<B: VaultBackend>(
 ///
 /// Содержимое, которое не разбирается, возвращается как `Unreadable`, и из
 /// этого состояния нет пути к записи (FR-017): повреждённый файл не
-/// перезаписывается — ровно как испорченный `settings.toml` в 004.
+/// перезаписывается — ровно как испорченный `settings.json` в 004.
 pub async fn read_board<B: VaultBackend>(
     backend: &B,
     path: &Path,

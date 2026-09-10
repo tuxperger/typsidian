@@ -11,14 +11,22 @@
 
 use wasm_bindgen::prelude::*;
 
-use super::compile::{compile_note, CompiledDocument};
+use super::cache::PackageCache;
+use super::compile::{compile_note_resolved, CompiledDocument};
 use super::fonts::FontSet;
 use typst::foundations::Bytes;
 
-/// Движок предпросмотра: набор шрифтов плюс сборка документа.
+/// Движок предпросмотра: набор шрифтов, кэш шаблонов и сборка документа.
 #[wasm_bindgen]
 pub struct PreviewEngine {
     fonts: FontSet,
+    /// Файлы внешних шаблонов, пережившие прошлые сборки.
+    ///
+    /// Живёт в движке, а не в вызове: движок создаётся один раз на открытый
+    /// vault, и именно эта длительность жизни делает кэш полезным. Без него
+    /// заметка с большим шаблоном поднимала бы его заново на каждое нажатие
+    /// клавиши — `cache.rs` объясняет, почему это сотня пересборок.
+    packages: PackageCache,
 }
 
 #[wasm_bindgen]
@@ -28,7 +36,15 @@ impl PreviewEngine {
     pub fn new() -> PreviewEngine {
         PreviewEngine {
             fonts: FontSet::builtin(),
+            packages: PackageCache::new(),
         }
+    }
+
+    /// Сколько файлов шаблонов удержано между сборками. Нужен диагностике:
+    /// по нему видно, работает ли кэш, без замеров времени.
+    #[wasm_bindgen(js_name = cachedPackageFiles)]
+    pub fn cached_package_files(&self) -> usize {
+        self.packages.len()
     }
 
     /// Добавляет шрифты из папки vault (FR-027, FR-029).
@@ -46,15 +62,66 @@ impl PreviewEngine {
     }
 
     /// Собирает заметку из текста редактора (FR-002, FR-006).
+    ///
+    /// `backend` нужен фазе резолва: связанные файлы — изображения, вставки
+    /// досок, импорты — читаются через vault, своего доступа к диску у
+    /// предпросмотра нет (принцип I). Движок по-прежнему не владеет vault:
+    /// он получает его на время одного вызова.
+    ///
+    /// **Вызывать только через очередь `wasm-call-queue`**: пока идёт сборка,
+    /// заимствование `WebBackend` занято, и параллельный вызов из цикла опроса
+    /// упал бы «recursive use of an object».
     #[wasm_bindgen(js_name = compile)]
-    pub fn compile_js(
+    pub async fn compile_js(
         &self,
+        backend: &crate::vault::web::WebBackend,
         note_path: &str,
         source_text: &str,
         revision: u64,
     ) -> Result<CompiledDocument, JsError> {
-        compile_note(note_path, source_text, revision, self.fonts.clone())
-            .map_err(|err| JsError::new(&format!("{err:?}")))
+        compile_note_resolved(
+            backend,
+            &self.packages,
+            note_path,
+            source_text,
+            revision,
+            self.fonts.clone(),
+        )
+        .await
+        .map_err(|err| JsError::new(&format!("{err:?}")))
+    }
+
+    /// То же, но недостающие внешние шаблоны доустанавливаются (фича 007,
+    /// FR-001).
+    ///
+    /// Отдельный вызов, а не флаг у `compile`: этот путь может **писать** в
+    /// vault и обращаться в сеть, и разница обязана быть видна на границе, а не
+    /// прятаться в параметре. Заметка без подключений проходит здесь ровно так
+    /// же, как через `compile`, и в сеть не заходит (FR-008).
+    ///
+    /// Правила загрузки приходят из настроек уровня vault — «включена ли
+    /// автозагрузка» и «какой адрес у этого шаблона» знает то место, которое их
+    /// хранит, а не предпросмотр (принцип I).
+    #[wasm_bindgen(js_name = compileWithTemplates)]
+    pub async fn compile_with_templates_js(
+        &self,
+        backend: &mut crate::vault::web::WebBackend,
+        note_path: &str,
+        source_text: &str,
+        revision: u64,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> Result<CompiledDocument, JsError> {
+        super::compile::compile_note_with_templates(
+            backend,
+            &self.packages,
+            note_path,
+            source_text,
+            revision,
+            self.fonts.clone(),
+            &overrides.template_policy(),
+        )
+        .await
+        .map_err(|err| JsError::new(&format!("{err:?}")))
     }
 }
 

@@ -1,8 +1,8 @@
 //! Веб-реализация хранилища настроек (research.md §1, §3, §5, §10).
 //!
-//! Значения — файл `settings.toml` в OPFS, тот же формат и тот же публичный API,
+//! Значения — файл `settings.json` в OPFS, тот же формат и тот же публичный API,
 //! что и на native. IndexedDB используется **только** для реестра ссылок на
-//! папки vault: `FileSystemDirectoryHandle` невозможно сериализовать в TOML.
+//! папки vault: `FileSystemDirectoryHandle` невозможно сериализовать в JSON.
 //! Значения настроек в IndexedDB не попадают никогда — иначе пользователь
 //! лишился бы возможности править их руками (FR-013) и видеть, где они лежат
 //! (FR-036).
@@ -97,7 +97,7 @@ async fn file_meta(file_handle: &JsValue) -> Option<(f64, f64)> {
 
 /// Атомарная запись (research.md §5): `FileSystemWritableFileStream` по
 /// спецификации фиксирует изменения только при `close()`, поэтому обрыв на
-/// середине оставляет прежнее содержимое целиком, а не обрезанный TOML.
+/// середине оставляет прежнее содержимое целиком, а не обрезанный JSON.
 async fn write_text(file_handle: &JsValue, text: &str) -> Result<(), JsValue> {
     let writable = js_call0(file_handle, "createWritable").await?;
     js_call1(&writable, "write", &JsValue::from_str(text)).await?;
@@ -545,6 +545,17 @@ impl WebStore {
         <WebStore as SettingsStore>::open().await
     }
 
+    /// Версия приложения — подвал панели настроек (макет «Утилиты» §
+    /// Настройки).
+    ///
+    /// Берётся из манифеста ядра на этапе сборки, а не пишется в интерфейсе
+    /// литералом: строка в подвале обязана меняться вместе с версией, а не
+    /// вместе с чьей-то памятью о ней.
+    #[wasm_bindgen(js_name = version)]
+    pub fn version_js() -> String {
+        crate::settings::VERSION.to_string()
+    }
+
     #[wasm_bindgen(js_name = settings)]
     pub fn settings_js(&self) -> Settings {
         self.settings.clone()
@@ -628,6 +639,43 @@ impl WebStore {
     #[wasm_bindgen(js_name = resetToDefaults)]
     pub fn reset_to_defaults_js() -> SettingsChange {
         reset_to_defaults()
+    }
+
+    /// Куда записать набор изменений (фича 006, FR-029).
+    ///
+    /// Решение принимает ядро, исполняет интерфейс — та же форма, что у
+    /// `ApplyPlan`: панель не владеет обоими хранилищами и не должна решать
+    /// сама, в какое из них уходит правка.
+    #[wasm_bindgen(js_name = changeTarget)]
+    pub fn change_target_js(
+        change: SettingsChange,
+        vault_is_open: bool,
+    ) -> super::apply::ChangeTarget {
+        super::apply::target_for(&change, vault_is_open)
+    }
+
+    /// Действующие значения при открытом vault: устройство как слой по
+    /// умолчанию, vault перекрывает записанное в нём (фича 006, FR-030).
+    #[wasm_bindgen(js_name = resolveWithVault)]
+    pub fn resolve_with_vault_js(
+        &self,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> super::Settings {
+        super::resolve(SettingsStore::settings(self), &overrides)
+    }
+
+    /// Набор, делающий действующие значения умолчаниями устройства (FR-031).
+    ///
+    /// Возвращает набор, а не применяет его: применение идёт тем же путём
+    /// `apply()`, что и любое другое изменение, — отдельной операции, обходящей
+    /// предусловия, не существует (то же правило, что у сброса).
+    #[wasm_bindgen(js_name = deviceDefaultsChange)]
+    pub fn device_defaults_change_js(
+        &self,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> SettingsChange {
+        let effective = super::resolve(SettingsStore::settings(self), &overrides);
+        super::apply::device_defaults_change(&effective)
     }
 
     /// Диагностика раздела «Дополнительно» (FR-039).

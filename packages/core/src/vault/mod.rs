@@ -3,6 +3,9 @@ pub mod cache;
 pub mod conflict;
 pub mod events;
 pub mod index;
+pub mod sections;
+pub mod service_dir;
+pub mod vault_settings;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
@@ -16,8 +19,19 @@ use std::path::{Path, PathBuf};
 pub const NOTE_EXTENSION: &str = "typ";
 /// Расширение доски для рисования (фича 002, research.md §2).
 pub const BOARD_EXTENSION: &str = "excalidraw";
-/// Суффикс папки со снимками вставленных досок (фича 002, research.md §4).
+/// Суффикс папки со снимками вставленных досок по **прежнему** правилу
+/// (фича 002, research.md §4): `<имя заметки>.assets` рядом с заметкой.
+///
+/// Фича 006 перестала создавать такие папки, но распознавать их обязана
+/// всегда: у пользователя они уже есть, и ни одно значение политики
+/// расположения не отключает эту ветку (006 FR-009, FR-010).
 pub const SNAPSHOT_FOLDER_SUFFIX: &str = ".assets";
+
+/// Имя общей папки ассетов по правилу фичи 006: `<корень>/assets/<заметка>/`.
+///
+/// Корень выбирает пользователь (`boards::placement`), а раскладка внутри него
+/// одна на все три варианта — различается только корень (006 FR-004).
+pub const ASSETS_FOLDER_NAME: &str = "assets";
 
 /// Чем является файл vault (фича 002, data-model.md «FileKind»).
 ///
@@ -37,13 +51,22 @@ pub enum FileKind {
     Board,
     /// Снимок доски, принадлежащий вставке в заметке.
     Snapshot,
+    /// Служебное состояние приложения: всё внутри `.typsidian/` (фича 006,
+    /// FR-020).
+    ///
+    /// Отдельный вид, а не `Other`: `Other` означает «файл пользователя,
+    /// который приложение не трогает», а здесь наоборот — файл приложения.
+    /// Различие нужно `write_snapshot`, отказывающему писать не по пути
+    /// снимка, и любой будущей проверке «не считать это заметкой».
+    Service,
     /// Всё остальное: приложение такие файлы не трогает.
     Other,
 }
 
 impl FileKind {
     /// Показывается ли файл в дереве. Заметки и доски — да (FR-004 фичи 002),
-    /// снимки и посторонние файлы — нет (FR-021 фичи 002).
+    /// снимки, служебные и посторонние файлы — нет (FR-021 фичи 002,
+    /// FR-022 фичи 006).
     pub fn is_listed(self) -> bool {
         matches!(self, FileKind::Note | FileKind::Board)
     }
@@ -61,16 +84,28 @@ impl FileKind {
 /// Если заметка-владелец папки `*.assets` удалена, её файлы остаются
 /// `Snapshot`: в дереве они скрыты в обоих прочтениях, и различать эти случаи
 /// незачем.
+///
+/// # Два правила снимка (фича 006, research.md §5)
+///
+/// ```text
+/// Service  ⟸ путь начинается с «.typsidian/»
+/// Snapshot ⟸ внутри папки «*.assets»                                (прежнее)
+///          ∨ внутри «…/assets/<любая>/» И имя вида «board-<hex>.svg» (новое)
+/// ```
+///
+/// Второе условие проверяет **имя файла**, а не только папку, и это
+/// существенно. Прежнее правило защищал суффикс `.assets`, которого человек
+/// своей папке не даст; у папки с именем `assets` такой защиты нет, и правило
+/// «всё внутри — снимок» спрятало бы картинки, которые пользователь положил
+/// туда сам.
+///
+/// Проверка `Service` идёт **первой**: файл `.typsidian/assets/…`, если он
+/// когда-нибудь появится, остаётся служебным, а не становится снимком.
 pub fn classify(path: &Path) -> FileKind {
-    let inside_snapshot_folder = path.parent().is_some_and(|parent| {
-        parent.components().any(|component| {
-            component
-                .as_os_str()
-                .to_str()
-                .is_some_and(|name| name.ends_with(SNAPSHOT_FOLDER_SUFFIX))
-        })
-    });
-    if inside_snapshot_folder {
+    if service_dir::is_inside_service_dir(path) {
+        return FileKind::Service;
+    }
+    if in_legacy_snapshot_folder(path) || is_snapshot_in_assets_folder(path) {
         return FileKind::Snapshot;
     }
 
@@ -79,6 +114,88 @@ pub fn classify(path: &Path) -> FileKind {
         Some(BOARD_EXTENSION) => FileKind::Board,
         _ => FileKind::Other,
     }
+}
+
+/// Прежнее правило: любой файл внутри папки `*.assets` (фича 002).
+fn in_legacy_snapshot_folder(path: &Path) -> bool {
+    path.parent().is_some_and(|parent| {
+        parent.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| name.ends_with(SNAPSHOT_FOLDER_SUFFIX))
+        })
+    })
+}
+
+/// Новое правило: `<корень>/assets/<заметка>/board-<hex>.svg`.
+///
+/// Родитель файла обязан быть **прямым** ребёнком папки `assets`: глубже
+/// приложение снимков не кладёт, а считать снимком что попало из чужого дерева
+/// нельзя.
+fn is_snapshot_in_assets_folder(path: &Path) -> bool {
+    let is_snapshot_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(crate::boards::snapshot::is_snapshot_file_name);
+    if !is_snapshot_name {
+        return false;
+    }
+    path.parent()
+        .and_then(|note_folder| note_folder.parent())
+        .and_then(|assets_folder| assets_folder.file_name())
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == ASSETS_FOLDER_NAME)
+}
+
+/// Почему папка внутри vault недоступна.
+///
+/// Отдельные варианты, а не текст: причина показывается пользователю и от неё
+/// зависит, что делать — «прав нет» чинит он сам, «по пути лежит файл» чинится
+/// переименованием, `Io` не чинится вовсе.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum FolderProblem {
+    /// Права на уровне ОС запрещают операцию.
+    AccessDenied,
+    /// По этому пути лежит не папка.
+    NotADirectory,
+    /// Vault целиком открыт без права записи (FR-036) — папка тут ни при чём.
+    ///
+    /// Backend этот вариант **не** возвращает: он знает только про сам путь.
+    /// Его выставляет тот, кто складывает состояние папки с состоянием vault —
+    /// сегодня это [`crate::templates::library::folder_state`].
+    VaultReadOnly,
+    /// Отказ ввода-вывода.
+    Io,
+}
+
+/// Состояние папки внутри vault: существует ли, читается ли, пишется ли.
+///
+/// Отдельный вопрос к backend, а не вывод из [`VaultBackend::list`]: обход не
+/// различает «папки нет» и «папка есть, но не читается» — в обоих случаях он
+/// просто ничего оттуда не приносит. Схлопывание этих двух случаев превратило
+/// бы штатное состояние нового vault (папки заготовок ещё нет — 003 FR-009) в
+/// неотличимую от него поломку.
+///
+/// Порядок вариантов — лестница: `Absent` → `Unreadable` → `NotWritable` →
+/// `Present`. Каждый следующий предполагает выполненными условия предыдущих.
+///
+/// [`VaultBackend::list`]: backend::VaultBackend::list
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(tag = "state")]
+pub enum FolderAccess {
+    /// Папка есть, читается и принимает запись.
+    Present,
+    /// Папки по этому пути нет. **Не ошибка**: её ещё не создали.
+    Absent,
+    /// Папка есть, но прочитать её нельзя.
+    Unreadable { reason: FolderProblem },
+    /// Папка читается, но записи не принимает.
+    NotWritable { reason: FolderProblem },
 }
 
 /// data-model.md «Vault». Переходы: ReadWrite -> ReadOnly (права на запись

@@ -40,16 +40,43 @@ serde = { version = "1", features = ["derive"] }
 # research.md §5, §9). Модель Excalidraw ядром не воспроизводится: содержимое
 # доски пересекает границу непрозрачными байтами. Ключи `Map` по умолчанию
 # отсортированы — это и даёт канонический порядок без отдельного кода.
+#
+# Он же — формат обоих файлов настроек: `settings.json` устройства и
+# `.typsidian/vault.json` папки заметок (004/research.md §2, пересмотрено).
+# Feature `preserve_order` включать НЕЛЬЗЯ: `boards::digest` рассчитывает ровно
+# на сортировку ключей, и её отключение изменило бы хэш каждой доски в проекте
+# (подробнее — в шапке `settings::format`).
 serde_json = "1"
 blake3 = "1"
+# Поиск по vault: подстрока и regex идут одним путём — совпадения и регистр
+# обязаны считаться одинаково, а два разных механизма разошлись бы. Крейт уже
+# приезжает транзитивно с `typst`, поэтому объявление его прямой зависимостью
+# ничего не добавляет ни к сборке, ни к весу модуля.
+regex = "1"
 thiserror = "1"
-# Чтение настроек (`toml` + serde) и форматосохраняющая запись (`toml_edit`):
-# файл настроек — пользовательский артефакт, его комментарии и порядок ключей
-# обязаны переживать запись приложения (research.md §2). Оба таргета.
-toml = "0.8"
-toml_edit = "0.22"
+# Загрузка внешних шаблонов Typst (фича 007). Три зависимости, все — под ОБА
+# таргета, и это проверено зондами до планирования (007/research.md §1):
+#
+# `reqwest` сам является платформенной абстракцией: под native он работает через
+# `hyper`, под wasm32 — через `fetch` браузера. Поэтому отдельного трейта
+# загрузчика с двумя реализациями не заводится вовсе — принцип II допускает
+# такой трейт, но здесь не нужен и он. `.timeout()` есть в обоих бэкендах
+# (007/research.md §2), значит и предел ожидания задаётся одним вызовом.
+#
+# `default-features = false` существенно: иначе под native приедет `native-tls`
+# с системным OpenSSL, чего на NixOS лучше избегать — TLS ниже включается
+# явным `rustls-tls`.
+reqwest = { version = "0.12", default-features = false }
+# Распаковка архива шаблона ЦЕЛИКОМ В ПАМЯТИ, без файловой системы: на wasm32 её
+# нет, а проверить все записи архива нужно до создания первого файла
+# (007 FR-019, FR-020). `rust_backend` у flate2 — чистый Rust вместо системного
+# zlib, по той же причине, что и `default-features = false` выше.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# TLS только под native: в браузере им занимается сам `fetch`.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 notify = "6"
 notify-debouncer-full = "0.3"
 # Каталог конфигурации по правилам платформы (research.md §1): путь показывается
@@ -79,7 +106,7 @@ web-sys = { version = "0.3", features = [
     "FileSystemWritableFileStream",
     "FileSystemCreateWritableOptions",
     # Реестр ссылок на папки vault: FileSystemDirectoryHandle невозможно
-    # сериализовать в TOML, поэтому хендлы живут в IndexedDB под ключом VaultId
+    # сериализовать в JSON, поэтому хендлы живут в IndexedDB под ключом VaultId
     # (research.md §1, §10). Значения настроек сюда не попадают.
     "IdbFactory",
     "IdbDatabase",
@@ -96,6 +123,12 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 tempfile = "3"
+# Сборка архива шаблона в тестах (фича 007): интеграционные тесты линкуются с
+# крейтом как с внешней зависимостью и его собственных зависимостей не видят.
+# Проверять разбор надо на настоящем gzip+tar, а не на заглушке — иначе
+# проверялся бы не тот путь, которым пойдут настоящие данные.
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Зависимость крейта на самого себя с включённой `test-support` — так
 # интеграционные тесты в tests/ видят `FakeBridge` (research.md §15). Cargo
 # такой цикл через dev-dependencies допускает намеренно.
@@ -121,6 +154,12 @@ harness = false
 # SC-006).
 [[bench]]
 name = "preview_scale"
+harness = false
+
+# Цикл резолва на заметке с большим внешним шаблоном: повторный показ обязан
+# идти по кэшу шаблонов, а не поднимать их заново по файлу за проход.
+[[bench]]
+name = "preview_resolve"
 harness = false
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

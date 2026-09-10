@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { WebStore } from "../wasm-core/typsidian_core.js";
 import type {
   ApplyPlan,
   ModePreference,
   OutageReason,
+  SettingsChange,
 } from "../wasm-core/typsidian_core.js";
 import { AdvancedSection } from "./AdvancedSection.js";
 import { AppearanceSection } from "./AppearanceSection.js";
@@ -17,6 +19,8 @@ import {
 } from "./useSettings.js";
 import { describeVaultActionError, useVaultList, type ConfirmSwitch } from "./useVaultList.js";
 import { VaultSection } from "./VaultSection.js";
+import { useVaultSettings } from "./useVaultSettings.js";
+import type { VaultClient } from "../vault-client.js";
 
 /**
  * Панель настроек: четыре раздела и **ни одной кнопки «сохранить» или
@@ -49,22 +53,78 @@ export interface SettingsPanelProps {
    * через свою wasm-границу, и придумывать ответ в UI вместо ядра нельзя.
    */
   fullBackendUnavailableReason?: OutageReason | null;
+  /**
+   * Клиент открытого vault (фича 006). Нужен разделу «Vault», чтобы показать и
+   * менять настройки, принадлежащие **vault**, а не устройству: политику
+   * расположения файлов вставок и список помеченных разделов (FR-002, FR-015).
+   *
+   * Инъецируется хозяином панели по той же причине, что `confirmSwitch` и
+   * `saveNote`: панель не владеет vault-бэкендом и не должна начать им владеть
+   * ради одной настройки. `null` — vault не открыт, и выбирать нечего.
+   */
+  vaultClient?: VaultClient | null;
 }
 
 export function SettingsPanel({
   confirmSwitch,
   saveNote,
   fullBackendUnavailableReason = null,
+  vaultClient = null,
 }: SettingsPanelProps = {}): React.JSX.Element {
-  const { state, apply, resetToDefaults, refresh, dismissNotice, queue } =
-    useSettings();
+  const {
+    state,
+    apply,
+    resetToDefaults,
+    makeSettingsDefault,
+    refresh,
+    dismissNotice,
+    queue,
+  } = useSettings();
   const vaults = useVaultList(state.store, {
     onChanged: refresh,
     queue,
     ...(confirmSwitch ? { confirmSwitch } : {}),
   });
+  const vaultSettings = useVaultSettings(vaultClient);
+  // Открытый раздел. «Vault» по умолчанию — первый пункт макета и то, с чего
+  // начинается работа: без выбранной папки остальные разделы не о чем.
+  const [section, setSection] = useState<SettingsSection>("vault");
   const [modeMessage, setModeMessage] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [defaultsMessage, setDefaultsMessage] = useState<string | null>(null);
+
+  /**
+   * Направляет изменение в то хранилище, которое назвало ядро (фича 006,
+   * FR-029).
+   *
+   * Ветка здесь — исполнение решения, а не само решение: панель не владеет
+   * обоими хранилищами и не имеет права выбирать за ядро, куда пишется правка.
+   * Та же форма, что у `ApplyPlan`: ядро говорит, интерфейс делает.
+   */
+  const route = async (change: SettingsChange): Promise<void> => {
+    const vaultIsOpen = vaultSettings.overrides !== null;
+    const target = WebStore.changeTarget(change, vaultIsOpen);
+    if (target.target === "Device") {
+      await apply(change);
+      return;
+    }
+    await vaultSettings.applyChange(change);
+  };
+
+  /**
+   * Сделать действующие значения умолчаниями устройства (FR-031). Отказ
+   * показывается словами по той же причине, что и у сброса.
+   */
+  const runMakeDefault = async (): Promise<void> => {
+    if (!vaultSettings.overrides) return;
+    const plan = await makeSettingsDefault(vaultSettings.overrides);
+    if (!plan) return;
+    setDefaultsMessage(
+      plan.outcome === "Applied"
+        ? "Текущие значения стали умолчаниями. Папки без своих настроек будут открываться с ними."
+        : describeResetRejection(plan),
+    );
+  };
 
   /**
    * Сброс к умолчаниям (FR-037). Отказ ядра показывается словами: сброс,
@@ -112,61 +172,159 @@ export function SettingsPanel({
     return <p role="status">Загружаем настройки…</p>;
   }
 
-  const settings = state.settings;
+  // Подвал меню: версия — из ядра, имя папки — у клиента открытого vault.
+  // Ни то, ни другое не пишется здесь литералом: в макете стоят «0.9.2» и
+  // «диссертация-2026», но это подписи макета, а не факты приложения.
+  const version = WebStore.version();
+  const vaultName = vaultClient?.rootName ?? null;
+
+  // Показываются **действующие** значения: устройство как слой по умолчанию,
+  // vault перекрывает записанное в нём (FR-030). Иначе тема, ушедшая в
+  // vault, не отобразилась бы в самой панели, которая её и переключила.
+  const settings =
+    state.store && vaultSettings.overrides
+      ? state.store.resolveWithVault(vaultSettings.overrides)
+      : state.settings;
 
   return (
-    <div aria-label="Настройки">
-      {state.notices.map((notice) => (
-        <StorageNoticeBanner
-          key={notice.kind}
-          notice={notice}
-          onDismiss={() => dismissNotice(notice.kind)}
-        />
-      ))}
+    <div className="ts-settings" aria-label="Настройки">
+      {/* Левое меню разделов (макет «Typsidian Утилиты» § Настройки). Разделы
+          переключаются, а не идут стопкой: их четыре, и «Кейбиндинги» в конце
+          длинного свитка пользователь просто не найдёт. */}
+      <nav className="ts-settings__nav" aria-label="Разделы настроек">
+        <span className="ts-eyebrow">Настройки</span>
+        {SECTIONS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={
+              item.id === section
+                ? "ts-settings__navitem ts-settings__navitem--active"
+                : "ts-settings__navitem"
+            }
+            aria-current={item.id === section ? "page" : undefined}
+            onClick={() => setSection(item.id)}
+          >
+            {item.title}
+          </button>
+        ))}
+        <span className="ts-spacer" />
+        <div className="ts-settings__foot">
+          typsidian {version}
+          <br />
+          {vaultName === null ? "vault не открыт" : `vault: ${vaultName}`}
+        </div>
+      </nav>
 
-      <AppearanceSection
-        settings={settings}
-        onChangeTheme={(theme) => void apply(changeOf({ theme }))}
-        onChangeFontSize={(size) => void apply(changeOf({ editor_font_size: size }))}
-        rejectionMessage={describeRejection(state)}
-      />
+      <div className="ts-settings__body">
+        {/* Уведомления о состоянии хранилища видны в любом разделе: они про
+            весь файл настроек, а не про раздел, в котором пользователь сейчас
+            стоит. */}
+        {state.notices.map((notice) => (
+          <StorageNoticeBanner
+            key={notice.kind}
+            notice={notice}
+            onDismiss={() => dismissNotice(notice.kind)}
+          />
+        ))}
 
-      <VaultSection
-        knownVaults={state.knownVaults}
-        currentVaultId={settings.current_vault ?? null}
-        onAddFolder={vaults.addFolder}
-        onSwitch={vaults.switchTo}
-        onSetLabel={vaults.setLabel}
-        onForget={vaults.forget}
-        errorMessage={vaults.error ? describeVaultActionError(vaults.error) : null}
-      />
+        {section === "appearance" && (
+          <AppearanceSection
+            settings={settings}
+            onChangeTheme={(theme) => void route(changeOf({ theme }))}
+            onChangeFontSize={(size) =>
+              void route(changeOf({ editor_font_size: size }))
+            }
+            canMakeDefault={vaultSettings.overrides !== null}
+            onMakeDefault={() => void runMakeDefault()}
+            defaultsMessage={defaultsMessage}
+            rejectionMessage={describeRejection(state)}
+          />
+        )}
 
-      <KeybindingsSection
-        mode={state.editorMode}
-        configDiskState={state.configDiskState}
-        configPath={settings.editor_config_path ?? null}
-        fullBackendUnavailableReason={fullBackendUnavailableReason}
-        onChooseFullBackend={() => void changeMode("fullBackend")}
-        onChooseSimplifiedEmulation={() => void changeMode("simplifiedEmulation")}
-        onPickConfig={() => {}}
-        onApplyConfig={() => {}}
-        onLeavePlainInput={() => {}}
-      />
+        {section === "vault" && (
+          <VaultSection
+            knownVaults={state.knownVaults}
+            currentVaultId={settings.current_vault ?? null}
+            onAddFolder={vaults.addFolder}
+            onSwitch={vaults.switchTo}
+            onSetLabel={vaults.setLabel}
+            onForget={vaults.forget}
+            errorMessage={
+              vaultSettings.error ??
+              (vaults.error ? describeVaultActionError(vaults.error) : null)
+            }
+            assetsPlacement={
+              vaultSettings.overrides
+                ? (vaultSettings.overrides.assets_placement ?? "next-to-note")
+                : null
+            }
+            onChangeAssetsPlacement={vaultSettings.setAssetsPlacement}
+            sections={(vaultSettings.overrides?.sections ?? []).map(
+              (marked) => marked.path,
+            )}
+            autoDownloadTemplates={
+              vaultSettings.overrides
+                ? (vaultSettings.overrides.auto_download_templates ?? true)
+                : null
+            }
+            onChangeAutoDownloadTemplates={vaultSettings.setAutoDownloadTemplates}
+          />
+        )}
 
-      {/* FR-029: о вынужденном сохранении заметки и об отказе сменить режим
-          пользователь узнаёт словами, а не по молчаливому бездействию. */}
-      {modeMessage && <p role="status">{modeMessage}</p>}
+        {section === "keybindings" && (
+          <>
+            <KeybindingsSection
+              mode={state.editorMode}
+              configDiskState={state.configDiskState}
+              configPath={settings.editor_config_path ?? null}
+              fullBackendUnavailableReason={fullBackendUnavailableReason}
+              onChooseFullBackend={() => void changeMode("fullBackend")}
+              onChooseSimplifiedEmulation={() =>
+                void changeMode("simplifiedEmulation")
+              }
+              onPickConfig={() => {}}
+              onApplyConfig={() => {}}
+              onLeavePlainInput={() => {}}
+            />
 
-      <AdvancedSection
-        capabilities={state.capabilities}
-        diagnostics={state.diagnostics}
-        onReveal={() => state.store?.reveal()}
-        onResetToDefaults={() => void runReset()}
-        resetMessage={resetMessage}
-      />
+            {/* FR-029: о вынужденном сохранении заметки и об отказе сменить
+                режим пользователь узнаёт словами, а не по молчаливому
+                бездействию. */}
+            {modeMessage && <p role="status">{modeMessage}</p>}
+          </>
+        )}
+
+        {section === "advanced" && (
+          <AdvancedSection
+            capabilities={state.capabilities}
+            diagnostics={state.diagnostics}
+            onReveal={() => state.store?.reveal()}
+            onResetToDefaults={() => void runReset()}
+            resetMessage={resetMessage}
+          />
+        )}
+      </div>
     </div>
   );
 }
+
+/**
+ * Разделы левого меню в порядке макета.
+ *
+ * Порядок именно такой и значим: «Vault» первым, потому что без открытой папки
+ * остальное не о чем; «Дополнительно» последним, потому что там сброс и
+ * диагностика.
+ */
+const SECTIONS: { id: SettingsSection; title: string }[] = [
+  { id: "vault", title: "Vault" },
+  { id: "appearance", title: "Внешний вид" },
+  { id: "keybindings", title: "Кейбиндинги" },
+  { id: "advanced", title: "Дополнительно" },
+];
+
+/** Какой раздел показан. */
+export type SettingsSection = "vault" | "appearance" | "keybindings" | "advanced";
 
 /**
  * Причина отказа берётся из плана, вернувшегося из ядра (FR-016): UI

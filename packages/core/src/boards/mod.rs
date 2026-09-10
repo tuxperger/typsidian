@@ -14,6 +14,7 @@
 pub mod digest;
 pub mod embed;
 pub mod events;
+pub mod placement;
 pub mod save;
 pub mod snapshot;
 pub mod store;
@@ -25,11 +26,13 @@ use std::path::PathBuf;
 pub use digest::{digest, BoardDigest, DigestError};
 pub use embed::{embed_state, embeds_of, embeds_with_state, Embed, EmbedRef, TextRange};
 pub use events::{embeds_changed, BoardEvent, BoardSaveState, EmbedState};
+pub use placement::AssetsPlacement;
 pub use save::SaveTracker;
 pub use snapshot::{
-    embed_markup, embed_metadata_in_svg, plan_embed, read_metadata_from_svg,
-    read_snapshot_metadata, snapshot_metadata, snapshot_path, write_snapshot, EmbedError, EmbedId,
-    EmbedPlan, SnapshotError, SnapshotMetadata, SnapshotWriteError,
+    embed_markup, embed_metadata_in_svg, is_snapshot_file_name, plan_embed,
+    read_metadata_from_svg, read_snapshot_metadata, snapshot_metadata, snapshot_path,
+    write_snapshot, EmbedError, EmbedId, EmbedPlan, SnapshotError, SnapshotMetadata,
+    SnapshotWriteError,
 };
 pub use store::{
     create_board, read_board, write_board, BoardWriteProfile, CreateBoardError, EMPTY_BOARD,

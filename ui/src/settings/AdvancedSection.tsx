@@ -169,6 +169,8 @@ function describeOutage(reason: OutageReason): string {
       return "подсистема не установлена на этом устройстве";
     case "BackendStopped":
       return "процесс перестал отвечать";
+    case "ConfigMissingOnThisDevice":
+      return "конфига нет на этом устройстве";
     default: {
       const exhaustive: never = reason;
       return exhaustive;

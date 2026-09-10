@@ -103,7 +103,7 @@ mod tests {
 
     fn capabilities() -> StoreCapabilities {
         StoreCapabilities {
-            location: "/home/user/.config/typsidian/settings.toml".to_string(),
+            location: "/home/user/.config/typsidian/settings.json".to_string(),
             can_reveal: true,
             writable: true,
         }

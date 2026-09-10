@@ -4,6 +4,25 @@ export interface AccessStateBannerProps {
   accessState: AccessState | null;
   /** FR-018: восстановление из `Unavailable` — только явным переоткрытием. */
   onReopenVault?: () => void;
+
+  /**
+   * Служебное место vault исчезло вместе с настройками уровня папки и
+   * локальными шаблонами (фича 006, FR-024).
+   *
+   * Приходит фактом из ядра (`VaultEvent::VaultSettingsLost`), а не выводится
+   * здесь: отличить «удалили» от «никогда не было» можно только зная, открывали
+   * ли эту папку на этом устройстве, а список известных vault принадлежит
+   * настройкам устройства, а не дереву.
+   */
+  settingsLost?: boolean;
+  /**
+   * Vault недоступен на запись, поэтому настройки уровня папки менять некуда
+   * (фича 006, FR-025).
+   *
+   * Отдельно от `accessState === "readOnly"`: то сообщение — про заметки, это —
+   * про настройки, и пользователю нужны разные слова.
+   */
+  settingsReadOnly?: boolean;
 }
 
 /**
@@ -20,25 +39,55 @@ export interface AccessStateBannerProps {
 export function AccessStateBanner({
   accessState,
   onReopenVault,
+  settingsLost = false,
+  settingsReadOnly = false,
 }: AccessStateBannerProps): React.JSX.Element | null {
-  if (accessState === null) return null;
+  // Сообщения о настройках уровня vault (фича 006) идут до разбора
+  // `accessState`: при `readWrite` тот вернул бы `null`, и об утрате настроек
+  // пользователь не узнал бы вовсе.
+  const settingsNotice = settingsLost ? (
+    <div role="status" aria-live="polite" className="ts-banner ts-banner--warn">
+      <p>
+        Служебная папка этого vault исчезла. Настройки уровня папки и локально
+        сохранённые шаблоны Typst утрачены — заметки, доски и файлы вставок при
+        этом на месте, а кэш пересоберётся сам.
+      </p>
+    </div>
+  ) : settingsReadOnly ? (
+    <div role="status" aria-live="polite" className="ts-banner ts-banner--warn">
+      <p>
+        Vault недоступен на запись, поэтому настройки уровня папки менять некуда:
+        расположение файлов вставок и пометки разделов сохранить не получится.
+      </p>
+    </div>
+  ) : null;
+
+  if (accessState === null) return settingsNotice;
 
   switch (accessState) {
     case "readWrite":
-      return null;
+      return settingsNotice;
     case "readOnly":
       return (
-        <div role="status" aria-live="polite">
-          <p>
-            Права на запись в vault отозваны. Заметки открываются и читаются как
-            обычно, но сохранение, создание, переименование и удаление сейчас
-            отклоняются.
-          </p>
-        </div>
+        <>
+          <div role="status" aria-live="polite">
+            <p>
+              Права на запись в vault отозваны. Заметки открываются и читаются
+              как обычно, но сохранение, создание, переименование и удаление
+              сейчас отклоняются.
+            </p>
+          </div>
+          {settingsNotice}
+        </>
       );
     case "unavailable":
       return (
-        <div role="alertdialog" aria-modal="true" aria-label="Vault недоступен">
+        <div
+          className="ts-dialog"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Vault недоступен"
+        >
           <p>
             Vault стал недоступен — например, отключён диск или отозван доступ к
             папке. Это <strong>не</strong> означает, что заметки удалены.

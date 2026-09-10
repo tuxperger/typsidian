@@ -36,12 +36,12 @@ description: "Task list for Templates and Snippets"
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Создать скелет модуля ядра `packages/core/src/templates/mod.rs` и подключить его в
+- [x] T001 Создать скелет модуля ядра `packages/core/src/templates/mod.rs` и подключить его в
       `packages/core/src/lib.rs`
-- [ ] T002 [P] Создать наборы тестов `packages/core/tests/templates_native.rs` (`cargo test`)
+- [x] T002 [P] Создать наборы тестов `packages/core/tests/templates_native.rs` (`cargo test`)
       и `packages/core/tests/templates_wasm.rs` (`wasm-bindgen-test`) с cfg-разметкой по
       образцу `vault_native.rs`/`vault_wasm.rs`
-- [ ] T003 [P] Создать каталог `ui/src/templates/` с подкаталогом `ui/src/templates/insertion/`.
+- [x] T003 [P] Создать каталог `ui/src/templates/` с подкаталогом `ui/src/templates/insertion/`.
       Подкаталог заводится сразу, даже под одну реализацию: он делает границу гейта принципа V
       видимой в раскладке файлов — contracts/insertion-target.md
 
@@ -52,22 +52,22 @@ description: "Task list for Templates and Snippets"
 **Purpose**: состав библиотеки и состояние папки нужны всем трём историям — галерее (US1),
 сохранению (US2) и выбору заготовки для вставки (US3).
 
-- [ ] T004 Задать путь папки шаблонов `templates/` константой и реализовать
+- [x] T004 Задать путь папки шаблонов `templates/` константой и реализовать
       `TemplateFolderState` четырьмя вариантами `Present`/`Absent`/`Unreadable`/`NotWritable`
       в `packages/core/src/templates/library.rs` — data-model.md, research.md §2
-- [ ] T005 Объявить типы `Template`, `TemplateLibraryView`, `PreviewState`, `NameCheck`,
+- [x] T005 Объявить типы `Template`, `TemplateLibraryView`, `PreviewState`, `NameCheck`,
       `InsertionPoint` в `packages/core/src/templates/mod.rs` с разметкой `tsify`; ручных
       копий на TypeScript не создавать per Constitution IV
-- [ ] T006 Реализовать состав библиотеки в `packages/core/src/templates/library.rs` как
+- [x] T006 Реализовать состав библиотеки в `packages/core/src/templates/library.rs` как
       проекцию уже построенного индекса заметок на папку `templates/`, включая вложенные
       папки как группировку; отдельного обхода диска не выполнять per FR-007, research.md §3
-- [ ] T007 [P] Тест состояния папки на обоих таргетах: отсутствующая папка даёт `Absent` и
+- [x] T007 [P] Тест состояния папки на обоих таргетах: отсутствующая папка даёт `Absent` и
       **не** является ошибкой; нечитаемая — `Unreadable`; варианты не схлопываются — в
       `templates_native.rs` и `templates_wasm.rs` per FR-009, FR-016
-- [ ] T008 [P] Тест состава на обоих таргетах: заметка, оказавшаяся в `templates/` — через
+- [x] T008 [P] Тест состава на обоих таргетах: заметка, оказавшаяся в `templates/` — через
       «сохранить как», обычным созданием или сторонней программой — попадает в библиотеку;
       вложенная папка даёт группу — в `templates_native.rs` и `templates_wasm.rs` per FR-007
-- [ ] T009 [P] Объявить `TemplateEvent` в `packages/core/src/templates/events.rs` для
+- [x] T009 [P] Объявить `TemplateEvent` в `packages/core/src/templates/events.rs` для
       уведомления галереи об изменении состава; события файлов при этом переиспользуются из
       001, свой вотчер не заводится per FR-003, research.md §3
 
@@ -85,51 +85,51 @@ Rust.
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T010 [P] [US1] Тест: `read_template` на нечитаемом файле возвращает `Unreadable`, и файл
+- [x] T010 [P] [US1] Тест: `read_template` на нечитаемом файле возвращает `Unreadable`, и файл
       после этого **не перезаписан** — в `templates_native.rs` и `templates_wasm.rs` per FR-017
-- [ ] T011 [P] [US1] Тест: `excerpt` обрезает содержимое по границе строки и не разрывает
+- [x] T011 [P] [US1] Тест: `excerpt` обрезает содержимое по границе строки и не разрывает
       слово посередине — в `templates_native.rs` и `templates_wasm.rs` per data-model.md
-- [ ] T012 [P] [US1] **Ключевой тест деградации**: `ExcerptOnlySource` на любом содержимом даёт
+- [x] T012 [P] [US1] **Ключевой тест деградации**: `ExcerptOnlySource` на любом содержимом даёт
       `SourceExcerpt { reason: CompilerUnavailable }`, а **не** `DoesNotCompile`; варианты
       различимы — в `templates_native.rs` и `templates_wasm.rs` per FR-012,
       contracts/preview-source.md
-- [ ] T013 [P] [US1] Тест кэша превью: попадание и промах по `BLAKE3` содержимого дают
+- [x] T013 [P] [US1] Тест кэша превью: попадание и промах по `BLAKE3` содержимого дают
       одинаковый `PreviewState`; изменение содержимого вызывает пересчёт, переименование файла
       — нет — в `templates_native.rs` и `templates_wasm.rs` per SC-010, research.md §4
-- [ ] T014 [P] [US1] Тест: создание заметки из заготовки не изменяет файл заготовки — сверка
+- [x] T014 [P] [US1] Тест: создание заметки из заготовки не изменяет файл заготовки — сверка
       содержимого и `FileStamp` до и после — в `templates_native.rs` и `templates_wasm.rs`
       per FR-023, SC-008, инвариант 1
-- [ ] T015 [P] [US1] Тест: нечитаемый файл заготовки даёт `PreviewState::Unavailable`, а не
+- [x] T015 [P] [US1] Тест: нечитаемый файл заготовки даёт `PreviewState::Unavailable`, а не
       `SourceExcerpt` с пустым фрагментом — в `templates_native.rs` и `templates_wasm.rs`
       per FR-017
 
 ### Implementation for User Story 1
 
-- [ ] T016 [US1] Реализовать `PreviewState` и извлечение фрагмента исходного текста в
+- [x] T016 [US1] Реализовать `PreviewState` и извлечение фрагмента исходного текста в
       `packages/core/src/templates/preview.rs` — data-model.md «PreviewState»
-- [ ] T017 [US1] Реализовать порт `PreviewSource` и реализацию `ExcerptOnlySource` в
+- [x] T017 [US1] Реализовать порт `PreviewSource` и реализацию `ExcerptOnlySource` в
       `packages/core/src/templates/preview.rs`; компилятор Typst в зависимости фичи **не**
       добавлять per contracts/preview-source.md, research.md §1
-- [ ] T018 [US1] Реализовать кэш превью по `BLAKE3` содержимого в
+- [x] T018 [US1] Реализовать кэш превью по `BLAKE3` содержимого в
       `packages/core/src/templates/preview.rs`; кэш держать в памяти как производное
       восстановимое состояние per research.md §4
-- [ ] T019 [US1] Реализовать `read_template` и `excerpt` трейта `TemplateLibrary` в
+- [x] T019 [US1] Реализовать `read_template` и `excerpt` трейта `TemplateLibrary` в
       `packages/core/src/templates/mod.rs` — contracts/template-library-trait.md
-- [ ] T020 [P] [US1] Реализовать `ui/src/templates/useTemplateLibrary.ts`: состав библиотеки и
+- [x] T020 [P] [US1] Реализовать `ui/src/templates/useTemplateLibrary.ts`: состав библиотеки и
       подписка на события изменения файлов из 001 per FR-003, SC-010
-- [ ] T021 [P] [US1] Реализовать `ui/src/templates/TemplateCard.tsx`: пять состояний превью
+- [x] T021 [P] [US1] Реализовать `ui/src/templates/TemplateCard.tsx`: пять состояний превью
       показываются по-разному, причина текстового превью названа словами, `CompilerUnavailable`
       не схлопывается в `DoesNotCompile` per FR-011, FR-012, FR-017
-- [ ] T022 [US1] Реализовать `ui/src/templates/TemplateGallery.tsx`: виртуализация списка,
+- [x] T022 [US1] Реализовать `ui/src/templates/TemplateGallery.tsx`: виртуализация списка,
       построение превью только для видимых карточек, поиск по имени; галерея пригодна для
       выбора до готовности превью per FR-010, FR-014, FR-015, SC-003, SC-004
-- [ ] T023 [US1] Обработать все четыре состояния папки в
+- [x] T023 [US1] Обработать все четыре состояния папки в
       `ui/src/templates/TemplateGallery.tsx`: `Absent` и пустая библиотека — штатное состояние
       с понятным текстом, без ошибки; `Unreadable` и `NotWritable` — сообщение с названной
       причиной, при котором остальное приложение продолжает работать. Состояния не
       схлопываются: «папки ещё нет» чинится первым сохранением, «папка не читается» —
       проблема per FR-004, FR-009, FR-016
-- [ ] T024 [US1] Реализовать `ui/src/templates/NewNoteFromTemplate.tsx`: выбор заготовки в
+- [x] T024 [US1] Реализовать `ui/src/templates/NewNoteFromTemplate.tsx`: выбор заготовки в
       момент создания заметки, имя и расположение задаются существующими средствами 001, отказ
       от выбора создаёт обычную пустую заметку per FR-020, FR-022, FR-024, SC-001
 - [ ] T025 [US1] Прогнать `specs/003-templates-snippets/quickstart.md` Сценарии 1, 2 и 3 на
@@ -153,30 +153,30 @@ Rust.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T026 [P] [US2] Тест: `check_name` на недопустимом для файловой системы имени возвращает
+- [x] T026 [P] [US2] Тест: `check_name` на недопустимом для файловой системы имени возвращает
       `Invalid { reason }`, и на диске **ничего не меняется** — в `templates_native.rs` и
       `templates_wasm.rs` per FR-029, инвариант 6
-- [ ] T027 [P] [US2] Тест: `save_as_template` с занятым именем и `confirm_overwrite: false`
+- [x] T027 [P] [US2] Тест: `save_as_template` с занятым именем и `confirm_overwrite: false`
       возвращает `NameTaken` и **не трогает существующий файл**; сверка `FileStamp` до и после
       — в `templates_native.rs` и `templates_wasm.rs` per FR-028
-- [ ] T028 [P] [US2] Тест: `save_as_template` создаёт папку `templates/`, если её нет, без
+- [x] T028 [P] [US2] Тест: `save_as_template` создаёт папку `templates/`, если её нет, без
       дополнительных действий — в `templates_native.rs` и `templates_wasm.rs` per FR-002
-- [ ] T029 [P] [US2] Тест: при папке, недоступной на запись, сохранение возвращает
+- [x] T029 [P] [US2] Тест: при папке, недоступной на запись, сохранение возвращает
       `FolderNotWritable` с причиной, а исходная заметка остаётся нетронутой — в
       `templates_native.rs` и `templates_wasm.rs` per FR-030
-- [ ] T030 [P] [US2] Тест: содержимое заготовки зафиксировано на момент сохранения —
+- [x] T030 [P] [US2] Тест: содержимое заготовки зафиксировано на момент сохранения —
       последующая правка исходной заметки её не меняет — в `templates_native.rs` и
       `templates_wasm.rs` per FR-027, инвариант 3
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] Реализовать валидацию имени и определение коллизии в
+- [x] T031 [US2] Реализовать валидацию имени и определение коллизии в
       `packages/core/src/templates/naming.rs`, переиспользуя валидацию имён 001, а не
       дублируя её per FR-029, research.md §7, §8
-- [ ] T032 [US2] Реализовать `check_name` и `save_as_template` с созданием папки и флагом
+- [x] T032 [US2] Реализовать `check_name` и `save_as_template` с созданием папки и флагом
       `confirm_overwrite` в `packages/core/src/templates/mod.rs` — правило коллизии живёт в
       ядре, а не в диалоге per FR-002, FR-028, contracts/template-library-trait.md
-- [ ] T033 [US2] Реализовать `ui/src/templates/SaveAsTemplateDialog.tsx`: ввод имени, показ
+- [x] T033 [US2] Реализовать `ui/src/templates/SaveAsTemplateDialog.tsx`: ввод имени, показ
       причины отказа, подтверждение перезаписи при `NameTaken`; сохранение не более чем за три
       действия per FR-026, FR-028, FR-030, SC-006
 - [ ] T034 [US2] Прогнать `specs/003-templates-snippets/quickstart.md` Сценарий 4 целиком,
@@ -202,28 +202,28 @@ Rust.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T035 [P] [US3] Тест: применение содержимого заготовки к тексту по `InsertionPoint`
+- [x] T035 [P] [US3] Тест: применение содержимого заготовки к тексту по `InsertionPoint`
       вставляет его дословно, без подстановок, и заменяет выделенный диапазон, если он задан —
       чистая функция, в `templates_native.rs` и `templates_wasm.rs` per FR-032, FR-035
-- [ ] T036 [P] [US3] Тест: файл заготовки не изменяется при вставке — сверка `FileStamp` до и
+- [x] T036 [P] [US3] Тест: файл заготовки не изменяется при вставке — сверка `FileStamp` до и
       после — в `templates_native.rs` и `templates_wasm.rs` per SC-008, инвариант 1
 
 ### Implementation for User Story 3
 
-- [ ] T037 [US3] Объявить порт `InsertionTarget` в `ui/src/templates/insertion/index.ts` с
+- [x] T037 [US3] Объявить порт `InsertionTarget` в `ui/src/templates/insertion/index.ts` с
       операциями «получить точку вставки» и «вставить текст одной отменяемой единицей» —
       contracts/insertion-target.md
-- [ ] T038 [US3] Реализовать `ui/src/templates/insertion/plainInputTarget.ts` для режима
+- [x] T038 [US3] Реализовать `ui/src/templates/insertion/plainInputTarget.ts` для режима
       `PlainInput`: вставка попадает в нативную историю отмены **одним шагом**, история
       предыдущих правок при этом не обнуляется. Реализация «прочитать значение, склеить строку,
       записать обратно» запрещена — она уничтожает историю отмены per FR-033, research.md §6
-- [ ] T039 [US3] Реализовать замену выделенного фрагмента содержимым заготовки в
+- [x] T039 [US3] Реализовать замену выделенного фрагмента содержимым заготовки в
       `ui/src/templates/insertion/plainInputTarget.ts` — как обычная вставка из буфера обмена
       per FR-035
-- [ ] T040 [US3] Обеспечить возврат фокуса в редактор и предсказуемое положение курсора после
+- [x] T040 [US3] Обеспечить возврат фокуса в редактор и предсказуемое положение курсора после
       вставки в `ui/src/templates/insertion/plainInputTarget.ts`; положение одинаково от
       вставки к вставке per FR-034
-- [ ] T041 [US3] Подключить вызов вставки из галереи в `ui/src/templates/TemplateGallery.tsx`
+- [x] T041 [US3] Подключить вызов вставки из галереи в `ui/src/templates/TemplateGallery.tsx`
       **через порт**, а не обращением к редактору напрямую: единственная реализация — не повод
       обойти границу per contracts/insertion-target.md § Правило для реализаторов
 - [ ] T042 [US3] Прогнать `specs/003-templates-snippets/quickstart.md` Сценарий 5, включая
@@ -241,13 +241,40 @@ Rust.
 - [ ] T044 Прогнать `specs/003-templates-snippets/quickstart.md` Сценарий 7 на 200 заготовках:
       галерея пригодна для выбора ≤1 с, превью видимых ≤3 с, отклик на ввод ≤100 мс во время
       построения превью per SC-003, SC-004, SC-009
-- [ ] T045 [P] Прогнать `nix develop --command pnpm -r typecheck`: TypeScript `strict` без
+- [x] T045 [P] Прогнать `nix develop --command pnpm -r typecheck`: TypeScript `strict` без
       `any` и без `@ts-ignore`; типы взяты из сгенерированных биндингов per Constitution IV
-- [ ] T046 [P] Прогнать `nix develop --command cargo test -p typsidian-core` и
+- [x] T046 [P] Прогнать `nix develop --command cargo test -p typsidian-core` и
       `nix develop --command wasm-pack test --headless --chrome packages/core` целиком per
       Constitution II
 - [ ] T047 Прогнать все сценарии `quickstart.md` на desktop-сборке и подтвердить паритет с web
       per Constitution II (blocked-by: `apps/desktop`, `001-vault-manager/tasks.md` → T112)
+
+---
+
+## Состояние на 2026-09-09
+
+Закрыто T001-T024, T026-T033, T035-T041, T045, T046, T048-T050. Открыты только ручные прогоны
+`quickstart.md` (T025, T034, T042, T043, T044, T047): их нельзя отметить пройденными, не
+пройдя, — сценарии требуют браузера, стороннего редактора и правки прав на файлах.
+
+Автоматикой при этом покрыто больше, чем планировалось: `templates_native.rs` дополнен
+проверками поверх настоящего `NativeBackend` — отсутствующая папка, файл вместо папки, папка
+без прав на чтение и на запись, создание папки первым сохранением (Сценарий 4 шаги 1-2). На
+`MemoryVault` эти случаи не воспроизводимы, а на wasm32 их не существует.
+
+### Расхождения с формулировками задач
+
+| Задача | Что сделано иначе | Почему |
+|---|---|---|
+| T019, T032 | `TemplateLibrary` — свободные функции над `VaultBackend`, а не трейт | все операции библиотеки асинхронны (`VaultBackend::list`), а контракт писался в синхронных сигнатурах; форма совпала с `crate::boards` и `crate::search`. Имена методов и все правила контракта сохранены |
+| T022 | виртуализации списка нет; ленивое построение превью — есть | бюджеты SC-003/SC-004 упираются в чтение файлов, а не в число узлов DOM: 200 карточек отрисовываются сразу, а превью строятся только для видимых. Выше 200 заготовок гарантий и так нет (research.md §10) |
+| T037-T041 | порт принимает готовую правку (`InsertionEdit`), а не содержимое | одна отмена и сохранность истории требуют **одной точечной транзакции** редактора; правило «что заменить и куда встанет курсор» при этом осталось в ядре (`plan_insertion`), чтобы три режима не разошлись |
+
+Ещё одно расхождение — с `research.md` §1: компилятор Typst в проекте **появился** (фича 005,
+`typst 0.15.1`). Порт `PreviewSource` от этого не стал лишним, он ровно то место, куда
+добавляется `TypstPreviewSource`; сама реализация остаётся за пределами этого списка
+(см. ниже, § «Что намеренно не входит»), поэтому все превью по-прежнему текстовые с пометкой
+`CompilerUnavailable`.
 
 ---
 
@@ -386,16 +413,16 @@ vault-manager, не заведя ни одной проверки. Ни одно
 задачи дописаны в конец, а не вставлены в Phase 2; выполнять их можно в любой момент после
 T006. Существующие ID не переиспользуются и не перенумеровываются.
 
-- [ ] T048 [P] Тест: папка `templates/` присутствует в дереве заметок как обычная папка, а
+- [x] T048 [P] Тест: папка `templates/` присутствует в дереве заметок как обычная папка, а
       лежащие в ней заготовки — как обычные заметки; отдельной ветки или фильтра для них не
       появилось — в `packages/core/tests/templates_native.rs` и `templates_wasm.rs`
       per FR-005
-- [ ] T049 [P] Тест: заготовка открывается и правится тем же путём, что обычная заметка —
+- [x] T049 [P] Тест: заготовка открывается и правится тем же путём, что обычная заметка —
       `read`/`begin_edit`/`write` через `VaultBackend`, без отдельного API для заготовок.
       Требование сформулировано как **MUST NOT** («отдельного пути редактирования заготовки
       не существует»), поэтому проверяется отсутствие второго пути, а не наличие первого — в
       `packages/core/tests/templates_native.rs` и `templates_wasm.rs` per FR-006
-- [ ] T050 [P] Тест: заготовка участвует в графе ссылок наравне с прочими заметками —
+- [x] T050 [P] Тест: заготовка участвует в графе ссылок наравне с прочими заметками —
       `backlinks()` находит ссылку из заготовки на заметку и из заметки на заготовку — в
       `packages/core/tests/templates_native.rs` и `templates_wasm.rs` per FR-008
 

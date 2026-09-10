@@ -2,6 +2,7 @@ import type {
   AccessState,
   Board,
   BoardEvent,
+  BoardWriteProfile,
   DiffLine,
   EditConflict,
   Embed,
@@ -9,8 +10,18 @@ import type {
   EmbedRef,
   FileKind,
   FileStamp,
+  InsertionEdit,
+  InsertionPoint,
+  NameCheck,
   Note,
+  PreviewState,
+  SearchQuery,
+  SearchResults,
+  Template,
+  TemplateEvent,
+  TemplateLibraryView,
   VaultEvent,
+  VaultOverrides,
 } from "./wasm-core/typsidian_core.js";
 
 // Поверхность ядра, которой пользуется общий UI (001 T113, T114).
@@ -32,6 +43,18 @@ import type {
 export interface VaultClient {
   // ── Дерево и файлы (001 FR-003…FR-014) ──────────────────────────────
 
+  /**
+   * Имя папки, открытой как vault — первая часть хлебных крошек в шапке
+   * (шаблон § Header bar).
+   *
+   * Свойство, а не метод: корень не меняется, пока vault открыт, и спрашивать
+   * его на каждую отрисовку заголовка незачем. Приходит из ядра
+   * (`WebBackend::rootPath`, команда `root_path` на рабочем столе), а не
+   * запоминается интерфейсом при выборе папки: тогда это было бы второе место,
+   * знающее, какой vault открыт.
+   */
+  readonly rootName: string;
+
   list(): Promise<Note[]>;
   read(path: string): Promise<string>;
   write(path: string, content: string, expected?: FileStamp | null): Promise<void>;
@@ -41,6 +64,15 @@ export interface VaultClient {
   backlinks(path: string): Promise<Note[]>;
   brokenLinks(path: string): Promise<string[]>;
   accessState(): Promise<AccessState>;
+
+  /**
+   * Расширенный поиск по vault (макет «Утилиты» § Поиск).
+   *
+   * Возвращает готовые группы и строки, уже разрезанные на куски с пометкой
+   * «подсветить»: где именно совпало, решает ядро — иначе regex и регистр
+   * пришлось бы разбирать второй раз в интерфейсе.
+   */
+  search(query: SearchQuery): Promise<SearchResults>;
 
   /**
    * Чем является файл по пути (фича 002, FR-004).
@@ -87,6 +119,21 @@ export interface VaultClient {
 
   // ── Доски и вставки (фича 002) ──────────────────────────────────────
 
+  /**
+   * Может ли этот клиент писать доски (FR-035).
+   *
+   * Свойство, а не метод, и `readonly`: профиль выбирает оболочка при сборке,
+   * общий UI его только **читает** — чтобы объявить ограничение пользователю
+   * (FR-034) и не показывать инструменты рисования. Гейт записи от этого
+   * значения не зависит: он в ядре и сработает, даже если интерфейс
+   * ошибётся (research.md §8).
+   *
+   * Синхронное: у оболочки оно известно до открытия vault, а рендер доски
+   * не должен ждать ответа, чтобы не мигнуть режимом правки на клиенте,
+   * которому правка недоступна.
+   */
+  readonly boardWriteProfile: BoardWriteProfile;
+
   createBoard(path: string): Promise<Board>;
   readBoard(path: string): Promise<string>;
   writeBoard(
@@ -107,10 +154,106 @@ export interface VaultClient {
     noteText: string,
     changed: string,
   ): Promise<BoardEvent | undefined>;
+  /**
+   * Куда и под каким именем писать снимок новой вставки (фича 002 FR-018,
+   * фича 006 FR-004).
+   *
+   * `overrides` передаётся целиком, а не разобранным на политику и список
+   * разделов: расчёт пути принадлежит ядру (принцип I), и разбор настроек в
+   * TS был бы вторым местом, знающим это правило.
+   */
   planEmbed(
     notePath: string,
     noteText: string,
     boardPath: string,
+    overrides: VaultOverrides,
   ): Promise<EmbedPlan>;
   embedMarkup(plan: EmbedPlan): Promise<string>;
+
+  // ── Шаблоны и сниппеты (фича 003) ───────────────────────────────────
+
+  /**
+   * Состав библиотеки заготовок и состояние папки `templates/`
+   * (FR-004, FR-007, FR-009).
+   *
+   * Библиотека — проекция того же индекса заметок, что питает дерево, а не
+   * отдельный реестр: заметка попадает в галерею независимо от того, как она
+   * там оказалась, и продолжает участвовать в поиске и графе ссылок.
+   */
+  templateLibrary(): Promise<TemplateLibraryView>;
+
+  /** Содержимое заготовки для применения — создания заметки или вставки. */
+  readTemplate(path: string): Promise<string>;
+
+  /**
+   * Превью одной заготовки (FR-011, FR-012, FR-014).
+   *
+   * Кэш живёт в ядре и ключуется хэшем содержимого: повторный вопрос про ту же
+   * заготовку файл не перечитывает, а правка снаружи пересчитывает превью
+   * сама. Момент вызова выбирает галерея — она одна знает, какие карточки
+   * видны (research.md §4).
+   */
+  templatePreview(template: Template): Promise<PreviewState>;
+
+  /** Проверка имени будущей заготовки до любых изменений на диске (FR-029). */
+  checkTemplateName(name: string): Promise<NameCheck>;
+
+  /**
+   * Сохраняет содержимое как заготовку (FR-002, FR-028, FR-030).
+   *
+   * `confirmOverwrite` передаётся ядру, а не проверяется здесь: правило
+   * коллизии живёт в ядре, иначе между проверкой и записью появилась бы гонка.
+   */
+  saveAsTemplate(
+    name: string,
+    content: string,
+    confirmOverwrite: boolean,
+  ): Promise<Template>;
+
+  /**
+   * Какую правку совершить над текстом, чтобы вставить заготовку
+   * (FR-031…FR-035).
+   *
+   * Правку, а не готовый текст: одна отмена обязана возвращать вставленное
+   * целиком, не обнуляя историю предыдущих правок, и это возможно только если
+   * редактор выполнит ровно одну точечную транзакцию.
+   */
+  planInsertion(
+    textLength: number,
+    point: InsertionPoint,
+    content: string,
+  ): Promise<InsertionEdit>;
+
+  /**
+   * Затрагивает ли событие файла библиотеку заготовок (FR-003).
+   *
+   * Спрашивается у ядра, а не выводится сверкой пути с «templates/» здесь:
+   * правило «что считается заготовкой» обязано жить в одном месте.
+   */
+  templateEvent(event: VaultEvent): Promise<TemplateEvent | undefined>;
+
+  // ── Настройки уровня vault и разделы (фича 006) ─────────────────────
+
+  /**
+   * Настройки, принадлежащие открытому vault: политика расположения файлов
+   * вставок, помеченные разделы и перекрытия значений устройства
+   * (FR-002, FR-015, FR-026).
+   *
+   * Поле со значением `undefined` означает «спросить устройство», а не
+   * «значение по умолчанию» (FR-030).
+   */
+  vaultSettings(): Promise<VaultOverrides>;
+
+  /** Записывает настройки уровня vault (FR-029). */
+  setVaultSettings(overrides: VaultOverrides): Promise<void>;
+
+  /**
+   * Помечает папку как корень раздела и снимает пометку (FR-013).
+   *
+   * Возвращает обновлённый набор настроек: дереву нужно новое состояние, и
+   * второй запрос за тем, что ядро уже посчитало, был бы лишним кругом через
+   * границу.
+   */
+  markSection(folder: string): Promise<VaultOverrides>;
+  unmarkSection(folder: string): Promise<VaultOverrides>;
 }

@@ -14,6 +14,10 @@
     "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", "SF Mono", ui-monospace, Menlo,
     monospace;
+  /* Только для текста «бумаги» в предпросмотре — handoff § Typography.
+   * Приходит из `next/font` тем же путём, что и Plex (см. шапку файла). */
+  --font-serif: var(--font-source-serif), "Source Serif 4", ui-serif, Georgia,
+    "Times New Roman", serif;
 
   /* Weights */
   --weight-regular: 400;

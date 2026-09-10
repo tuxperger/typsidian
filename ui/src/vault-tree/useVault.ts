@@ -5,6 +5,7 @@ import type {
   OpenError,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import type { PreviewClient } from "../preview-client.js";
 import { bulkChangeReducer } from "./BulkChangeIndicator.js";
 import { useVaultEvents, type VaultEventHandlers } from "./useVaultEvents.js";
 
@@ -83,7 +84,18 @@ function asOpenError(cause: unknown): OpenError | null {
 
 /** Чем закончилась попытка открыть vault. */
 export type VaultOpenResult =
-  | { ok: true; client: VaultClient }
+  | {
+      ok: true;
+      client: VaultClient;
+      /**
+       * Компилятор предпросмотра, если оболочка его даёт (фича 005).
+       *
+       * Приходит вместе с клиентом vault, а не создаётся отдельно: с фазой
+       * резолва сборка читает связанные файлы через тот же бэкенд и обязана
+       * делить с ним очередь вызовов ядра.
+       */
+      preview?: PreviewClient;
+    }
   | { ok: false; error: OpenVaultError };
 
 /**
@@ -97,6 +109,8 @@ export type VaultOpener = () => Promise<VaultOpenResult>;
 
 export interface VaultState {
   client: VaultClient | null;
+  /** Компилятор предпросмотра открытого vault; `null` — оболочка его не даёт. */
+  preview: PreviewClient | null;
   notes: Note[];
   accessState: AccessState | null;
   isLoading: boolean;
@@ -107,6 +121,14 @@ export interface VaultState {
    * Растёт на каждое `LinksInvalidated` — сигнал пересчитать битые ссылки
    * (`useBrokenLinks`), не опрашивая ядро на каждом тике (FR-030).
    */
+  /**
+   * Служебная папка vault исчезла вместе с настройками уровня папки и
+   * локальными шаблонами (фича 006, FR-024). Факт приходит из ядра: отличить
+   * «удалили» от «никогда не было» дерево само не может.
+   */
+  settingsLost: boolean;
+  /** Настройки уровня vault менять некуда — vault на чтение (FR-025). */
+  settingsReadOnly: boolean;
   linksRevision: number;
 }
 
@@ -128,12 +150,15 @@ export function useVault(
 } {
   const [state, setState] = useState<VaultState>({
     client: null,
+    preview: null,
     notes: [],
     accessState: null,
     isLoading: false,
     error: null,
     bulkChangeDepth: 0,
     linksRevision: 0,
+    settingsLost: false,
+    settingsReadOnly: false,
   });
   const clientRef = useRef<VaultClient | null>(null);
 
@@ -152,18 +177,23 @@ export function useVault(
       setState((prev) => ({ ...prev, isLoading: false, error: opened.error }));
       return;
     }
-    const { client } = opened;
+    const { client, preview = null } = opened;
     clientRef.current = client;
     const notes = await client.list();
     const accessState = await client.accessState();
     setState({
       client,
+      preview,
       notes,
       accessState,
       isLoading: false,
       error: null,
       bulkChangeDepth: 0,
       linksRevision: 0,
+      // Сбрасываются на каждое открытие: сообщения относятся к конкретному
+      // vault, и перенос их на следующий был бы прямой дезинформацией.
+      settingsLost: false,
+      settingsReadOnly: false,
     });
   }, [openClient]);
 
@@ -219,6 +249,14 @@ export function useVault(
       onLinksInvalidated: (affectedPaths) => {
         handlers.onLinksInvalidated?.(affectedPaths);
         setState((prev) => ({ ...prev, linksRevision: prev.linksRevision + 1 }));
+      },
+      onVaultSettingsLost: () => {
+        handlers.onVaultSettingsLost?.();
+        setState((prev) => ({ ...prev, settingsLost: true }));
+      },
+      onVaultSettingsReadOnly: () => {
+        handlers.onVaultSettingsReadOnly?.();
+        setState((prev) => ({ ...prev, settingsReadOnly: true }));
       },
     }),
     [handlers, refresh],

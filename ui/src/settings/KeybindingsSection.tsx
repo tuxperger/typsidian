@@ -164,6 +164,10 @@ function describeOutage(reason: OutageReason): string {
       return "подсистема не найдена на этом устройстве.";
     case "BackendStopped":
       return "внешний процесс завершился или перестал отвечать.";
+    case "ConfigMissingOnThisDevice":
+      // Фича 006, FR-027: путь приехал вместе с папкой заметок с другой
+      // машины. Чинится правкой пути, а не установкой подсистемы.
+      return "указанного конфига нет на этом устройстве.";
     default: {
       const exhaustive: never = reason;
       return exhaustive;

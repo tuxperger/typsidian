@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import type { VaultClient } from "@typsidian/ui/vault-client.js";
+// Из нейтрального модуля, а не из `vault-client-web.js`: тот импортирует
+// `WebBackend` значением и втянул бы WASM в сборку оболочки.
+import { basename } from "@typsidian/ui/paths.js";
 import type {
   VaultOpenResult,
   OpenVaultError,
@@ -10,6 +13,7 @@ import type {
   AccessState,
   Board,
   BoardEvent,
+  BoardWriteProfile,
   DiffLine,
   EditConflict,
   Embed,
@@ -17,8 +21,16 @@ import type {
   EmbedRef,
   FileKind,
   FileStamp,
+  InsertionEdit,
+  NameCheck,
   Note,
+  PreviewState,
+  SearchResults,
+  Template,
+  TemplateEvent,
+  TemplateLibraryView,
   VaultEvent,
+  VaultOverrides,
 } from "@typsidian/ui/wasm-core/typsidian_core.js";
 
 // Реализация `VaultClient` для рабочего стола (001 T113, T114, T115).
@@ -62,7 +74,14 @@ export async function openTauriVault(): Promise<VaultOpenResult> {
   } catch (cause) {
     return { ok: false, error: classifyNativeOpenFailure(cause) };
   }
-  return { ok: true, client: tauriVaultClient() };
+  // Профиль спрашивается у оболочки один раз, здесь: он выбран её сборкой и
+  // за время работы окна не меняется, а `VaultClient.boardWriteProfile`
+  // синхронное — ждать `invoke` на каждом рендере доски незачем (FR-035).
+  const profile = await invoke<BoardWriteProfile>("board_write_profile");
+  // Корень спрашивается один раз: пока окно живёт, открытый vault не меняется,
+  // а `VaultClient.rootName` синхронное.
+  const root = await invoke<string>("root_path");
+  return { ok: true, client: tauriVaultClient(profile, basename(root)) };
 }
 
 /**
@@ -94,7 +113,10 @@ function kindOf(cause: unknown): string | null {
   return null;
 }
 
-export function tauriVaultClient(): VaultClient {
+export function tauriVaultClient(
+  boardWriteProfile: BoardWriteProfile,
+  rootName: string,
+): VaultClient {
   // Снимок «есть ли что терять» для `beforeunload`, где ждать промис нельзя.
   //
   // Обновляется двумя путями: пессимистично — сразу при объявлении правок, и
@@ -122,6 +144,7 @@ export function tauriVaultClient(): VaultClient {
     backlinks: (path) => invoke<Note[]>("backlinks", { path }),
     brokenLinks: (path) => invoke<string[]>("broken_links", { path }),
     accessState: () => invoke<AccessState>("access_state"),
+    search: (query) => invoke<SearchResults>("search", { query }),
     fileKind: (path) => invoke<FileKind>("file_kind", { path }),
 
     beginEdit: async (path, buffer) => {
@@ -169,6 +192,9 @@ export function tauriVaultClient(): VaultClient {
       };
     },
 
+    boardWriteProfile,
+    rootName,
+
     createBoard: (path) => invoke<Board>("create_board", { path }),
     readBoard: (path) => invoke<string>("read_board", { path }),
     writeBoard: (path, content, expected) =>
@@ -192,9 +218,43 @@ export function tauriVaultClient(): VaultClient {
       });
       return event ?? undefined;
     },
-    planEmbed: (notePath, noteText, boardPath) =>
-      invoke<EmbedPlan>("plan_embed", { notePath, noteText, boardPath }),
+    planEmbed: (notePath, noteText, boardPath, overrides) =>
+      invoke<EmbedPlan>("plan_embed", {
+        notePath,
+        noteText,
+        boardPath,
+        overrides,
+      }),
     embedMarkup: (plan) => invoke<string>("embed_markup", { plan }),
+
+    // ── Шаблоны и сниппеты (фича 003) ─────────────────────────────────
+    templateLibrary: () => invoke<TemplateLibraryView>("template_library"),
+    readTemplate: (path) => invoke<string>("read_template", { path }),
+    templatePreview: (template) =>
+      invoke<PreviewState>("template_preview", { template }),
+    checkTemplateName: (name) => invoke<NameCheck>("check_template_name", { name }),
+    saveAsTemplate: (name, content, confirmOverwrite) =>
+      invoke<Template>("save_as_template", {
+        name,
+        content,
+        confirmOverwrite,
+      }),
+    planInsertion: (textLength, point, content) =>
+      invoke<InsertionEdit>("plan_insertion", { textLength, point, content }),
+    templateEvent: async (event) => {
+      const effect = await invoke<TemplateEvent | null>("template_event", {
+        event,
+      });
+      return effect ?? undefined;
+    },
+
+    // ── Настройки уровня vault и разделы (фича 006) ───────────────────
+    vaultSettings: () => invoke<VaultOverrides>("vault_settings"),
+    setVaultSettings: (overrides) =>
+      invoke<void>("set_vault_settings", { overrides }),
+    markSection: (folder) => invoke<VaultOverrides>("mark_section", { folder }),
+    unmarkSection: (folder) =>
+      invoke<VaultOverrides>("unmark_section", { folder }),
   };
 }
 

@@ -66,7 +66,7 @@ description: "Task list for Application Settings implementation"
 - [X] T005 [P] Создать скелет UI-панели:
       `ui/src/settings/{useSettings.ts,SettingsPanel.tsx,VaultSection.tsx,AppearanceSection.tsx,KeybindingsSection.tsx,AdvancedSection.tsx}`
       — по структуре из `plan.md`
-- [X] T006 [P] Проверить и зафиксировать в `flake.nix`, что новые крейты (`toml`, `toml_edit`,
+- [X] T006 [P] Проверить и зафиксировать в `flake.nix`, что новые крейты (`serde_json`,
       `directories`) не требуют системных библиотек и dev-окружение остаётся воспроизводимым;
       при необходимости обновить
 
@@ -113,18 +113,23 @@ description: "Task list for Application Settings implementation"
       дважды, подпись в тождестве не участвует и уникальности не требует) — общий код для
       обеих реализаций, по образцу `is_valid_note_name` в `vault::backend`; платформенным
       остаётся **только** сравнение самих папок (research.md §10, §11, §14)
-- [X] T017 Реализовать чтение и **форматосохраняющую** запись TOML в
-      `packages/core/src/settings/format.rs`: `toml` + `serde` на чтение, `toml_edit` на
-      запись, правятся только затронутые значения — research.md §2
+- [X] T017 Реализовать чтение и запись JSON в `packages/core/src/settings/format.rs`:
+      `serde_json` на чтение, разбор через `serde_json::Value` на запись, чтобы уцелели
+      ключи, которых приложение не знает — research.md §2
+      - **Переформулировано 2026-09-09 вслед за сменой формата.** Прежняя формулировка
+        требовала форматосохраняющей записи TOML через `toml_edit`. Комментариев в JSON нет,
+        и эта часть требования оплачена, а не выполнена другими средствами. Переноса с
+        прежнего формата нет — тоже по решению владельца проекта (research.md §2).
 - [X] T018 [P] Тесты `format.rs` в `packages/core/tests/settings_native.rs` и
-      `packages/core/tests/settings_wasm.rs`: комментарии пользователя и порядок ключей
-      переживают запись приложения (ключевая проверка research.md §2)
+      `packages/core/tests/settings_wasm.rs`: дописанные пользователем ключи переживают
+      запись приложения, порядок ключей от записи к записи стабилен (ключевая проверка
+      research.md §2)
 - [X] T019 Реализовать `NativeStore` (`open`/`load`/`apply`) в
-      `packages/core/src/settings/native.rs`: файл `settings.toml` в каталоге конфигурации ОС
+      `packages/core/src/settings/native.rs`: файл `settings.json` в каталоге конфигурации ОС
       через `directories`, атомарная запись «временный файл + fsync + rename» — research.md
       §1, §5 (зависит от T013, T017)
 - [X] T020 Реализовать `WebStore` (`open`/`load`/`apply`) в
-      `packages/core/src/settings/web.rs`: `settings.toml` в OPFS, атомарная запись через
+      `packages/core/src/settings/web.rs`: `settings.json` в OPFS, атомарная запись через
       `FileSystemWritableFileStream` с фиксацией на `close()` — research.md §1, §5
       (зависит от T013, T017)
 - [X] T021 [P] Тесты паритета `open`/`load`/`apply` в `packages/core/tests/settings_native.rs`
@@ -150,8 +155,8 @@ description: "Task list for Application Settings implementation"
 равноправна правке через панель.
 
 **Independent Test**: открыть настройки, переключить тему и изменить размер шрифта — результат
-виден сразу и переживает перезапуск; отредактировать `settings.toml` сторонним редактором —
-изменение подхватывается без перезапуска, а добавленный комментарий переживает следующую
+виден сразу и переживает перезапуск; отредактировать `settings.json` сторонним редактором —
+изменение подхватывается без перезапуска, а дописанный руками ключ переживает следующую
 запись из панели.
 
 ### Tests for User Story 1
@@ -182,7 +187,7 @@ description: "Task list for Application Settings implementation"
       `ApplyPlan::Applied`) и отказ `RejectReason::ValueOutOfRange` в
       `packages/core/src/settings/apply.rs` (зависит от T012, T016)
 - [X] T032 [US1] Реализовать `StorageState`: переход в `DefaultsAfterUnreadable`, перенос
-      испорченного файла в `settings.toml.invalid-<UTC-метка>` перед первой записью и событие
+      испорченного файла в `settings.json.invalid-<UTC-метка>` перед первой записью и событие
       `InvalidFileSetAside` в `packages/core/src/settings/store.rs` — research.md §6
 - [X] T033 [US1] Реализовать `ReadOnlyForSession` и событие `StorageBecameReadOnly` при
       недоступности каталога на запись в `packages/core/src/settings/store.rs` (FR-014)
@@ -274,7 +279,7 @@ description: "Task list for Application Settings implementation"
       `packages/core/src/settings/web.rs`: `FolderRef = FileSystemDirectoryHandle`, сравнение
       через асинхронный `isSameEntry()` перебором по списку (FR-020, research.md §10)
 - [X] T056 [US2] Реализовать реестр ссылок на папки в IndexedDB под ключом `VaultId` в
-      `packages/core/src/settings/web.rs` — хендлы невозможно сериализовать в TOML; значения
+      `packages/core/src/settings/web.rs` — хендлы невозможно сериализовать в JSON; значения
       настроек в IndexedDB не попадают (research.md §1, §10)
 - [X] T057 [US2] Реализовать `resolve(id)` с тремя исходами (`Resolved`/`NeedsPermission`/
       `Missing`) в `packages/core/src/settings/folder_ref.rs` и обеих реализациях —
@@ -656,7 +661,7 @@ US3 намеренно стоит третьей, а не первой, несм
         приёмника журналов не существует ни на одном таргете, и файла, который можно
         было бы показать, тоже нет.
       - Прежде чем выводить журналы в интерфейс, нужна отдельная задача: подключить
-        запись — на native в файл рядом с `settings.toml`, в вебе в OPFS, — и решить,
+        запись — на native в файл рядом с `settings.json`, в вебе в OPFS, — и решить,
         какие события в неё попадают. Это работа уровня ядра, а не UI, и в объём
         «две дыры в UI-контуре» она не входила.
 - [X] T113 [P] Покрыть T108-T110 тестами на обоих таргетах: сброс через биндинг возвращает

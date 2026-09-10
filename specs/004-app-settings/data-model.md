@@ -9,7 +9,7 @@
 
 ## Settings
 
-Полный набор значений, переживающих перезапуск. Сериализуется в один TOML-файл (research.md §2).
+Полный набор значений, переживающих перезапуск. Сериализуется в один JSON-файл (research.md §2, пересмотрено 2026-09-09).
 
 | Поле | Тип | По умолчанию | Правила |
 |---|---|---|---|
@@ -42,7 +42,7 @@
 | `availability` | `Availability` = `Available \| Unavailable` | Вычисляется при показе списка, в файле не хранится (FR-023) |
 
 Ссылка на саму папку в записи **не хранится**: она живёт в реестре, зависящем от таргета —
-`PathBuf` в `settings.toml` (native) либо `FileSystemDirectoryHandle` в IndexedDB под ключом
+`PathBuf` в `settings.json` (native) либо `FileSystemDirectoryHandle` в IndexedDB под ключом
 `id` (web), см. research.md §1, §10.
 
 Правила:

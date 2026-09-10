@@ -18,17 +18,22 @@
 //! и ничего больше. Браузерный хендл туда не положить даже случайно — код
 //! просто не скомпилируется (research.md §11).
 
+pub mod cache;
 pub mod compile;
 pub mod diagnostics;
 pub mod fonts;
+pub mod packages;
 pub mod pages;
+pub mod resolve;
 pub mod snapshot;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
-pub use compile::{compile_note, CompileOutcome, CompiledDocument};
+pub use cache::PackageCache;
+pub use compile::{compile_note, compile_note_resolved, CompileOutcome, CompiledDocument};
+pub use resolve::{read_dependency, vault_path, ResolveError};
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;
 pub use pages::{render_pages, RenderedPage};

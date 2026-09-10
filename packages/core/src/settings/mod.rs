@@ -53,6 +53,13 @@ pub enum ModePreference {
     SimplifiedEmulation,
 }
 
+/// Версия приложения — из манифеста ядра, на этапе сборки.
+///
+/// Показывается в подвале панели настроек (макет «Утилиты» § Настройки). Здесь,
+/// а не литералом в интерфейсе: две копии версии разошлись бы при первом же
+/// выпуске, и подвал начал бы врать.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Наименьший допустимый размер шрифта редактора (research.md §11): предел
 /// читаемости на обычной плотности пикселей.
 pub const MIN_FONT_SIZE: u8 = 8;
@@ -63,7 +70,7 @@ pub const MAX_FONT_SIZE: u8 = 32;
 pub const DEFAULT_FONT_SIZE: u8 = 14;
 
 /// Полный набор значений, переживающих перезапуск (data-model.md «Settings»).
-/// Сериализуется в один TOML-файл.
+/// Сериализуется в один JSON-файл.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
@@ -109,6 +116,37 @@ pub enum InvalidSettings {
 /// же приём, что `is_valid_note_name` в `vault::backend`.
 pub fn is_valid_font_size(value: u8) -> bool {
     (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value)
+}
+
+/// Значения, действующие при открытом vault: устройство как слой по умолчанию,
+/// vault перекрывает только то, что в нём записано (фича 006, FR-030).
+///
+/// Чистая функция, поле за полем. Слой, а не копия: `None` в перекрытии
+/// означает «спросить устройство», и разница между «значение не задано» и
+/// «задано и равно умолчанию» выражена в системе типов, а не в соглашении.
+///
+/// Список известных vault и текущий vault перекрытию **не подлежат** и в
+/// [`crate::vault::vault_settings::VaultOverrides`] отсутствуют физически
+/// (FR-028): без них неоткуда узнать, какую папку открывать, поэтому положить
+/// их внутрь одной из папок нельзя даже по ошибке.
+pub fn resolve(
+    device: &Settings,
+    overrides: &crate::vault::vault_settings::VaultOverrides,
+) -> Settings {
+    Settings {
+        theme: overrides.theme.unwrap_or(device.theme),
+        editor_font_size: overrides.editor_font_size.unwrap_or(device.editor_font_size),
+        editor_mode_preference: overrides
+            .editor_mode_preference
+            .unwrap_or(device.editor_mode_preference),
+        editor_config_path: overrides
+            .editor_config_path
+            .clone()
+            .or_else(|| device.editor_config_path.clone()),
+        // Принадлежат устройству и слоями не перекрываются.
+        known_vaults: device.known_vaults.clone(),
+        current_vault: device.current_vault.clone(),
+    }
 }
 
 /// Инварианты набора настроек целиком.
@@ -194,6 +232,85 @@ mod tests {
             ..Settings::default()
         };
         assert!(validate(&settings).is_ok());
+    }
+
+    #[test]
+    fn the_vault_layer_overrides_only_what_it_records() {
+        // FR-030: `None` пропускает значение устройства, `Some` перекрывает.
+        use crate::vault::vault_settings::VaultOverrides;
+
+        let device = Settings {
+            theme: Theme::Light,
+            editor_font_size: 14,
+            editor_mode_preference: ModePreference::SimplifiedEmulation,
+            editor_config_path: Some("/device/init.lua".into()),
+            known_vaults: vec![VaultRecord::new(
+                VaultId::from_raw("a"),
+                "/notes".to_string(),
+            )],
+            current_vault: Some(VaultId::from_raw("a")),
+        };
+        let overrides = VaultOverrides {
+            theme: Some(Theme::Dark),
+            ..VaultOverrides::default()
+        };
+
+        let effective = resolve(&device, &overrides);
+        assert_eq!(effective.theme, Theme::Dark, "перекрыто");
+        assert_eq!(effective.editor_font_size, 14, "взято с устройства");
+        assert_eq!(
+            effective.editor_config_path,
+            Some("/device/init.lua".into()),
+            "взято с устройства"
+        );
+        // FR-028: реестр остаётся свойством устройства при любом перекрытии.
+        assert_eq!(effective.known_vaults, device.known_vaults);
+        assert_eq!(effective.current_vault, device.current_vault);
+    }
+
+    #[test]
+    fn values_written_by_the_previous_version_become_the_device_layer() {
+        // FR-032, SC-005: при первом запуске новой версии не теряется ни одно
+        // ранее заданное значение. Файл настроек устройства **и есть** слой по
+        // умолчанию после переезда настроек внутрь vault (research.md §4) —
+        // отдельного кода миграции для этого не нужно.
+        //
+        // Речь именно о файле, написанном **этой же** версией формата: смена
+        // формата на JSON переносом с прежнего TOML не сопровождается вовсе
+        // (research.md §2, пересмотрено).
+        use crate::vault::vault_settings::VaultOverrides;
+
+        let written_by_previous_version = r#"{
+  "theme": "dark",
+  "editor_font_size": 20,
+  "editor_mode_preference": "fullBackend",
+  "editor_config_path": "/home/user/init.lua",
+  "known_vaults": [{ "id": "a", "location": "/work/notes" }],
+  "current_vault": "a"
+}"#;
+        let device = format::parse(written_by_previous_version)
+            .expect("файл прежней версии читается новой");
+
+        assert_eq!(device.theme, Theme::Dark);
+        assert_eq!(device.editor_font_size, 20);
+        assert_eq!(device.editor_mode_preference, ModePreference::FullBackend);
+        assert_eq!(device.editor_config_path, Some("/home/user/init.lua".into()));
+        assert_eq!(device.known_vaults.len(), 1);
+        assert_eq!(device.current_vault, Some(VaultId::from_raw("a")));
+
+        // И они действуют как слой по умолчанию для папки без своих значений.
+        assert_eq!(resolve(&device, &VaultOverrides::default()), device);
+    }
+
+    #[test]
+    fn an_empty_vault_layer_changes_nothing() {
+        use crate::vault::vault_settings::VaultOverrides;
+        let device = Settings {
+            theme: Theme::Dark,
+            editor_font_size: 20,
+            ..Settings::default()
+        };
+        assert_eq!(resolve(&device, &VaultOverrides::default()), device);
     }
 
     #[test]

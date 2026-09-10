@@ -108,6 +108,16 @@ async fn read_file_handle_text(file_handle: &JsValue) -> Result<String, JsValue>
     Ok(text_promise.as_string().unwrap_or_default())
 }
 
+/// Содержимое файла байтами — `File.arrayBuffer()` вместо `File.text()`.
+///
+/// Нужно предпросмотру для изображений: `text()` испортил бы всё, что не
+/// UTF-8, заменой недопустимых последовательностей.
+async fn read_file_handle_bytes(file_handle: &JsValue) -> Result<Vec<u8>, JsValue> {
+    let file = js_call0(file_handle, "getFile").await?;
+    let buffer = js_call0(&file, "arrayBuffer").await?;
+    Ok(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
 fn stamp_from_content(content: &str) -> FileStamp {
     FileStamp::from_content(0, content.as_bytes())
 }
@@ -186,6 +196,17 @@ pub struct WebBackend {
     /// разрешения конфликта не имеют права расходиться по таргету (принцип II).
     conflicts: ConflictRegistry,
     events: VecDeque<VaultEvent>,
+    /// Право этой оболочки писать доски (фича 002, FR-035). Поле, а не
+    /// константа в месте записи: тот же экземпляр отвечает и на вопрос
+    /// интерфейса «можно ли рисовать», и на запрос записи, поэтому объявленное
+    /// пользователю ограничение и фактический гейт не могут разойтись.
+    board_write_profile: crate::boards::BoardWriteProfile,
+    /// Кэш превью заготовок (фича 003, research.md §4).
+    ///
+    /// Производное восстановимое состояние: авторитетной копией ничему не
+    /// является, живёт ровно столько, сколько открыт этот vault. Ключ — хэш
+    /// содержимого, поэтому правка заготовки снаружи пересчитывает превью сама.
+    template_previews: crate::templates::PreviewCache,
     /// Последний известный дешёвый снимок `{size, lastModified}` на путь
     /// (research.md §3) — предфильтр `poll_for_changes`, отдельный от
     /// `Note.stamp` (который хранит content_hash, а не lastModified: web
@@ -193,6 +214,11 @@ pub struct WebBackend {
     /// заметки, см. `stamp_from_content`, только как сигнал "возможно,
     /// изменилось, стоит перечитать").
     poll_snapshot: HashMap<PathBuf, (u64, f64)>,
+    /// Существовало ли `.typsidian/` до открытия (фича 006, FR-024).
+    ///
+    /// Снимок момента открытия, а не текущее состояние: открытие само эту
+    /// папку создаёт, поэтому спросить позже — значит всегда получить `true`.
+    service_dir_existed: bool,
 }
 
 // `JsValue` не Send/Sync, но wasm32 однопоточен — обёртка безопасна в этом контексте.
@@ -312,12 +338,35 @@ impl VaultBackend for WebBackend {
         self.access_state
     }
 
+    fn service_dir_existed_at_open(&self) -> bool {
+        self.service_dir_existed
+    }
+
     async fn list(&self) -> Vec<Note> {
         self.index.all()
     }
 
     async fn list_folder(&self, folder: &Path) -> Vec<Note> {
         self.index.in_folder(folder)
+    }
+
+    /// Папка есть тогда и только тогда, когда на неё выдаётся хендл.
+    ///
+    /// `Unreadable` и `NotWritable` здесь недостижимы, и это свойство File
+    /// System Access API, а не упрощение: разрешение выдаётся на корень vault
+    /// целиком и наследуется всем поддеревом — отдельной папке отказать в
+    /// чтении браузер не может. Расхождения с `NativeBackend` тут нет: там эти
+    /// варианты возможны, здесь их порождать нечему, и выдумывать их значило бы
+    /// сообщать о поломке, которой не существует.
+    ///
+    /// Отсутствие права записи на web выражается состоянием vault целиком
+    /// (`accessState`), и его складывает с ответом отсюда
+    /// [`crate::templates::library::folder_state`].
+    async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {
+        match self.find_folder_handle(folder).await {
+            Some(_) => crate::vault::FolderAccess::Present,
+            None => crate::vault::FolderAccess::Absent,
+        }
     }
 
     async fn read(&self, path: &Path) -> Result<String, ReadError> {
@@ -336,6 +385,50 @@ impl VaultBackend for WebBackend {
         read_file_handle_text(&handle)
             .await
             .map_err(|_| ReadError::Io)
+    }
+
+    async fn read_bytes(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        let handle = self.find_handle(path).await.ok_or(ReadError::NotFound)?;
+        // Порядок проверок тот же, что в `read` и у `NativeBackend` (принцип II).
+        if file_meta(&handle)
+            .await
+            .is_some_and(|(size, _)| size > NOTE_SIZE_LIMIT_BYTES)
+        {
+            return Err(ReadError::TooLarge);
+        }
+        read_file_handle_bytes(&handle)
+            .await
+            .map_err(|_| ReadError::Io)
+    }
+
+    async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
+        if self.write_denied() {
+            return Err(WriteError::AccessDenied);
+        }
+        let handle = self
+            .resolve_handle(path, true, false)
+            .await
+            .ok_or(WriteError::Io)?;
+        let writable = js_call0(&handle, "createWritable")
+            .await
+            .map_err(|_| WriteError::Io)?;
+        // `Uint8Array` вместо строки: `FileSystemWritableFileStream.write`
+        // принимает и то, и другое, но строка прошла бы через UTF-8 и испортила
+        // всё, что им не является.
+        let view = js_sys::Uint8Array::from(bytes);
+        let write_fn =
+            Reflect::get(&writable, &JsValue::from_str("write")).map_err(|_| WriteError::Io)?;
+        let write_fn: js_sys::Function = write_fn.dyn_into().map_err(|_| WriteError::Io)?;
+        let promise = write_fn
+            .call1(&writable, &view)
+            .map_err(|_| WriteError::Io)?;
+        JsFuture::from(js_sys::Promise::from(promise))
+            .await
+            .map_err(|_| WriteError::Io)?;
+        js_call0(&writable, "close")
+            .await
+            .map_err(|_| WriteError::Io)?;
+        Ok(())
     }
 
     async fn write(
@@ -453,6 +546,17 @@ impl VaultBackend for WebBackend {
         let _ = self.delete(from).await;
         self.index.rename(from, to);
         self.cache.rename_note(from, to).await;
+
+        // FR-018, паритет с `NativeBackend::rename`: пометка раздела едет за
+        // папкой, переименованной средствами приложения.
+        //
+        // На практике сюда не доходит: rename здесь реализован как чтение
+        // файла + запись + удаление, и на папке он отказывает выше, на
+        // `self.read(from)`. Вызов стоит всё равно — правило переноса пометки
+        // обязано быть одним на оба таргета, а не появиться на web задним
+        // числом вместе с переименованием папок.
+        let _ = super::vault_settings::move_sections(self, from, to).await;
+
         self.publish_links_invalidated(&[from.to_path_buf(), to.to_path_buf()])
             .await;
         Ok(())
@@ -600,7 +704,12 @@ impl WebBackend {
             cache: MemoryCache::new(),
             conflicts: ConflictRegistry::new(),
             events: VecDeque::new(),
+            // FR-033: веб-клиент рисует наравне с рабочим столом.
+            board_write_profile: crate::boards::BoardWriteProfile::ReadWrite,
+            template_previews: crate::templates::PreviewCache::new(),
             poll_snapshot: HashMap::new(),
+            // Уточняется ниже, до создания папки.
+            service_dir_existed: false,
         };
         let mut found = Vec::new();
         // FR-038: обход прерывается на превышении предела, и ни индекс, ни
@@ -630,6 +739,23 @@ impl WebBackend {
                 }
             }
         }
+
+        backend.service_dir_existed = backend
+            .find_folder_handle(&super::service_dir::service_dir())
+            .await
+            .is_some();
+
+        // Служебное место заводится при открытии — так же, как на native, где
+        // внутрь него сразу ложится файл кэша (фича 006, research.md §12).
+        // Здесь папка остаётся пустой до первой записи настроек, и это
+        // осознанно: одно и то же действие пользователя обязано давать
+        // одинаковый наблюдаемый результат на обоих клиентах.
+        //
+        // Отказ открытие не блокирует: невозможность завести служебное место
+        // проявится там, где её надо назвать пользователю, — при записи
+        // настроек (FR-025).
+        let _ = super::vault_settings::ensure_service_dir(&mut backend).await;
+
         Ok(backend)
     }
 
@@ -847,6 +973,19 @@ impl WebBackend {
         VaultBackend::list_folder(self, Path::new(folder)).await
     }
 
+    /// Расширенный поиск по vault (макет «Утилиты» § Поиск).
+    ///
+    /// Метод бэкенда, а не отдельного объекта: поиск читает vault и без него
+    /// не существует. Правила совпадения при этом целиком в ядре — интерфейс
+    /// получает готовые группы и куски строк.
+    #[wasm_bindgen(js_name = search)]
+    pub async fn search_js(
+        &self,
+        query: crate::search::SearchQuery,
+    ) -> Result<crate::search::SearchResults, crate::search::SearchError> {
+        crate::search::search(self, &query).await
+    }
+
     #[wasm_bindgen(js_name = read)]
     pub async fn read_js(&self, path: &str) -> Result<String, ReadError> {
         VaultBackend::read(self, Path::new(path)).await
@@ -881,11 +1020,22 @@ impl WebBackend {
     // ── Доски (фича 002) ────────────────────────────────────────────────
     //
     // Операции досок обобщены по `VaultBackend` и живут в `crate::boards`;
-    // здесь только проброс через границу WASM/JS. Профиль записи зашит как
-    // `ReadWrite` намеренно: веб-клиент рисует (FR-033), а просмотр без записи
-    // — свойство мобильного клиента, у которого будет своя оболочка. Принимать
-    // профиль параметром значило бы отдать интерфейсу решение, которое FR-035
-    // требует держать в ядре.
+    // здесь только проброс через границу WASM/JS. Профиль записи веб-клиента —
+    // `ReadWrite` (FR-033), а просмотр без записи — свойство мобильного
+    // клиента, у которого своя оболочка. Параметром `writeBoard` профиль не
+    // принимает: это отдало бы интерфейсу решение, которое FR-035 требует
+    // держать в ядре. Через границу он проходит только наружу, геттером ниже.
+
+    /// Право этой оболочки писать доски — интерфейсу, чтобы объявить
+    /// ограничение пользователю (FR-034).
+    ///
+    /// Читается из того же поля, что и гейт в `writeBoard`: сказанное
+    /// пользователю и применённое к записи — одно значение, а не два
+    /// согласованных вручную.
+    #[wasm_bindgen(getter, js_name = boardWriteProfile)]
+    pub fn board_write_profile_js(&self) -> crate::boards::BoardWriteProfile {
+        self.board_write_profile
+    }
 
     #[wasm_bindgen(js_name = createBoard)]
     pub async fn create_board_js(
@@ -914,9 +1064,10 @@ impl WebBackend {
         content: &str,
         expected: Option<FileStamp>,
     ) -> Result<(), crate::boards::WriteBoardError> {
+        let profile = self.board_write_profile;
         crate::boards::write_board(
             self,
-            crate::boards::BoardWriteProfile::ReadWrite,
+            profile,
             Path::new(path),
             &crate::boards::BoardContent::new(content.as_bytes().to_vec()),
             expected,
@@ -933,6 +1084,149 @@ impl WebBackend {
         crate::boards::digest(content.as_bytes())
     }
 
+    // ── Шаблоны и сниппеты (фича 003) ───────────────────────────────────
+    //
+    // Операции библиотеки обобщены по `VaultBackend` и живут в
+    // `crate::templates`; здесь только проброс через границу WASM/JS.
+    //
+    // Кэш превью — поле бэкенда, а не отдельного объекта: он привязан к
+    // открытому vault и умирает вместе с ним. Производное восстановимое
+    // состояние (research.md §4), поэтому переживать перезапуск не обязано.
+
+    /// Состав библиотеки заготовок и состояние её папки (FR-004, FR-007).
+    #[wasm_bindgen(js_name = templateLibrary)]
+    pub async fn template_library_js(&self) -> crate::templates::TemplateLibraryView {
+        crate::templates::library(self).await
+    }
+
+    /// Содержимое заготовки для применения (FR-017, FR-023).
+    #[wasm_bindgen(js_name = readTemplate)]
+    pub async fn read_template_js(
+        &self,
+        path: &str,
+    ) -> Result<String, crate::templates::ReadTemplateError> {
+        crate::templates::read_template(self, Path::new(path)).await
+    }
+
+    /// Превью одной заготовки (FR-011, FR-012, FR-014).
+    ///
+    /// `&mut self` из-за кэша: сам порт превью ничего не меняет, но результат
+    /// запоминается, чтобы прокрутка галереи не пересчитывала одно и то же.
+    #[wasm_bindgen(js_name = templatePreview)]
+    pub async fn template_preview_js(
+        &mut self,
+        template: crate::templates::Template,
+    ) -> crate::templates::PreviewState {
+        // Кэш вынимается из поля на время вызова: `preview_of` берёт `&self`
+        // ради чтения файла и `&mut PreviewCache` ради записи результата, а
+        // держать оба заимствования одного объекта нельзя.
+        let mut cache = std::mem::take(&mut self.template_previews);
+        let state = crate::templates::preview_of(
+            self,
+            &crate::templates::ExcerptOnlySource,
+            &mut cache,
+            &template,
+        )
+        .await;
+        self.template_previews = cache;
+        state
+    }
+
+    /// Проверка имени будущей заготовки — до любых изменений на диске (FR-029).
+    #[wasm_bindgen(js_name = checkTemplateName)]
+    pub async fn check_template_name_js(&self, name: &str) -> crate::templates::NameCheck {
+        crate::templates::check_name(self, name).await
+    }
+
+    /// Сохраняет содержимое как заготовку (FR-002, FR-028, FR-030).
+    #[wasm_bindgen(js_name = saveAsTemplate)]
+    pub async fn save_as_template_js(
+        &mut self,
+        name: &str,
+        content: &str,
+        confirm_overwrite: bool,
+    ) -> Result<crate::templates::Template, crate::templates::SaveTemplateError> {
+        crate::templates::save_as_template(self, name, content, confirm_overwrite).await
+    }
+
+    /// Какую правку совершить над текстом, чтобы вставить заготовку
+    /// (FR-031…FR-035).
+    ///
+    /// Статический метод: правило вставки текста от vault не зависит вовсе.
+    #[wasm_bindgen(js_name = planInsertion)]
+    pub fn plan_insertion_js(
+        text_length: usize,
+        point: crate::templates::InsertionPoint,
+        content: &str,
+    ) -> crate::templates::InsertionEdit {
+        crate::templates::plan_insertion(text_length, &point, content)
+    }
+
+    /// Затрагивает ли событие файла библиотеку заготовок (FR-003).
+    ///
+    /// Спрашивается у ядра, а не выводится в интерфейсе сверкой пути с
+    /// «templates/»: правило «что считается заготовкой» обязано жить в одном
+    /// месте (принцип I).
+    #[wasm_bindgen(js_name = templateEvent)]
+    pub fn template_event_js(event: VaultEvent) -> Option<crate::templates::TemplateEvent> {
+        crate::templates::library_event(&event)
+    }
+
+    // ── Настройки уровня vault и разделы (фича 006) ─────────────────────
+    //
+    // Та же дыра, что закрывал T070 фичи 002: логика в
+    // `crate::vault::vault_settings` есть, но без этих вызовов UI физически не
+    // может ни прочитать политику расположения, ни пометить папку разделом.
+
+    /// Настройки уровня vault (FR-002, FR-015, FR-026).
+    #[wasm_bindgen(js_name = vaultSettings)]
+    pub async fn vault_settings_js(
+        &self,
+    ) -> Result<
+        crate::vault::vault_settings::VaultOverrides,
+        crate::vault::vault_settings::VaultSettingsError,
+    > {
+        crate::vault::vault_settings::read_vault_settings(self).await
+    }
+
+    /// Записывает настройки уровня vault (FR-029).
+    #[wasm_bindgen(js_name = setVaultSettings)]
+    pub async fn set_vault_settings_js(
+        &mut self,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> Result<(), crate::vault::vault_settings::VaultSettingsError> {
+        crate::vault::vault_settings::write_vault_settings(self, &overrides).await
+    }
+
+    /// Помечает папку как корень раздела (FR-013).
+    ///
+    /// Возвращает обновлённый набор настроек, а не `()`: UI обязан показать
+    /// новое состояние дерева, и второй запрос за тем, что ядро уже знает,
+    /// был бы лишним кругом через границу.
+    #[wasm_bindgen(js_name = markSection)]
+    pub async fn mark_section_js(
+        &mut self,
+        folder: &str,
+    ) -> Result<
+        crate::vault::vault_settings::VaultOverrides,
+        crate::vault::vault_settings::VaultSettingsError,
+    > {
+        crate::vault::vault_settings::set_section(self, Path::new(folder), true).await
+    }
+
+    /// Снимает пометку раздела (FR-013). Уже созданные файлы вставок при этом
+    /// не двигаются (FR-017).
+    #[wasm_bindgen(js_name = unmarkSection)]
+    pub async fn unmark_section_js(
+        &mut self,
+        folder: &str,
+    ) -> Result<
+        crate::vault::vault_settings::VaultOverrides,
+        crate::vault::vault_settings::VaultSettingsError,
+    > {
+        crate::vault::vault_settings::set_section(self, Path::new(folder), false).await
+    }
+
     // ── Вставки досок в заметки (фича 002, US2 и US3) ───────────────────
     //
     // Проброс тем же правилом, что и у досок выше: решения — в ядре, здесь
@@ -941,13 +1235,24 @@ impl WebBackend {
     // закрыл T070.
 
     /// Путь и имя файла для новой вставки (FR-018, FR-020). Файл не создаётся.
+    ///
+    /// Настройки vault приходят целиком, а не разобранными на политику и
+    /// список разделов: UI их уже прочитал через `vaultSettings()`, а решение
+    /// «что из них влияет на путь» принадлежит ядру (фича 006, принцип I).
     #[wasm_bindgen(js_name = planEmbed)]
     pub fn plan_embed_js(
         note_path: &str,
         note_text: &str,
         board_path: &str,
+        overrides: crate::vault::vault_settings::VaultOverrides,
     ) -> Result<crate::boards::EmbedPlan, crate::boards::EmbedError> {
-        crate::boards::plan_embed(Path::new(note_path), note_text, Path::new(board_path))
+        crate::boards::plan_embed(
+            Path::new(note_path),
+            note_text,
+            Path::new(board_path),
+            overrides.placement(),
+            &overrides.sections,
+        )
     }
 
     /// Текст вызова `#image(...)` для вставки в заметку (FR-022).

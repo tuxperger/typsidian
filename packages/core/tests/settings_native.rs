@@ -36,29 +36,31 @@ fn settings_path(dir: &TempDir) -> std::path::PathBuf {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn user_comments_and_key_order_survive_an_application_write() {
-    // Ключевая проверка research.md §2: обычная serde-сериализация провалилась
-    // бы здесь, уничтожив комментарии и порядок ключей пользователя.
-    let authored = "\
-# основной блок
-theme = \"dark\"
-editor_font_size = 18  # покрупнее
-";
+fn what_the_user_wrote_by_hand_survives_an_application_write() {
+    // Прежняя проверка research.md §2 требовала переживания **комментариев**.
+    // В JSON комментариев нет, и притворяться иначе нельзя — но вторая половина
+    // того же требования (FR-013) в силе: приложение не выбрасывает ключи,
+    // которых не понимает.
+    let authored = r#"{
+  "theme": "dark",
+  "editor_font_size": 18,
+  "my_future_option": {"nested": true}
+}"#;
     let mut settings = format::parse(authored).expect("файл должен разбираться");
     settings.editor_font_size = 21;
 
     let rewritten = format::render(authored, &settings, &FolderRefs::new());
 
-    assert!(rewritten.contains("# основной блок"));
     assert!(
-        rewritten.contains("# покрупнее"),
-        "комментарий в конце строки обязан пережить запись: {rewritten}"
+        rewritten.contains("my_future_option"),
+        "дописанное пользователем обязано пережить запись: {rewritten}"
     );
     assert!(
-        rewritten.find("theme") < rewritten.find("editor_font_size"),
-        "порядок ключей пользователя сохраняется"
+        rewritten.contains("nested"),
+        "вместе со вложенным содержимым"
     );
     assert_eq!(format::parse(&rewritten).unwrap().editor_font_size, 21);
+    assert_eq!(format::parse(&rewritten).unwrap().theme, Theme::Dark);
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +653,7 @@ async fn externally_repaired_file_recovers_without_restart() {
     assert_eq!(store.storage_state(), StorageState::DefaultsAfterUnreadable);
     let _ = store.poll_events().await;
 
-    fs::write(&path, "theme = \"dark\"\n").unwrap();
+    fs::write(&path, "{\"theme\": \"dark\"}\n").unwrap();
     let settings = store.load().await;
 
     assert_eq!(settings.theme, Theme::Dark);

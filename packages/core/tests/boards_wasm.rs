@@ -78,12 +78,31 @@ use typsidian_core::boards::{
 const NOTE: &str = "Идея.typ";
 const BOARD_FILE: &str = "Схема.excalidraw";
 
+/// Планирование вставки с политикой по умолчанию — «рядом с заметкой»
+/// (006 FR-003), без помеченных разделов.
+///
+/// Тесты этой фичи проверяют поведение вставок как таковых, а не выбор
+/// расположения: за него отвечает `placement_wasm.rs`.
+fn plan_next_to_note(
+    note: &Path,
+    text: &str,
+    board: &Path,
+) -> Result<typsidian_core::boards::EmbedPlan, EmbedError> {
+    plan_embed(
+        note,
+        text,
+        board,
+        typsidian_core::boards::AssetsPlacement::NextToNote,
+        &[],
+    )
+}
+
 #[wasm_bindgen_test]
 fn every_embed_gets_its_own_snapshot_file() {
-    let first = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let first = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let text = embed_markup(&first);
-    let second = plan_embed(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
-    let other_note = plan_embed(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
+    let second = plan_next_to_note(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
+    let other_note = plan_next_to_note(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
 
     assert_ne!(first.embed_id, second.embed_id, "две вставки в одну заметку");
     assert_ne!(first.snapshot_path, second.snapshot_path);
@@ -114,7 +133,7 @@ fn an_embed_is_recognised_by_its_address_not_by_a_marker() {
 
 #[wasm_bindgen_test]
 fn markup_is_an_ordinary_typst_image_call() {
-    let plan = plan_embed(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
+    let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let markup = embed_markup(&plan);
     assert_eq!(markup, format!("#image(\"{}\")", plan.markup_path));
     assert!(!markup.to_lowercase().contains("typsidian"));
@@ -135,7 +154,7 @@ fn snapshot_metadata_survives_a_round_trip() {
 #[wasm_bindgen_test]
 fn a_board_is_not_a_valid_host_for_an_embed() {
     assert_eq!(
-        plan_embed(Path::new(BOARD_FILE), "", Path::new("Другая.excalidraw")),
+        plan_next_to_note(Path::new(BOARD_FILE), "", Path::new("Другая.excalidraw")),
         Err(EmbedError::NotANote)
     );
 }
@@ -235,6 +254,14 @@ impl VaultBackend for UntouchableVault {
         unreachable!("отказ по профилю не зависит от доступности vault")
     }
 
+    fn service_dir_existed_at_open(&self) -> bool {
+        unreachable!("отказ по профилю не зависит от служебного места")
+    }
+
+    async fn write_bytes(&mut self, _path: &Path, _bytes: &[u8]) -> Result<(), WriteError> {
+        unreachable!("гейт профиля отклоняет запись до обращения к диску")
+    }
+
     async fn list(&self) -> Vec<Note> {
         unreachable!("гейт профиля не читает дерево")
     }
@@ -243,7 +270,15 @@ impl VaultBackend for UntouchableVault {
         unreachable!("гейт профиля не читает дерево")
     }
 
+    async fn folder_access(&self, _folder: &Path) -> typsidian_core::vault::FolderAccess {
+        unreachable!("гейт профиля не спрашивает про папки")
+    }
+
     async fn read(&self, _path: &Path) -> Result<String, ReadError> {
+        unreachable!("гейт профиля не читает файлы")
+    }
+
+    async fn read_bytes(&self, _path: &Path) -> Result<Vec<u8>, ReadError> {
         unreachable!("гейт профиля не читает файлы")
     }
 

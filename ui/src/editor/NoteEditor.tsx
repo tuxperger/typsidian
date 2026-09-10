@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { EditorView } from "@codemirror/view";
 import type {
   Embed,
   Note,
@@ -15,6 +16,12 @@ import {
 } from "../boards/InsertBoardDialog.js";
 import { writeBoardSnapshot } from "../boards/exportSnapshot.js";
 import { useNoteEmbeds } from "../boards/useNoteEmbeds.js";
+import { CodeEditor, type CaretPosition, type CodeEditorHandle } from "./CodeEditor.js";
+import {
+  InsertMenu,
+  type CaretAnchor,
+  type InsertRequest,
+} from "./InsertMenu.js";
 
 export interface NoteEditorProps {
   client: VaultClient;
@@ -40,6 +47,19 @@ export interface NoteEditorProps {
    * поэтому текст объявляется наверх, а не читается ею с диска.
    */
   onContentChange?: (text: string) => void;
+  /**
+   * Доступ к живому редактору — наверх, для порта вставки заготовок
+   * (фича 003). Объявляется, а не спрашивается: галерея живёт выше по дереву и
+   * до `CodeEditor` не дотягивается.
+   *
+   * Наверх идёт **функция доступа**, а не сам экземпляр: `CodeEditor`
+   * пересоздаётся при смене заметки, и значение, снятое однажды, устарело бы
+   * молча. `null` — заметка закрыта: вставлять некуда, и галерея сообщает об
+   * этом вместо того, чтобы предлагать неработающую кнопку.
+   */
+  onEditorReady?: (getView: (() => EditorView | null) | null) => void;
+  /** Сохранить открытую заметку как заготовку (фича 003, US2). */
+  onSaveAsTemplate?: (content: string) => void;
 }
 
 /**
@@ -60,6 +80,8 @@ export function NoteEditor({
   onOpenBoard,
   onCreateBoard,
   onContentChange,
+  onEditorReady,
+  onSaveAsTemplate,
 }: NoteEditorProps): React.JSX.Element {
   const [content, setContent] = useState("");
   const [readError, setReadError] = useState<ReadError | null>(null);
@@ -68,7 +90,42 @@ export function NoteEditor({
   const [insertError, setInsertError] = useState<string | null>(null);
   const [isChoosingBoard, setIsChoosingBoard] = useState(false);
   // Вставка идёт в позицию курсора, а её знает только сам textarea.
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Позиция курсора нужна двум разным потребителям: статус-бару — на отрисовку,
+  // вставке доски — в момент нажатия. Первому нужно состояние, второму — всегда
+  // свежее значение без ожидания рендера, поэтому и ref, и state.
+  const caretRef = useRef<CaretPosition>({ line: 1, column: 1, offset: 0 });
+  const [caret, setCaret] = useState<CaretPosition>({ line: 1, column: 1, offset: 0 });
+  const onCaretMove = useCallback((next: CaretPosition) => {
+    caretRef.current = next;
+    setCaret(next);
+  }, []);
+
+  // Меню вставки элементов Typst (⌘E). Открытое меню помнит, где была каретка
+  // в момент вызова: пока оно висит, курсор в редакторе не двигается, а
+  // пересчитывать координаты на каждый кадр незачем.
+  const editorRef = useRef<CodeEditorHandle | null>(null);
+  const [insertMenu, setInsertMenu] = useState<{ anchor: CaretAnchor | null } | null>(
+    null,
+  );
+  const isInsertMenuOpen = insertMenu !== null;
+
+  const openInsertMenu = useCallback(() => {
+    setInsertMenu({ anchor: editorRef.current?.caretCoords() ?? null });
+  }, []);
+
+  const closeInsertMenu = useCallback(() => {
+    setInsertMenu(null);
+    // Работа продолжается в тексте, а не в закрытом меню.
+    editorRef.current?.focus();
+  }, []);
+
+  const insertElement = useCallback((request: InsertRequest) => {
+    setInsertMenu(null);
+    // Текст правит редактор: он же вернёт новое содержимое через `onChange`,
+    // и отдельного `setContent` здесь быть не должно — иначе буфер обновлялся
+    // бы двумя путями сразу.
+    editorRef.current?.insertSnippet(request.template, { block: request.block });
+  }, []);
 
   const notePath = note?.path ?? null;
   const embeds = useNoteEmbeds(client, notePath, content);
@@ -80,6 +137,45 @@ export function NoteEditor({
   useEffect(() => {
     onContentChange?.(content);
   }, [content, onContentChange]);
+
+  // Доступ к редактору объявляется наверх, пока заметка открыта. Функция, а не
+  // значение: она спрашивает `editorRef` в момент вставки и потому не может
+  // указывать на редактор предыдущей заметки.
+  const getView = useCallback(() => editorRef.current?.view() ?? null, []);
+  const hasNote = note !== null;
+  useEffect(() => {
+    onEditorReady?.(hasNote ? getView : null);
+    return () => onEditorReady?.(null);
+  }, [hasNote, getView, onEditorReady]);
+
+  // ⌘E открывает и закрывает меню вставки, Escape — только закрывает. Так же,
+  // как ⌘K у палитры команд: слушатель на окне, потому что открыть меню нужно
+  // и тогда, когда фокус не в тексте, а самого меню в дереве ещё нет.
+  //
+  // `metaKey || ctrlKey` — не различая платформ, как и ⌘K: две раскладки
+  // расходились бы там, где приложение обещает одинаковое поведение.
+  //
+  // Клавиша сверяется и по `code`, и по `key`: интерфейс русский, и при
+  // кириллической раскладке `key` для этой клавиши — «у», а не «e». По одному
+  // `key` сочетание молча не работало бы ровно у того, для кого написано.
+  // Без открытой заметки вставлять некуда, поэтому и слушателя нет.
+  useEffect(() => {
+    if (!note) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.code === "KeyE" || event.key.toLowerCase() === "e")
+      ) {
+        event.preventDefault();
+        if (isInsertMenuOpen) closeInsertMenu();
+        else openInsertMenu();
+      } else if (event.key === "Escape" && isInsertMenuOpen) {
+        closeInsertMenu();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [note, isInsertMenuOpen, openInsertMenu, closeInsertMenu]);
 
   // Изменение файла в vault — повод пересчитать состояние вставок. Затрагивает
   // ли оно эту заметку, решает ядро внутри `fileChanged` (T056).
@@ -104,7 +200,17 @@ export function NoteEditor({
       setIsInserting(true);
       setInsertError(null);
       try {
-        const plan = await client.planEmbed(notePath, content, boardPath);
+        // Настройки читаются прямо здесь, а не держатся в состоянии
+        // редактора: вставка — редкая операция, а политика могла смениться в
+        // панели секунду назад. Одно чтение маленького файла дешевле, чем
+        // второе место, знающее текущую политику (фича 006, FR-002).
+        const overrides = await client.vaultSettings();
+        const plan = await client.planEmbed(
+          notePath,
+          content,
+          boardPath,
+          overrides,
+        );
         const boardContent = await client.readBoard(boardPath);
         const written = await writeBoardSnapshot({
           client,
@@ -117,8 +223,8 @@ export function NoteEditor({
         }
 
         const markup = await client.embedMarkup(plan);
-        const caret = textareaRef.current?.selectionStart ?? content.length;
-        const next = `${content.slice(0, caret)}${markup}${content.slice(caret)}`;
+        const at = Math.min(caretRef.current.offset, content.length);
+        const next = `${content.slice(0, at)}${markup}${content.slice(at)}`;
         setContent(next);
         await client.beginEdit(notePath, next);
         setIsChoosingBoard(false);
@@ -188,6 +294,21 @@ export function NoteEditor({
         <h2 className="ts-pane__title">{note.name}</h2>
         <span className="ts-spacer" />
         <div role="group" aria-label="Действия с заметкой">
+          {/* Меню вставки открывается по ⌘E; кнопка здесь для того, кто про
+              сочетание не знает, — сама она ничего не вставляет.
+              Только открывает, не переключает: открытое меню закрывается от
+              нажатия мимо себя, и нажатие на эту кнопку для него тоже «мимо» —
+              переключатель успевал бы закрыться до собственного onClick. */}
+          <button
+            type="button"
+            className="ts-btn"
+            title="Вставить элемент Typst · ⌘E"
+            aria-haspopup="dialog"
+            aria-expanded={isInsertMenuOpen}
+            onClick={openInsertMenu}
+          >
+            Вставить элемент
+          </button>
           {/* SC-007: от открытой заметки до вставленной доски — два действия,
               эта кнопка и выбор доски в списке. */}
           <button
@@ -200,6 +321,19 @@ export function NoteEditor({
           >
             Вставить доску
           </button>
+          {/* SC-006: от открытой заметки до сохранённой заготовки — три
+              действия, эта кнопка, ввод имени и подтверждение. Сохраняется
+              **буфер**, а не файл с диска: заготовка фиксирует то, что
+              пользователь видит перед собой (FR-027). */}
+          {onSaveAsTemplate && (
+            <button
+              type="button"
+              className="ts-btn"
+              onClick={() => onSaveAsTemplate(content)}
+            >
+              Сохранить как заготовку
+            </button>
+          )}
           <button
             type="button"
             className="ts-btn ts-btn--accent"
@@ -221,19 +355,26 @@ export function NoteEditor({
           </button>
         </div>
       </div>
-      <textarea
-        ref={textareaRef}
-        className="ts-code"
-        aria-label={`Содержимое заметки ${note.name}`}
+      <CodeEditor
+        ref={editorRef}
+        ariaLabel={`Содержимое заметки ${note.name}`}
         value={content}
-        onChange={(event) => {
-          const next = event.target.value;
+        onCaretMove={onCaretMove}
+        onChange={(next) => {
           setContent(next);
           // FR-035: ядро должно знать о несохранённых правках и держать сам
           // буфер — иначе внешнее изменение будет применено молча.
           void client.beginEdit(note.path, next);
         }}
       />
+
+      {insertMenu && (
+        <InsertMenu
+          anchor={insertMenu.anchor}
+          onInsert={insertElement}
+          onClose={closeInsertMenu}
+        />
+      )}
 
       {/* Вставки заметки и их актуальность (FR-027, FR-031, FR-032). Список, а
           не пометки внутри текста: индикатор рядом с вызовом требует редактора,
@@ -266,17 +407,45 @@ export function NoteEditor({
         onCancel={() => setIsChoosingBoard(false)}
       />
       {/* Статус-бар макета (handoff § Editor pane). Показывает только то, что
-          известно на самом деле: индикатора vim-режима здесь нет, потому что
-          моста к Neovim в web-сборке не существует (research.md §7). */}
+          известно на самом деле: пилюля vim-режима здесь надпись, а не
+          переключатель, — моста к Neovim в web-сборке не существует
+          (research.md §7), и кликабельная пилюля утверждала бы, что режим
+          переключается. */}
       <div className="ts-statusbar">
-        <span>{content.length} симв.</span>
+        <span className="ts-vim" title="Режим редактора: моста к Neovim в web-сборке нет">
+          NORMAL
+        </span>
+        <span>
+          Ln {caret.line}, Col {caret.column}
+        </span>
         <span>UTF-8</span>
         {saveMessage && <p role="status">{saveMessage}</p>}
         <span className="ts-spacer" />
+        <span>{countWords(content)}</span>
         <span className="ts-tag">typst</span>
       </div>
     </section>
   );
+}
+
+/**
+ * Счётчик слов для статус-бара («142 слова» в макете).
+ *
+ * Считает по пробелам, вместе с разметкой Typst: отделять команды от текста
+ * значило бы разбирать язык, а разбор живёт в компиляторе, не здесь.
+ */
+function countWords(text: string): string {
+  const count = text.split(/\s+/).filter((word) => word.length > 0).length;
+  const mod100 = count % 100;
+  const word =
+    mod100 >= 11 && mod100 <= 14
+      ? "слов"
+      : count % 10 === 1
+        ? "слово"
+        : count % 10 >= 2 && count % 10 <= 4
+          ? "слова"
+          : "слов";
+  return `${count} ${word}`;
 }
 
 /** Почему вставка не состоялась (FR-018, FR-019). */

@@ -10,6 +10,7 @@ import init, {
   type SettingsEvent,
   type StorageState,
   type StoreCapabilities,
+  type VaultOverrides,
   type VaultRecord,
 } from "../wasm-core/typsidian_core.js";
 import { createWasmCallQueue, type WasmCallQueue } from "../wasm-call-queue.js";
@@ -161,6 +162,17 @@ export function useSettings(): {
    * (FR-038, SC-011).
    */
   resetToDefaults: () => Promise<ApplyPlan | null>;
+  /**
+   * Сделать действующие сейчас значения умолчаниями устройства (фича 006,
+   * FR-031).
+   *
+   * Единственный способ изменить умолчания: обычная правка при открытом vault
+   * уходит в сам vault и устройства не касается (FR-029). Набор изменений
+   * собирает ядро по перекрытиям vault — здесь только применение.
+   */
+  makeSettingsDefault: (
+    overrides: VaultOverrides,
+  ) => Promise<ApplyPlan | null>;
   refresh: () => Promise<void>;
   dismissNotice: (kind: StorageNotice["kind"]) => void;
   /**
@@ -281,6 +293,22 @@ export function useSettings(): {
     [apply],
   );
 
+  // Набор строит ядро по тем же слоям, что применяет `resolve` — здесь
+  // только применение, тем же `apply`, что и любое другое изменение.
+  const makeSettingsDefault = useCallback(
+    async (overrides: VaultOverrides): Promise<ApplyPlan | null> => {
+      const store = storeRef.current;
+      if (!store) return null;
+      // Синхронный геттер читается внутри операции очереди, а не рядом с ней:
+      // иначе он попадёт в чужое окно заимствования wasm-bindgen.
+      const change = await queue.run(async () =>
+        store.deviceDefaultsChange(overrides),
+      );
+      return apply(change);
+    },
+    [apply, queue],
+  );
+
   const dismissNotice = useCallback((kind: StorageNotice["kind"]) => {
     setState((prev) => ({
       ...prev,
@@ -288,5 +316,13 @@ export function useSettings(): {
     }));
   }, []);
 
-  return { state, apply, resetToDefaults, refresh, dismissNotice, queue };
+  return {
+    state,
+    apply,
+    resetToDefaults,
+    makeSettingsDefault,
+    refresh,
+    dismissNotice,
+    queue,
+  };
 }

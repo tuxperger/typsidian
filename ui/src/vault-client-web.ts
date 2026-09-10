@@ -3,6 +3,7 @@ import type { VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue } from "./wasm-call-queue.js";
 import { classifyOpenFailure, type VaultOpenResult } from "./vault-tree/useVault.js";
+import { basename } from "./paths.js";
 
 // Реализация `VaultClient` для web: ядро в том же процессе, WASM
 // (`packages/core` → `wasm-pack --target web`).
@@ -27,14 +28,42 @@ function ensureWasmInitialized(): Promise<unknown> {
   return wasmInitPromise;
 }
 
-/** Оборачивает готовый `WebBackend` в общий интерфейс. */
-export function webVaultClient(backend: WebBackend): VaultClient {
+/**
+ * Оборачивает готовый `WebBackend` в оба интерфейса сразу.
+ *
+ * Вместе, а не по отдельности: предпросмотр читает связанные файлы через тот
+ * же бэкенд и обязан ходить через ту же очередь. Две независимые фабрики
+ * означали бы две очереди — то есть отсутствие очереди.
+ */
+export function webClients(
+  backend: WebBackend,
+  engine: PreviewEngine,
+): { vault: VaultClient; preview: PreviewClient } {
+  const queue = createWasmCallQueue();
+  return {
+    vault: webVaultClient(backend, queue),
+    // Снимок несохранённых правок предпросмотру обновлять не нужно: сборка
+    // ничего в vault не пишет, поэтому здесь обычный `run`, а не обёртка
+    // `withSnapshotRefresh` из клиента vault.
+    preview: webPreviewClient(engine, backend, (op) => queue.run(op)),
+  };
+}
+
+/**
+ * Оборачивает готовый `WebBackend` в общий интерфейс.
+ *
+ * Очередь можно передать снаружи — так предпросмотр делит её с vault
+ * (см. `webClients`). Без аргумента заводит свою.
+ */
+export function webVaultClient(
+  backend: WebBackend,
+  queue = createWasmCallQueue(),
+): VaultClient {
   // Ядро живёт в том же процессе одним Rust-объектом, и обращаться к нему можно
   // только по одному вызову за раз — см. `wasm-call-queue.ts`. Через очередь
   // проходят все вызовы **экземпляра**; статические методы `WebBackend`
   // (`fileKind`, `embedsInText`, `planEmbed`, …) его не заимствуют и в
   // сериализации не нуждаются.
-  const queue = createWasmCallQueue();
 
   /**
    * Последний ответ ядра на «что будет потеряно при закрытии». Нужен ровно для
@@ -61,6 +90,9 @@ export function webVaultClient(backend: WebBackend): VaultClient {
     queue.runInternal(withSnapshotRefresh(op));
 
   return {
+    // Геттер ядра, а не имя из `showDirectoryPicker`: корень знает бэкенд.
+    rootName: basename(backend.rootPath()),
+
     list: () => call(() => backend.list()),
     read: (path) => call(() => backend.read(path)),
     write: (path, content, expected) =>
@@ -71,7 +103,17 @@ export function webVaultClient(backend: WebBackend): VaultClient {
     backlinks: (path) => call(() => backend.backlinks(path)),
     brokenLinks: (path) => call(() => backend.brokenLinks(path)),
     accessState: () => call(() => backend.accessState()),
+    search: (query) => call(() => backend.search(query)),
     fileKind: async (path) => WebBackend.fileKind(path),
+
+    // Берётся у ядра, а не пишется здесь литералом «ReadWrite»: значение,
+    // объявляемое пользователю, и значение, применяемое гейтом записи, —
+    // одно поле `WebBackend` (FR-034, FR-035).
+    //
+    // Через очередь не идёт и не нуждается в ней: геттер читается один раз,
+    // синхронно, в момент сборки клиента — когда ни один вызов ядра ещё не в
+    // полёте, — а не при каждом обращении UI.
+    boardWriteProfile: backend.boardWriteProfile,
 
     beginEdit: (path, buffer) => call(() => backend.beginEdit(path, buffer)),
     pendingConflict: (path) => call(() => backend.pendingConflict(path)),
@@ -140,34 +182,72 @@ export function webVaultClient(backend: WebBackend): VaultClient {
       WebBackend.embedsInText(notePath, noteText),
     embedsChanged: async (notePath, noteText, changed) =>
       WebBackend.embedsChanged(notePath, noteText, changed),
-    planEmbed: async (notePath, noteText, boardPath) =>
-      WebBackend.planEmbed(notePath, noteText, boardPath),
+    planEmbed: async (notePath, noteText, boardPath, overrides) =>
+      WebBackend.planEmbed(notePath, noteText, boardPath, overrides),
     embedMarkup: async (plan) => WebBackend.embedMarkup(plan),
+
+    // ── Шаблоны и сниппеты (фича 003) ─────────────────────────────────
+    //
+    // Через очередь идёт всё, что заимствует backend: и чтение библиотеки, и
+    // превью (оно держит кэш полем самого backend). Планирование вставки и
+    // разбор события — статические функции ядра, им очередь не нужна.
+    templateLibrary: () => call(() => backend.templateLibrary()),
+    readTemplate: (path) => call(() => backend.readTemplate(path)),
+    templatePreview: (template) => call(() => backend.templatePreview(template)),
+    checkTemplateName: (name) => call(() => backend.checkTemplateName(name)),
+    saveAsTemplate: (name, content, confirmOverwrite) =>
+      call(() => backend.saveAsTemplate(name, content, confirmOverwrite)),
+    planInsertion: async (textLength, point, content) =>
+      WebBackend.planInsertion(textLength, point, content),
+    templateEvent: async (event) => WebBackend.templateEvent(event),
+
+    // ── Настройки уровня vault и разделы (фича 006) ───────────────────
+    //
+    // Идут через `call`, а не как статические функции выше: они читают и
+    // пишут файл внутри vault, то есть заимствуют backend.
+    vaultSettings: () => call(() => backend.vaultSettings()),
+    setVaultSettings: (overrides) =>
+      call(() => backend.setVaultSettings(overrides)),
+    markSection: (folder) => call(() => backend.markSection(folder)),
+    unmarkSection: (folder) => call(() => backend.unmarkSection(folder)),
   };
 }
 
 /**
  * Компилятор предпросмотра для web (фича 005).
  *
- * Очередь сериализации ядра ему не нужна: `PreviewEngine` — отдельный объект
- * wasm-bindgen со своим заимствованием, и его методы синхронны, а значит
- * пересечься с циклом опроса vault физически не могут.
+ * **Очередь теперь обязательна.** Раньше её здесь не было: движок был отдельным
+ * объектом wasm-bindgen со своим заимствованием и до vault не дотягивался. С
+ * появлением фазы резолва (T014-T015) сборка читает связанные файлы через
+ * `WebBackend`, то есть держит его заимствование на всё время компиляции —
+ * параллельный тик опроса упал бы «recursive use of an object».
  *
  * Чего здесь пока нет: сборка идёт в потоке UI. Для короткого документа это
  * незаметно, но FR-007 в полном объёме закрывает только вынос в Web Worker
  * (задача T022) — до неё тяжёлый документ подморозит ввод.
  */
-export function webPreviewClient(engine: PreviewEngine): PreviewClient {
+function webPreviewClient(
+  engine: PreviewEngine,
+  backend: WebBackend,
+  call: <T>(op: () => T | Promise<T>) => Promise<T>,
+): PreviewClient {
   return {
-    compile: async (notePath, text, revision) =>
-      engine.compile(notePath, text, BigInt(revision)),
+    compile: (notePath, text, revision) =>
+      call(() => engine.compile(backend, notePath, text, BigInt(revision))),
+    // Фича 007: тот же движок, но недостающие шаблоны доустанавливаются.
+    // Идёт через ту же очередь: путь пишет в vault, и наложение на цикл
+    // опроса упало бы «recursive use of an object».
+    compileWithTemplates: (notePath, text, revision, overrides) =>
+      call(() =>
+        engine.compileWithTemplates(
+          backend,
+          notePath,
+          text,
+          BigInt(revision),
+          overrides,
+        ),
+      ),
   };
-}
-
-/** Создаёт компилятор предпросмотра, дождавшись инициализации wasm. */
-export async function createWebPreviewClient(): Promise<PreviewClient> {
-  await ensureWasmInitialized();
-  return webPreviewClient(new PreviewEngine());
 }
 
 /**
@@ -188,7 +268,8 @@ export async function openWebVault(): Promise<VaultOpenResult> {
 
     const handle = await picker();
     const backend = await WebBackend.fromHandle(handle.name, handle);
-    return { ok: true, client: webVaultClient(backend) };
+    const { vault, preview } = webClients(backend, new PreviewEngine());
+    return { ok: true, client: vault, preview };
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };
   }

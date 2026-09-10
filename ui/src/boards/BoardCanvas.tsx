@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import "@excalidraw/excalidraw/index.css";
 import type { BoardSaveState } from "../wasm-core/typsidian_core.js";
 
@@ -57,6 +57,23 @@ export function BoardCanvas({
     setIsMounted(true);
   }, []);
 
+  /**
+   * Обработчик обязан быть стабильным по ссылке.
+   *
+   * Движок обёрнут в `React.memo` со сравнением, которое пропускает только
+   * `initialData` и `UIOptions`, а остальные пропы сверяет поверхностно. Стрелка,
+   * созданная прямо в JSX, давала новую ссылку на каждый рендер — движок
+   * перерисовывался, звал `onChange`, тот менял состояние сохранения, рендер
+   * повторялся. Цикл замыкался без единого действия пользователя.
+   */
+  const handleEngineChange = useCallback<NonNullable<EngineProps["onChange"]>>(
+    (elements, appState, files) => {
+      if (!onChange || viewModeEnabled) return;
+      onChange(serializeScene(elements, appState, files));
+    },
+    [onChange, viewModeEnabled],
+  );
+
   // Разбор файла — забота движка, не наша: ядро содержимое не интерпретирует
   // (research.md §9). Здесь только распаковка в ту форму, которую движок ждёт
   // на входе, и отказ разбора превращается в отсутствие начальной сцены, а не
@@ -91,10 +108,7 @@ export function BoardCanvas({
               key={contentRevision}
               initialData={initialData}
               viewModeEnabled={viewModeEnabled}
-              onChange={(elements, appState, files) => {
-                if (!onChange || viewModeEnabled) return;
-                onChange(serializeScene(elements, appState, files));
-              }}
+              onChange={handleEngineChange}
             />
           </Suspense>
         ) : (

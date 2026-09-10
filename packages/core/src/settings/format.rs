@@ -1,30 +1,75 @@
-//! Чтение и **форматосохраняющая** запись файла настроек (research.md §2).
+//! Чтение и запись файла настроек — JSON (research.md §2, пересмотрено).
 //!
-//! Файл настроек — пользовательский артефакт: FR-036 приглашает его открыть,
-//! FR-013 делает правку руками равноправной правке через панель. Приложение
-//! перезаписывает файл при каждом изменении настройки, поэтому обычная
-//! serde-сериализация молча стирала бы комментарии и порядок ключей, которые
-//! пользователь написал сам.
+//! # Почему JSON, хотя research.md §2 выбирал TOML
 //!
-//! Отсюда разделение: чтение — `toml` + `serde` (простое и строгое), запись —
-//! `toml_edit` поверх **существующего текста**, правящий только затронутые
-//! значения.
+//! Исходное решение фичи 004 выбрало TOML ради **комментариев**: FR-036
+//! приглашает открыть файл, FR-013 делает правку руками равноправной правке
+//! через панель, а обычная serde-сериализация стирала бы то, что пользователь
+//! написал сам. Формат сменён по прямому решению владельца проекта; цена
+//! известна и здесь не замалчивается:
+//!
+//! - **комментариев в файле больше нет** — JSON их не поддерживает вовсе;
+//! - **порядок ключей задаёт приложение**, а не пользователь: он
+//!   алфавитный и детерминированный (см. ниже про `preserve_order`).
+//!
+//! Что при этом **сохранено** из прежних гарантий:
+//!
+//! - неизвестные ключи не являются ошибкой разбора и переживают запись
+//!   приложения — то, что пользователь дописал руками, не выбрасывается
+//!   (FR-013);
+//! - сломанный синтаксис называется ошибкой, а не подменяется молча
+//!   умолчаниями;
+//! - отсутствующие ключи берут значения по умолчанию.
+//!
+//! # Переноса с прежнего формата нет
+//!
+//! Тоже по прямому решению владельца проекта. `settings.toml`, написанный
+//! прежней версией, не читается: приложение поднимается на умолчаниях и создаёт
+//! `settings.json` рядом. Прежний файл при этом **не трогается** — ни удаления,
+//! ни переименования: перенести значения руками должно быть возможно.
+//!
+//! Это наблюдаемая потеря настроек при обновлении, и прятать её за словом
+//! «формат» нельзя. Названа она и в `004/research.md §2`, и в
+//! `004/quickstart.md` отдельным сценарием.
+//!
+//! # `preserve_order` у `serde_json` включать НЕЛЬЗЯ
+//!
+//! Соблазн очевиден: с этой feature `Map` сохранял бы порядок ключей
+//! пользователя. Но `serde_json` в проекте общий, а `boards::digest`
+//! рассчитывает ровно на обратное — что `Map` **сортирует** ключи, и именно это
+//! даёт канонический порядок при нормализации доски без отдельного кода
+//! (`packages/core/Cargo.toml`, фича 002 research.md §5, §9). Включение feature
+//! изменило бы хэш каждой доски в проекте и уронило бы эталонный
+//! `REFERENCE_DIGEST` в `boards_native.rs`/`boards_wasm.rs`.
+//!
+//! Поэтому порядок ключей здесь алфавитный — свойство `BTreeMap` под `Map`, а
+//! не выбор. Файл от записи к записи стабилен, и это главное.
 
 use super::{Settings, VaultRecord};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use toml_edit::{value, Array, DocumentMut, Item, Value};
 
 /// Ссылки на папки vault, пригодные к сериализации: `VaultId` → путь.
 ///
 /// Заполняется **только на native** (research.md §10): в вебе ссылка — это
-/// `FileSystemDirectoryHandle`, который в TOML не сериализуется, и её реестр
+/// `FileSystemDirectoryHandle`, который в JSON не сериализуется, и её реестр
 /// живёт в IndexedDB. Формат файла при этом один на оба таргета — веб просто
-/// не пишет эту таблицу. `BTreeMap` ради детерминированного порядка: иначе
-/// каждая запись переставляла бы строки в пользовательском файле.
+/// не пишет этот объект.
 pub type FolderRefs = BTreeMap<String, String>;
 
-/// Имя таблицы со ссылками на папки.
-const FOLDER_REFS_TABLE: &str = "folder_refs";
+/// Имя объекта со ссылками на папки.
+const FOLDER_REFS_KEY: &str = "folder_refs";
+
+/// Ключ с подсказкой о том, что файл можно править руками.
+///
+/// Заменяет комментарий-шапку, которого в JSON быть не может. Обычный ключ, а
+/// не магия: пользователь волен его удалить, приложение не станет его
+/// восстанавливать — [`render`] его не пишет, [`initial_document`] пишет один
+/// раз при создании файла.
+const HINT_KEY: &str = "_";
+
+/// Текст подсказки в новом файле.
+const HINT: &str = "Настройки Typsidian. Файл можно править вручную — приложение подхватит изменения без перезапуска. Эту строку можно удалить.";
 
 /// Не удалось разобрать файл настроек. Само по себе не ошибка приложения:
 /// вызывающая сторона поднимается на значениях по умолчанию (FR-013).
@@ -40,121 +85,131 @@ pub struct ParseError {
 /// будущей или прошлой версии, и отказ разбирать файл из-за лишней строки
 /// противоречил бы FR-013.
 pub fn parse(text: &str) -> Result<Settings, ParseError> {
-    toml::from_str::<Settings>(text).map_err(|error| ParseError {
+    // Пустой файл — это `Settings::default()`, а не синтаксическая ошибка:
+    // так ведёт себя и только что созданный файл нулевой длины после сбоя
+    // записи, и он не должен объявляться повреждённым.
+    if text.trim().is_empty() {
+        return Ok(Settings::default());
+    }
+    serde_json::from_str::<Settings>(text).map_err(|error| ParseError {
         message: error.to_string(),
     })
 }
 
-/// Записывает значения в существующий текст, сохраняя комментарии, порядок
-/// ключей и форматирование пользователя.
+/// Записывает значения поверх существующего текста.
 ///
 /// `previous` — прежнее содержимое файла (пустая строка, если файла ещё нет).
 /// Возвращает новый текст целиком: запись на диск атомарна и выполняется
 /// реализацией хранилища (research.md §5).
+///
+/// Ключи, которых приложение не знает, **переносятся как есть**: разбор идёт
+/// через `serde_json::Value`, а не через `Settings`, и всё лишнее остаётся в
+/// объекте нетронутым.
 pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> String {
-    let mut document = previous.parse::<DocumentMut>().unwrap_or_default();
+    let mut document = match serde_json::from_str::<Value>(previous) {
+        Ok(Value::Object(map)) => map,
+        // Не объект или не разбирается — начинаем с чистого: сохранять нечего.
+        _ => Map::new(),
+    };
 
-    set_value(&mut document, "theme", Value::from(theme_str(settings.theme)));
-    set_value(
-        &mut document,
-        "editor_font_size",
-        Value::from(i64::from(settings.editor_font_size)),
+    document.insert("theme".into(), Value::from(theme_str(settings.theme)));
+    document.insert(
+        "editor_font_size".into(),
+        Value::from(settings.editor_font_size),
     );
-    set_value(
-        &mut document,
-        "editor_mode_preference",
+    document.insert(
+        "editor_mode_preference".into(),
         Value::from(mode_str(settings.editor_mode_preference)),
     );
 
-    match &settings.current_vault {
-        Some(id) => set_value(&mut document, "current_vault", Value::from(id.as_str())),
-        None => {
-            document.remove("current_vault");
-        }
-    }
-    match &settings.editor_config_path {
-        Some(path) => set_value(
-            &mut document,
-            "editor_config_path",
-            Value::from(path.to_string_lossy().into_owned()),
-        ),
-        None => {
-            document.remove("editor_config_path");
-        }
-    }
+    set_or_remove(
+        &mut document,
+        "current_vault",
+        settings
+            .current_vault
+            .as_ref()
+            .map(|id| Value::from(id.as_str())),
+    );
+    set_or_remove(
+        &mut document,
+        "editor_config_path",
+        settings
+            .editor_config_path
+            .as_ref()
+            .map(|path| Value::from(path.to_string_lossy().into_owned())),
+    );
 
     write_known_vaults(&mut document, &settings.known_vaults);
     write_folder_refs(&mut document, folder_refs);
-    document.to_string()
+
+    // С отступами, а не одной строкой: файл предназначен для чтения глазами
+    // (FR-036), и `diff` по нему должен быть построчным.
+    let mut text = serde_json::to_string_pretty(&Value::Object(document))
+        .unwrap_or_else(|_| "{}".to_string());
+    text.push('\n');
+    text
 }
 
-/// Записывает значение, **сохраняя его декор** — отступы и комментарии вокруг.
-///
-/// Присваивание `document[key] = value(...)` подменяет весь `Item` вместе с
-/// декором, из-за чего комментарий в конце строки (`ключ = 18  # почему`)
-/// молча исчезал бы при первой же записи приложения. Именно это research.md §2
-/// и требует не допустить: файл — пользовательский артефакт.
-fn set_value(document: &mut DocumentMut, key: &str, new_value: Value) {
-    match document.get_mut(key).and_then(Item::as_value_mut) {
-        Some(existing) => {
-            let decor = existing.decor().clone();
-            *existing = new_value;
-            *existing.decor_mut() = decor;
+/// Пишет значение либо убирает ключ, если значения нет.
+fn set_or_remove(document: &mut Map<String, Value>, key: &str, new_value: Option<Value>) {
+    match new_value {
+        Some(value) => {
+            document.insert(key.to_string(), value);
         }
-        None => document[key] = value(new_value),
+        None => {
+            document.remove(key);
+        }
     }
 }
 
-/// Читает реестр ссылок на папки. Отсутствие таблицы — норма (веб её не
+/// Читает реестр ссылок на папки. Отсутствие объекта — норма (веб его не
 /// пишет), а не признак повреждённого файла.
 pub fn parse_folder_refs(text: &str) -> FolderRefs {
-    let Ok(document) = text.parse::<DocumentMut>() else {
+    let Ok(Value::Object(document)) = serde_json::from_str::<Value>(text) else {
         return FolderRefs::new();
     };
-    let Some(table) = document.get(FOLDER_REFS_TABLE).and_then(Item::as_table) else {
+    let Some(Value::Object(table)) = document.get(FOLDER_REFS_KEY) else {
         return FolderRefs::new();
     };
     table
         .iter()
-        .filter_map(|(key, item)| item.as_str().map(|path| (key.to_string(), path.to_string())))
+        .filter_map(|(key, item)| item.as_str().map(|path| (key.clone(), path.to_string())))
         .collect()
 }
 
-fn write_folder_refs(document: &mut DocumentMut, folder_refs: &FolderRefs) {
+fn write_folder_refs(document: &mut Map<String, Value>, folder_refs: &FolderRefs) {
     if folder_refs.is_empty() {
-        document.remove(FOLDER_REFS_TABLE);
+        document.remove(FOLDER_REFS_KEY);
         return;
     }
-    let mut table = toml_edit::Table::new();
+    let mut table = Map::new();
     for (id, path) in folder_refs {
-        table.insert(id, value(path.clone()));
+        table.insert(id.clone(), Value::from(path.clone()));
     }
-    // Таблица идёт последней и не смешивается со значениями настроек: это
-    // служебная часть файла, а не то, что пользователь правит руками.
-    table.set_implicit(false);
-    document[FOLDER_REFS_TABLE] = Item::Table(table);
+    document.insert(FOLDER_REFS_KEY.to_string(), Value::Object(table));
 }
 
-/// Список vault пишется массивом инлайн-таблиц, а не `[[known_vaults]]`:
-/// повторяющиеся секции `toml_edit` пришлось бы пересобирать целиком на каждое
-/// изменение, теряя ровно то форматирование, ради которого он и взят.
-fn write_known_vaults(document: &mut DocumentMut, records: &[VaultRecord]) {
+fn write_known_vaults(document: &mut Map<String, Value>, records: &[VaultRecord]) {
     if records.is_empty() {
         document.remove("known_vaults");
         return;
     }
 
-    let mut array = Array::new();
-    for record in records {
-        let mut entry = toml_edit::InlineTable::new();
-        entry.insert("id", Value::from(record.id.as_str()));
-        entry.insert("location", Value::from(record.location.clone()));
-        if let Some(label) = &record.label {
-            entry.insert("label", Value::from(label.clone()));
-        }
-        array.push(Value::InlineTable(entry));
-    }
-    document["known_vaults"] = Item::Value(Value::Array(array));
+    let entries: Vec<Value> = records
+        .iter()
+        .map(|record| {
+            let mut entry = Map::new();
+            entry.insert("id".into(), Value::from(record.id.as_str()));
+            entry.insert("location".into(), Value::from(record.location.clone()));
+            // Отсутствующая метка не пишется вовсе, а не пишется как `null`:
+            // `null` в файле выглядел бы значением, которого нет.
+            if let Some(label) = &record.label {
+                entry.insert("label".into(), Value::from(label.clone()));
+            }
+            Value::Object(entry)
+        })
+        .collect();
+    document.insert("known_vaults".to_string(), Value::Array(entries));
 }
 
 fn theme_str(theme: super::Theme) -> &'static str {
@@ -171,14 +226,12 @@ fn mode_str(preference: super::ModePreference) -> &'static str {
     }
 }
 
-/// Пустой документ настроек по умолчанию — с пояснением, что файл можно
-/// править руками. Комментарий пишется один раз, при создании файла, и дальше
-/// переживает все записи приложения наравне с пользовательскими.
+/// Новый файл настроек — со строкой-подсказкой вместо комментария-шапки.
 pub fn initial_document(settings: &Settings) -> String {
-    let header = "# Настройки Typsidian. Файл можно править вручную —\n\
-                  # приложение подхватит изменения без перезапуска\n\
-                  # и сохранит ваши комментарии при следующей записи.\n";
-    render(header, settings, &FolderRefs::new())
+    let mut seed = Map::new();
+    seed.insert(HINT_KEY.to_string(), Value::from(HINT));
+    let previous = serde_json::to_string(&Value::Object(seed)).unwrap_or_default();
+    render(&previous, settings, &FolderRefs::new())
 }
 
 #[cfg(test)]
@@ -206,63 +259,76 @@ mod tests {
     }
 
     #[test]
-    fn user_comments_and_key_order_survive_a_write() {
-        // Ключевая проверка research.md §2: обычная serde-сериализация здесь
-        // провалилась бы.
-        let authored = "\
-# мои настройки
-editor_font_size = 18  # нравится покрупнее
-
-# тема
-theme = \"dark\"
-";
-        let mut settings = parse(authored).unwrap();
-        settings.editor_font_size = 19;
-
-        let rewritten = render(authored, &settings, &FolderRefs::new());
-
-        assert!(rewritten.contains("# мои настройки"));
-        assert!(rewritten.contains("# нравится покрупнее"));
-        assert!(rewritten.contains("# тема"));
+    fn the_output_is_json_a_person_can_read() {
+        let text = render("", &Settings::default(), &FolderRefs::new());
+        assert!(text.starts_with('{'), "объект, а не массив и не строка");
+        assert!(text.ends_with("}\n"), "файл заканчивается переводом строки");
         assert!(
-            rewritten.find("editor_font_size").is_some()
-                && rewritten.find("editor_font_size") < rewritten.find("theme"),
-            "порядок ключей пользователя сохраняется"
+            text.lines().count() > 3,
+            "с отступами, а не одной строкой: файл читают глазами (FR-036)"
         );
-        assert!(rewritten.contains("19"));
-        assert_eq!(parse(&rewritten).unwrap().editor_font_size, 19);
-        assert_eq!(parse(&rewritten).unwrap().theme, Theme::Dark);
+        assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
     }
 
     #[test]
     fn unknown_keys_are_not_an_error() {
-        // FR-013: файл принадлежит пользователю; лишняя строка не должна
-        // делать его нечитаемым.
-        let text = "theme = \"dark\"\nmy_future_option = 42\n";
+        // FR-013: файл принадлежит пользователю; лишний ключ не должен делать
+        // его нечитаемым.
+        let text = r#"{"theme": "dark", "my_future_option": 42}"#;
         let parsed = parse(text).expect("неизвестный ключ не является ошибкой");
         assert_eq!(parsed.theme, Theme::Dark);
     }
 
     #[test]
     fn unknown_key_survives_application_write() {
-        let text = "theme = \"dark\"\nmy_future_option = 42\n";
+        // Единственная гарантия прежнего TOML-формата, которую JSON сохраняет
+        // полностью: приложение не выбрасывает то, чего не понимает.
+        let text = r#"{"theme": "dark", "my_future_option": 42}"#;
         let settings = parse(text).unwrap();
         let rewritten = render(text, &settings, &FolderRefs::new());
-        assert!(
-            rewritten.contains("my_future_option"),
-            "приложение не выбрасывает то, чего не понимает"
+        assert!(rewritten.contains("my_future_option"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&rewritten).unwrap()["my_future_option"],
+            Value::from(42)
         );
     }
 
     #[test]
+    fn the_key_order_is_stable_between_writes() {
+        // Порядок задаёт приложение (алфавитный, свойство `BTreeMap` под
+        // `serde_json::Map`), но он обязан быть ОДИНАКОВЫМ от записи к записи:
+        // иначе каждая правка одной настройки давала бы diff на весь файл.
+        let settings = Settings::default();
+        let first = render("", &settings, &FolderRefs::new());
+        let second = render(&first, &settings, &FolderRefs::new());
+        assert_eq!(first, second);
+
+        let keys: Vec<&str> = first
+            .lines()
+            .filter_map(|line| line.trim().split('"').nth(1))
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        assert_eq!(keys, sorted, "ключи идут в алфавитном порядке");
+    }
+
+    #[test]
     fn broken_syntax_is_reported_not_silently_defaulted() {
-        let error = parse("theme = = = \"dark\"").expect_err("сломанный TOML должен отклоняться");
+        let error = parse("{ theme: dark }").expect_err("сломанный JSON должен отклоняться");
         assert!(!error.message.is_empty());
     }
 
     #[test]
+    fn an_empty_file_is_defaults_not_a_failure() {
+        // Файл нулевой длины остаётся после оборванной записи; объявлять его
+        // повреждённым и уводить пользователя в «файл не читается» незачем.
+        assert_eq!(parse("").unwrap(), Settings::default());
+        assert_eq!(parse("   \n").unwrap(), Settings::default());
+    }
+
+    #[test]
     fn missing_keys_fall_back_to_defaults() {
-        let parsed = parse("theme = \"dark\"").unwrap();
+        let parsed = parse(r#"{"theme": "dark"}"#).unwrap();
         assert_eq!(parsed.theme, Theme::Dark);
         assert_eq!(parsed.editor_font_size, super::super::DEFAULT_FONT_SIZE);
         assert!(parsed.known_vaults.is_empty());
@@ -275,7 +341,7 @@ theme = \"dark\"
             editor_config_path: None,
             ..Settings::default()
         };
-        let previous = "current_vault = \"old\"\neditor_config_path = \"/tmp/x\"\n";
+        let previous = r#"{"current_vault": "old", "editor_config_path": "/tmp/x"}"#;
         let rewritten = render(previous, &settings, &FolderRefs::new());
         assert!(!rewritten.contains("current_vault"));
         assert!(!rewritten.contains("editor_config_path"));
@@ -302,17 +368,17 @@ theme = \"dark\"
     }
 
     #[test]
-    fn folder_refs_round_trip_and_absent_table_is_not_an_error() {
-        // Веб таблицу не пишет — её отсутствие нормальный случай, а не
+    fn folder_refs_round_trip_and_absent_object_is_not_an_error() {
+        // Веб реестр не пишет — его отсутствие нормальный случай, а не
         // повреждённый файл (research.md §10).
-        assert!(parse_folder_refs("theme = \"dark\"").is_empty());
+        assert!(parse_folder_refs(r#"{"theme": "dark"}"#).is_empty());
 
         let mut refs = FolderRefs::new();
         refs.insert("a".to_string(), "/work/notes".to_string());
         refs.insert("b".to_string(), "/personal/notes".to_string());
         let text = render("", &Settings::default(), &refs);
         assert_eq!(parse_folder_refs(&text), refs);
-        // Значения настроек от появления служебной таблицы не меняются.
+        // Значения настроек от появления служебного объекта не меняются.
         assert_eq!(parse(&text).unwrap(), Settings::default());
     }
 

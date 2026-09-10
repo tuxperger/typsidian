@@ -40,7 +40,12 @@ export function InsertBoardDialog({
   if (!isOpen) return null;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Вставить доску в заметку">
+    <div
+      className="ts-dialog ts-dialog--choice"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Вставить доску в заметку"
+    >
       {error !== null && <p role="alert">{error}</p>}
 
       {boards.length === 0 ? (

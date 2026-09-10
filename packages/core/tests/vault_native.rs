@@ -206,15 +206,14 @@ async fn create_rejects_invalid_filesystem_names_before_touching_disk() {
         );
     }
 
-    // `open()` сам создаёт служебный файл персистентного кэша
-    // (`.typsidian-cache.sqlite`) в корне vault — исключаем его из проверки,
-    // важно лишь, что ни одна из отклонённых операций create() ничего не
-    // добавила на диск.
+    // `open()` сам заводит служебное место `.typsidian/` (фича 006, FR-020) —
+    // исключаем его из проверки, важно лишь, что ни одна из отклонённых
+    // операций create() ничего не добавила на диск.
     let entries: Vec<_> = fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|name| !name.starts_with(".typsidian-cache"))
+        .filter(|name| name != ".typsidian")
         .collect();
     assert!(
         entries.is_empty(),

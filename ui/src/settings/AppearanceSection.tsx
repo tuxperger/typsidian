@@ -15,6 +15,16 @@ export interface AppearanceSectionProps {
   onChangeFontSize: (size: number) => void;
   /** Причина отказа из ядра (FR-016) — UI её показывает, но не придумывает. */
   rejectionMessage: string | null;
+
+  /**
+   * Можно ли объявить текущие значения умолчаниями устройства (фича 006,
+   * FR-031). `false` — vault не открыт: перекрывать нечего, и правка и так
+   * уходит прямо в устройство.
+   */
+  canMakeDefault?: boolean;
+  onMakeDefault?: () => void;
+  /** Итог последнего такого действия, словами ядра. */
+  defaultsMessage?: string | null;
 }
 
 /**
@@ -30,6 +40,9 @@ export function AppearanceSection({
   settings,
   onChangeTheme,
   onChangeFontSize,
+  canMakeDefault = false,
+  onMakeDefault,
+  defaultsMessage = null,
   rejectionMessage,
 }: AppearanceSectionProps): React.JSX.Element {
   const [draft, setDraft] = useState(String(settings.editor_font_size ?? ""));
@@ -84,6 +97,21 @@ export function AppearanceSection({
       </label>
 
       {rejectionMessage && <p role="alert">{rejectionMessage}</p>}
+
+      {canMakeDefault && onMakeDefault && (
+        <>
+          {/* FR-029: правка при открытом vault уходит в сам vault. Значит
+              умолчания устройства меняются только этим явным действием — без
+              него они не менялись бы никогда. */}
+          <p>
+            Эти значения принадлежат открытому vault и переезжают вместе с ним.
+          </p>
+          <button type="button" onClick={onMakeDefault}>
+            Сделать значениями по умолчанию
+          </button>
+          {defaultsMessage && <p role="status">{defaultsMessage}</p>}
+        </>
+      )}
     </section>
   );
 }

@@ -12,6 +12,19 @@ import type { VaultClient } from "../vault-client.js";
 // определения «изменилось ли» здесь нет.
 
 export interface VaultEventHandlers {
+  /**
+   * Событие целиком, до разбора по вариантам.
+   *
+   * Существует для потребителей, которым нужно **спросить у ядра**, что это
+   * событие значит, а не разбирать его самим: галерея заготовок узнаёт у
+   * `templateEvent`, затронута ли библиотека, потому что правило «что считается
+   * заготовкой» живёт в ядре (фича 003, FR-003).
+   *
+   * Не заменяет разбор ниже и не отменяет его: вызывается **дополнительно**,
+   * первым. Класть сюда логику, для которой есть именованный обработчик, —
+   * значит завести второй разбор того же события.
+   */
+  onAnyEvent?: (event: VaultEvent) => void;
   onNoteCreated?: (path: string) => void;
   onNoteUpdated?: (path: string) => void;
   onNoteRenamed?: (fromPath: string, toPath: string) => void;
@@ -27,6 +40,14 @@ export interface VaultEventHandlers {
   onAccessStateChanged?: (accessState: AccessState) => void;
   /** FR-030: обновить индикацию битых ссылок для затронутых заметок. */
   onLinksInvalidated?: (affectedPaths: string[]) => void;
+  /**
+   * Фича 006, FR-024: служебная папка исчезла вместе с настройками уровня
+   * vault и локальными шаблонами. Ядро взводит это только для папки, которую
+   * на этом устройстве уже открывали.
+   */
+  onVaultSettingsLost?: () => void;
+  /** Фича 006, FR-025: настройки уровня vault менять некуда — vault на чтение. */
+  onVaultSettingsReadOnly?: () => void;
 }
 
 /**
@@ -38,6 +59,7 @@ export function applyVaultEvent(
   event: VaultEvent,
   handlers: VaultEventHandlers,
 ): void {
+  handlers.onAnyEvent?.(event);
   switch (event.type) {
     case "NoteCreated":
       handlers.onNoteCreated?.(event.path);
@@ -68,6 +90,12 @@ export function applyVaultEvent(
       return;
     case "LinksInvalidated":
       handlers.onLinksInvalidated?.(event.affected_paths);
+      return;
+    case "VaultSettingsLost":
+      handlers.onVaultSettingsLost?.();
+      return;
+    case "VaultSettingsReadOnly":
+      handlers.onVaultSettingsReadOnly?.();
       return;
     default: {
       const exhaustive: never = event;

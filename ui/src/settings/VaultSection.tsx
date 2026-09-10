@@ -1,5 +1,31 @@
 import { useState } from "react";
-import type { VaultRecord } from "../wasm-core/typsidian_core.js";
+import type {
+  AssetsPlacement,
+  VaultRecord,
+} from "../wasm-core/typsidian_core.js";
+
+/** Варианты расположения файлов вставок (фича 006, FR-001). */
+const PLACEMENTS: ReadonlyArray<{
+  value: AssetsPlacement;
+  title: string;
+  hint: string;
+}> = [
+  {
+    value: "next-to-note",
+    title: "Рядом с заметкой",
+    hint: "Одна общая папка assets в той же папке, где лежит заметка.",
+  },
+  {
+    value: "vault-root",
+    title: "В корне vault",
+    hint: "Одна папка assets на весь vault, рядом с заметками ничего не создаётся.",
+  },
+  {
+    value: "section-root",
+    title: "В корне раздела",
+    hint: "В ближайшей папке-предке, помеченной как раздел. Если помеченных нет — в корне vault.",
+  },
+];
 
 export interface VaultSectionProps {
   knownVaults: VaultRecord[];
@@ -11,6 +37,26 @@ export interface VaultSectionProps {
   onForget: (id: string) => void | Promise<void>;
   /** Причина отказа последней операции — показывается, но не придумывается. */
   errorMessage?: string | null;
+
+  /**
+   * Текущее расположение файлов вставленных досок (фича 006, FR-001).
+   *
+   * `null` — vault не открыт: выбирать нечего, потому что настройка
+   * принадлежит vault, а не устройству (FR-002).
+   */
+  assetsPlacement?: AssetsPlacement | null;
+  onChangeAssetsPlacement?: (placement: AssetsPlacement) => void | Promise<void>;
+  /** Помеченные разделы — показываются, чтобы выбор «в корне раздела» был осмыслен. */
+  sections?: string[];
+
+  /**
+   * Ходить ли в сеть за недостающими внешними шаблонами (фича 007, FR-009).
+   *
+   * `null` — vault не открыт: настройка принадлежит папке заметок, и менять
+   * нечего.
+   */
+  autoDownloadTemplates?: boolean | null;
+  onChangeAutoDownloadTemplates?: (enabled: boolean) => void | Promise<void>;
 }
 
 /**
@@ -34,6 +80,11 @@ export function VaultSection({
   onSetLabel,
   onForget,
   errorMessage = null,
+  assetsPlacement = null,
+  onChangeAssetsPlacement,
+  sections = [],
+  autoDownloadTemplates = null,
+  onChangeAutoDownloadTemplates,
 }: VaultSectionProps): React.JSX.Element {
   const [labelDraft, setLabelDraft] = useState<{ id: string; value: string } | null>(null);
   const current = knownVaults.find((record) => record.id === currentVaultId) ?? null;
@@ -127,6 +178,72 @@ export function VaultSection({
 
       {knownVaults.length === 0 && (
         <p role="status">Пока ни одной папки не добавлено.</p>
+      )}
+
+      {assetsPlacement !== null && onChangeAssetsPlacement && (
+        <fieldset className="ts-assets-placement">
+          <legend>Файлы вставленных досок</legend>
+          <p className="ts-assets-placement__intro">
+            Где создаётся папка <code>assets</code>. Настройка принадлежит этому
+            vault и переезжает вместе с ним. Уже созданные файлы смена варианта
+            не двигает.
+          </p>
+
+          {PLACEMENTS.map((option) => (
+            <label key={option.value} className="ts-assets-placement__option">
+              <input
+                type="radio"
+                name="assets-placement"
+                value={option.value}
+                checked={assetsPlacement === option.value}
+                onChange={() => void onChangeAssetsPlacement(option.value)}
+              />
+              <span className="ts-assets-placement__title">{option.title}</span>
+              <span className="ts-assets-placement__hint">{option.hint}</span>
+            </label>
+          ))}
+
+          {assetsPlacement === "section-root" && (
+            <p role="status" className="ts-assets-placement__sections">
+              {sections.length > 0 ? (
+                <>Помеченные разделы: {sections.join(", ")}.</>
+              ) : (
+                <>
+                  Помеченных разделов пока нет — вставки идут в корень vault.
+                  Пометить папку разделом можно из дерева.
+                </>
+              )}
+            </p>
+          )}
+        </fieldset>
+      )}
+
+      {autoDownloadTemplates !== null && onChangeAutoDownloadTemplates && (
+        <fieldset className="ts-assets-placement">
+          <legend>Внешние шаблоны Typst</legend>
+          <p className="ts-assets-placement__intro">
+            Шаблон, подключённый в заметке через <code>/…</code>, может
+            загружаться автоматически, если его нет на устройстве. Шаблон — это
+            код, исполняемый при сборке заметки: имя, версия и адрес источника
+            каждой загрузки называются в диагностике.
+          </p>
+          <label className="ts-assets-placement__option">
+            <input
+              type="checkbox"
+              checked={autoDownloadTemplates}
+              onChange={(event) =>
+                void onChangeAutoDownloadTemplates(event.target.checked)
+              }
+            />
+            <span className="ts-assets-placement__title">
+              Загружать недостающие шаблоны
+            </span>
+            <span className="ts-assets-placement__hint">
+              Выключено — приложение в сеть за шаблонами не ходит, а
+              отсутствующий шаблон называется по имени и версии.
+            </span>
+          </label>
+        </fieldset>
       )}
     </section>
   );

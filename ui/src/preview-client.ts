@@ -1,4 +1,7 @@
-import type { CompiledDocument } from "./wasm-core/typsidian_core.js";
+import type {
+  CompiledDocument,
+  VaultOverrides,
+} from "./wasm-core/typsidian_core.js";
 
 // Поверхность предпросмотра, которой пользуется общий UI (фича 005).
 //
@@ -18,5 +21,28 @@ export interface PreviewClient {
     notePath: string,
     text: string,
     revision: number,
+  ): Promise<CompiledDocument>;
+
+  /**
+   * Собрать заметку, доустанавливая недостающие внешние шаблоны (фича 007,
+   * FR-001).
+   *
+   * Отдельный метод, а не флаг у `compile`: этот путь может обращаться в сеть и
+   * писать в vault, и разница обязана быть видна на границе, а не прятаться в
+   * параметре. Заметка без подключений проходит здесь так же, как через
+   * `compile`, и в сеть не заходит (FR-008).
+   *
+   * `overrides` — настройки уровня vault: включена ли автозагрузка и какие
+   * адреса указаны для конкретных шаблонов. Решение «идти ли в сеть» принимает
+   * ядро по этим значениям, а не интерфейс (принцип I).
+   *
+   * `undefined` в реализации означает, что этот клиент загрузку не
+   * поддерживает; вызывающая сторона тогда пользуется `compile`.
+   */
+  compileWithTemplates?(
+    notePath: string,
+    text: string,
+    revision: number,
+    overrides: VaultOverrides,
   ): Promise<CompiledDocument>;
 }

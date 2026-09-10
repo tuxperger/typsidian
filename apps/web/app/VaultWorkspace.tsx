@@ -1,12 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
-import type { PreviewClient } from "@typsidian/ui/preview-client.js";
-import {
-  createWebPreviewClient,
-  openWebVault,
-} from "@typsidian/ui/vault-client-web.js";
+import { openWebVault } from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 
 /**
@@ -17,29 +12,20 @@ import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
  * `WebBackend` поверх File System Access API, настройки поверх `WebStore`
  * (OPFS) и компилятор предпросмотра как wasm в том же процессе. На рабочем
  * столе тот же `Workspace` получает клиентов поверх команд Tauri (001 T112).
+ *
+ * Компилятор предпросмотра здесь больше не создаётся отдельно: с появлением
+ * фазы резолва (005 T014-T015) сборка читает связанные файлы через тот же
+ * `WebBackend` и обязана делить с ним очередь вызовов ядра, поэтому оба
+ * клиента приходят из `openWebVault` уже связанными.
  */
 export function VaultWorkspace(): React.JSX.Element {
-  const [preview, setPreview] = useState<PreviewClient | null>(null);
-
-  // Компилятор создаётся лениво и после монтирования: модуль тяжёлый, и
-  // держать его загрузку на пути первого рендера незачем — пока его нет,
-  // колонка предпросмотра честно говорит, что собирается (005/research.md §6).
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const client = await createWebPreviewClient();
-      if (!cancelled) setPreview(client);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <Workspace
       openVaultFolder={openWebVault}
-      settings={<SettingsPanel />}
-      preview={preview}
+      // Клиент открытого vault нужен разделу «Vault»: политика расположения
+      // файлов вставок и помеченные разделы живут внутри vault, а не в
+      // хранилище устройства (фича 006, FR-002).
+      settings={(client) => <SettingsPanel vaultClient={client} />}
     />
   );
 }

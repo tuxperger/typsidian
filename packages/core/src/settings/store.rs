@@ -98,7 +98,7 @@ pub trait SettingsStore: Sized {
 }
 
 /// Имя файла настроек, общее для обоих таргетов.
-pub const SETTINGS_FILE_NAME: &str = "settings.toml";
+pub const SETTINGS_FILE_NAME: &str = "settings.json";
 
 /// Как называется отложенный испорченный файл (research.md §6). Метка — UTC,
 /// чтобы имена не зависели от часового пояса и сортировались лексикографически.
@@ -118,10 +118,10 @@ mod tests {
 
     #[test]
     fn invalid_file_sits_next_to_the_original_and_keeps_it() {
-        let path = invalid_file_path(Path::new("/home/user/.config/typsidian/settings.toml"), 42);
+        let path = invalid_file_path(Path::new("/home/user/.config/typsidian/settings.json"), 42);
         assert_eq!(
             path,
-            Path::new("/home/user/.config/typsidian/settings.toml.invalid-42")
+            Path::new("/home/user/.config/typsidian/settings.json.invalid-42")
         );
         assert_ne!(path.file_name(), Some(std::ffi::OsStr::new(SETTINGS_FILE_NAME)));
     }

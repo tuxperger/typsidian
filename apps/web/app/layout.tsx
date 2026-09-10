@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { IBM_Plex_Mono, IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
 import "@typsidian/ui/styles/app.css";
 
 /**
@@ -26,6 +26,23 @@ const plexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+/**
+ * Source Serif 4 — только для текста «бумаги» в предпросмотре (handoff §
+ * Typography: «Preview pane body copy»). Тем же путём, что и Plex: макет тянет
+ * его ссылкой на Google Fonts, но FR-042 это запрещает.
+ *
+ * Начертание не указано намеренно: это переменный шрифт, и документация Next
+ * (`01-getting-started/13-fonts.md`) рекомендует не фиксировать `weight` для
+ * таких — иначе вместо одного файла со всей осью придёт набор статических.
+ * Курсив нужен для подписей к рисункам и формул, поэтому он в `style`.
+ */
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin", "cyrillic"],
+  style: ["normal", "italic"],
+  variable: "--font-source-serif",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "Typsidian",
   description: "Локальный редактор заметок на Typst",
@@ -37,7 +54,10 @@ export default function RootLayout({
   children: ReactNode;
 }): React.JSX.Element {
   return (
-    <html lang="ru" className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html
+      lang="ru"
+      className={`${plexSans.variable} ${plexMono.variable} ${sourceSerif.variable}`}
+    >
       <body>{children}</body>
     </html>
   );
