@@ -368,6 +368,47 @@ async fn forgetting_a_vault_leaves_the_folder_and_its_notes_untouched() {
 }
 
 #[tokio::test]
+async fn the_last_opened_vault_survives_a_restart_and_resolves_to_the_same_folder() {
+    // FR-007 фичи 001: «запоминать ранее открытые vault и предлагать открыть
+    // последний при следующем запуске». Проверяется целиком тот путь, которым
+    // это делают оболочки: запись о папке, отметка её текущей, перезапуск
+    // (новое открытие хранилища) и разрешение ссылки обратно в папку.
+    let dir = TempDir::new().unwrap();
+    let vault_dir = TempDir::new().unwrap();
+
+    let remembered = {
+        let mut store = store_in(&dir).await;
+        let id = store
+            .add(vault_dir.path().to_path_buf(), "notes".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .apply(
+                    &SettingsChange::current_vault(id.clone()),
+                    &ApplyContext::unobstructed()
+                )
+                .await,
+            ApplyPlan::Applied
+        );
+        id
+    };
+
+    // Перезапуск приложения: то же хранилище открывается заново.
+    let store = store_in(&dir).await;
+    assert_eq!(
+        store.settings().current_vault.as_ref(),
+        Some(&remembered),
+        "последний открытый vault обязан пережить перезапуск"
+    );
+    assert_eq!(
+        store.resolve(&remembered).await,
+        Resolved::Resolved(fs::canonicalize(vault_dir.path()).unwrap()),
+        "ссылка обязана разрешиться в ту же самую папку"
+    );
+}
+
+#[tokio::test]
 async fn no_service_files_appear_inside_the_vault_folder() {
     // FR-020, принцип VI: тождество устанавливается средствами платформы, а не
     // меткой-файлом внутри vault.

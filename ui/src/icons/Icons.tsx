@@ -36,6 +36,10 @@ export type IconName =
   | "tag"
   | "text"
   | "page"
+  | "layout"
+  | "shape"
+  | "braces"
+  | "data"
   | "tab";
 
 /**
@@ -339,6 +343,46 @@ export function IconSprite(): React.JSX.Element {
             strokeLinecap="round"
           />
           <rect x="5" y="17" width="14" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+        </symbol>
+
+        <symbol id="i-layout" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+          <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="2" />
+        </symbol>
+
+        <symbol id="i-shape" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="12" height="12" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="15" cy="15" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+        </symbol>
+
+        <symbol id="i-braces" viewBox="0 0 24 24">
+          <path
+            d="M9 4H8a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h1"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M15 4h1a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-1"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </symbol>
+
+        <symbol id="i-data" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path
+            d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" fill="none" stroke="currentColor" strokeWidth="2" />
         </symbol>
 
         <symbol id="i-tab" viewBox="0 0 24 24">

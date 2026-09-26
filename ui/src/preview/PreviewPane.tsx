@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,6 +17,8 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
 import { PreviewPage } from "./PreviewPage.js";
+import { describeInstallError } from "./describeInstallError.js";
+import { copyText, useContextMenu } from "../menu/ContextMenu.js";
 
 // Принцип I: панель ничего не решает про документ. «Собрался или нет»,
 // «где ошибка», «какие страницы» — всё приходит из ядра готовым. Здесь только
@@ -37,10 +40,12 @@ export const PREVIEW_DEBOUNCE_MS = 250;
  * дороги обязаны попадать в одни и те же значения — иначе «100 %» перестаёт
  * быть достижимой точкой возврата.
  *
- * `1` — базовая раскладка из макета: лист занимает ширину колонки, но не шире
- * 520px. Проценты отсчитываются от неё, а не от физического размера страницы:
- * настоящий сантиметр на экране требовал бы плотности точек монитора, которой
- * браузер не сообщает.
+ * `1` — базовая раскладка: лист занимает **всю** ширину колонки. Раньше он был
+ * ограничен 520px из макета, и расширение колонки уходило в пустое поле справа
+ * — при 1:1 в широком окне лист занимал меньше половины отведённого ему места.
+ * Проценты отсчитываются от этой раскладки, а не от физического размера
+ * страницы: настоящий сантиметр на экране требовал бы плотности точек монитора,
+ * которой браузер не сообщает.
  */
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5, 3];
 const ZOOM_DEFAULT = ZOOM_STEPS.indexOf(1);
@@ -112,6 +117,12 @@ export function PreviewPane({
   // он живёт здесь и переживает переключение заметок, как и в просмотрщиках.
   const [zoomIndex, setZoomIndex] = useState(ZOOM_DEFAULT);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  // Ширина, отведённая листу. Меряется, а не считается в CSS: её знает только
+  // раскладка — колонка минус линейка, минус зазор, минус полоса прокрутки, — а
+  // вертикальной линейке та же величина нужна в пикселях, потому что её деления
+  // абсолютные. Одно измерение на обоих и есть то, что держит их вместе.
+  const stackRef = useRef<HTMLDivElement | null>(null);
+  const [pageWidth, setPageWidth] = useState<number | null>(null);
   // Колбэк в ref: новая ссылка на него не должна перезапускать сборку.
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -119,6 +130,44 @@ export function PreviewPane({
   // более новый (FR-009). Ядро помечает результат этой же версией.
   const revisionRef = useRef(0);
   const shownRevisionRef = useRef(-1);
+  // Явная загрузка шаблона (007 FR-010). Счётчик — чтобы после установки
+  // пересобрать заметку сразу, не дожидаясь правки текста.
+  const [installRound, setInstallRound] = useState(0);
+  // Пересборка из контекстного меню — тот же приём, что после установки шаблона.
+  const [menuRound, setMenuRound] = useState(0);
+  const contextMenu = useContextMenu();
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installNote, setInstallNote] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  // Сообщение об установке относится к заметке, из которой её попросили.
+  useEffect(() => {
+    setInstallNote(null);
+  }, [notePath]);
+
+  const install = useCallback(
+    async (spec: string) => {
+      if (!client?.installTemplate || !vaultOverrides) return;
+      setInstalling(spec);
+      try {
+        const report = await client.installTemplate(spec, vaultOverrides);
+        // FR-006: что и откуда — и при явной загрузке тоже.
+        setInstallNote({
+          ok: true,
+          text: `Шаблон ${report.spec} загружен с ${report.url} (${report.file_count} файлов, отпечаток ${report.fingerprint.slice(0, 12)}).`,
+        });
+        setInstallRound((round) => round + 1);
+      } catch (cause) {
+        setInstallNote({ ok: false, text: describeInstallError(cause) });
+      } finally {
+        setInstalling(null);
+      }
+    },
+    [client, vaultOverrides],
+  );
+  const canInstall = Boolean(client?.installTemplate && vaultOverrides);
 
   useEffect(() => {
     if (!client || notePath === null) {
@@ -180,7 +229,7 @@ export function PreviewPane({
     }, PREVIEW_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [client, notePath, text, rebuildToken, vaultOverrides]);
+  }, [client, notePath, text, rebuildToken, vaultOverrides, installRound, menuRound]);
 
   // Шапка узнаёт о сборке отсюда, а не считает её сама.
   useEffect(() => {
@@ -203,6 +252,38 @@ export function PreviewPane({
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
   }, []);
+
+  // Дробная часть отбрасывается: измерения приходят субпиксельными, и без
+  // округления состояние менялось бы на сотых долях пикселя. Ширина листа на
+  // раскладку не влияет (лист шире колонки просто выезжает за неё, а полоса
+  // прокрутки зарезервирована постоянно), поэтому обратной связи «шире лист →
+  // уже колонка → уже лист» здесь нет, а при неизменной ширине состояние не
+  // двигается вовсе — и цикла отрисовок отсюда не берётся.
+  const measurePage = useCallback(() => {
+    const node = stackRef.current;
+    if (node === null) return;
+    setPageWidth((previous) => {
+      const next = Math.floor(node.clientWidth);
+      return next > 0 && next !== previous ? next : previous;
+    });
+  }, []);
+
+  // Слежение за шириной колонки. Один `ResizeObserver` на всё: он сообщает о
+  // любом изменении размера — и о том, что сделал React (границу колонок
+  // тянут, дерево файлов прячут), и о том, что сделал браузер (размер окна,
+  // масштаб страницы), — и первый вызов приходит сразу при `observe`.
+  //
+  // Замера после каждой отрисовки здесь быть не должно, хотя соблазн есть:
+  // эффект без списка зависимостей, зовущий `setState`, React считает
+  // бесконечным обновлением и рвёт отрисовку с «Maximum update depth exceeded»
+  // — бездействие при неизменной ширине его не спасает.
+  useEffect(() => {
+    const node = stackRef.current;
+    if (node === null || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measurePage);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [measurePage]);
 
   const errors = useMemo(
     () => state.diagnostics.filter((d) => d.severity === "Error"),
@@ -269,7 +350,60 @@ export function PreviewPane({
       <div
         className="ts-preview"
         ref={previewRef}
-        style={{ "--ts-preview-zoom": zoom } as CSSProperties}
+        onContextMenu={(event) => {
+          // Выделенный текст берётся из текстового слоя страницы (FR-031): он
+          // настоящий, поэтому копируется то же, что видно выделенным.
+          const selection = window.getSelection();
+          const node = previewRef.current;
+          const selected =
+            selection !== null &&
+            node !== null &&
+            !selection.isCollapsed &&
+            node.contains(selection.anchorNode)
+              ? selection.toString()
+              : "";
+          contextMenu.open(event, [
+            {
+              label: "Копировать",
+              disabled: selected === "",
+              run: async () => {
+                const failure = await copyText(selected);
+                if (failure) contextMenu.notify(failure);
+              },
+            },
+            { kind: "separator" },
+            {
+              label: "Пересобрать",
+              disabled: !client || notePath === null,
+              run: () => setMenuRound((round) => round + 1),
+            },
+            { kind: "separator" },
+            {
+              label: "Увеличить",
+              disabled: zoomIndex === ZOOM_STEPS.length - 1,
+              run: () => shiftZoom(setZoomIndex, 1),
+            },
+            {
+              label: "Уменьшить",
+              disabled: zoomIndex === 0,
+              run: () => shiftZoom(setZoomIndex, -1),
+            },
+            {
+              label: "Масштаб 100 %",
+              disabled: zoomIndex === ZOOM_DEFAULT,
+              run: () => setZoomIndex(ZOOM_DEFAULT),
+            },
+          ]);
+        }}
+        style={
+          {
+            "--ts-preview-zoom": zoom,
+            // До первого измерения (и на сервере, где мерить нечего) остаётся
+            // запасная ширина из стилей: лист обязан быть осмысленным уже на
+            // первом кадре.
+            ...(pageWidth === null ? {} : { "--ts-page-w": `${pageWidth}px` }),
+          } as CSSProperties
+        }
       >
         {/* Линейки в сантиметрах — мотив макета (handoff § Ruler motif):
             признак того, что перед пользователем постраничный документ, а не
@@ -294,7 +428,7 @@ export function PreviewPane({
             <span style={{ top: "calc(var(--ts-ruler-10cm) * 2)" }}>20</span>
           </div>
 
-          <div className="ts-preview__stack">
+          <div className="ts-preview__stack" ref={stackRef}>
             {/* Ошибки — на месте предпросмотра, а не строчкой внизу: собранного
                 вида всё равно нет или он устарел, и главное на панели сейчас
                 они. Список остаётся полным и в порядке появления (FR-016). */}
@@ -307,7 +441,12 @@ export function PreviewPane({
                 </p>
                 <ul className="ts-failure__list">
                   {errors.map((d, i) => (
-                    <DiagnosticItem key={`e${i}`} diagnostic={d} />
+                    <DiagnosticItem
+                      key={`e${i}`}
+                      diagnostic={d}
+                      onInstall={canInstall ? install : undefined}
+                      installing={installing}
+                    />
                   ))}
                 </ul>
               </div>
@@ -328,6 +467,15 @@ export function PreviewPane({
           </div>
         </div>
       </div>
+
+      {installNote && (
+        <p
+          className="ts-diagnostics ts-diagnostics__install"
+          role={installNote.ok ? "status" : "alert"}
+        >
+          {installNote.text}
+        </p>
+      )}
 
       {/* Предупреждения сборку не ломают (FR-018) и остаются внизу: поднимать
           их на место документа значило бы приравнять к ошибкам. */}
@@ -359,9 +507,20 @@ function shiftZoom(
 
 function DiagnosticItem({
   diagnostic,
+  onInstall,
+  installing = null,
 }: {
   diagnostic: Diagnostic;
+  /**
+   * Явная загрузка шаблона, названного замечанием (007 FR-010). Кнопка есть
+   * только у замечаний, к которым ядро приложило спецификацию шаблона, — какой
+   * шаблон отсутствует, решает ядро, а не разбор текста здесь.
+   */
+  onInstall?: ((spec: string) => void | Promise<void>) | undefined;
+  /** Какой шаблон ставится прямо сейчас. */
+  installing?: string | null;
 }): React.JSX.Element {
+  const template = diagnostic.template;
   const place = diagnostic.location;
   return (
     <li
@@ -377,6 +536,19 @@ function DiagnosticItem({
           {" "}
           — {place.path}:{place.line}:{place.column}
         </span>
+      )}
+      {template && onInstall && (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="ts-btn"
+            disabled={installing !== null}
+            onClick={() => void onInstall(template)}
+          >
+            {installing === template ? "Загружается…" : "Загрузить шаблон"}
+          </button>
+        </>
       )}
     </li>
   );

@@ -415,3 +415,78 @@ fn runs_follow_reading_order_across_columns_and_pages() {
 fn generated_content_reaches_the_layer() {
     textlayer::generated_content_reaches_the_layer();
 }
+
+// ── Сборка поверх настоящего NativeBackend (фича 005, T042) ─────────────────
+//
+// Выше предпросмотр проверяется на `MemoryVault`, и это правильно: там
+// проверяется сама сборка, а подставной бэкенд делает её тесты быстрыми и
+// независимыми от диска. Но нативные оболочки (`packages/shell`) передают в
+// `compile_note_resolved` **`NativeBackend`**, и именно эта пара до сих пор не
+// была связана ни одним тестом. Промах здесь выглядел бы как «на web документы
+// собираются, на рабочем столе нет» — то есть как раз то, чем T042 и была.
+
+use tempfile::TempDir;
+use typsidian_core::vault::backend::VaultBackend as _;
+use typsidian_core::vault::native::NativeBackend;
+
+/// Готовит папку с файлами и открывает её как vault.
+async fn native_vault(files: &[(&str, &str)]) -> (TempDir, NativeBackend) {
+    let dir = TempDir::new().unwrap();
+    for (name, content) in files {
+        std::fs::write(dir.path().join(name), content).unwrap();
+    }
+    let backend = NativeBackend::open(dir.path()).await.unwrap();
+    // TempDir возвращается вместе с бэкендом: уронив его, тест удалил бы папку
+    // из-под открытого vault.
+    (dir, backend)
+}
+
+#[tokio::test]
+async fn note_on_native_backend_compiles_into_pages() {
+    let (_dir, backend) = native_vault(&[(MAIN, "= Заголовок\n\nОбычный абзац.\n")]).await;
+
+    let doc = compile_note_resolved(
+        &backend,
+        &PackageCache::new(),
+        MAIN,
+        "= Заголовок\n\nОбычный абзац.\n",
+        1,
+        FontSet::builtin(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "заметка обязана собраться поверх NativeBackend: {:?}",
+        doc.diagnostics
+    );
+    assert!(!doc.pages.is_empty(), "у собранного документа нет страниц");
+}
+
+#[tokio::test]
+async fn dependency_is_read_through_the_native_backend() {
+    // Файл существует только на диске: если бы фаза резолва до него не дошла,
+    // сборка отчиталась бы о ненайденной картинке, а не о странице.
+    let (_dir, backend) = native_vault(&[(MAIN, ""), ("схема.svg", SVG)]).await;
+
+    let doc = compile_note_resolved(
+        &backend,
+        &PackageCache::new(),
+        MAIN,
+        "#image(\"схема.svg\", width: 2cm)\n",
+        7,
+        FontSet::builtin(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "картинка обязана прочитаться через NativeBackend: {:?}",
+        doc.diagnostics
+    );
+    assert_eq!(doc.revision, 7, "версия текста обязана дойти до результата");
+}

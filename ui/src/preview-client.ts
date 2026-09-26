@@ -1,5 +1,7 @@
 import type {
   CompiledDocument,
+  InstalledTemplate,
+  InstallReport,
   VaultOverrides,
 } from "./wasm-core/typsidian_core.js";
 
@@ -45,4 +47,23 @@ export interface PreviewClient {
     revision: number,
     overrides: VaultOverrides,
   ): Promise<CompiledDocument>;
+
+  /**
+   * Установить шаблон по явному запросу пользователя (фича 007, FR-010).
+   *
+   * Отдельно от `compileWithTemplates`, потому что это другое действие: сборка
+   * идёт по правилам настроек и может в сеть не пойти вовсе, а здесь
+   * пользователь попросил прямо. Выключенная автозагрузка запрещает приложению
+   * ходить в сеть **самому**, но не отнимает у человека возможность попросить.
+   *
+   * `undefined` — клиент этого не умеет; тогда кнопка не показывается.
+   */
+  installTemplate?(spec: string, overrides: VaultOverrides): Promise<InstallReport>;
+
+  /**
+   * Установленные шаблоны: имя, версия, источник и отпечаток (фича 007, US5).
+   *
+   * Перечень читается из служебного места vault; сети не требует.
+   */
+  installedTemplates?(): Promise<InstalledTemplate[]>;
 }

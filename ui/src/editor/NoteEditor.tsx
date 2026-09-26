@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type {
+  ElementSpec,
   Embed,
   Note,
   ReadError,
+  TextEdit,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import { hintWith, type ShortcutsState } from "../workspace/useShortcuts.js";
 import { EmbedLink } from "../boards/EmbedLink.js";
 import { EmbedStaleBadge } from "../boards/EmbedStaleBadge.js";
 import {
@@ -22,6 +25,19 @@ import {
   type CaretAnchor,
   type InsertRequest,
 } from "./InsertMenu.js";
+import { useNoteAutoSave, type NoteSaveState } from "./useNoteAutoSave.js";
+import { InsertPanel, useInsertPanelVisible } from "./InsertPanel.js";
+import { elementById, type TypstElement } from "./typstElements.js";
+import { ParamForm, type ParamFormMode } from "./ParamForm.js";
+import {
+  describeUnavailable,
+  NOTHING_TO_EDIT,
+  useElementAtCaret,
+} from "./useElementAtCaret.js";
+import type { SnippetFieldState } from "./snippet.js";
+import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
+import { useContextMenu } from "../menu/ContextMenu.js";
+import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
 
 export interface NoteEditorProps {
   client: VaultClient;
@@ -35,6 +51,18 @@ export interface NoteEditorProps {
    * перехватывал бы события у первого.
    */
   externalChange?: { path: string; revision: number } | null;
+  /**
+   * Версия заметки, принятая при разрешении конфликта (FR-022, FR-023).
+   *
+   * Ядро отдаёт её тому, кто решение исполнил, со словами «редактор обязан
+   * показать это вместо буфера» (`resolve_conflict_accept_external`), а решение
+   * принимает диалог выше по дереву — отсюда проп.
+   *
+   * С автосохранением это перестало быть украшением: буфер, оставленный после
+   * «принять внешнюю», ушёл бы в файл сам и отменил только что сделанный выбор
+   * пользователя.
+   */
+  acceptedExternal?: { path: string; text: string; revision: number } | null;
   /** Открыть доску на полотне: переход от вставки к источнику (FR-025). */
   onOpenBoard?: (boardPath: string) => void;
   /** Создать доску, когда вставлять пока нечего (US2 AS2). */
@@ -60,12 +88,35 @@ export interface NoteEditorProps {
   onEditorReady?: (getView: (() => EditorView | null) | null) => void;
   /** Сохранить открытую заметку как заготовку (фича 003, US2). */
   onSaveAsTemplate?: (content: string) => void;
+  /**
+   * Размер шрифта редактора, меняемый на месте: колесом с Ctrl/⌘ и ступенями в
+   * статус-баре (004 FR-016, FR-017).
+   *
+   * Приходит пропом, а не создаётся здесь: значение живёт в настройках открытой
+   * папки, а ими владеет рабочая область. Не передан — жестов нет, и размер
+   * меняется только панелью настроек, как раньше.
+   */
+  fontSize?: EditorFontSizeControl;
+  /**
+   * Действующие сочетания клавиш. Пропом, а не своим разбором: один разбор на
+   * приложение, и подпись в меню вставки обязана совпадать с тем, что работает.
+   */
+  shortcuts: ShortcutsState;
+  /**
+   * Счётчик запросов «Параметры элемента» извне — из палитры команд (фича 008,
+   * FR-006). Меняется — форма открывается для элемента под кареткой.
+   */
+  paramsRequest?: number;
 }
 
 /**
  * Панель просмотра и правки открытой заметки — минимум, без которого нельзя
- * пройти сценарии 2 и 4 `quickstart.md` (заметку нужно открыть, изменить и
- * сохранить).
+ * пройти сценарии 2 и 4 `quickstart.md` (заметку нужно открыть и изменить).
+ *
+ * Сохранять её отдельным действием больше не нужно: набранное уходит в файл само
+ * (`useNoteAutoSave`), как это давно делают доски, и кнопки «Сохранить» здесь
+ * нет. Состояние записи видно в статус-баре — иначе автосохранение было бы
+ * обещанием без подтверждения.
  *
  * Никаких решений о конфликтах здесь нет: правки объявляются ядру через
  * `beginEdit`, и именно ядро решает, поднимать ли конфликт (FR-021, FR-035).
@@ -77,15 +128,18 @@ export function NoteEditor({
   onClose,
   boards = [],
   externalChange = null,
+  acceptedExternal = null,
   onOpenBoard,
   onCreateBoard,
   onContentChange,
   onEditorReady,
   onSaveAsTemplate,
+  fontSize,
+  shortcuts,
+  paramsRequest = 0,
 }: NoteEditorProps): React.JSX.Element {
   const [content, setContent] = useState("");
   const [readError, setReadError] = useState<ReadError | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isInserting, setIsInserting] = useState(false);
   const [insertError, setInsertError] = useState<string | null>(null);
   const [isChoosingBoard, setIsChoosingBoard] = useState(false);
@@ -108,27 +162,215 @@ export function NoteEditor({
     null,
   );
   const isInsertMenuOpen = insertMenu !== null;
+  // Смещение косой черты, которой вызвали меню (макет § Меню вставки).
+  // `null` — меню открыли сочетанием клавиш, и заменять в тексте нечего.
+  // В ref, а не в состоянии: значение нужно в момент вставки, а не на отрисовку.
+  const slashAt = useRef<number | null>(null);
+  // Форма параметров элемента (фича 008): `null` — закрыта. Схему и режим
+  // (вставка или правка найденного под кареткой) отдаёт ядро.
+  const [paramForm, setParamForm] = useState<{
+    spec: ElementSpec;
+    title: string;
+    mode: ParamFormMode;
+    block: boolean;
+  } | null>(null);
+  // Где курсор среди полей вставленного сниппета — подсказка в статус-баре.
+  const [fieldState, setFieldState] = useState<SnippetFieldState | null>(null);
+  const contextMenu = useContextMenu();
 
   const openInsertMenu = useCallback(() => {
+    slashAt.current = null;
+    setInsertMenu({ anchor: editorRef.current?.caretCoords() ?? null });
+  }, []);
+
+  // Вызов по `/`: меню встаёт у той же каретки, а сама косая черта остаётся в
+  // тексте — её уберёт вставка. Отказ от выбора (Escape, нажатие мимо) её не
+  // трогает: набранное пользователем приложение не стирает.
+  const openInsertMenuAt = useCallback((at: number) => {
+    slashAt.current = at;
     setInsertMenu({ anchor: editorRef.current?.caretCoords() ?? null });
   }, []);
 
   const closeInsertMenu = useCallback(() => {
     setInsertMenu(null);
+    slashAt.current = null;
     // Работа продолжается в тексте, а не в закрытом меню.
     editorRef.current?.focus();
   }, []);
 
-  const insertElement = useCallback((request: InsertRequest) => {
-    setInsertMenu(null);
-    // Текст правит редактор: он же вернёт новое содержимое через `onChange`,
-    // и отдельного `setContent` здесь быть не должно — иначе буфер обновлялся
-    // бы двумя путями сразу.
-    editorRef.current?.insertSnippet(request.template, { block: request.block });
+  /**
+   * Вставляет шаблон в редактор.
+   *
+   * `range` — что заменить: диапазон правимого блока. Не передан — снимается
+   * косая черта вызова, если меню открыли ею, а иначе вставка идёт в позицию
+   * курсора.
+   */
+  const applyTemplate = useCallback(
+    (template: string, block: boolean, range?: { from: number; to: number }) => {
+      const from = slashAt.current;
+      slashAt.current = null;
+      editorRef.current?.insertSnippet(template, {
+        block,
+        ...(range === undefined
+          ? from === null
+            ? {}
+            : { replaceFrom: from }
+          : { replaceFrom: range.from, replaceTo: range.to }),
+      });
+    },
+    [],
+  );
+
+  /**
+   * Вставка элемента из меню или с панели. Элемент, у которого ядро велит
+   * открыть форму (contracts § «Когда форма»), идёт через неё; остальные —
+   * сниппетом, как раньше (FR-003).
+   */
+  const insertElement = useCallback(
+    async (request: InsertRequest) => {
+      setInsertMenu(null);
+      const spec = request.id ? await client.elementSchema(request.id) : undefined;
+      if (spec?.form_on_insert && request.id) {
+        setParamForm({
+          spec,
+          title: elementById(request.id)?.name ?? spec.typst,
+          mode: { kind: "insert" },
+          block: request.block,
+        });
+        return;
+      }
+      // Текст правит редактор: он же вернёт новое содержимое через `onChange`,
+      // и отдельного `setContent` здесь быть не должно — иначе буфер обновлялся
+      // бы двумя путями сразу.
+      applyTemplate(request.template, request.block);
+    },
+    [applyTemplate, client],
+  );
+
+  /** Текст заметки сейчас — форме, чтобы ядро сверяло элемент и метки. */
+  const noteText = useCallback(
+    () => editorRef.current?.view()?.state.doc.toString() ?? content,
+    [content],
+  );
+
+  // Элемент под кареткой — для кнопки «Параметры» на панели (T033, FR-006).
+  const caretElement = useElementAtCaret(client, content, caret.offset);
+
+  /**
+   * «Параметры» элемента под кареткой (или в `offset`). Где правка недоступна,
+   * причина называется словами (FR-011, US2 AS5), а не молчанием.
+   */
+  const openParams = useCallback(
+    async (offset?: number) => {
+      const view = editorRef.current?.view();
+      const text = view?.state.doc.toString() ?? content;
+      const at = offset ?? view?.state.selection.main.head ?? caretRef.current.offset;
+      const found = await client.elementAt(text, at);
+      if (found.kind === "None") {
+        contextMenu.notify(NOTHING_TO_EDIT);
+        return;
+      }
+      if (found.kind === "Unavailable") {
+        contextMenu.notify(describeUnavailable(found.reason));
+        return;
+      }
+      const spec = await client.elementSchema(found.element.id);
+      if (!spec) return;
+      setInsertMenu(null);
+      setParamForm({
+        spec,
+        title: elementById(found.element.id)?.name ?? spec.typst,
+        mode: { kind: "edit", parsed: found.element },
+        block: false,
+      });
+    },
+    [client, content, contextMenu],
+  );
+
+  const closeForm = useCallback(() => {
+    setParamForm(null);
+    slashAt.current = null;
+    editorRef.current?.focus();
   }, []);
+
+  /**
+   * Вставить собранный формой текст. Сырым текстом, а не сниппетом: в тексте
+   * Typst `${…}` — обычные символы формулы, а не поля сниппета.
+   */
+  const insertRendered = useCallback((text: string, block: boolean) => {
+    const view = editorRef.current?.view();
+    if (!view) return;
+    const range = view.state.selection.main;
+    const from = slashAt.current ?? range.from;
+    const to = slashAt.current === null ? range.to : Math.max(range.to, from + 1);
+    slashAt.current = null;
+    // Блочный элемент начинает строку: `#figure` посреди абзаца разорвал бы его.
+    const lineStart = view.state.doc.lineAt(from).from;
+    const needsBreak = block && view.state.sliceDoc(lineStart, from).trim() !== "";
+    const insert = needsBreak ? `\n${text}` : text;
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + insert.length },
+      userEvent: "input",
+      scrollIntoView: true,
+    });
+    setParamForm(null);
+    view.focus();
+  }, []);
+
+  /** Применить правку: все замены — одной транзакцией, одним шагом отмены (FR-010). */
+  const applyEdits = useCallback((edits: TextEdit[]) => {
+    const view = editorRef.current?.view();
+    if (!view) return;
+    view.dispatch({
+      changes: edits.map((edit) => ({ from: edit.from, to: edit.to, insert: edit.insert })),
+      userEvent: "input",
+    });
+    setParamForm(null);
+    view.focus();
+  }, []);
+
+  // Запрос из палитры команд (FR-006): счётчик сменился — открыть «Параметры».
+  const lastParamsRequest = useRef(paramsRequest);
+  useEffect(() => {
+    if (paramsRequest === lastParamsRequest.current) return;
+    lastParamsRequest.current = paramsRequest;
+    void openParams();
+  }, [paramsRequest, openParams]);
+
+  // Панель вставки (макет § Панель вставки). Показана по умолчанию и убирается
+  // кнопкой в тулбаре заметки: она для мыши и меню не заменяет.
+  const [panelVisible, togglePanel] = useInsertPanelVisible();
+
+  /**
+   * Вставка с панели идёт тем же путём, что из меню: элемент с параметрами
+   * открывает диалог, остальные вставляются сниппетом. Второй дороги к тексту
+   * здесь не заводится.
+   */
+  const insertFromPanel = useCallback(
+    (element: TypstElement) => {
+      void insertElement({
+        id: element.id,
+        template: element.template,
+        block: element.block ?? false,
+      });
+    },
+    [insertElement],
+  );
 
   const notePath = note?.path ?? null;
   const embeds = useNoteEmbeds(client, notePath, content);
+
+  // Автосохранение вместо кнопки (FR-006 фичи 005 — предпросмотр собирается из
+  // буфера, а буфер теперь сам доходит до диска).
+  const autoSave = useNoteAutoSave(client, notePath);
+  const flushSave = autoSave.flush;
+
+  // Переключение на другую заметку и размонтирование обязаны дописать текущую:
+  // иначе последние нажатия остались бы в буфере дебаунса. `flushSave` меняется
+  // вместе с путём, поэтому уборка достаётся той заметке, которая закрывается, а
+  // не той, что открылась.
+  useEffect(() => () => void flushSave(), [flushSave]);
 
   // Объявляем буфер наверх одним местом, а не в каждом `setContent`: путей
   // изменения текста четыре (набор, чтение с диска, вставка доски, закрытие
@@ -152,30 +394,31 @@ export function NoteEditor({
   // как ⌘K у палитры команд: слушатель на окне, потому что открыть меню нужно
   // и тогда, когда фокус не в тексте, а самого меню в дереве ещё нет.
   //
-  // `metaKey || ctrlKey` — не различая платформ, как и ⌘K: две раскладки
-  // расходились бы там, где приложение обещает одинаковое поведение.
-  //
-  // Клавиша сверяется и по `code`, и по `key`: интерфейс русский, и при
-  // кириллической раскладке `key` для этой клавиши — «у», а не «e». По одному
-  // `key` сочетание молча не работало бы ровно у того, для кого написано.
+  // Сверка по `code` и `key` вместе никуда не делась — она переехала в
+  // `useShortcuts`, а имя физической клавиши считает ядро: интерфейс русский, и
+  // при кириллической раскладке `key` для этой клавиши — «у», а не «e».
   // Без открытой заметки вставлять некуда, поэтому и слушателя нет.
   useEffect(() => {
     if (!note) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        (event.code === "KeyE" || event.key.toLowerCase() === "e")
-      ) {
+      if (shortcuts.matches("insert-menu", event)) {
         event.preventDefault();
         if (isInsertMenuOpen) closeInsertMenu();
         else openInsertMenu();
-      } else if (event.key === "Escape" && isInsertMenuOpen) {
-        closeInsertMenu();
       }
+      // «Параметры элемента» под кареткой (фича 008, FR-006) — пара к меню
+      // вставки. Пока форма открыта, повторное нажатие её не перебивает.
+      if (shortcuts.matches("element-params", event) && paramForm === null) {
+        event.preventDefault();
+        void openParams();
+      }
+      // Escape отсюда ушёл: меню закрывает себя само через
+      // `useDismissOnEscape`, и поверх него может стоять диалог параметров —
+      // закрыться обязан он один.
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [note, isInsertMenuOpen, openInsertMenu, closeInsertMenu]);
+  }, [note, isInsertMenuOpen, openInsertMenu, closeInsertMenu, shortcuts, paramForm, openParams]);
 
   // Изменение файла в vault — повод пересчитать состояние вставок. Затрагивает
   // ли оно эту заметку, решает ядро внутри `fileChanged` (T056).
@@ -227,6 +470,9 @@ export function NoteEditor({
         const next = `${content.slice(0, at)}${markup}${content.slice(at)}`;
         setContent(next);
         await client.beginEdit(notePath, next);
+        // Вставка — такая же правка буфера, как набор текста, и уходит в файл
+        // тем же путём: иначе разметка вставки жила бы только в окне.
+        autoSave.changed(next);
         setIsChoosingBoard(false);
       } catch (cause) {
         setInsertError(describeInsertFailure(cause));
@@ -234,13 +480,13 @@ export function NoteEditor({
         setIsInserting(false);
       }
     },
-    [client, notePath, content],
+    [client, notePath, content, autoSave],
   );
 
+  const acceptSaved = autoSave.accept;
   useEffect(() => {
     let cancelled = false;
     setReadError(null);
-    setSaveMessage(null);
     if (!note) {
       setContent("");
       return;
@@ -248,7 +494,12 @@ export function NoteEditor({
     void (async () => {
       try {
         const text = await client.read(note.path);
-        if (!cancelled) setContent(text);
+        if (cancelled) return;
+        setContent(text);
+        // Прочитанное с диска — не правка: автосохранению говорится, что именно
+        // этот текст сейчас в файле, иначе первое же открытие заметки
+        // перезаписывало бы её тем же содержимым.
+        acceptSaved(text);
       } catch (cause) {
         if (!cancelled) setReadError(asReadError(cause));
       }
@@ -256,7 +507,24 @@ export function NoteEditor({
     return () => {
       cancelled = true;
     };
-  }, [client, note]);
+  }, [client, note, acceptSaved]);
+
+  // Принятая внешняя версия заменяет буфер (FR-022). Записывать её обратно не
+  // нужно и нельзя: она уже на диске — ядро её оттуда и прочитало, — поэтому
+  // автосохранению она объявляется как сохранённая, а не как правка.
+  const acceptedPath = acceptedExternal?.path ?? null;
+  const acceptedText = acceptedExternal?.text ?? null;
+  const acceptedRevision = acceptedExternal?.revision ?? 0;
+  useEffect(() => {
+    if (acceptedText === null || acceptedPath === null || acceptedPath !== notePath) {
+      return;
+    }
+    setContent(acceptedText);
+    acceptSaved(acceptedText);
+    // `acceptedRevision` в зависимостях намеренно: он и есть повод применить
+    // версию заново, если пользователь принял внешнюю дважды подряд.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceptedPath, acceptedText, acceptedRevision, notePath, acceptSaved]);
 
   if (!note) {
     return (
@@ -299,16 +567,24 @@ export function NoteEditor({
               Только открывает, не переключает: открытое меню закрывается от
               нажатия мимо себя, и нажатие на эту кнопку для него тоже «мимо» —
               переключатель успевал бы закрыться до собственного onClick. */}
-          <button
-            type="button"
-            className="ts-btn"
-            title="Вставить элемент Typst · ⌘E"
-            aria-haspopup="dialog"
-            aria-expanded={isInsertMenuOpen}
-            onClick={openInsertMenu}
-          >
-            Вставить элемент
-          </button>
+          {/* Пока панель вставки показана, эта кнопка не нужна: там та же
+              дверь в каталог («Все элементы»), и две одинаковые в соседних
+              строках только теснят тулбар. */}
+          {!panelVisible && (
+            <button
+              type="button"
+              className="ts-btn"
+              title={hintWith(
+                "Вставить элемент Typst",
+                shortcuts.displayOf("insert-menu"),
+              )}
+              aria-haspopup="dialog"
+              aria-expanded={isInsertMenuOpen}
+              onClick={openInsertMenu}
+            >
+              Вставить элемент
+            </button>
+          )}
           {/* SC-007: от открытой заметки до вставленной доски — два действия,
               эта кнопка и выбор доски в списке. */}
           <button
@@ -334,27 +610,45 @@ export function NoteEditor({
               Сохранить как заготовку
             </button>
           )}
+          {/* Выключатель панели вставки. В тулбаре, а не в самой панели:
+              убранную панель нечем было бы вернуть. */}
           <button
             type="button"
-            className="ts-btn ts-btn--accent"
-            onClick={() => {
-              void (async () => {
-                try {
-                  await client.write(note.path, content, undefined);
-                  setSaveMessage("Сохранено.");
-                } catch {
-                  setSaveMessage("Сохранить не удалось — правки не потеряны.");
-                }
-              })();
-            }}
+            className="ts-btn"
+            aria-pressed={panelVisible}
+            title="Панель вставки — строка кнопок над текстом"
+            onClick={togglePanel}
           >
-            Сохранить
+            Панель
           </button>
+          {/* Кнопки «Сохранить» здесь нет намеренно: набранное уходит в файл
+              само, а состояние записи видно в статус-баре. Оставить её значило
+              бы завести второй путь к тому же `write` и второй ответ на вопрос
+              «сохранено ли». */}
           <button type="button" className="ts-btn" onClick={onClose}>
             Закрыть
           </button>
         </div>
       </div>
+      {panelVisible && (
+        <InsertPanel
+          shortcut={shortcuts.displayOf("insert-menu")}
+          onInsert={insertFromPanel}
+          onOpenMenu={openInsertMenu}
+          // «Параметры» элемента под кареткой (FR-006): кнопка видна, когда
+          // каретка в элементе схемы; недоступная — с причиной (FR-011).
+          params={
+            caretElement?.kind === "Found"
+              ? { available: true }
+              : caretElement?.kind === "Unavailable"
+                ? { available: false, reason: describeUnavailable(caretElement.reason) }
+                : null
+          }
+          paramsShortcut={shortcuts.displayOf("element-params")}
+          onParams={() => void openParams()}
+        />
+      )}
+
       <CodeEditor
         ref={editorRef}
         ariaLabel={`Содержимое заметки ${note.name}`}
@@ -365,14 +659,59 @@ export function NoteEditor({
           // FR-035: ядро должно знать о несохранённых правках и держать сам
           // буфер — иначе внешнее изменение будет применено молча.
           void client.beginEdit(note.path, next);
+          autoSave.changed(next);
         }}
+        onSlashMenu={openInsertMenuAt}
+        onContextMenu={(event) => {
+          const view = editorRef.current?.view();
+          if (!view || event.shiftKey) return;
+          placeCaretAt(view, event.clientX, event.clientY);
+          contextMenu.open(
+            event,
+            editorMenuItems(view, {
+              openInsertMenu,
+              // Позиция — свежая, после `placeCaretAt`: состояние `caret`
+              // догонит клик только на следующей отрисовке.
+              openParams: () => void openParams(view.state.selection.main.head),
+              paramsShortcut: shortcuts.displayOf("element-params"),
+              chooseBoard: () => {
+                setInsertError(null);
+                setIsChoosingBoard(true);
+              },
+              saveAsTemplate: onSaveAsTemplate
+                ? () => onSaveAsTemplate(view.state.doc.toString())
+                : undefined,
+              notify: contextMenu.notify,
+              insertShortcut: shortcuts.displayOf("insert-menu"),
+            }),
+          );
+        }}
+        onFieldState={setFieldState}
+        {...(fontSize ? { onZoom: fontSize.step } : {})}
       />
 
       {insertMenu && (
         <InsertMenu
           anchor={insertMenu.anchor}
-          onInsert={insertElement}
+          onInsert={(request) => void insertElement(request)}
           onClose={closeInsertMenu}
+        />
+      )}
+
+      {/* Форма параметров элемента (фича 008; макет «Вставка» § Параметры
+          блока). Поля строятся по схеме из ядра; занятые метки, текст
+          «Будет вставлено» и план правки тоже считает ядро. */}
+      {paramForm !== null && (
+        <ParamForm
+          key={paramForm.mode.kind === "edit" ? paramForm.mode.parsed.revision : paramForm.spec.id}
+          client={client}
+          spec={paramForm.spec}
+          title={paramForm.title}
+          mode={paramForm.mode}
+          noteText={noteText}
+          onInsert={(text) => insertRendered(text, paramForm.block)}
+          onApply={applyEdits}
+          onCancel={closeForm}
         />
       )}
 
@@ -419,13 +758,87 @@ export function NoteEditor({
           Ln {caret.line}, Col {caret.column}
         </span>
         <span>UTF-8</span>
-        {saveMessage && <p role="status">{saveMessage}</p>}
+        {/* Состояние полей вставленного сниппета (макет «Вставка» § состояние
+            полей): без счётчика подсветка говорит только «что-то выделено». */}
+        {fieldState && (
+          <span className="ts-fieldstate">
+            поле {fieldState.index} из {fieldState.count} · ⇥ следующее · esc выйти
+          </span>
+        )}
+        <SaveIndicator state={autoSave.state} />
         <span className="ts-spacer" />
+
+        {/* Кегль редактора — те же ступени, что у масштаба предпросмотра, и
+            тот же жест Ctrl/⌘ + колесо поверх текста. Значение — сама кнопка:
+            нажатие снимает перекрытие папки и возвращает размер устройства. */}
+        {fontSize && (
+          <div className="ts-zoom" role="group" aria-label="Размер шрифта редактора">
+            <button
+              type="button"
+              className="ts-btn ts-zoom__step"
+              onClick={() => fontSize.step(-1)}
+              aria-label="Уменьшить шрифт редактора"
+              title="Уменьшить шрифт (Ctrl + колесо)"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="ts-btn ts-zoom__value"
+              onClick={fontSize.reset}
+              disabled={!fontSize.isOverridden}
+              aria-label={`Шрифт ${fontSize.size} пикселей, вернуть размер по умолчанию`}
+              title="Вернуть размер по умолчанию"
+            >
+              {fontSize.size}&nbsp;px
+            </button>
+            <button
+              type="button"
+              className="ts-btn ts-zoom__step"
+              onClick={() => fontSize.step(1)}
+              aria-label="Увеличить шрифт редактора"
+              title="Увеличить шрифт (Ctrl + колесо)"
+            >
+              +
+            </button>
+          </div>
+        )}
+
         <span>{countWords(content)}</span>
         <span className="ts-tag">typst</span>
       </div>
     </section>
   );
+}
+
+/**
+ * Состояние автосохранения в статус-баре.
+ *
+ * Показывается всегда, в том числе «сохранено»: без кнопки это единственное
+ * место, по которому видно, что набранное дошло до диска.
+ *
+ * Живая область — только у отказа. «Не сохранено → сохранение… → сохранено»
+ * сменяется на каждой паузе в наборе, и объявляй это программа чтения с экрана,
+ * она перебивала бы сам набор текста. Отказ — другое дело: о нём пользователь
+ * обязан узнать сразу, а не при следующем взгляде на строку.
+ */
+function SaveIndicator({ state }: { state: NoteSaveState }): React.JSX.Element {
+  if (state.state === "Failed") {
+    return (
+      <p className="ts-save ts-save--failed" role="alert">
+        {state.reason}
+      </p>
+    );
+  }
+  const label =
+    state.state === "Saving"
+      ? "сохранение…"
+      : state.state === "Dirty"
+        ? "не сохранено"
+        : state.state === "Held"
+          ? "конфликт — сохранение приостановлено"
+          : "сохранено";
+  return <p className="ts-save">{label}</p>;
 }
 
 /**

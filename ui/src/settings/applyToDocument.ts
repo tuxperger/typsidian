@@ -9,9 +9,19 @@ import type { Settings, Theme } from "../wasm-core/typsidian_core.js";
  * в `ui/src/styles/app.css`. Связь идёт каскадом, а не пропсом, и это
  * существенно — редактор перерисовывать для смены размера не нужно, поэтому
  * FR-017 «без переоткрытия» выполняется само собой.
+ *
+ * Переменных под размер **две**, и это те же два слоя, что в ядре (фича 006,
+ * FR-030): `FONT_SIZE_VARIABLE` — перекрытие открытой папки заметок,
+ * `DEVICE_FONT_SIZE_VARIABLE` — значение устройства. Слои разведены, потому что
+ * ставят их разные места в разное время: перекрытие — `Workspace` (он есть во
+ * всех трёх оболочках), значение устройства — панель настроек web, пока она
+ * смонтирована. Живи они в одной переменной, снятое перекрытие уносило бы
+ * значение устройства, а кто из двоих записал последним, зависело бы от
+ * порядка эффектов. Старшинство слоёв теперь выражено в самом правиле CSS.
  */
 export const THEME_ATTRIBUTE = "data-theme";
 export const FONT_SIZE_VARIABLE = "--typsidian-editor-font-size";
+export const DEVICE_FONT_SIZE_VARIABLE = "--typsidian-editor-font-size-device";
 
 /**
  * Применяет внешний вид к корню документа (T044, FR-017, SC-002).
@@ -36,8 +46,29 @@ export function applyAppearanceToDocument(settings: Settings): void {
   const root = document.documentElement;
   root.setAttribute(THEME_ATTRIBUTE, themeName(settings.theme));
   if (settings.editor_font_size !== undefined) {
-    root.style.setProperty(FONT_SIZE_VARIABLE, `${settings.editor_font_size}px`);
+    root.style.setProperty(
+      DEVICE_FONT_SIZE_VARIABLE,
+      `${settings.editor_font_size}px`,
+    );
   }
+}
+
+/**
+ * Ставит или снимает перекрытие размера, пришедшее из открытой папки заметок.
+ *
+ * `null` — снять: размер вернётся к слою устройства, а где его нет (desktop,
+ * Android) — к токену макета. Снятие — не то же, что «поставить умолчание»:
+ * имени умолчания здесь нет, оно принадлежит ядру.
+ *
+ * Зовёт его `useEditorFontSizeControl` — одно место на приложение: слой папки
+ * старше слоя устройства, и второй записывающий сюда развёл бы старшинство с
+ * тем, что написано в правиле CSS.
+ */
+export function applyEditorFontSize(size: number | null): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (size === null) root.style.removeProperty(FONT_SIZE_VARIABLE);
+  else root.style.setProperty(FONT_SIZE_VARIABLE, `${size}px`);
 }
 
 function themeName(theme: Theme | undefined): string {

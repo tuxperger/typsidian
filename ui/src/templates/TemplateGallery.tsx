@@ -16,6 +16,7 @@ import {
   type TemplateLibraryState,
 } from "./useTemplateLibrary.js";
 import { insertTemplate, type InsertionTarget } from "./insertion/index.js";
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 // Галерея заготовок (T022, T023) — экран «Шаблоны и сниппеты» макета
 // «Typsidian Утилиты».
@@ -71,6 +72,8 @@ export function TemplateGallery({
   onSaveCurrentNote,
   onClose,
 }: TemplateGalleryProps): React.JSX.Element {
+  useDismissOnEscape(onClose);
+
   const [filter, setFilter] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

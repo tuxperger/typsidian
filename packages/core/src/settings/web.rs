@@ -626,6 +626,49 @@ impl WebStore {
         Ok(serde_wasm_bindgen::to_value(&records)?)
     }
 
+    /// Ссылка на папку известного vault — чтобы его можно было **открыть**, а
+    /// не только показать в списке (FR-007 фичи 001).
+    ///
+    /// Без этой обёртки реестр папок оставался недостижим из интерфейса:
+    /// `FolderRegistry::resolve` существовал, но пересечь границу wasm-bindgen
+    /// не мог — трейт не несёт `#[wasm_bindgen]`, как и в случае самого
+    /// `SettingsStore`. Список известных vault от этого был списком, по
+    /// которому нельзя открыть ни одной записи.
+    ///
+    /// Возвращает `{ access, handle }`, где `access` — одно из трёх состояний
+    /// [`Resolved`]: `"granted"`, `"needsPermission"` или `"missing"`.
+    ///
+    /// Состояние возвращается отдельно от хендла, а не сводится к «есть или
+    /// нет», потому что от него зависит **может ли приложение открыть vault
+    /// само**. При `"granted"` открытие не требует ничего от пользователя и
+    /// происходит сразу при запуске; при `"needsPermission"` хендл цел, но
+    /// браузер выдаст разрешение только в обработчике жеста — там приложение и
+    /// спрашивает его, кнопкой на экране приветствия. `"missing"` — ссылки
+    /// больше нет: папка удалена или связь утрачена, а розыск запрещён
+    /// (FR-023).
+    #[wasm_bindgen(js_name = resolveVault)]
+    pub async fn resolve_vault_js(&self, id: String) -> Result<JsValue, JsValue> {
+        let id = VaultId::from_raw(id);
+        let (access, handle) = match self.resolve(&id).await {
+            Resolved::Resolved(handle) => ("granted", Some(handle)),
+            Resolved::NeedsPermission => {
+                let stored = match self.registry.as_ref() {
+                    Some(registry) => registry_get(registry, id.as_str()).await,
+                    None => None,
+                };
+                ("needsPermission", stored)
+            }
+            Resolved::Missing => ("missing", None),
+        };
+
+        let result = Object::new();
+        Reflect::set(&result, &JsValue::from_str("access"), &JsValue::from_str(access))?;
+        if let Some(handle) = handle {
+            Reflect::set(&result, &JsValue::from_str("handle"), &handle)?;
+        }
+        Ok(result.into())
+    }
+
     /// Набор изменений, возвращающий значения к умолчаниям (FR-037).
     ///
     /// Возвращается именно `SettingsChange`, а не результат: сброс обязан

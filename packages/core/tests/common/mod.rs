@@ -61,6 +61,15 @@ impl MemoryVault {
         self
     }
 
+    /// Убирает файл — «кто-то удалил его мимо приложения».
+    ///
+    /// Нужен проверкам, где истина на диске важнее записанного нами: перечень
+    /// установленных шаблонов обязан терять запись, если файла больше нет
+    /// (фича 007, US5).
+    pub fn remove(&mut self, path: &Path) {
+        self.files.remove(path);
+    }
+
     /// Папка, которая существует, но не читается.
     pub fn with_folder_problem(mut self, folder: &str, reason: FolderProblem) -> Self {
         self.folder_problems.insert(PathBuf::from(folder), reason);
@@ -308,6 +317,7 @@ impl VaultBackend for MemoryVault {
 // сверялись с ОДНИМ набором ожиданий: в отличие от эталонного хэша досок, это
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
+pub mod element_cases;
 pub mod install_cases;
 pub mod package_cases;
 pub mod placement_cases;

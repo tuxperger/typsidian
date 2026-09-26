@@ -10,6 +10,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { describeFolderProblem } from "./TemplateGallery.js";
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 // «Сохранить заметку как заготовку» (T033, US2).
 //
@@ -46,6 +47,9 @@ export function SaveAsTemplateDialog({
   const [failure, setFailure] = useState<SaveTemplateError | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Пока идёт запись, отменять нечего: файл уже пишется.
+  useDismissOnEscape(isSaving ? null : onCancel);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -92,12 +96,6 @@ export function SaveAsTemplateDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Сохранить как заготовку"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
       >
         <div className="ts-dialog__head">
           <span className="ts-eyebrow">Сохранить как заготовку</span>

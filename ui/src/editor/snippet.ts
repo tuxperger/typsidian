@@ -173,6 +173,43 @@ export interface InsertOptions {
    * поэтому такой сниппет начинает строку.
    */
   block?: boolean;
+  /**
+   * Откуда заменять текст — смещение косой черты, которой вызвали меню
+   * (макет § Меню вставки: вызов по `/`).
+   *
+   * Без этого `/` осталась бы в тексте перед вставленным элементом: меню
+   * открылось по ней, а вставка пришла бы следом.
+   */
+  replaceFrom?: number;
+  /**
+   * До какого места заменять. Нужна правке готового блока: там заменяется весь
+   * `#figure(…) <fig:…>`, а не кусок от каретки.
+   *
+   * Без неё замена идёт до курсора — так ведёт себя вызов по `/`.
+   */
+  replaceTo?: number;
+}
+
+/** Где стоит курсор среди полей активного сниппета (для статус-бара). */
+export interface SnippetFieldState {
+  /** Номер поля с единицы — так же, как он называется пользователю. */
+  index: number;
+  count: number;
+}
+
+/**
+ * Поле, в котором сейчас курсор; `null` — сниппет не активен.
+ *
+ * Нужно статус-бару: без «поле 2 из 3» подсветка полей говорит только, что
+ * что-то выделено, а сколько их ещё впереди — нет (макет § Панель вставки +
+ * состояние полей).
+ */
+export function snippetFieldState(view: EditorView): SnippetFieldState | null {
+  const fields = view.state.field(activeFields, false) ?? [];
+  if (fields.length === 0) return null;
+  const head = view.state.selection.main.head;
+  const at = fields.findIndex((field) => head >= field.from && head <= field.to);
+  return at === -1 ? null : { index: at + 1, count: fields.length };
 }
 
 /**
@@ -191,10 +228,19 @@ export function insertSnippet(
   const selected = state.sliceDoc(range.from, range.to);
   const parsed = parseSnippet(template, selected === "" ? undefined : selected);
 
-  const lineStart = state.doc.lineAt(range.from).from;
-  const needsBreak = options.block === true && state.sliceDoc(lineStart, range.from).trim() !== "";
+  // Замена начинается с косой черты, если меню вызвали ею, — иначе с обычного
+  // начала выделения. Значение подрезается по документу: пока меню было
+  // открыто, текст мог измениться (внешняя правка, принятая версия).
+  const from = Math.max(0, Math.min(options.replaceFrom ?? range.from, range.from));
+  const to = Math.min(
+    state.doc.length,
+    Math.max(options.replaceTo ?? range.to, from),
+  );
+
+  const lineStart = state.doc.lineAt(from).from;
+  const needsBreak = options.block === true && state.sliceDoc(lineStart, from).trim() !== "";
   const insert = needsBreak ? `\n${parsed.text}` : parsed.text;
-  const origin = range.from + (needsBreak ? 1 : 0);
+  const origin = from + (needsBreak ? 1 : 0);
 
   const fields = parsed.fields.map((field) => ({
     from: origin + field.from,
@@ -203,10 +249,10 @@ export function insertSnippet(
   const first = fields[0];
 
   view.dispatch({
-    changes: { from: range.from, to: range.to, insert },
+    changes: { from, to, insert },
     selection: first
       ? EditorSelection.range(first.from, first.to)
-      : EditorSelection.cursor(range.from + insert.length),
+      : EditorSelection.cursor(from + insert.length),
     effects: setFields.of(fields),
     scrollIntoView: true,
     userEvent: "input.complete",

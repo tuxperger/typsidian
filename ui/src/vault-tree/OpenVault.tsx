@@ -1,9 +1,16 @@
-import type { OpenVaultError } from "./useVault.js";
+import type { LastVault, OpenVaultError } from "./useVault.js";
 
 export interface OpenVaultProps {
   isLoading: boolean;
   error: OpenVaultError | null;
   onOpen: () => void;
+  /**
+   * Последний открытый vault (FR-007); `null` — предлагать нечего: его нет,
+   * связь с папкой утрачена либо оболочка хранилища устройства не даёт.
+   */
+  last?: LastVault | null;
+  /** Открыть последний vault. Обязателен, если `last` не `null`. */
+  onOpenLast?: () => void;
 }
 
 /**
@@ -32,16 +39,33 @@ function describeOpenVaultError(error: OpenVaultError): string | null {
 }
 
 /**
- * Поток «открыть vault» (FR-001, FR-008). Отмена системного диалога выбора
- * папки — не ошибка (Assumptions), поэтому `PickerCancelled` не показывается
- * пользователю как сбой.
+ * Поток «открыть vault» (FR-001, FR-007, FR-008). Отмена системного диалога
+ * выбора папки — не ошибка (Assumptions), поэтому `PickerCancelled` не
+ * показывается пользователю как сбой.
+ *
+ * Последний vault именно **предлагается**, а не открывается сам — так сказано
+ * в FR-007, и так же он ведёт себя на всех трёх клиентах. Молчаливое открытие
+ * было бы к тому же невыполнимо в браузере: разрешение на папку там
+ * переспрашивается только в обработчике жеста пользователя, и на загрузке
+ * страницы приложение показало бы отказ вместо заметок.
  */
-export function OpenVault({ isLoading, error, onOpen }: OpenVaultProps): React.JSX.Element {
+export function OpenVault({
+  isLoading,
+  error,
+  onOpen,
+  last = null,
+  onOpenLast,
+}: OpenVaultProps): React.JSX.Element {
   const message = error ? describeOpenVaultError(error) : null;
   return (
     <div>
+      {last && (
+        <button type="button" onClick={onOpenLast} disabled={isLoading}>
+          {isLoading ? "Открываем…" : `Продолжить: ${last.label}`}
+        </button>
+      )}
       <button type="button" onClick={onOpen} disabled={isLoading}>
-        {isLoading ? "Открываем…" : "Открыть vault"}
+        {isLoading ? "Открываем…" : last ? "Выбрать другую папку" : "Открыть vault"}
       </button>
       {message && <p role="alert">{message}</p>}
     </div>

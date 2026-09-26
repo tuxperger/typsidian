@@ -48,15 +48,6 @@ export interface VaultSectionProps {
   onChangeAssetsPlacement?: (placement: AssetsPlacement) => void | Promise<void>;
   /** Помеченные разделы — показываются, чтобы выбор «в корне раздела» был осмыслен. */
   sections?: string[];
-
-  /**
-   * Ходить ли в сеть за недостающими внешними шаблонами (фича 007, FR-009).
-   *
-   * `null` — vault не открыт: настройка принадлежит папке заметок, и менять
-   * нечего.
-   */
-  autoDownloadTemplates?: boolean | null;
-  onChangeAutoDownloadTemplates?: (enabled: boolean) => void | Promise<void>;
 }
 
 /**
@@ -83,8 +74,6 @@ export function VaultSection({
   assetsPlacement = null,
   onChangeAssetsPlacement,
   sections = [],
-  autoDownloadTemplates = null,
-  onChangeAutoDownloadTemplates,
 }: VaultSectionProps): React.JSX.Element {
   const [labelDraft, setLabelDraft] = useState<{ id: string; value: string } | null>(null);
   const current = knownVaults.find((record) => record.id === currentVaultId) ?? null;
@@ -215,34 +204,6 @@ export function VaultSection({
               )}
             </p>
           )}
-        </fieldset>
-      )}
-
-      {autoDownloadTemplates !== null && onChangeAutoDownloadTemplates && (
-        <fieldset className="ts-assets-placement">
-          <legend>Внешние шаблоны Typst</legend>
-          <p className="ts-assets-placement__intro">
-            Шаблон, подключённый в заметке через <code>/…</code>, может
-            загружаться автоматически, если его нет на устройстве. Шаблон — это
-            код, исполняемый при сборке заметки: имя, версия и адрес источника
-            каждой загрузки называются в диагностике.
-          </p>
-          <label className="ts-assets-placement__option">
-            <input
-              type="checkbox"
-              checked={autoDownloadTemplates}
-              onChange={(event) =>
-                void onChangeAutoDownloadTemplates(event.target.checked)
-              }
-            />
-            <span className="ts-assets-placement__title">
-              Загружать недостающие шаблоны
-            </span>
-            <span className="ts-assets-placement__hint">
-              Выключено — приложение в сеть за шаблонами не ходит, а
-              отсутствующий шаблон называется по имени и версии.
-            </span>
-          </label>
         </fieldset>
       )}
     </section>

@@ -12,7 +12,13 @@ import {
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { insertSnippet, snippetFields, type InsertOptions } from "./snippet.js";
+import {
+  insertSnippet,
+  snippetFields,
+  snippetFieldState,
+  type InsertOptions,
+  type SnippetFieldState,
+} from "./snippet.js";
 
 // Редактор исходника Typst — колонка «Editor pane» макета.
 //
@@ -58,7 +64,31 @@ export interface CodeEditorProps {
   value: string;
   onChange: (next: string) => void;
   onCaretMove?: (caret: CaretPosition) => void;
+  /**
+   * Ctrl/⌘ + колесо поверх текста — тот же жест, что в панели предпросмотра.
+   *
+   * Наружу уходит **направление**, а не новый размер: что считать шагом кегля,
+   * знают настройки, а редактор — только то, что жест был. Не передан — жест
+   * остаётся браузеру, то есть масштабирует страницу.
+   */
+  onZoom?: (direction: 1 | -1) => void;
+  /**
+   * Набрана `/` в начале пустой строки — вызов меню вставки (макет § Меню
+   * вставки). Наверх уходит смещение самой косой черты: вставленный элемент
+   * заменит её, а не встанет следом.
+   *
+   * Только в начале строки и только на пустой: косая черта встречается в
+   * путях и в тексте, и меню, выскакивающее посреди слова, мешало бы набору.
+   */
+  onSlashMenu?: (at: number) => void;
+  /**
+   * Где курсор среди полей вставленного сниппета; `null` — полей нет.
+   * Показывается в статус-баре.
+   */
+  onFieldState?: (state: SnippetFieldState | null) => void;
   ariaLabel: string;
+  /** Правый клик по тексту — собственное меню редактора (см. `NoteEditor`). */
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
   ref?: React.Ref<CodeEditorHandle>;
 }
 
@@ -66,7 +96,11 @@ export function CodeEditor({
   value,
   onChange,
   onCaretMove,
+  onZoom,
+  onSlashMenu,
+  onFieldState,
   ariaLabel,
+  onContextMenu,
   ref,
 }: CodeEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -99,8 +133,14 @@ export function CodeEditor({
   // обработчик нельзя — вместе с ним пропадут история правок и позиция курсора.
   const onChangeRef = useRef(onChange);
   const onCaretMoveRef = useRef(onCaretMove);
+  const onZoomRef = useRef(onZoom);
+  const onSlashMenuRef = useRef(onSlashMenu);
+  const onFieldStateRef = useRef(onFieldState);
   onChangeRef.current = onChange;
   onCaretMoveRef.current = onCaretMove;
+  onZoomRef.current = onZoom;
+  onSlashMenuRef.current = onSlashMenu;
+  onFieldStateRef.current = onFieldState;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -123,6 +163,24 @@ export function CodeEditor({
                 column: head - line.from + 1,
                 offset: head,
               });
+              // Состояние полей считается тем же тактом, что и позиция
+              // каретки: поле «активно», пока курсор внутри него, и одно без
+              // другого не меняется.
+              onFieldStateRef.current?.(snippetFieldState(update.view));
+            }
+            // Меню по `/`: строка состоит ровно из неё, и её только что
+            // набрали. Проверка по итоговому состоянию, а не по тексту
+            // правки, — так вставка `/` из буфера обмена тоже считается, а
+            // удаление символов до одинокой `/` — нет.
+            if (update.docChanged && onSlashMenuRef.current) {
+              const head = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(head);
+              const typedSlash = update.transactions.some((transaction) =>
+                transaction.isUserEvent("input"),
+              );
+              if (typedSlash && line.text === "/" && head === line.to) {
+                onSlashMenuRef.current(line.from);
+              }
             }
           }),
         ],
@@ -137,6 +195,26 @@ export function CodeEditor({
     // Пересоздание только при смене подписи, то есть при смене заметки.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ariaLabel]);
+
+  // Ctrl/⌘ + колесо — кегль текста, как масштаб листа в предпросмотре.
+  // Слушатель вешается вручную и непассивным: `onWheel` React ставит пассивным,
+  // а пассивный обработчик не может отменить масштабирование всей страницы
+  // браузером, и вместо шрифта редактора менялся бы размер окна целиком.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      const zoom = onZoomRef.current;
+      if (!zoom) return;
+      event.preventDefault();
+      zoom(event.deltaY < 0 ? 1 : -1);
+    };
+
+    host.addEventListener("wheel", onWheel, { passive: false });
+    return () => host.removeEventListener("wheel", onWheel);
+  }, []);
 
   // Внешняя замена текста — переключение заметки, вставка доски, принятие
   // внешней версии. Сравнение с текущим документом обязательно: без него
@@ -153,7 +231,7 @@ export function CodeEditor({
     });
   }, [value]);
 
-  return <div className="ts-editor" ref={hostRef} />;
+  return <div className="ts-editor" ref={hostRef} onContextMenu={onContextMenu} />;
 }
 
 /**

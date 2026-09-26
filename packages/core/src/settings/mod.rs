@@ -12,6 +12,7 @@ pub mod editor_mode;
 pub mod events;
 pub mod folder_ref;
 pub mod format;
+pub mod keybindings;
 pub mod logging;
 pub mod store;
 pub mod vaults;

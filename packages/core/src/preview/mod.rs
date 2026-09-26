@@ -33,7 +33,10 @@ pub mod world;
 pub mod web;
 
 pub use cache::PackageCache;
-pub use compile::{compile_note, compile_note_resolved, CompileOutcome, CompiledDocument};
+pub use compile::{
+    compile_note, compile_note_resolved, compile_note_with_templates, install_template,
+    CompileOutcome, CompiledDocument,
+};
 pub use resolve::{read_dependency, vault_path, ResolveError};
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;

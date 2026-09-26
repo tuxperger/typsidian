@@ -8,6 +8,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { Icon } from "../icons/Icons.js";
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 // Экран расширенного поиска (макет «Typsidian Утилиты» § Поиск).
 //
@@ -46,6 +47,8 @@ export function SearchOverlay({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(0);
+
+  useDismissOnEscape(onClose);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => inputRef.current?.focus(), []);
@@ -113,11 +116,8 @@ export function SearchOverlay({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
+    // Escape закрывает поиск откуда угодно, а не только из поля ввода, —
+    // `useDismissOnEscape` слушает окно.
     if (rows.length === 0) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();

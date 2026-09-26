@@ -85,6 +85,12 @@ directories = "5"
 sqlx = { version = "0.7", default-features = false, features = ["sqlite", "runtime-tokio", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "sync", "time"] }
 jwalk = "0.8"
+
+# Корзина ОС — не «не-wasm», а «есть далеко не везде». Под Android крейт не
+# собирается: его платформенные модули исключают `target_os = "android"` явным
+# cfg, и без этого таргетного условия падает вся мобильная сборка ядра. Ветку
+# без корзины держит `native::move_to_trash`.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 trash = "3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

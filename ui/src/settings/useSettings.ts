@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import init, {
+import {
   WebStore,
   type ApplyPlan,
   type ConfigDiskState,
@@ -13,7 +13,8 @@ import init, {
   type VaultOverrides,
   type VaultRecord,
 } from "../wasm-core/typsidian_core.js";
-import { createWasmCallQueue, type WasmCallQueue } from "../wasm-call-queue.js";
+import { type WasmCallQueue } from "../wasm-call-queue.js";
+import { deviceStore, deviceStoreQueue } from "./deviceStore.js";
 
 // Принцип I конституции: этот хук не переизобретает логику настроек — он только
 // вызывает ядро (contracts/settings-store-trait.md) и разбирает уже готовые
@@ -84,15 +85,6 @@ const NO_CHANGE: SettingsChange = {
 /** Собирает набор изменений из названных полей, остальные — «не трогать». */
 export function changeOf(fields: Partial<SettingsChange>): SettingsChange {
   return { ...NO_CHANGE, ...fields };
-}
-
-let wasmInitPromise: Promise<unknown> | null = null;
-
-function ensureWasmInitialized(): Promise<unknown> {
-  if (!wasmInitPromise) {
-    wasmInitPromise = init();
-  }
-  return wasmInitPromise;
 }
 
 /**
@@ -193,9 +185,10 @@ export function useSettings(): {
   // обращения к экземпляру идут через очередь (см. `wasm-call-queue.ts`);
   // синхронные геттеры вроде `settings()` читаются внутри той же операции, а не
   // рядом с ней — иначе они попадут в чужое окно заимствования.
-  const queueRef = useRef<WasmCallQueue | null>(null);
-  if (queueRef.current === null) queueRef.current = createWasmCallQueue();
-  const queue = queueRef.current;
+  // Очередь приходит из `deviceStore`, а не заводится здесь: экземпляр
+  // хранилища один на страницу (его открывает и экран приветствия, предлагая
+  // последний vault), и очередь к нему обязана быть той же самой.
+  const queue = deviceStoreQueue;
 
   const refresh = useCallback(async () => {
     const store = storeRef.current;
@@ -213,8 +206,7 @@ export function useSettings(): {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      await ensureWasmInitialized();
-      const store = await WebStore.create();
+      const store = await deviceStore();
       if (cancelled) return;
       storeRef.current = store;
       const snapshot = await queue.run(async () => ({

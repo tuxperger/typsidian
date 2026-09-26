@@ -1,0 +1,23 @@
+[package]
+name = "typsidian-mobile"
+version = "0.1.0"
+edition = "2021"
+description = "Typsidian mobile shell (Tauri, Android)"
+
+# Оболочка, а не второе ядро: вся логика приходит из `typsidian-core` через
+# `typsidian-shell` — тот же крейт команд, что у рабочего стола. Здесь только
+# точка входа и собственный `tauri.conf.json` (принцип I).
+
+[lib]
+name = "typsidian_mobile_lib"
+# `cdylib` — обязательное: на Android точки входа `main` нет, приложение
+# стартует из Java/Kotlin, и JNI загружает библиотеку по имени.
+# `staticlib` — ради iOS, если оболочка когда-нибудь до него дойдёт.
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+typsidian-shell = { path = "../../../packages/shell" }

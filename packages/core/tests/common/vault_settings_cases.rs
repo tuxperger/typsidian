@@ -12,9 +12,10 @@ use typsidian_core::boards::placement::AssetsPlacement;
 use typsidian_core::vault::sections::SectionMark;
 use typsidian_core::vault::service_dir;
 use typsidian_core::vault::events::VaultEvent;
+use typsidian_core::settings::keybindings::{self, CommandId, Shortcut, ShortcutProblem};
 use typsidian_core::vault::vault_settings::{
-    read_vault_settings, service_dir_status, set_section, write_vault_settings, VaultOverrides,
-    VaultSettingsError,
+    read_vault_settings, reset_keybinding, service_dir_status, set_keybinding, set_section,
+    write_vault_settings, SetKeybindingError, VaultOverrides, VaultSettingsError,
 };
 
 use super::MemoryVault;
@@ -184,5 +185,191 @@ pub async fn the_vault_registry_has_nowhere_to_live_here() {
     assert_eq!(
         read_vault_settings(&vault).await.unwrap(),
         VaultOverrides::default()
+    );
+}
+
+// ── Сочетания клавиш ────────────────────────────────────────────────────────
+
+/// Назначенное сочетание переживает круговой рейс через файл, а команда, которой
+/// не касались, остаётся на умолчании ядра.
+pub async fn a_keybinding_survives_a_round_trip() {
+    let mut vault = MemoryVault::new();
+    let mine = Shortcut::normalize(true, false, true, "p");
+
+    let after = set_keybinding(&mut vault, CommandId::CommandPalette, Some(mine.clone()))
+        .await
+        .expect("назначение в доступный vault");
+    assert_eq!(after.keybindings.len(), 1);
+
+    let read_back = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(read_back.keybindings, after.keybindings);
+
+    let resolved = keybindings::resolve(&read_back.keybindings, false);
+    let palette = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::CommandPalette)
+        .unwrap();
+    assert_eq!(palette.shortcut.as_ref(), Some(&mine));
+    assert!(!palette.is_default);
+
+    // Соседняя команда не тронута.
+    let search = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::Search)
+        .unwrap();
+    assert!(search.is_default);
+}
+
+/// Негодное сочетание отклоняется **до** записи: файл не должен содержать то,
+/// чем нельзя пользоваться.
+pub async fn an_unusable_shortcut_is_refused_before_the_file_is_touched() {
+    let mut vault = MemoryVault::new();
+
+    let refused = set_keybinding(
+        &mut vault,
+        CommandId::Search,
+        // Escape занят интерфейсом.
+        Some(Shortcut::normalize(true, false, false, "escape")),
+    )
+    .await;
+    assert!(matches!(
+        refused,
+        Err(SetKeybindingError::Invalid(ShortcutProblem::ReservedKey))
+    ));
+
+    let refused = set_keybinding(
+        &mut vault,
+        CommandId::Search,
+        // Без модификатора сочетание срабатывало бы при наборе текста.
+        Some(Shortcut::normalize(false, false, false, "f")),
+    )
+    .await;
+    assert!(matches!(
+        refused,
+        Err(SetKeybindingError::Invalid(ShortcutProblem::NoModifier))
+    ));
+
+    // Отказ не оставил следов: файла нет вовсе.
+    assert_eq!(
+        read_vault_settings(&vault).await.unwrap(),
+        VaultOverrides::default()
+    );
+}
+
+/// Снять сочетание и вернуть умолчание — разные действия, и одно не выражается
+/// через другое.
+pub async fn clearing_differs_from_resetting() {
+    let mut vault = MemoryVault::new();
+
+    // Снятое: запись есть, сочетания нет.
+    let cleared = set_keybinding(&mut vault, CommandId::Search, None)
+        .await
+        .expect("снятие в доступный vault");
+    assert_eq!(cleared.keybindings.len(), 1);
+    let resolved = keybindings::resolve(&cleared.keybindings, false);
+    let search = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::Search)
+        .unwrap();
+    assert_eq!(search.shortcut, None);
+    assert!(!search.is_default);
+
+    // Возврат к умолчанию: записи не остаётся вовсе, и сочетание снова есть.
+    let reset = reset_keybinding(&mut vault, CommandId::Search)
+        .await
+        .expect("возврат к умолчанию");
+    assert!(reset.keybindings.is_empty());
+    let resolved = keybindings::resolve(&reset.keybindings, false);
+    let search = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::Search)
+        .unwrap();
+    assert!(search.is_default);
+    assert_eq!(
+        search.shortcut.as_ref(),
+        Some(&CommandId::Search.default_shortcut())
+    );
+}
+
+/// Повторное назначение той же команде заменяет запись, а не добавляет вторую:
+/// иначе файл рос бы при каждом изменении, а какая из записей действует, стало
+/// бы вопросом порядка.
+pub async fn reassigning_replaces_rather_than_appends() {
+    let mut vault = MemoryVault::new();
+    for key in ["p", "j", "u"] {
+        set_keybinding(
+            &mut vault,
+            CommandId::CommandPalette,
+            Some(Shortcut::normalize(true, false, false, key)),
+        )
+        .await
+        .expect("назначение");
+    }
+    let overrides = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(overrides.keybindings.len(), 1);
+    assert_eq!(
+        overrides.keybindings[0].shortcut.as_ref().map(|s| s.key.as_str()),
+        Some("u")
+    );
+}
+
+/// Возврат команды, которую и не меняли, файл не трогает: лишняя запись — лишний
+/// повод его испортить.
+pub async fn resetting_an_untouched_command_writes_nothing() {
+    let mut vault = MemoryVault::new();
+    let overrides = reset_keybinding(&mut vault, CommandId::Search)
+        .await
+        .expect("возврат к умолчанию");
+    assert_eq!(overrides, VaultOverrides::default());
+    assert!(
+        vault.read(Path::new(SETTINGS_PATH)).await.is_err(),
+        "файл не должен появиться от возврата к тому, что и так действует"
+    );
+}
+
+/// Фича 007, FR-004: адрес шаблона пишется только годным, и отказ ничего не
+/// портит — ни эту запись, ни прежний файл.
+pub async fn a_bad_template_source_is_refused_before_writing() {
+    use typsidian_core::vault::vault_settings::TemplateSourceEntry;
+
+    let mut vault = MemoryVault::new();
+    let good = VaultOverrides {
+        template_sources: vec![TemplateSourceEntry {
+            spec: "@preview/codly:1.3.0".to_string(),
+            url: "https://example.org/codly.tar.gz".to_string(),
+        }],
+        ..VaultOverrides::default()
+    };
+    write_vault_settings(&mut vault, &good)
+        .await
+        .expect("годный адрес записывается");
+
+    for (spec, url) in [
+        ("codly", "https://example.org/codly.tar.gz"),
+        ("@preview/codly:1.3", "https://example.org/codly.tar.gz"),
+        ("@preview/codly:1.3.0", "ftp://example.org/codly.tar.gz"),
+        ("@preview/codly:1.3.0", "https://"),
+        ("@preview/codly:1.3.0", "https://example.org/с пробелом.tar.gz"),
+    ] {
+        let bad = VaultOverrides {
+            template_sources: vec![TemplateSourceEntry {
+                spec: spec.to_string(),
+                url: url.to_string(),
+            }],
+            ..VaultOverrides::default()
+        };
+        assert_eq!(
+            write_vault_settings(&mut vault, &bad).await,
+            Err(VaultSettingsError::InvalidTemplateSource {
+                spec: spec.to_string()
+            }),
+            "{spec} → {url}"
+        );
+    }
+
+    assert_eq!(
+        read_vault_settings(&vault).await.unwrap(),
+        good,
+        "прежние настройки не тронуты"
     );
 }

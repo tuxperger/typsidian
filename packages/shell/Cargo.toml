@@ -1,0 +1,36 @@
+[package]
+name = "typsidian-shell"
+version = "0.1.0"
+edition = "2021"
+description = "Команды Tauri поверх typsidian-core, общие для desktop и mobile"
+
+# Оболочка, а не второе ядро: вся логика приходит из `typsidian-core` по пути,
+# как того требует plan.md → Project Structure. Здесь только команды-обёртки и
+# пересылка событий в окно (001 T112-T115, принцип I).
+#
+# Приложением этот крейт не является и `tauri.conf.json` у него нет: точку входа
+# и `Context` дают `apps/desktop` и `apps/mobile`. Общими остаются команды —
+# именно они не имеют права разойтись между платформами.
+
+[lib]
+name = "typsidian_shell"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+typsidian-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+# `fs` — ради обзора папок устройства (выбор vault на Android): каталог с
+# тысячей записей читается заметное время, и делать это синхронной командой
+# значило бы держать поток окна.
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "fs"] }
+
+[dev-dependencies]
+# Тестам последнего vault нужен каталог настроек, не трогающий настоящий
+# каталог конфигурации пользователя.
+tempfile = "3"
+
+# `tauri-plugin-dialog` здесь СОЗНАТЕЛЬНО нет: плагин объявляет оболочка, у
+# которой он есть в capabilities (`tauri-build` ищет права плагина в
+# зависимостях того крейта, где раскрыт `generate_context!`). Рабочий стол его
+# подключает, мобильная оболочка — нет: `pick_folder` под Android у плагина не
+# реализован, и папку там выбирают своим обзором поверх команд `browse_*`.

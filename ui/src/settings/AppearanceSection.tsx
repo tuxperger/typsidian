@@ -1,13 +1,5 @@
-import { useEffect, useState } from "react";
 import type { Settings, Theme } from "../wasm-core/typsidian_core.js";
-
-/**
- * Границы, объявленные ядром (research.md §11). Дублируются здесь **только**
- * как подсказка полю ввода (`min`/`max`): решение о допустимости принимает
- * ядро, и UI не отклоняет значение сам — он показывает причину, вернувшуюся из
- * `apply` (принцип I, FR-016).
- */
-export const FONT_SIZE_HINT = { min: 8, max: 32 } as const;
+import { EditorFontSizeField } from "./EditorFontSizeField.js";
 
 export interface AppearanceSectionProps {
   settings: Settings;
@@ -31,10 +23,9 @@ export interface AppearanceSectionProps {
  * Раздел «Внешний вид» (T040, FR-015, FR-016).
  *
  * Кнопки «применить» здесь нет намеренно: изменение вступает в силу в момент
- * выбора (FR-003). Размер шрифта — единственное место, где пользователь может
- * ввести негодное значение, поэтому черновик поля живёт локально до `blur` или
- * `Enter`: иначе набор «20» проходил бы через промежуточное «2», которое ядро
- * честно отвергало бы как выход за диапазон.
+ * выбора (FR-003). Правила ввода размера живут в самом поле
+ * ([`EditorFontSizeField`]) — тем же полем настраивается размер внутри папки
+ * заметок, и двум копиям этих правил ничто не помешало бы разойтись.
  */
 export function AppearanceSection({
   settings,
@@ -45,23 +36,6 @@ export function AppearanceSection({
   defaultsMessage = null,
   rejectionMessage,
 }: AppearanceSectionProps): React.JSX.Element {
-  const [draft, setDraft] = useState(String(settings.editor_font_size ?? ""));
-
-  // Значение могло измениться снаружи (правка файла руками, другое окно) —
-  // поле следует за источником истины, а не за собственным прошлым состоянием.
-  useEffect(() => {
-    setDraft(String(settings.editor_font_size ?? ""));
-  }, [settings.editor_font_size]);
-
-  const commitDraft = (): void => {
-    const parsed = Number(draft);
-    if (!Number.isInteger(parsed)) {
-      setDraft(String(settings.editor_font_size ?? ""));
-      return;
-    }
-    onChangeFontSize(parsed);
-  };
-
   return (
     <section aria-label="Внешний вид">
       <h2>Внешний вид</h2>
@@ -77,24 +51,10 @@ export function AppearanceSection({
         </select>
       </label>
 
-      <label>
-        Размер шрифта редактора
-        <input
-          type="number"
-          inputMode="numeric"
-          min={FONT_SIZE_HINT.min}
-          max={FONT_SIZE_HINT.max}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commitDraft}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitDraft();
-            }
-          }}
-        />
-      </label>
+      <EditorFontSizeField
+        size={settings.editor_font_size ?? null}
+        onChange={onChangeFontSize}
+      />
 
       {rejectionMessage && <p role="alert">{rejectionMessage}</p>}
 

@@ -12,6 +12,7 @@ import { buildTree, type TreeFolder, type TreeNode } from "./buildTree.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
 import { isBoard } from "./fileKind.js";
 import { Icon } from "../icons/Icons.js";
+import { copyText, useContextMenu, type ContextMenuItem } from "../menu/ContextMenu.js";
 
 // Принцип I конституции: этот файл не переизобретает vault-логику —
 // create/rename/delete здесь всегда прямые вызовы `VaultClient`
@@ -123,6 +124,27 @@ function makeDefaultConfirmRename(client: VaultClient) {
 const OpenPathContext = createContext<string | null>(null);
 
 /**
+ * Действия дерева, которым нужна рабочая область, — сейчас одно: вставить
+ * ссылку на заметку в открытую заметку. Контекст по той же причине, что
+ * `OpenPathContext`: строки лежат на два уровня глубже, чем пропы дерева.
+ */
+const TreeExtrasContext = createContext<{ onInsertLink?: (note: Note) => void }>({});
+
+/** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
+function copyPathItem(
+  path: string,
+  notify: (message: string) => void,
+): ContextMenuItem {
+  return {
+    label: "Копировать путь",
+    run: async () => {
+      const failure = await copyText(path);
+      notify(failure ?? `Скопировано: ${path}`);
+    },
+  };
+}
+
+/**
  * Что нужно самому состоянию действий — им пользуется `useVaultTreeActions`.
  *
  * Отдельно от пропов компонента: с тех пор как кнопка создания переехала в
@@ -174,6 +196,11 @@ export interface VaultTreeActionsProps {
   /** Какой файл сейчас открыт — он выделяется в дереве (FR-004 макета). */
   openPath?: string | null;
   actions: VaultTreeActionsController;
+  /**
+   * Вставить ссылку `[[…]]` на заметку в открытую заметку — пункт контекстного
+   * меню. Не передан — открытой текстовой заметки нет, и пункт не показывается.
+   */
+  onInsertLink?: ((note: Note) => void) | undefined;
 }
 
 type MenuTarget =
@@ -553,6 +580,8 @@ function NoteRow({
   const isMenuOpen = menu !== null && menu.kind === "note" && menu.note.path === note.path;
   const isBusy = actions.state.pendingPath !== null;
   const isOpen = useContext(OpenPathContext) === note.path.toString();
+  const contextMenu = useContextMenu();
+  const { onInsertLink } = useContext(TreeExtrasContext);
 
   if (isRenaming) {
     return (
@@ -574,8 +603,18 @@ function NoteRow({
       role="treeitem"
       className="ts-tree__file"
       onContextMenu={(event) => {
-        event.preventDefault();
-        actions.openMenu({ kind: "note", note });
+        if (isBusy) return;
+        contextMenu.open(event, [
+          { label: "Открыть", run: () => onOpenNote(note) },
+          ...(onInsertLink && !isBoard(note) && !isOpen
+            ? [{ label: "Вставить ссылку в открытую заметку", run: () => onInsertLink(note) }]
+            : []),
+          { kind: "separator" },
+          copyPathItem(note.path.toString(), contextMenu.notify),
+          { label: "Переименовать", run: () => actions.beginRename(note) },
+          { kind: "separator" },
+          { label: "Удалить…", danger: true, run: () => actions.requestDelete(note) },
+        ]);
       }}
     >
       <button
@@ -657,9 +696,34 @@ function FolderRow({
   // иначе новый инлайн-инпут появлялся бы в свёрнутой, невидимой ветке.
   const showChildren = expanded || isCreatingHere;
   const isBusy = actions.state.pendingPath !== null;
+  const contextMenu = useContextMenu();
 
   return (
-    <li role="treeitem" aria-expanded={showChildren} className="ts-tree__folder">
+    <li
+      role="treeitem"
+      aria-expanded={showChildren}
+      className="ts-tree__folder"
+      onContextMenu={(event) => {
+        if (isBusy) return;
+        contextMenu.open(event, [
+          { label: "Создать заметку здесь", run: () => actions.beginCreate(folder.path) },
+          {
+            label: "Создать доску здесь",
+            run: () => actions.beginCreate(folder.path, "board"),
+          },
+          { kind: "separator" },
+          ...(actions.onToggleSection
+            ? [
+                {
+                  label: isSection ? "Снять пометку раздела" : "Пометить как раздел",
+                  run: () => actions.onToggleSection?.(folder.path, !isSection),
+                },
+              ]
+            : []),
+          copyPathItem(folder.path, contextMenu.notify),
+        ]);
+      }}
+    >
       {/* Строка папки по шаблону: иконка папки и имя. Шеврон в шаблоне не
           нарисован — там папки декоративные заголовки, а здесь они
           сворачиваются, и управляющий элемент без признака состояния был бы
@@ -775,13 +839,19 @@ export function VaultTreeActions({
   onOpenNote,
   openPath = null,
   actions,
+  onInsertLink,
 }: VaultTreeActionsProps): React.JSX.Element {
   const tree = useMemo(() => buildTree(notes), [notes]);
   const isCreatingAtRoot = actions.state.creatingInFolder === "";
   const isBusy = actions.state.pendingPath !== null;
+  const extras = useMemo(
+    () => (onInsertLink ? { onInsertLink } : {}),
+    [onInsertLink],
+  );
 
   return (
     <OpenPathContext.Provider value={openPath}>
+    <TreeExtrasContext.Provider value={extras}>
     <div>
       {notes.length === 0 && !isCreatingAtRoot ? (
         <p role="status">Vault пуст — создайте первую заметку или доску.</p>
@@ -811,6 +881,7 @@ export function VaultTreeActions({
         </ul>
       )}
     </div>
+    </TreeExtrasContext.Provider>
     </OpenPathContext.Provider>
   );
 }

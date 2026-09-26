@@ -218,8 +218,27 @@ description: "Task list for Note Rendering and Live Preview"
 - [ ] T041 [US1] Реализовать web-часть `PreviewClient` в `ui/src/vault-client-web.ts`,
       проведя **все** вызовы экземпляра ядра через `ui/src/wasm-call-queue.ts`: без очереди
       сборка наложится на цикл опроса vault и даст `recursive use of an object detected`
-- [ ] T042 [US1] Реализовать native-часть `PreviewClient` в
-      `apps/desktop/src/tauriVaultClient.ts` командами Tauri
+- [X] T042 [US1] Реализовать native-часть `PreviewClient` в
+      `ui/src/vault-client-tauri.ts` командами Tauri, а сами команды — в
+      `packages/shell/src/lib.rs`
+      - **Закрыт 2026-09-15.** Файл в тот же день переехал: был
+        `apps/desktop/src/tauriVaultClient.ts`, стал общим для обеих нативных оболочек,
+        поэтому одна реализация закрыла **и desktop, и Android**.
+      - Переписывать в ядре не пришлось ничего: `compile_note_resolved`,
+        `compile_note_with_templates`, `FontSet::builtin()` и `PackageCache` живут вне
+        `cfg` — под `cfg(target_arch = "wasm32")` спрятана только обёртка
+        wasm-bindgen `preview::web`. Из ядра понадобилось ровно два штриха:
+        `SnapshotError` стал сериализуемым (он теперь пересекает границу как есть, а не
+        строкой в `JsError`), и `compile_note_with_templates` добавлен в `pub use`.
+      - Движок (`typsidian_shell::Preview`) — состояние окна, как `PreviewEngine` на web
+        и по той же причине: предпросмотр не владеет vault, а получает его на вызов.
+        Своего `Mutex` у него нет — `PackageCache` синхронизируется изнутри.
+      - Очереди вызовов, обязательной на web, здесь нет намеренно:
+        «recursive use of an object» — свойство границы wasm-bindgen, а не ядра.
+      - Покрытие: `preview_native.rs` → `note_on_native_backend_compiles_into_pages`,
+        `dependency_is_read_through_the_native_backend`. До этого предпросмотр
+        проверялся только на `MemoryVault`, и пара «`NativeBackend` + сборка» — та
+        самая, которой пользуются оболочки, — не была связана ни одним тестом.
 
 ### Панель предпросмотра
 
@@ -613,8 +632,9 @@ T017, T018, T019 пишутся параллельно реализациям, �
   недоступен программе чтения с экрана. FR-031, FR-032 и SC-011 не выполнены.
 - **T067, T068, якорь прокрутки.** Не сделан: при пересборке вид возвращается к началу
   документа. FR-004, FR-034 и SC-005 не выполнены.
-- **T042, desktop.** `PreviewClient` реализован только для web; на рабочем столе колонка
-  предпросмотра сообщает, что сборка недоступна.
+- ~~**T042, desktop.**~~ Закрыт 2026-09-15: команды `preview_compile` и
+  `preview_compile_with_templates` в `packages/shell`, клиент — в
+  `ui/src/vault-client-tauri.ts`, общий для desktop и Android. В окне не прогонялся.
 
 **Отступления от буквы задач**, чтобы не искать их потом по диффу: T043 (`PreviewPage.tsx`) и
 T046 (`useCompiledDocument.ts`) отдельными файлами не заведены — их содержимое пока живёт

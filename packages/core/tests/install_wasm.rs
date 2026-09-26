@@ -76,3 +76,68 @@ async fn a_changed_template_diverges_from_its_fingerprint() {
 async fn a_template_with_binary_files_installs() {
     cases::a_template_with_binary_files_installs().await;
 }
+
+#[wasm_bindgen_test]
+async fn a_neighbouring_version_is_left_alone() {
+    cases::a_neighbouring_version_is_left_alone().await;
+}
+
+#[wasm_bindgen_test]
+async fn tampering_is_noticed_without_reinstalling() {
+    cases::tampering_is_noticed_without_reinstalling().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_hand_placed_template_cannot_be_verified() {
+    cases::a_hand_placed_template_cannot_be_verified().await;
+}
+
+#[wasm_bindgen_test]
+async fn the_registry_lists_installed_templates() {
+    cases::the_registry_lists_installed_templates().await;
+}
+
+#[wasm_bindgen_test]
+async fn an_installed_template_is_not_fetched_again() {
+    cases::an_installed_template_is_not_fetched_again().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_note_without_imports_never_reaches_for_the_network() {
+    cases::a_note_without_imports_never_reaches_for_the_network().await;
+}
+
+#[wasm_bindgen_test]
+async fn the_fetch_path_sends_nothing_about_the_note() {
+    cases::the_fetch_path_sends_nothing_about_the_note().await;
+}
+
+#[wasm_bindgen_test]
+async fn disabled_auto_download_makes_no_attempt() {
+    cases::disabled_auto_download_makes_no_attempt().await;
+}
+
+#[wasm_bindgen_test]
+async fn enabled_auto_download_makes_an_attempt() {
+    cases::enabled_auto_download_makes_an_attempt().await;
+}
+
+#[wasm_bindgen_test]
+async fn an_explicit_install_ignores_the_switch() {
+    cases::an_explicit_install_ignores_the_switch().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_user_url_is_never_replaced_by_the_registry() {
+    cases::a_user_url_is_never_replaced_by_the_registry().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_local_namespace_is_only_reported_missing() {
+    cases::a_local_namespace_is_only_reported_missing().await;
+}
+
+#[wasm_bindgen_test]
+async fn compiling_reports_a_tampered_template_without_reinstalling() {
+    cases::compiling_reports_a_tampered_template_without_reinstalling().await;
+}

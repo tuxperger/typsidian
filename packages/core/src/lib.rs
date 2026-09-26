@@ -1,4 +1,5 @@
 pub mod boards;
+pub mod elements;
 pub mod graph;
 pub mod preview;
 pub mod search;

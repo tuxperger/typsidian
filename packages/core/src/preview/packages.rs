@@ -32,7 +32,7 @@
 //! [`install`].
 
 use std::io::Read;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -98,13 +98,18 @@ pub enum TemplateSource {
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(tag = "kind")]
 pub enum InstallError {
-    #[error("сети нет")]
-    Offline,
+    /// Адрес назван и здесь: FR-007 требует его у **каждого** отказа, а
+    /// «сети нет» без адреса не говорит, куда приложение пыталось обратиться.
+    #[error("сети нет: {url} недостижим")]
+    Offline { url: String },
     #[error("источник {url} недоступен")]
     SourceUnavailable { url: String },
     /// Среда клиента не дала обратиться к источнику (FR-015). В браузере это
     /// обычно политика доступа к чужому домену.
-    #[error("обращение к {url} запрещено средой этого клиента")]
+    #[error(
+        "обращение к {url} запрещено средой этого клиента; шаблон можно положить \
+         вручную в папку .typsidian/packages/ этой папки заметок"
+    )]
     Blocked { url: String },
     #[error("в источнике нет версии {spec}")]
     VersionNotFound { spec: String },
@@ -122,13 +127,50 @@ pub enum InstallError {
 
 /// Что получилось из попытки установить шаблон — для отчёта пользователю
 /// (FR-006, FR-007).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct InstallReport {
     pub spec: String,
     pub url: String,
     pub fingerprint: String,
     pub file_count: usize,
 }
+
+/// Сошлось ли содержимое установленного шаблона с записанным отпечатком
+/// (FR-023).
+///
+/// `Unknown` — не «сошлось» и не «разошлось»: шаблон разложен руками или
+/// установлен прежней версией приложения, и сверять не с чем. Смешивать это
+/// состояние с «сошлось» нельзя — оно означало бы гарантию, которой нет.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FingerprintCheck {
+    Matches,
+    Diverged { recorded: String, actual: String },
+    Unknown,
+}
+
+/// Установленный шаблон — для перечня в интерфейсе (FR-022, US5 AS1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct InstalledTemplate {
+    /// Спецификация строкой — та же, что видит пользователь: `@preview/codly:1.3.0`.
+    pub spec: String,
+    /// Адрес, с которого шаблон получен. Пусто — установлен не этим приложением.
+    pub url: String,
+    pub fingerprint: String,
+    pub file_count: usize,
+}
+
+/// Реестр установленного — список, а не обход папок.
+///
+/// Обхода каталога у `VaultBackend` нет, и заводить его ради одного перечня
+/// значило бы расширить поверхность ядра сильнее, чем стоит задача. Истина
+/// по-прежнему на диске: каждая запись перед показом сверяется с наличием
+/// манифеста, и удалённый руками шаблон из перечня исчезает (см.
+/// [`installed_templates`]).
+pub const REGISTRY_FILE: &str = "installed.json";
 
 /// Адрес, к которому приложение обратится.
 ///
@@ -353,12 +395,16 @@ pub async fn install<B: VaultBackend>(
         write_file(backend, &root.join(path), bytes).await?;
     }
 
-    write_file(
-        backend,
-        &root.join(FINGERPRINT_FILE),
-        digest.as_bytes(),
-    )
-    .await?;
+    // В файл отпечатка идёт и состав установленного: сверять отпечаток нужно по
+    // тому же набору файлов, по которому он считался, а обхода каталога у
+    // бэкенда нет — см. `recorded_fingerprint`.
+    let mut record = String::with_capacity(digest.len() + files.len() * 16);
+    record.push_str(&digest);
+    for (path, _) in files {
+        record.push('\n');
+        record.push_str(path);
+    }
+    write_file(backend, &root.join(FINGERPRINT_FILE), record.as_bytes()).await?;
 
     let manifest = deferred.ok_or_else(|| InstallError::ArchiveRejected {
         reason: format!("в архиве нет манифеста {PACKAGE_MANIFEST}"),
@@ -370,16 +416,171 @@ pub async fn install<B: VaultBackend>(
 
 /// Отпечаток, записанный при установке. `None` — шаблон установлен прежней
 /// версией приложения либо разложен пользователем вручную.
+///
+/// Первая строка файла — сам отпечаток; дальше идут пути установленных файлов.
+/// Формат сложился таким, потому что сверять отпечаток нужно по тому же набору
+/// файлов, по которому он считался, а перечислить содержимое папки
+/// `VaultBackend` не умеет — обхода каталога у него нет. Файл прежнего формата
+/// (один отпечаток без списка) читается по-прежнему: сверить по нему нельзя,
+/// и [`verify_installed`] честно отвечает `Unknown`.
 pub async fn recorded_fingerprint<B: VaultBackend>(
     backend: &B,
     spec: &PackageSpec,
 ) -> Option<String> {
+    read_record(backend, spec).await.map(|record| record.digest)
+}
+
+/// Записанное про установленный шаблон: отпечаток и состав.
+struct InstallRecord {
+    digest: String,
+    files: Vec<String>,
+}
+
+async fn read_record<B: VaultBackend>(backend: &B, spec: &PackageSpec) -> Option<InstallRecord> {
     let path = package_root(spec).join(FINGERPRINT_FILE);
-    backend
-        .read(&path)
-        .await
-        .ok()
-        .map(|text| text.trim().to_string())
+    let text = backend.read(&path).await.ok()?;
+    let mut lines = text.lines();
+    let digest = lines.next()?.trim().to_string();
+    if digest.is_empty() {
+        return None;
+    }
+    Some(InstallRecord {
+        digest,
+        files: lines
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect(),
+    })
+}
+
+/// Сверяет содержимое установленного шаблона с записанным отпечатком (FR-023).
+///
+/// Ничего не переписывает и не переустанавливает: правка шаблона руками может
+/// быть намеренной, и решение остаётся за пользователем. Дело этой функции —
+/// заметить расхождение, а не устранить его.
+pub async fn verify_installed<B: VaultBackend>(
+    backend: &B,
+    spec: &PackageSpec,
+) -> FingerprintCheck {
+    let Some(record) = read_record(backend, spec).await else {
+        return FingerprintCheck::Unknown;
+    };
+    if record.files.is_empty() {
+        // Файл прежнего формата: отпечаток есть, состав неизвестен — пересчитать
+        // не из чего.
+        return FingerprintCheck::Unknown;
+    }
+
+    let root = package_root(spec);
+    let mut files: Vec<(String, Vec<u8>)> = Vec::with_capacity(record.files.len());
+    for name in &record.files {
+        match backend.read_bytes(&root.join(name)).await {
+            Ok(bytes) => files.push((name.clone(), bytes)),
+            // Файл исчез — это тоже расхождение, и молчать о нём нельзя.
+            Err(_) => {
+                return FingerprintCheck::Diverged {
+                    recorded: record.digest,
+                    actual: format!("файла {name} больше нет"),
+                }
+            }
+        }
+    }
+
+    let actual = fingerprint(&files);
+    if actual == record.digest {
+        FingerprintCheck::Matches
+    } else {
+        FingerprintCheck::Diverged {
+            recorded: record.digest,
+            actual,
+        }
+    }
+}
+
+/// Перечень установленных шаблонов (US5 AS1).
+///
+/// Реестр — лишь список известных записей; истина на диске. Поэтому каждая
+/// запись перед выдачей проверяется наличием манифеста: шаблон, удалённый
+/// руками, из перечня исчезает, а не висит призраком.
+pub async fn installed_templates<B: VaultBackend>(backend: &B) -> Vec<InstalledTemplate> {
+    let Ok(text) = backend.read(&registry_path()).await else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<Vec<InstalledTemplate>>(&text) else {
+        return Vec::new();
+    };
+
+    let mut alive = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(spec) = parse_spec(&entry.spec) else {
+            continue;
+        };
+        if backend
+            .read(&package_root(&spec).join(PACKAGE_MANIFEST))
+            .await
+            .is_ok()
+        {
+            alive.push(entry);
+        }
+    }
+    alive
+}
+
+fn registry_path() -> PathBuf {
+    crate::vault::service_dir::packages_dir().join(REGISTRY_FILE)
+}
+
+/// Дописывает запись в реестр установленного, заменяя прежнюю о той же версии.
+///
+/// Отдельная операция, а не часть [`install`]: адрес источника знает только
+/// вызывающая сторона — сама установка работает с уже полученными байтами и о
+/// том, откуда они взялись, не осведомлена.
+///
+/// Отказ записи реестра установку не отменяет: шаблон уже на диске и работает,
+/// а реестр — удобство перечня. Молча ронять установку из-за него было бы
+/// хуже, чем показать неполный список.
+pub async fn remember_installed<B: VaultBackend>(backend: &mut B, entry: InstalledTemplate) {
+    let mut entries = match backend.read(&registry_path()).await {
+        Ok(text) => serde_json::from_str::<Vec<InstalledTemplate>>(&text).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    entries.retain(|known| known.spec != entry.spec);
+    entries.push(entry);
+    entries.sort_by(|a, b| a.spec.cmp(&b.spec));
+
+    if let Ok(text) = serde_json::to_string_pretty(&entries) {
+        let path = registry_path();
+        if let Some(folder) = path.parent() {
+            let _ = backend.ensure_folder(folder).await;
+        }
+        let _ = backend.write(&path, &text, None).await;
+    }
+}
+
+/// Разбирает `@namespace/name:major.minor.patch` обратно в спецификацию.
+///
+/// Нужен реестру: записи хранятся строкой — ровно той, что видит пользователь.
+pub fn parse_spec(text: &str) -> Option<PackageSpec> {
+    let rest = text.strip_prefix('@')?;
+    let (namespace, rest) = rest.split_once('/')?;
+    let (name, version) = rest.split_once(':')?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(PackageSpec {
+        namespace: namespace.into(),
+        name: name.into(),
+        version: typst::syntax::package::PackageVersion {
+            major,
+            minor,
+            patch,
+        },
+    })
 }
 
 async fn write_file<B: VaultBackend>(
@@ -483,7 +684,9 @@ fn classify_transport(error: reqwest::Error, url: &str) -> InstallError {
         };
     }
     if is_connect_failure(&error) {
-        return InstallError::Offline;
+        return InstallError::Offline {
+            url: url.to_string(),
+        };
     }
     // В браузере отказ по политике доступа к чужому домену приходит как
     // обычная ошибка запроса без статуса — отличить её от прочих транспортных
@@ -516,12 +719,24 @@ pub async fn fetch_and_install<B: VaultBackend>(
     let files = unpack(&archive)?;
     let digest = install(backend, spec, &files).await?;
 
-    Ok(InstallReport {
+    let report = InstallReport {
         spec: spec.to_string(),
         url,
         fingerprint: digest,
         file_count: files.len(),
-    })
+    };
+    remember_installed(
+        backend,
+        InstalledTemplate {
+            spec: report.spec.clone(),
+            url: report.url.clone(),
+            fingerprint: report.fingerprint.clone(),
+            file_count: report.file_count,
+        },
+    )
+    .await;
+
+    Ok(report)
 }
 
 #[cfg(test)]

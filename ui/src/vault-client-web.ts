@@ -1,8 +1,18 @@
-import init, { PreviewEngine, WebBackend } from "./wasm-core/typsidian_core.js";
+import init, {
+  PreviewEngine,
+  WebBackend,
+  type VaultRecord,
+} from "./wasm-core/typsidian_core.js";
 import type { VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue } from "./wasm-call-queue.js";
-import { classifyOpenFailure, type VaultOpenResult } from "./vault-tree/useVault.js";
+import { deviceStore, deviceStoreQueue } from "./settings/deviceStore.js";
+import { changeOf } from "./settings/useSettings.js";
+import {
+  classifyOpenFailure,
+  type LastVault,
+  type VaultOpenResult,
+} from "./vault-tree/useVault.js";
 import { basename } from "./paths.js";
 
 // Реализация `VaultClient` для web: ядро в том же процессе, WASM
@@ -199,6 +209,11 @@ export function webVaultClient(
       call(() => backend.saveAsTemplate(name, content, confirmOverwrite)),
     planInsertion: async (textLength, point, content) =>
       WebBackend.planInsertion(textLength, point, content),
+    // Фича 008: чистые функции ядра — статические, без очереди вызовов.
+    elementSchema: async (id) => WebBackend.elementSchema(id),
+    elementAt: async (text, offset) => WebBackend.elementAt(text, offset),
+    renderElement: async (request) => WebBackend.renderElement(request),
+    planElementEdit: async (request) => WebBackend.planElementEdit(request),
     templateEvent: async (event) => WebBackend.templateEvent(event),
 
     // ── Настройки уровня vault и разделы (фича 006) ───────────────────
@@ -210,6 +225,14 @@ export function webVaultClient(
       call(() => backend.setVaultSettings(overrides)),
     markSection: (folder) => call(() => backend.markSection(folder)),
     unmarkSection: (folder) => call(() => backend.unmarkSection(folder)),
+
+    // ── Сочетания клавиш ──────────────────────────────────────────────
+    // `keybindings` — статическая: она ничего не читает с диска, это разбор
+    // уже полученных настроек. Две другие пишут файл, поэтому через `call`.
+    keybindings: async (overrides, mac) => WebBackend.keybindings(overrides, mac),
+    setKeybinding: (command, shortcut) =>
+      call(() => backend.setKeybinding(command, shortcut)),
+    resetKeybinding: (command) => call(() => backend.resetKeybinding(command)),
   };
 }
 
@@ -247,6 +270,11 @@ function webPreviewClient(
           overrides,
         ),
       ),
+    // FR-010: явная установка идёт через ту же очередь — она тоже пишет в
+    // vault, и наложение на цикл опроса упало бы «recursive use of an object».
+    installTemplate: (spec, overrides) =>
+      call(() => engine.installTemplate(backend, spec, overrides)),
+    installedTemplates: () => call(() => engine.installedTemplates(backend)),
   };
 }
 
@@ -267,10 +295,163 @@ export async function openWebVault(): Promise<VaultOpenResult> {
     if (!picker) return { ok: false, error: { kind: "NotSupported" } };
 
     const handle = await picker();
-    const backend = await WebBackend.fromHandle(handle.name, handle);
-    const { vault, preview } = webClients(backend, new PreviewEngine());
-    return { ok: true, client: vault, preview };
+    const opened = await openWebVaultFromHandle(handle);
+    // FR-007: открытый vault становится последним. После успеха, а не до:
+    // папка, которую не удалось открыть, последней не становится.
+    if (opened.ok) await rememberWebVault(handle);
+    return opened;
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };
   }
+}
+
+/** Открыть vault по уже полученному хендлу папки. */
+async function openWebVaultFromHandle(
+  handle: FileSystemDirectoryHandle,
+): Promise<VaultOpenResult> {
+  const backend = await WebBackend.fromHandle(handle.name, handle);
+  const { vault, preview } = webClients(backend, new PreviewEngine());
+  return { ok: true, client: vault, preview };
+}
+
+/**
+ * Запоминает папку как последний открытый vault (FR-007).
+ *
+ * Хендл уходит в ядро **не разобранным**: сведение повторного добавления к уже
+ * известной записи делает реестр ядра через `isSameEntry()` (FR-020 фичи 004),
+ * а не этот модуль — сравнивать здесь было бы нечего, абсолютного пути в
+ * браузере не существует.
+ *
+ * Отказ хранилища открытие не отменяет и пользователю не показывается: vault
+ * уже открыт и работает, не запомнилась только точка входа следующего запуска.
+ */
+async function rememberWebVault(handle: FileSystemDirectoryHandle): Promise<void> {
+  try {
+    const store = await deviceStore();
+    await deviceStoreQueue.run(async () => {
+      const id = await store.addVault(handle, handle.name);
+      await store.apply(changeOf({ current_vault: id }));
+    });
+  } catch {
+    // Молча: действия от пользователя это не требует.
+  }
+}
+
+/**
+ * Последний открытый vault по данным хранилища устройства (FR-007).
+ *
+ * `null` — предлагать нечего: ни одного vault ещё не открывали, либо ссылки на
+ * папку больше нет. Перенесённая папка не разыскивается — это решение ядра
+ * (FR-023 фичи 004).
+ *
+ * Разрешение на папку спрашивается **в момент открытия**, а не здесь: браузер
+ * выдаёт его только в обработчике жеста пользователя, и запрос на загрузке
+ * страницы обернулся бы отказом вместо заметок.
+ */
+export async function lastWebVault(): Promise<LastVault | null> {
+  try {
+    const store = await deviceStore();
+    return await deviceStoreQueue.run(async () => {
+      const id = store.settings().current_vault;
+      if (id === undefined) return null;
+      const resolved = await resolveWebVault(store, id);
+      if (resolved === null) return null;
+      const records = (await store.knownVaults()) as VaultRecord[];
+      const record = records.find((known) => known.id === id) ?? null;
+      return {
+        label: record?.label ?? record?.location ?? resolved.handle.name,
+        // Молчаливое открытие возможно, только пока разрешение действует:
+        // браузер выдаёт его заново лишь в обработчике жеста.
+        readyToOpen: resolved.access === "granted",
+        open: () => openRememberedWebVault(resolved.handle),
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Открыть известный vault по его записи в списке — жест переключения из панели
+ * настроек (US2 фичи 004, AS3).
+ *
+ * Отдельная точка входа, а не `lastWebVault`: переключение идёт на **выбранную**
+ * запись, и текущей она становится в ядре, а не здесь.
+ */
+export async function openWebVaultById(id: string): Promise<VaultOpenResult> {
+  let handle: FileSystemDirectoryHandle;
+  try {
+    const store = await deviceStore();
+    const resolved = await deviceStoreQueue.run(() => resolveWebVault(store, id));
+    // Папки больше нет: та же причина, что показывает список как недоступную
+    // запись (FR-023).
+    if (resolved === null) return { ok: false, error: { kind: "OpenFailed", message: "NotFound" } };
+    handle = resolved.handle;
+  } catch (cause) {
+    return { ok: false, error: classifyOpenFailure(cause) };
+  }
+  return openRememberedWebVault(handle);
+}
+
+/** Ссылка на папку записи и состояние доступа к ней — ответ `resolveVault`. */
+interface ResolvedVault {
+  access: "granted" | "needsPermission";
+  handle: FileSystemDirectoryHandle;
+}
+
+/**
+ * Разбирает ответ `WebStore.resolveVault`.
+ *
+ * Типизация на границе wasm-bindgen: объект приходит нетипизированным, и
+ * сужение здесь — единственное место, где о природе хендла вообще говорится.
+ * Ядро его не разбирает и сравнивает только через `isSameEntry()` (FR-020).
+ *
+ * Вызывать **внутри** операции очереди: метод заимствует объект ядра.
+ */
+async function resolveWebVault(
+  store: Awaited<ReturnType<typeof deviceStore>>,
+  id: string,
+): Promise<ResolvedVault | null> {
+  const answer: { access?: unknown; handle?: unknown } = await store.resolveVault(id);
+  const handle = answer.handle;
+  if (answer.access === "missing" || handle === undefined || handle === null) return null;
+  return {
+    access: answer.access === "granted" ? "granted" : "needsPermission",
+    handle: handle as FileSystemDirectoryHandle,
+  };
+}
+
+/**
+ * Открывает запомненный vault, переспросив разрешение на папку.
+ *
+ * `requestPermission()` вызывается всегда: на уже выданном разрешении он
+ * отвечает `granted`, ничего не спрашивая, а отозванное — это штатный случай, а
+ * не поломка (`Resolved::NeedsPermission` в ядре).
+ */
+async function openRememberedWebVault(
+  handle: FileSystemDirectoryHandle,
+): Promise<VaultOpenResult> {
+  try {
+    await ensureWasmInitialized();
+    const permission = await requestFolderPermission(handle);
+    if (permission !== "granted") return { ok: false, error: { kind: "PermissionDenied" } };
+    return await openWebVaultFromHandle(handle);
+  } catch (cause) {
+    return { ok: false, error: classifyOpenFailure(cause) };
+  }
+}
+
+/**
+ * Запрос разрешения на папку. Метода может не быть вовсе — в браузере без
+ * File System Access API этого хендла не существует, но версии, где он есть, а
+ * `requestPermission` ещё нет, встречаются.
+ */
+async function requestFolderPermission(handle: FileSystemDirectoryHandle): Promise<string> {
+  const request = (
+    handle as unknown as {
+      requestPermission?: (options: { mode: string }) => Promise<string>;
+    }
+  ).requestPermission;
+  if (!request) return "granted";
+  return request.call(handle, { mode: "readwrite" });
 }

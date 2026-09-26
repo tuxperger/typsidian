@@ -48,6 +48,16 @@ pub struct Diagnostic {
     pub message: String,
     /// Место; `None` для замечания без привязки к файлу.
     pub location: Option<DiagnosticLocation>,
+    /// Внешний шаблон, который можно попросить загрузить явно (фича 007,
+    /// FR-010), — спецификацией строкой: `@preview/codly:1.3.0`.
+    ///
+    /// Стоит только у замечаний о **неудавшейся или не начатой** загрузке
+    /// шаблона, у которого есть источник. Поле, а не разбор текста в
+    /// интерфейсе: формулировка сообщения меняется, а спецификация — нет
+    /// (принцип I).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub template: Option<String>,
 }
 
 /// Переводит диагностику компилятора в форму для UI.
@@ -65,6 +75,7 @@ pub fn translate(
         severity,
         message: diagnostic.message.to_string(),
         location: locate(world, main, diagnostic),
+        template: None,
     }
 }
 

@@ -82,3 +82,35 @@ async fn a_read_only_vault_gets_no_service_dir() {
 async fn settings_loss_is_reported_only_when_there_was_something_to_lose() {
     cases::settings_loss_is_reported_only_when_there_was_something_to_lose().await;
 }
+
+// ── Сочетания клавиш ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_keybinding_survives_a_round_trip() {
+    cases::a_keybinding_survives_a_round_trip().await;
+}
+
+#[tokio::test]
+async fn an_unusable_shortcut_is_refused_before_the_file_is_touched() {
+    cases::an_unusable_shortcut_is_refused_before_the_file_is_touched().await;
+}
+
+#[tokio::test]
+async fn clearing_differs_from_resetting() {
+    cases::clearing_differs_from_resetting().await;
+}
+
+#[tokio::test]
+async fn reassigning_replaces_rather_than_appends() {
+    cases::reassigning_replaces_rather_than_appends().await;
+}
+
+#[tokio::test]
+async fn resetting_an_untouched_command_writes_nothing() {
+    cases::resetting_an_untouched_command_writes_nothing().await;
+}
+
+#[tokio::test]
+async fn a_bad_template_source_is_refused_before_writing() {
+    cases::a_bad_template_source_is_refused_before_writing().await;
+}

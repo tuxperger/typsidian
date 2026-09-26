@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../icons/Icons.js";
 import { plural } from "../plural.js";
 import type { Note } from "../wasm-core/typsidian_core.js";
+import { useDismissOnEscape } from "./useDismissOnEscape.js";
 
 // Палитра команд ⌘K — экран 3 макета (handoff § Screens 3).
 //
@@ -42,6 +43,8 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement | null>(null);
+
+  useDismissOnEscape(onClose);
 
   const noteRows = useMemo<Row[]>(() => {
     const needle = query.trim().toLowerCase();
@@ -102,8 +105,8 @@ export function CommandPalette({
         event.preventDefault();
         runRow(rows[active]);
       }
-      // Escape намеренно не здесь: он закрывает палитру из любого места, и
-      // слушатель на него висит в `Workspace` вместе с ⌘K.
+      // Escape намеренно не здесь: он закрывает палитру из любого места —
+      // этим занят `useDismissOnEscape`, общий для всех наложений.
     },
     [rows, active, runRow],
   );

@@ -107,6 +107,41 @@ export type VaultOpenResult =
  */
 export type VaultOpener = () => Promise<VaultOpenResult>;
 
+/**
+ * Последний открытый vault, предлагаемый при запуске (FR-007).
+ *
+ * Чем он **не** является: путём или хендлом. Ссылку на папку хранит реестр
+ * ядра, и у платформ она разная — `PathBuf` в `settings.json` на native,
+ * `FileSystemDirectoryHandle` в IndexedDB на web. Сюда приходит только то, что
+ * нужно интерфейсу: как его назвать и чем открыть.
+ */
+export interface LastVault {
+  /** Как назвать его пользователю: подпись, путь или имя папки. */
+  label: string;
+  /**
+   * Можно ли открыть его, ничего не спрашивая у пользователя.
+   *
+   * `true` — приложение открывает его само, сразу при запуске: именно это
+   * значит «запомнил папку». На native так всегда; в браузере — когда
+   * разрешение на папку уже выдано и действует.
+   *
+   * `false` — разрешение отозвано или требует подтверждения, а браузер выдаёт
+   * его только в обработчике жеста. Тогда вместо молчаливого открытия
+   * предлагается кнопка: молчаливая попытка на загрузке страницы кончилась бы
+   * отказом вместо заметок.
+   */
+  readyToOpen: boolean;
+  /** Открыть его. */
+  open: VaultOpener;
+}
+
+/**
+ * Узнать последний открытый vault. `null` — его нет, либо связь с папкой
+ * утрачена: разыскивать перенесённую папку запрещено (FR-023 фичи 004), и
+ * предлагать то, что не откроется, тоже незачем.
+ */
+export type LastVaultLookup = () => Promise<LastVault | null>;
+
 export interface VaultState {
   client: VaultClient | null;
   /** Компилятор предпросмотра открытого vault; `null` — оболочка его не даёт. */
@@ -146,6 +181,8 @@ export function useVault(
 ): {
   state: VaultState;
   openVault: () => Promise<void>;
+  /** Открыть vault другим жестом — например, переоткрыть последний (FR-007). */
+  openVaultWith: (opener: VaultOpener) => Promise<void>;
   refresh: () => Promise<void>;
 } {
   const [state, setState] = useState<VaultState>({
@@ -170,9 +207,17 @@ export function useVault(
     setState((prev) => ({ ...prev, notes, accessState }));
   }, []);
 
-  const openVault = useCallback(async () => {
+  /**
+   * Открыть vault данным жестом.
+   *
+   * Жест — параметр, потому что их два и оба платформенные: выбор папки
+   * (`openClient`) и переоткрытие последнего vault (FR-007). Всё, что дальше
+   * пути к папке, у них общее — состояние загрузки, классификация отказа,
+   * загрузка дерева, — и второй копии этого кода быть не должно.
+   */
+  const openVaultWith = useCallback(async (opener: VaultOpener) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    const opened = await openClient();
+    const opened = await opener();
     if (!opened.ok) {
       setState((prev) => ({ ...prev, isLoading: false, error: opened.error }));
       return;
@@ -195,7 +240,13 @@ export function useVault(
       settingsLost: false,
       settingsReadOnly: false,
     });
-  }, [openClient]);
+  }, []);
+
+  /** Открыть vault жестом выбора папки — тем, который дала оболочка. */
+  const openVault = useCallback(
+    () => openVaultWith(openClient),
+    [openVaultWith, openClient],
+  );
 
   // FR-016: подхватывать внешние изменения без перезапуска. Разбор событий и
   // сам цикл сверки живут в `useVaultEvents` — здесь только реакция на них:
@@ -264,5 +315,5 @@ export function useVault(
 
   useVaultEvents(state.client, eventHandlers);
 
-  return { state, openVault, refresh };
+  return { state, openVault, openVaultWith, refresh };
 }

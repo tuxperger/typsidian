@@ -31,6 +31,28 @@ fn is_listed(path: &Path) -> bool {
     super::classify(path).is_listed()
 }
 
+/// Удаление в корзину ОС — там, где корзина есть.
+///
+/// `false` означает «в корзину не получилось», и вызывающий уходит на
+/// безвозвратное удаление. Это не мобильная ветка, а обычный исход: корзина
+/// недоступна и на рабочем столе — на другом томе, на сетевом диске, без прав.
+///
+/// На Android корзины нет вовсе: ни спецификации freedesktop, ни системного
+/// аналога, видимого файловому приложению, — и крейт `trash` под этот таргет не
+/// собирается даже теоретически (его платформенные модули исключают
+/// `target_os = "android"` явно). Поэтому здесь не заглушка «пока не сделали», а
+/// зафиксированное поведение платформы: на Android удаление сразу
+/// безвозвратное.
+#[cfg(not(target_os = "android"))]
+fn move_to_trash(path: &Path) -> bool {
+    trash::delete(path).is_ok()
+}
+
+#[cfg(target_os = "android")]
+fn move_to_trash(_path: &Path) -> bool {
+    false
+}
+
 fn stamp_for(path: &Path) -> std::io::Result<FileStamp> {
     let content = std::fs::read(path)?;
     let metadata = std::fs::metadata(path)?;
@@ -1159,7 +1181,7 @@ impl VaultBackend for NativeBackend {
         if !full.exists() {
             return Err(DeleteError::NotFound);
         }
-        let trashed = trash::delete(&full).is_ok();
+        let trashed = move_to_trash(&full);
         if !trashed {
             std::fs::remove_file(&full).map_err(|_| DeleteError::Io)?;
         }

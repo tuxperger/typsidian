@@ -36,7 +36,7 @@ export interface BoardCanvasProps {
   saveState?: BoardSaveState;
   /** Причина, по которой доску не удалось прочитать (FR-017). */
   readError?: string | null;
-  /** Просмотр без инструментов рисования — мобильный клиент (FR-034). */
+  /** Просмотр без инструментов рисования — клиент без права записи (FR-034). */
   viewModeEnabled?: boolean;
   /** Движок сообщил об изменении рисунка. */
   onChange?: (content: string) => void;

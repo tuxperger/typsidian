@@ -1,19 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
-import type { VaultClient } from "@typsidian/ui/vault-client.js";
+import type { VaultClient } from "./vault-client.js";
+import type { PreviewClient } from "./preview-client.js";
 // Из нейтрального модуля, а не из `vault-client-web.js`: тот импортирует
 // `WebBackend` значением и втянул бы WASM в сборку оболочки.
-import { basename } from "@typsidian/ui/paths.js";
+import { basename } from "./paths.js";
 import type {
+  LastVault,
   VaultOpenResult,
   OpenVaultError,
-} from "@typsidian/ui/vault-tree/useVault.js";
+} from "./vault-tree/useVault.js";
 import type {
   AccessState,
   Board,
   BoardEvent,
   BoardWriteProfile,
+  CompiledDocument,
   DiffLine,
   EditConflict,
   Embed,
@@ -22,55 +24,57 @@ import type {
   FileKind,
   FileStamp,
   InsertionEdit,
+  EditOutcome,
+  ElementAtResult,
+  ElementSpec,
+  RenderOutcome,
+  InstalledTemplate,
+  InstallReport,
   NameCheck,
   Note,
   PreviewState,
+  ResolvedBinding,
   SearchResults,
   Template,
   TemplateEvent,
   TemplateLibraryView,
   VaultEvent,
   VaultOverrides,
-} from "@typsidian/ui/wasm-core/typsidian_core.js";
+} from "./wasm-core/typsidian_core.js";
 
-// Реализация `VaultClient` для рабочего стола (001 T113, T114, T115).
+// Реализация `VaultClient` поверх команд Tauri (001 T113, T114, T115) —
+// третья наравне с web (`vault-client-web.ts`) и общая для обеих нативных
+// оболочек, рабочего стола и Android.
 //
 // Каждый метод — один `invoke` соответствующей команды Tauri, за которой стоит
-// `NativeBackend` (`apps/desktop/src-tauri/src/lib.rs`). Правил здесь нет: их
-// нельзя завести, не продублировав ядро (принцип I).
+// `NativeBackend` (`packages/shell/src/lib.rs`). Правил здесь нет: их нельзя
+// завести, не продублировав ядро (принцип I).
 //
 // Типы взяты из тех же сгенерированных из Rust определений, что и на web
 // (принцип IV): импорт типовой, WASM в сборку оболочки не попадает — ядро здесь
 // нативное.
+//
+// Чего в этом модуле НЕТ — жеста выбора папки: он у платформ разный
+// (`apps/desktop` — нативный диалог ОС, `apps/mobile` — свой обзор папок), и
+// именно им отличаются оболочки. Общее начинается с пути: см. `openVaultAt`.
 
 /** Имя события, которым оболочка отдаёт окну пачку `VaultEvent`. */
 const VAULT_EVENTS = "vault://events";
 
 /**
- * Открыть vault нативным диалогом ОС (T115).
+ * Открыть vault по уже выбранному пути.
  *
- * Классификация отказов та же, что у web (`OpenVaultError`): отмена диалога
- * ошибкой не считается — пользователь передумал (Assumptions). Причины, которых
- * на рабочем столе не бывает (`NotSupported` — нет File System Access API),
- * здесь просто не возникают, а `TooManyNotes` приходит из того же ядра.
+ * Здесь всё, что одинаково у рабочего стола и мобильного: открытие в ядре,
+ * классификация отказа и два разовых запроса к оболочке. Различается только то,
+ * откуда взялся `path`, — и это остаётся в оболочках.
+ *
+ * Классификация отказов та же, что у web (`OpenVaultError`). Причины, которых
+ * на native не бывает (`NotSupported` — нет File System Access API), здесь
+ * просто не возникают, а `TooManyNotes` приходит из того же ядра.
  */
-export async function openTauriVault(): Promise<VaultOpenResult> {
-  let chosen: string | null;
+export async function openVaultAt(path: string): Promise<VaultOpenResult> {
   try {
-    const selection = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Выберите папку с заметками",
-    });
-    chosen = typeof selection === "string" ? selection : null;
-  } catch (cause) {
-    return { ok: false, error: { kind: "OpenFailed", message: String(cause) } };
-  }
-  // `null` — диалог закрыт без выбора.
-  if (chosen === null) return { ok: false, error: { kind: "PickerCancelled" } };
-
-  try {
-    await invoke<void>("open_vault", { path: chosen });
+    await invoke<void>("open_vault", { path });
   } catch (cause) {
     return { ok: false, error: classifyNativeOpenFailure(cause) };
   }
@@ -81,7 +85,93 @@ export async function openTauriVault(): Promise<VaultOpenResult> {
   // Корень спрашивается один раз: пока окно живёт, открытый vault не меняется,
   // а `VaultClient.rootName` синхронное.
   const root = await invoke<string>("root_path");
-  return { ok: true, client: tauriVaultClient(profile, basename(root)) };
+  // FR-007: открытый vault становится последним. Здесь, а не в оболочках:
+  // запоминается то же самое и там, и там, и разъехаться этому нельзя.
+  //
+  // Отказ хранилища настроек открытие не отменяет: vault уже открыт и работает,
+  // а не запомнилась только точка входа следующего запуска.
+  try {
+    await invoke<void>("remember_vault", { path });
+  } catch {
+    // Молча: сказать об этом пользователю нечего — действия от него не требуется.
+  }
+  return {
+    ok: true,
+    client: tauriVaultClient(profile, basename(root)),
+    // Предпросмотр приходит вместе с клиентом, как и на web: движок живёт в
+    // оболочке всё время работы окна, и отдельного создания ему не нужно.
+    preview: tauriPreviewClient(),
+  };
+}
+
+/**
+ * Последний открытый vault по данным хранилища настроек устройства (FR-007).
+ *
+ * Общий для рабочего стола и Android: хранилище там одно и то же —
+ * `settings.json` ядра в каталоге конфигурации платформы, а команды к нему
+ * живут в `packages/shell`.
+ *
+ * `null` — предлагать нечего: ни одного vault ещё не открывали либо папка
+ * больше не разрешается по записанному пути. Перенесённая папка **не
+ * разыскивается** (FR-023 фичи 004) — это решение ядра, а не молчание этого
+ * модуля.
+ */
+export async function lastTauriVault(): Promise<LastVault | null> {
+  let record: LastVaultRecord | null;
+  try {
+    record = await invoke<LastVaultRecord | null>("last_vault");
+  } catch {
+    // Хранилище настроек недоступно — предложить продолжить не выйдет, но
+    // выбор папки работает по-прежнему.
+    return null;
+  }
+  if (record === null) return null;
+  return {
+    // Подпись пользователя важнее пути: он сам назвал этот vault так.
+    label: record.label ?? record.location,
+    // Спрашивать нечего: путь уже разрешился в существующую папку, а прав на
+    // файловую систему у нативной сборки не отзывают между запусками. Поэтому
+    // окно открывает его само, без единого нажатия.
+    readyToOpen: true,
+    open: () => openVaultAt(record.path),
+  };
+}
+
+/** Ответ команды `last_vault` — `LastVaultView` оболочки. */
+interface LastVaultRecord {
+  label: string | null;
+  location: string;
+  path: string;
+}
+
+/**
+ * Предпросмотр документа поверх команд Tauri (фича 005, T042).
+ *
+ * Состояния у клиента нет: шрифты и кэш шаблонов держит оболочка
+ * (`typsidian_shell::Preview`), а сюда приходят только вызовы. На web их
+ * приходится проводить через `wasm-call-queue`, потому что там движок и vault
+ * делят одно заимствование на границе wasm-bindgen; здесь такой границы нет, и
+ * очередь была бы обрядом без причины.
+ */
+function tauriPreviewClient(): PreviewClient {
+  return {
+    compile: (notePath, text, revision) =>
+      invoke<CompiledDocument>("preview_compile", { notePath, text, revision }),
+    // Фича 007: то же, но недостающие внешние шаблоны доустанавливаются. Это
+    // отдельная команда, а не флаг: путь может писать в vault и ходить в сеть.
+    compileWithTemplates: (notePath, text, revision, overrides) =>
+      invoke<CompiledDocument>("preview_compile_with_templates", {
+        notePath,
+        text,
+        revision,
+        overrides,
+      }),
+    // FR-010: явная установка — настройка автозагрузки здесь не спрашивается.
+    installTemplate: (spec, overrides) =>
+      invoke<InstallReport>("preview_install_template", { spec, overrides }),
+    installedTemplates: () =>
+      invoke<InstalledTemplate[]>("preview_installed_templates", {}),
+  };
 }
 
 /**
@@ -241,6 +331,14 @@ export function tauriVaultClient(
       }),
     planInsertion: (textLength, point, content) =>
       invoke<InsertionEdit>("plan_insertion", { textLength, point, content }),
+    // Фича 008: те же функции ядра командами Tauri.
+    elementSchema: async (id) =>
+      (await invoke<ElementSpec | null>("element_schema", { id })) ?? undefined,
+    elementAt: (text, offset) =>
+      invoke<ElementAtResult>("element_at", { text, offset }),
+    renderElement: (request) => invoke<RenderOutcome>("render_element", { request }),
+    planElementEdit: (request) =>
+      invoke<EditOutcome>("plan_element_edit", { request }),
     templateEvent: async (event) => {
       const effect = await invoke<TemplateEvent | null>("template_event", {
         event,
@@ -255,6 +353,14 @@ export function tauriVaultClient(
     markSection: (folder) => invoke<VaultOverrides>("mark_section", { folder }),
     unmarkSection: (folder) =>
       invoke<VaultOverrides>("unmark_section", { folder }),
+
+    // ── Сочетания клавиш ──────────────────────────────────────────────
+    keybindings: (overrides, mac) =>
+      invoke<ResolvedBinding[]>("keybindings", { overrides, mac }),
+    setKeybinding: (command, shortcut) =>
+      invoke<VaultOverrides>("set_keybinding", { command, shortcut }),
+    resetKeybinding: (command) =>
+      invoke<VaultOverrides>("reset_keybinding", { command }),
   };
 }
 

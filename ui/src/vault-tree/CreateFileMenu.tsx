@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Icon, type IconName } from "../icons/Icons.js";
-import type { Template } from "../wasm-core/typsidian_core.js";
+import type { CommandId, Template } from "../wasm-core/typsidian_core.js";
 import { NewNoteFromTemplate } from "../templates/NewNoteFromTemplate.js";
+import { hintWith, type ShortcutsState } from "../workspace/useShortcuts.js";
 
 // Создание файла по макету «Typsidian Доски» → экран «Новый файл».
 //
@@ -24,8 +25,11 @@ interface Choice {
   title: string;
   hint: string;
   icon: IconName;
-  /** Подпись сочетания клавиш — она же и работает, см. `useEffect` ниже. */
-  shortcut: string;
+  /**
+   * Команда, чьё сочетание создаёт этот вид. Подпись берётся у неё же — раньше
+   * здесь стоял литерал «⌘N», и после переназначения он начал бы врать.
+   */
+  command: CommandId;
   className: string;
 }
 
@@ -35,7 +39,7 @@ const CHOICES: Choice[] = [
     title: "Заметка Typst",
     hint: ".typ · компилируется в PDF",
     icon: "file",
-    shortcut: "⌘N",
+    command: "new-file",
     className: "ts-create__icon ts-create__icon--note",
   },
   {
@@ -43,7 +47,7 @@ const CHOICES: Choice[] = [
     title: "Доска Excalidraw",
     hint: ".excalidraw · встроенный",
     icon: "board",
-    shortcut: "⌘⇧N",
+    command: "new-board",
     className: "ts-create__icon ts-create__icon--board",
   },
 ];
@@ -62,6 +66,11 @@ export interface CreateFileMenuProps {
   /** Открыть галерею целиком — когда заготовок больше, чем помещается. */
   onOpenTemplates?: () => void;
   onCreate: (kind: CreateKind, template?: Template | null) => void;
+  /**
+   * Действующие сочетания. Приходят пропом, а не читаются здесь: один разбор на
+   * приложение, и меню обязано показывать те же клавиши, что и работают.
+   */
+  shortcuts: ShortcutsState;
 }
 
 export function CreateFileMenu({
@@ -70,6 +79,7 @@ export function CreateFileMenu({
   templates = [],
   onOpenTemplates,
   onCreate,
+  shortcuts,
 }: CreateFileMenuProps): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -86,17 +96,24 @@ export function CreateFileMenu({
 
   // Сочетания из макета работают, а не только нарисованы: «шорткат создаёт
   // нужный тип, минуя меню». Слушатель глобальный по той же причине, что и у
-  // ⌘K, — создать файл нужно и когда фокус в редакторе.
+  // палитры, — создать файл нужно и когда фокус в редакторе.
+  //
+  // Заметка и доска — две команды, а не одна с модификатором: иначе
+  // переназначить их по отдельности было бы нечем.
   useEffect(() => {
     if (disabled) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "n") return;
-      event.preventDefault();
-      choose(event.shiftKey ? "board" : "note");
+      if (shortcuts.matches("new-board", event)) {
+        event.preventDefault();
+        choose("board");
+      } else if (shortcuts.matches("new-file", event)) {
+        event.preventDefault();
+        choose("note");
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [disabled, choose]);
+  }, [disabled, choose, shortcuts]);
 
   // Клик мимо закрывает меню. Слушатель ставится только пока оно открыто.
   useEffect(() => {
@@ -113,7 +130,7 @@ export function CreateFileMenu({
       <button
         type="button"
         className="ts-create__plus"
-        title="Создать файл — ⌘N"
+        title={hintWith("Создать файл", shortcuts.displayOf("new-file"))}
         aria-label="Создать файл"
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -175,7 +192,9 @@ export function CreateFileMenu({
                     <span className="ts-create__title">{choice.title}</span>
                     <span className="ts-create__hint">{choice.hint}</span>
                   </span>
-                  <span className="ts-create__key">{choice.shortcut}</span>
+                  <span className="ts-create__key">
+                    {shortcuts.displayOf(choice.command)}
+                  </span>
                 </button>
 
                 {/* Второй уровень — сразу под «Заметка Typst», а не отдельным

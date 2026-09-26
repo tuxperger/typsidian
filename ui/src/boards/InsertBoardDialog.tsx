@@ -1,5 +1,7 @@
 "use client";
 
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+
 // Выбор доски для вставки в открытую заметку (T045, T046, FR-018, SC-007).
 //
 // SC-007 даёт не более трёх действий от открытой заметки до вставленной доски:
@@ -37,6 +39,10 @@ export function InsertBoardDialog({
   onCreateBoard,
   onCancel,
 }: InsertBoardDialogProps): React.JSX.Element | null {
+  // Пока идёт запись снимка, Escape не отменяет: файл уже пишется, и закрытие
+  // диалога не отменило бы начатое, а только спрятало бы его исход.
+  useDismissOnEscape(isOpen && !isInserting ? onCancel : null);
+
   if (!isOpen) return null;
 
   return (

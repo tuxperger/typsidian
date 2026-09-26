@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { VaultClient } from "../vault-client.js";
 import type {
   AssetsPlacement,
+  CommandId,
   SettingsChange,
+  Shortcut,
+  TemplateSourceEntry,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 
@@ -33,6 +36,12 @@ export interface VaultSettingsState {
    */
   setAutoDownloadTemplates: (enabled: boolean) => Promise<void>;
   /**
+   * Адреса архивов для конкретных шаблонов (фича 007, FR-004): весь список
+   * целиком. Годность пары проверяет ядро при записи — негодный адрес
+   * отклоняется с названной причиной, и файл не меняется.
+   */
+  setTemplateSources: (sources: TemplateSourceEntry[]) => Promise<boolean>;
+  /**
    * Применяет к перекрытиям vault набор изменений, который ядро направило сюда
    * (фича 006, FR-029).
    *
@@ -40,8 +49,30 @@ export interface VaultSettingsState {
    * набора изменений разошлись бы при первом же новом поле.
    */
   applyChange: (change: SettingsChange) => Promise<void>;
+  /**
+   * Размер шрифта редактора для этой папки заметок (фича 004, FR-015; фича
+   * 006, FR-029).
+   *
+   * Отдельно от [`applyChange`], хотя поле то же: набор `SettingsChange`
+   * собирается из wasm-модуля, а он на desktop и Android не загружается вовсе.
+   * Панель настроек папки обязана обходиться без него — иначе размер снова
+   * оказался бы настройкой одной только web-сборки.
+   *
+   * `null` — снять перекрытие: размер вернётся к значению устройства, а там,
+   * где хранилища устройства нет, — к запасному значению из стилей.
+   */
+  setEditorFontSize: (size: number | null) => Promise<void>;
   markSection: (folder: string) => Promise<void>;
   unmarkSection: (folder: string) => Promise<void>;
+  /**
+   * Назначает команде сочетание либо снимает его при `null`.
+   *
+   * Снять — не то же, что вернуть умолчание: команда остаётся в палитре, но
+   * клавишами не вызывается.
+   */
+  setKeybinding: (command: CommandId, shortcut: Shortcut | null) => Promise<void>;
+  /** Возвращает команду к умолчанию ядра. */
+  resetKeybinding: (command: CommandId) => Promise<void>;
   reload: () => Promise<void>;
 }
 
@@ -73,17 +104,22 @@ export function useVaultSettings(
 
   const write = useCallback(
     async (next: VaultOverrides) => {
-      if (client === null) return;
+      if (client === null) return false;
       try {
         await client.setVaultSettings(next);
         setOverrides(next);
         setError(null);
+        return true;
       } catch (cause) {
-        setError(describe(cause));
         // Состояние не двигается: показать выбор применённым, когда запись
         // отклонена, значило бы соврать пользователю о том, что лежит на
         // диске.
+        //
+        // Причина ставится **после** перечитывания: удачное чтение сбрасывает
+        // ошибку, и в обратном порядке отказ записи исчезал, не показавшись.
         await reload();
+        setError(describe(cause));
+        return false;
       }
     },
     [client, reload],
@@ -93,6 +129,14 @@ export function useVaultSettings(
     async (enabled: boolean) => {
       if (overrides === null) return;
       await write({ ...overrides, auto_download_templates: enabled });
+    },
+    [overrides, write],
+  );
+
+  const setTemplateSources = useCallback(
+    async (sources: TemplateSourceEntry[]) => {
+      if (overrides === null) return false;
+      return write({ ...overrides, template_sources: sources });
     },
     [overrides, write],
   );
@@ -128,6 +172,16 @@ export function useVaultSettings(
     [overrides, write],
   );
 
+  const setEditorFontSize = useCallback(
+    async (size: number | null) => {
+      if (overrides === null) return;
+      // `undefined` в перекрытии — это «спросить устройство», и снятие размера
+      // выражается именно им, а не нулём: ключ уходит из файла целиком.
+      await write({ ...overrides, editor_font_size: size ?? undefined });
+    },
+    [overrides, write],
+  );
+
   const toggleSection = useCallback(
     async (folder: string, marked: boolean) => {
       if (client === null) return;
@@ -156,16 +210,75 @@ export function useVaultSettings(
     [toggleSection],
   );
 
+  // Сочетания идут отдельными вызовами ядра, а не через `write`: проверку
+  // годности и нормализацию делает ядро, и собрать набор здесь значило бы
+  // записать в файл то, что оно бы отклонило.
+  const setKeybinding = useCallback(
+    async (command: CommandId, shortcut: Shortcut | null) => {
+      if (client === null) return;
+      try {
+        setOverrides(await client.setKeybinding(command, shortcut));
+        setError(null);
+      } catch (cause) {
+        setError(describeKeybinding(cause));
+      }
+    },
+    [client],
+  );
+
+  const resetKeybinding = useCallback(
+    async (command: CommandId) => {
+      if (client === null) return;
+      try {
+        setOverrides(await client.resetKeybinding(command));
+        setError(null);
+      } catch (cause) {
+        setError(describe(cause));
+      }
+    },
+    [client],
+  );
+
   return {
     overrides,
     error,
     setAssetsPlacement,
     setAutoDownloadTemplates,
+    setTemplateSources,
     applyChange,
+    setEditorFontSize,
     markSection,
     unmarkSection,
+    setKeybinding,
+    resetKeybinding,
     reload,
   };
+}
+
+/**
+ * Отказ назначить сочетание. Негодное сочетание и отказ диска — разные вещи и
+ * для пользователя: первое чинится другой клавишей, второе — нет.
+ */
+function describeKeybinding(cause: unknown): string {
+  if (typeof cause === "object" && cause !== null && "kind" in cause) {
+    const failure = cause as { kind: string; reason?: { kind?: string } };
+    if (failure.kind === "Invalid") {
+      switch (failure.reason?.kind) {
+        case "NoModifier":
+          return "Нужен модификатор: сочетание без него срабатывало бы при наборе текста.";
+        case "ReservedKey":
+          return "Эта клавиша занята интерфейсом — Escape, Enter, Tab и стрелки назначить нельзя.";
+        case "NoKey":
+          return "Нажмите клавишу вместе с модификатором — одного модификатора мало.";
+        default:
+          return "Такое сочетание назначить нельзя.";
+      }
+    }
+    if (failure.kind === "Storage") {
+      return describe(failure.reason ?? cause);
+    }
+  }
+  return describe(cause);
 }
 
 /** Причина отказа словами ядра; общего «что-то пошло не так» здесь нет. */
@@ -178,6 +291,8 @@ function describe(cause: unknown): string {
         return "Vault недоступен на запись: настройки уровня vault сохранить некуда.";
       case "NoVaultOpen":
         return "Vault не открыт.";
+      case "InvalidTemplateSource":
+        return `Адрес для шаблона «${(cause as { spec?: string }).spec ?? ""}» не сохранён: нужна спецификация вида @preview/имя:1.2.3 и адрес http(s)://…`;
       default:
         break;
     }

@@ -7,10 +7,27 @@ import type { IconName } from "../icons/Icons.js";
 // набирает руками чаще всего. Компилятор о списке не знает и знать не должен —
 // проверяет вставленное он сам, при ближайшей сборке предпросмотра.
 //
+// Состав сверен со справочником https://typst.app/docs/reference для версии
+// компилятора, объявленной в `packages/core/Cargo.toml` (0.15). Проверять при
+// обновлении компилятора: в 0.14–0.15 появились `title`, `divider`, `curve`, и
+// так же молча может исчезнуть что-то отсюда — меню предложит элемент, а сборка
+// предпросмотра ответит ошибкой.
+//
 // Шаблоны — в обычных кавычках: `${…}` здесь поле сниппета (см. `snippet.ts`),
-// а в шаблонной строке JS оно превратилось бы в подстановку.
+// а в шаблонной строке JS оно превратилось бы в подстановку. Внутри поля не
+// бывает `}`: разбор шаблона закрывает поле первой же закрывающей скобкой.
 
-export type ElementCategory = "struct" | "list" | "math" | "block" | "link" | "mark";
+export type ElementCategory =
+  | "struct"
+  | "list"
+  | "math"
+  | "block"
+  | "layout"
+  | "draw"
+  | "style"
+  | "data"
+  | "link"
+  | "mark";
 
 /** Порядок разделов в меню — от каркаса документа к оформлению строки. */
 export const ELEMENT_CATEGORIES: { id: ElementCategory; name: string }[] = [
@@ -18,6 +35,10 @@ export const ELEMENT_CATEGORIES: { id: ElementCategory; name: string }[] = [
   { id: "list", name: "Списки" },
   { id: "math", name: "Математика" },
   { id: "block", name: "Блоки" },
+  { id: "layout", name: "Макет" },
+  { id: "draw", name: "Графика" },
+  { id: "style", name: "Стили" },
+  { id: "data", name: "Данные" },
   { id: "link", name: "Ссылки" },
   { id: "mark", name: "Разметка" },
 ];
@@ -27,8 +48,20 @@ export interface TypstElement {
   category: ElementCategory;
   name: string;
   icon: IconName;
+  /**
+   * Одна строка о том, что элемент делает, — подпись над кодом в предпросмотре.
+   * Обязательна: каталог на сотню имён без объяснений читается как справочник,
+   * который уже есть на typst.app, а не как меню.
+   */
+  summary: string;
   /** Шаблон сниппета; `${…}` — поле для заполнения. */
   template: string;
+  /**
+   * Имена из документации Typst для поиска — там, где в шаблоне их нет:
+   * маркированный список набирается как `-`, и по запросу «list» он иначе не
+   * находится.
+   */
+  keywords?: string;
   /** Блочная разметка начинает строку. */
   block?: boolean;
   /**
@@ -38,12 +71,15 @@ export interface TypstElement {
   opensSymbols?: boolean;
 }
 
+
 export const TYPST_ELEMENTS: TypstElement[] = [
   {
     id: "heading-1",
     category: "struct",
     name: "Заголовок 1",
     icon: "heading",
+    summary: "Раздел верхнего уровня",
+    keywords: "heading",
     template: "= ${Заголовок}",
     block: true,
   },
@@ -52,6 +88,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "struct",
     name: "Заголовок 2",
     icon: "heading",
+    summary: "Подраздел",
+    keywords: "heading",
     template: "== ${Подзаголовок}",
     block: true,
   },
@@ -60,7 +98,30 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "struct",
     name: "Заголовок 3",
     icon: "heading",
+    summary: "Пункт внутри подраздела",
+    keywords: "heading",
     template: "=== ${Пункт}",
+    block: true,
+  },
+  {
+    id: "heading-4",
+    category: "struct",
+    name: "Заголовок 4",
+    icon: "heading",
+    summary: "Подпункт",
+    keywords: "heading",
+    template: "==== ${Подпункт}",
+    block: true,
+  },
+  {
+    id: "title",
+    category: "struct",
+    name: "Заглавие документа",
+    icon: "heading",
+    summary: "Название документа, один раз на документ",
+    // Вместе с `#set document`: `#title()` без заданного названия — это
+    // ошибка сборки, и меню не должно предлагать заведомо красный предпросмотр.
+    template: "#set document(title: [${Название}])\n#title()",
     block: true,
   },
   {
@@ -68,7 +129,17 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "struct",
     name: "Оглавление",
     icon: "list",
-    template: "#outline(depth: ${2})",
+    summary: "Содержание по заголовкам до указанной глубины",
+    template: "#outline(title: [${Содержание}], depth: ${2})",
+    block: true,
+  },
+  {
+    id: "divider",
+    category: "struct",
+    name: "Тематический разрыв",
+    icon: "page",
+    summary: "Черта между частями текста",
+    template: "#divider()",
     block: true,
   },
   {
@@ -76,7 +147,17 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "struct",
     name: "Разрыв страницы",
     icon: "page",
+    summary: "Дальше — со следующей страницы",
     template: "#pagebreak()",
+    block: true,
+  },
+  {
+    id: "parbreak",
+    category: "struct",
+    name: "Разрыв абзаца",
+    icon: "text",
+    summary: "Конец абзаца там, где пустой строки быть не может",
+    template: "#parbreak()",
     block: true,
   },
 
@@ -85,6 +166,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "list",
     name: "Маркированный список",
     icon: "list",
+    summary: "Перечисление без порядка",
+    keywords: "list bullet",
     template: "- ${Первый пункт}\n- ${Второй пункт}",
     block: true,
   },
@@ -93,7 +176,19 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "list",
     name: "Нумерованный список",
     icon: "listnum",
+    summary: "Перечисление по шагам",
+    keywords: "enum numbered",
     template: "+ ${Первый шаг}\n+ ${Второй шаг}",
+    block: true,
+  },
+  {
+    id: "list-nested",
+    category: "list",
+    name: "Вложенный список",
+    icon: "list",
+    summary: "Уровень вложенности задаёт отступ",
+    keywords: "list nested",
+    template: "- ${Пункт}\n  - ${Вложенный пункт}",
     block: true,
   },
   {
@@ -101,7 +196,29 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "list",
     name: "Список терминов",
     icon: "list",
+    summary: "Термин и его определение",
+    keywords: "terms",
     template: "/ ${Термин}: ${определение}",
+    block: true,
+  },
+  {
+    id: "enum-numbering",
+    category: "list",
+    name: "Нумерация списка",
+    icon: "listnum",
+    summary: "Свой формат номеров: «a)», «I.», «1.1»",
+    keywords: "set enum numbering",
+    template: '#set enum(numbering: "${a)}")',
+    block: true,
+  },
+  {
+    id: "list-marker",
+    category: "list",
+    name: "Маркер списка",
+    icon: "list",
+    summary: "Чем помечены пункты вместо точки",
+    keywords: "set list marker",
+    template: "#set list(marker: [${—}])",
     block: true,
   },
 
@@ -110,6 +227,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Формула в строке",
     icon: "sigma",
+    summary: "Формула внутри абзаца",
+    keywords: "equation inline",
     template: "$${x^2}$",
   },
   {
@@ -117,7 +236,19 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Формула блоком",
     icon: "sigma",
+    summary: "Выключная формула отдельной строкой",
+    keywords: "equation block",
     template: "$ ${T(x) = T_0 + Delta T} $",
+    block: true,
+  },
+  {
+    id: "math-numbering",
+    category: "math",
+    name: "Нумерация формул",
+    icon: "sigma",
+    summary: "Номера у выключных формул — для ссылок @eq",
+    keywords: "set math equation numbering",
+    template: '#set math.equation(numbering: "(${1})")',
     block: true,
   },
   {
@@ -125,6 +256,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Дробь",
     icon: "sigma",
+    summary: "Числитель над знаменателем",
+    keywords: "frac",
     template: "frac(${a}, ${b})",
   },
   {
@@ -132,6 +265,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Корень",
     icon: "sigma",
+    summary: "Квадратный корень",
+    keywords: "sqrt root",
     template: "sqrt(${x})",
   },
   {
@@ -139,6 +274,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Сумма",
     icon: "sigma",
+    summary: "Знак суммы с пределами",
+    keywords: "sum",
     template: "sum_(${i=1})^${n}",
   },
   {
@@ -146,6 +283,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Интеграл",
     icon: "sigma",
+    summary: "Знак интеграла с пределами",
+    keywords: "integral",
     template: "integral_${a}^${b}",
   },
   {
@@ -153,20 +292,108 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "math",
     name: "Матрица",
     icon: "sigma",
+    summary: "Строки через «;», элементы через «,»",
+    keywords: "mat matrix",
     template: "mat(${1}, ${2}; ${3}, ${4})",
+  },
+  {
+    id: "math-vector",
+    category: "math",
+    name: "Вектор-столбец",
+    icon: "sigma",
+    summary: "Столбец в круглых скобках",
+    keywords: "vec vector",
+    template: "vec(${1}, ${2})",
   },
   {
     id: "math-cases",
     category: "math",
     name: "Система уравнений",
     icon: "sigma",
+    summary: "Фигурная скобка с вариантами",
+    keywords: "cases",
     template: "cases(${x = 1}, ${y = 2})",
+  },
+  {
+    id: "math-binom",
+    category: "math",
+    name: "Биномиальный коэффициент",
+    icon: "sigma",
+    summary: "«n по k» в круглых скобках",
+    keywords: "binom",
+    template: "binom(${n}, ${k})",
+  },
+  {
+    id: "math-attach",
+    category: "math",
+    name: "Индексы со всех сторон",
+    icon: "sigma",
+    summary: "Верхние и нижние индексы слева и справа",
+    keywords: "attach",
+    template: "attach(${A}, tl: ${1}, br: ${2})",
+  },
+  {
+    id: "math-accent",
+    category: "math",
+    name: "Надстрочный знак",
+    icon: "sigma",
+    summary: "Стрелка, крышка, тильда над символом",
+    keywords: "accent hat arrow",
+    template: "accent(${x}, ${arrow})",
+  },
+  {
+    id: "math-underbrace",
+    category: "math",
+    name: "Фигурная скобка снизу",
+    icon: "sigma",
+    summary: "Скобка с подписью под частью формулы",
+    keywords: "underbrace",
+    // Подпись в кавычках: без них `сумма` в формуле — это переменная из шести
+    // букв, набранная курсивом, а не слово.
+    template: 'underbrace(${x + y}, "${сумма}")',
+  },
+  {
+    id: "math-cancel",
+    category: "math",
+    name: "Сокращение",
+    icon: "sigma",
+    summary: "Перечёркивает сокращаемое",
+    keywords: "cancel",
+    template: "cancel(${x})",
+  },
+  {
+    id: "math-lr",
+    category: "math",
+    name: "Скобки по высоте",
+    icon: "sigma",
+    summary: "Ограничители растут вместе с содержимым",
+    keywords: "lr left right",
+    template: "lr(|${x}|)",
+  },
+  {
+    id: "math-op",
+    category: "math",
+    name: "Имя оператора",
+    icon: "sigma",
+    summary: "Прямой шрифт для sin, cos, ker",
+    keywords: "op",
+    template: 'op("${sin}")',
+  },
+  {
+    id: "math-bb",
+    category: "math",
+    name: "Ажурный шрифт",
+    icon: "sigma",
+    summary: "Множества: R, N, Z",
+    keywords: "bb blackboard",
+    template: "bb(${R})",
   },
   {
     id: "math-symbols",
     category: "math",
     name: "Символы и структуры…",
     icon: "sigma",
+    summary: "Палитра математических символов по имени",
     template: "",
     opensSymbols: true,
   },
@@ -176,8 +403,21 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "block",
     name: "Рисунок",
     icon: "image",
+    summary: "Изображение с подписью и меткой для ссылок",
+    keywords: "figure image",
     template:
       '#figure(\n  image("${data/график.png}", width: ${80%}),\n  caption: [${Подпись}],\n) <fig:${label}>',
+    block: true,
+  },
+  {
+    id: "figure-table",
+    category: "block",
+    name: "Таблица с подписью",
+    icon: "table",
+    summary: "Таблица в figure — нумеруется и ссылается",
+    keywords: "figure table caption",
+    template:
+      "#figure(\n  table(columns: ${2}, [${A}], [${B}]),\n  caption: [${Подпись таблицы}],\n) <tbl:${label}>",
     block: true,
   },
   {
@@ -185,7 +425,20 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "block",
     name: "Таблица",
     icon: "table",
+    summary: "Ячейки подряд, по столбцам",
+    keywords: "table",
     template: "#table(\n  columns: ${3},\n  [${A}], [${B}], [${C}],\n)",
+    block: true,
+  },
+  {
+    id: "table-header",
+    category: "block",
+    name: "Таблица с шапкой",
+    icon: "table",
+    summary: "Шапка повторяется на каждой странице",
+    keywords: "table header",
+    template:
+      "#table(\n  columns: ${3},\n  table.header([${A}], [${B}], [${C}]),\n  [${1}], [${2}], [${3}],\n)",
     block: true,
   },
   {
@@ -193,6 +446,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "block",
     name: "Кодовый блок",
     icon: "code",
+    summary: "Код с подсветкой по имени языка",
+    keywords: "raw code block",
     // Внутри поля не бывает `}`: разбор шаблона (`snippet.ts`) закрывает поле
     // первой же закрывающей скобкой, и `fn main() {}` в значении по умолчанию
     // разорвал бы его пополам.
@@ -204,6 +459,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "block",
     name: "Цитата",
     icon: "quote",
+    summary: "Выключная цитата с источником",
+    keywords: "quote",
     template: "#quote(block: true, attribution: [${Смирнов, 2023}])[\n  ${Текст цитаты.}\n]",
     block: true,
   },
@@ -212,8 +469,481 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "block",
     name: "Выделенный блок",
     icon: "page",
+    summary: "Абзац на подложке с отступами",
+    keywords: "block fill inset",
     template: "#block(fill: luma(240), inset: 8pt)[\n  ${Важное замечание}\n]",
     block: true,
+  },
+
+  {
+    id: "page-setup",
+    category: "layout",
+    name: "Формат страницы",
+    icon: "page",
+    summary: "Размер, поля, нумерация",
+    keywords: "set page paper margin numbering",
+    template: '#set page(paper: "${a4}", margin: ${2cm}, numbering: "${1 / 1}")',
+    block: true,
+  },
+  {
+    id: "page-header",
+    category: "layout",
+    name: "Колонтитул",
+    icon: "page",
+    summary: "Строка вверху и внизу каждой страницы",
+    keywords: "set page header footer",
+    template: "#set page(\n  header: align(${right})[${Шапка}],\n  footer: align(${center})[${Подвал}],\n)",
+    block: true,
+  },
+  {
+    id: "columns",
+    category: "layout",
+    name: "Колонки",
+    icon: "layout",
+    summary: "Текст в несколько колонок",
+    keywords: "columns gutter",
+    template: "#columns(${2}, gutter: ${8pt})[\n  ${Текст в две колонки}\n]",
+    block: true,
+  },
+  {
+    id: "colbreak",
+    category: "layout",
+    name: "Разрыв колонки",
+    icon: "layout",
+    summary: "Дальше — в следующей колонке",
+    keywords: "colbreak",
+    template: "#colbreak()",
+    block: true,
+  },
+  {
+    id: "grid",
+    category: "layout",
+    name: "Сетка",
+    icon: "layout",
+    summary: "Раскладка без табличных линеек",
+    keywords: "grid columns gutter",
+    template: "#grid(\n  columns: (${1fr}, ${1fr}),\n  gutter: ${8pt},\n  [${Слева}], [${Справа}],\n)",
+    block: true,
+  },
+  {
+    id: "stack",
+    category: "layout",
+    name: "Стопка",
+    icon: "layout",
+    summary: "Элементы подряд в одном направлении",
+    keywords: "stack dir spacing",
+    template: "#stack(\n  dir: ${ttb},\n  spacing: ${8pt},\n  [${Первый}],\n  [${Второй}],\n)",
+    block: true,
+  },
+  {
+    id: "align",
+    category: "layout",
+    name: "Выравнивание",
+    icon: "layout",
+    summary: "center, right, horizon + left",
+    keywords: "align",
+    template: "#align(${center})[${текст}]",
+    block: true,
+  },
+  {
+    id: "pad",
+    category: "layout",
+    name: "Отступы",
+    icon: "layout",
+    summary: "Поля вокруг содержимого",
+    keywords: "pad",
+    template: "#pad(x: ${2cm})[\n  ${Содержимое с отступами}\n]",
+    block: true,
+  },
+  {
+    id: "place",
+    category: "layout",
+    name: "Свободное размещение",
+    icon: "layout",
+    summary: "Вне потока: угол страницы, сдвиг, плавающий блок",
+    keywords: "place float dx dy",
+    template: "#place(${top + right}, dx: ${0pt}, dy: ${0pt})[${содержимое}]",
+    block: true,
+  },
+  {
+    id: "box",
+    category: "layout",
+    name: "Бокс в строке",
+    icon: "layout",
+    summary: "Кусок разметки внутри абзаца, не разрываемый",
+    keywords: "box",
+    template: "#box(width: ${3cm})[${текст}]",
+  },
+  {
+    id: "hspace",
+    category: "layout",
+    name: "Горизонтальный отбив",
+    icon: "layout",
+    summary: "Пробел заданной ширины; 1fr — распорка",
+    keywords: "h space",
+    template: "#h(${1fr})",
+  },
+  {
+    id: "vspace",
+    category: "layout",
+    name: "Вертикальный отбив",
+    icon: "layout",
+    summary: "Пропуск по высоте между блоками",
+    keywords: "v space",
+    template: "#v(${1em})",
+    block: true,
+  },
+  {
+    id: "repeat",
+    category: "layout",
+    name: "Заполнитель строки",
+    icon: "layout",
+    summary: "Повторяет знак до конца строки — точки в оглавлении",
+    keywords: "repeat",
+    template: "#repeat[${.}]",
+  },
+  {
+    id: "hide",
+    category: "layout",
+    name: "Невидимое содержимое",
+    icon: "layout",
+    summary: "Место занимает, на бумаге не видно",
+    keywords: "hide",
+    template: "#hide[${текст}]",
+  },
+  {
+    id: "move",
+    category: "layout",
+    name: "Сдвиг",
+    icon: "layout",
+    summary: "Смещает, не меняя раскладку вокруг",
+    keywords: "move dx dy",
+    template: "#move(dx: ${4pt}, dy: ${0pt})[${текст}]",
+  },
+  {
+    id: "rotate",
+    category: "layout",
+    name: "Поворот",
+    icon: "layout",
+    summary: "Поворачивает содержимое на угол",
+    keywords: "rotate",
+    template: "#rotate(${45deg})[${текст}]",
+  },
+  {
+    id: "scale",
+    category: "layout",
+    name: "Масштаб",
+    icon: "layout",
+    summary: "Увеличивает или уменьшает содержимое",
+    keywords: "scale",
+    template: "#scale(${150%})[${текст}]",
+  },
+
+  {
+    id: "image",
+    category: "draw",
+    name: "Изображение",
+    icon: "image",
+    summary: "Картинка из файла vault без подписи",
+    keywords: "image",
+    template: '#image("${assets/схема.svg}", width: ${80%})',
+    block: true,
+  },
+  {
+    id: "rect",
+    category: "draw",
+    name: "Прямоугольник",
+    icon: "shape",
+    summary: "Рамка или плашка заданного размера",
+    keywords: "rect",
+    template: "#rect(width: ${4cm}, height: ${2cm}, fill: ${luma(230)})[${текст}]",
+  },
+  {
+    id: "square",
+    category: "draw",
+    name: "Квадрат",
+    icon: "shape",
+    summary: "Прямоугольник с равными сторонами",
+    keywords: "square",
+    template: "#square(size: ${2cm}, fill: ${aqua})",
+  },
+  {
+    id: "circle",
+    category: "draw",
+    name: "Круг",
+    icon: "shape",
+    summary: "Круг по радиусу или по содержимому",
+    keywords: "circle",
+    template: "#circle(radius: ${1cm}, fill: ${aqua})",
+  },
+  {
+    id: "ellipse",
+    category: "draw",
+    name: "Эллипс",
+    icon: "shape",
+    summary: "Овал заданной ширины и высоты",
+    keywords: "ellipse",
+    template: "#ellipse(width: ${3cm}, height: ${2cm})",
+  },
+  {
+    id: "line",
+    category: "draw",
+    name: "Линия",
+    icon: "shape",
+    summary: "Отрезок заданной длины и толщины",
+    keywords: "line stroke",
+    template: "#line(length: ${100%}, stroke: ${0.5pt + gray})",
+    block: true,
+  },
+  {
+    id: "polygon",
+    category: "draw",
+    name: "Правильный многоугольник",
+    icon: "shape",
+    summary: "Треугольник, пятиугольник, звезда основания",
+    keywords: "polygon regular",
+    template: "#polygon.regular(size: ${2cm}, vertices: ${5}, fill: ${luma(230)})",
+  },
+  {
+    id: "gradient",
+    category: "draw",
+    name: "Градиентная заливка",
+    icon: "shape",
+    summary: "Переход между цветами вместо сплошного фона",
+    keywords: "gradient linear fill",
+    template: "#rect(width: ${100%}, height: ${1cm}, fill: gradient.linear(${blue}, ${red}))",
+    block: true,
+  },
+
+  {
+    id: "set-text",
+    category: "style",
+    name: "Шрифт документа",
+    icon: "braces",
+    summary: "Гарнитура, кегль и язык переносов",
+    keywords: "set text font size lang",
+    template: '#set text(font: "${New Computer Modern}", size: ${11pt}, lang: "${ru}")',
+    block: true,
+  },
+  {
+    id: "set-par",
+    category: "style",
+    name: "Абзац",
+    icon: "braces",
+    summary: "Выключка, интерлиньяж, красная строка",
+    keywords: "set par justify leading indent",
+    template: "#set par(justify: ${true}, leading: ${0.65em}, first-line-indent: ${1em})",
+    block: true,
+  },
+  {
+    id: "set-heading",
+    category: "style",
+    name: "Нумерация заголовков",
+    icon: "braces",
+    summary: "«1.1.» у разделов и подразделов",
+    keywords: "set heading numbering",
+    template: '#set heading(numbering: "${1.1.}")',
+    block: true,
+  },
+  {
+    id: "set-document",
+    category: "style",
+    name: "Свойства документа",
+    icon: "braces",
+    summary: "Название и автор — в PDF и в #title",
+    keywords: "set document title author",
+    template: '#set document(title: [${Название}], author: "${Автор}")',
+    block: true,
+  },
+  {
+    id: "show-set",
+    category: "style",
+    name: "Правило показа: стиль",
+    icon: "braces",
+    summary: "Меняет оформление одного вида элементов",
+    keywords: "show set where",
+    template: "#show heading.where(level: ${1}): set text(size: ${18pt})",
+    block: true,
+  },
+  {
+    id: "show-function",
+    category: "style",
+    name: "Правило показа: замена",
+    icon: "braces",
+    summary: "Заворачивает элемент в свою разметку",
+    keywords: "show function it",
+    template: "#show ${raw}: it => block(inset: ${6pt}, it)",
+    block: true,
+  },
+  {
+    id: "show-regex",
+    category: "style",
+    name: "Правило показа: по образцу",
+    icon: "braces",
+    summary: "Оформляет каждое совпадение в тексте",
+    keywords: "show regex",
+    template: '#show regex("${TODO}"): strong',
+    block: true,
+  },
+  {
+    id: "show-template",
+    category: "style",
+    name: "Применить шаблон",
+    icon: "braces",
+    summary: "Правило показа на весь документ целиком",
+    keywords: "show with template",
+    template: "#show: ${шаблон}.with(title: [${Название}])",
+    block: true,
+  },
+  {
+    id: "let-value",
+    category: "style",
+    name: "Переменная",
+    icon: "braces",
+    summary: "Значение под именем — набирать один раз",
+    keywords: "let",
+    template: "#let ${имя} = ${значение}",
+    block: true,
+  },
+  {
+    id: "let-function",
+    category: "style",
+    name: "Своя функция",
+    icon: "braces",
+    summary: "Разметка с параметрами под своим именем",
+    keywords: "let function",
+    template: "#let ${заметка}(тело) = block(fill: luma(240), inset: 8pt, тело)",
+    block: true,
+  },
+  {
+    id: "import-package",
+    category: "style",
+    name: "Пакет из Typst Universe",
+    icon: "braces",
+    summary: "Внешняя библиотека по имени и версии",
+    keywords: "import preview package",
+    template: '#import "@preview/${пакет}:${0.1.0}": *',
+    block: true,
+  },
+  {
+    id: "import-file",
+    category: "style",
+    name: "Импорт файла",
+    icon: "braces",
+    summary: "Определения из соседнего .typ",
+    keywords: "import",
+    template: '#import "${шаблон.typ}": *',
+    block: true,
+  },
+  {
+    id: "include-file",
+    category: "style",
+    name: "Включить файл",
+    icon: "braces",
+    summary: "Текст другого файла на это место",
+    keywords: "include",
+    template: '#include "${глава.typ}"',
+    block: true,
+  },
+  {
+    id: "context",
+    category: "style",
+    name: "Контекстное выражение",
+    icon: "braces",
+    summary: "Значение, известное только на месте вставки",
+    keywords: "context",
+    template: "#context ${counter(page).display()}",
+  },
+
+  {
+    id: "data-csv",
+    category: "data",
+    name: "Чтение CSV",
+    icon: "data",
+    summary: "Таблица из файла как массив строк",
+    keywords: "csv",
+    template: '#let ${данные} = csv("${data/таблица.csv}")',
+    block: true,
+  },
+  {
+    id: "data-json",
+    category: "data",
+    name: "Чтение JSON",
+    icon: "data",
+    summary: "Словарь или массив из файла",
+    keywords: "json",
+    template: '#let ${данные} = json("${data/файл.json}")',
+    block: true,
+  },
+  {
+    id: "data-yaml",
+    category: "data",
+    name: "Чтение YAML",
+    icon: "data",
+    summary: "Данные из .yaml или .yml",
+    keywords: "yaml",
+    template: '#let ${данные} = yaml("${data/файл.yaml}")',
+    block: true,
+  },
+  {
+    id: "data-read",
+    category: "data",
+    name: "Чтение файла",
+    icon: "data",
+    summary: "Содержимое файла строкой",
+    keywords: "read",
+    template: '#read("${заметки/фрагмент.txt}")',
+  },
+  {
+    id: "data-table",
+    category: "data",
+    name: "Таблица из CSV",
+    icon: "data",
+    summary: "Ячейки прямо из файла, без копирования",
+    keywords: "table csv flatten",
+    template: '#table(\n  columns: ${3},\n  ..csv("${data/таблица.csv}").flatten(),\n)',
+    block: true,
+  },
+  {
+    id: "counter-display",
+    category: "data",
+    name: "Значение счётчика",
+    icon: "data",
+    summary: "Номер страницы, раздела, рисунка на этом месте",
+    keywords: "counter display context",
+    template: "#context counter(${page}).display()",
+  },
+  {
+    id: "counter-update",
+    category: "data",
+    name: "Сброс счётчика",
+    icon: "data",
+    summary: "Задаёт счётчику новое значение",
+    keywords: "counter update",
+    template: "#counter(${page}).update(${1})",
+    block: true,
+  },
+  {
+    id: "numbering",
+    category: "data",
+    name: "Формат номера",
+    icon: "data",
+    summary: "Число по образцу: «1.1», «I», «a»",
+    keywords: "numbering",
+    template: '#numbering("${1.1}", ${1}, ${2})',
+  },
+  // `#datetime.today()` в меню нет намеренно: предпросмотр собирается без
+  // текущей даты (`preview/world.rs`, `today()` → `None`), чтобы результат
+  // сборки не менялся сам по себе. Снипет с ней всегда давал бы ошибку
+  // «unable to get the current date» — меню не предлагает заведомо красное.
+  {
+    id: "lorem",
+    category: "data",
+    name: "Рыба текста",
+    icon: "data",
+    summary: "Заполнитель на заданное число слов",
+    keywords: "lorem",
+    template: "#lorem(${50})",
   },
 
   {
@@ -221,6 +951,7 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "link",
     name: "Вики-ссылка",
     icon: "link",
+    summary: "Ссылка на заметку vault по имени",
     template: "[[${Методология}]]",
   },
   {
@@ -228,6 +959,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "link",
     name: "Перекрёстная ссылка",
     icon: "tag",
+    summary: "Ссылка на метку внутри документа",
+    keywords: "ref",
     template: "@${fig:thermogram}",
   },
   {
@@ -235,6 +968,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "link",
     name: "Метка",
     icon: "tag",
+    summary: "Имя места, на которое ссылаются",
+    keywords: "label",
     template: "<${sec:results}>",
   },
   {
@@ -242,6 +977,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "link",
     name: "Внешняя ссылка",
     icon: "link",
+    summary: "Адрес в сети с видимым текстом",
+    keywords: "link url",
     template: '#link("${https://typst.app}")[${документация}]',
   },
   {
@@ -249,13 +986,36 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "link",
     name: "Библиографическая ссылка",
     icon: "quote",
+    summary: "Ссылка на запись из списка литературы",
+    keywords: "cite",
     template: "#cite(<${smirnov2023}>)",
+  },
+  {
+    id: "cite-supplement",
+    category: "link",
+    name: "Ссылка с указанием места",
+    icon: "quote",
+    summary: "Страница или глава рядом с номером источника",
+    keywords: "cite supplement",
+    template: "#cite(<${smirnov2023}>, supplement: [${с. 42}])",
+  },
+  {
+    id: "bibliography",
+    category: "link",
+    name: "Список литературы",
+    icon: "quote",
+    summary: "Записи из .bib или .yaml в выбранном стиле",
+    keywords: "bibliography",
+    template: '#bibliography("${works.bib}", style: "${ieee}")',
+    block: true,
   },
   {
     id: "footnote",
     category: "link",
     name: "Сноска",
     icon: "text",
+    summary: "Примечание внизу страницы",
+    keywords: "footnote",
     template: "#footnote[${Примечание}]",
   },
 
@@ -264,6 +1024,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "mark",
     name: "Жирный",
     icon: "text",
+    summary: "Полужирное начертание",
+    keywords: "strong bold",
     template: "*${текст}*",
   },
   {
@@ -271,6 +1033,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "mark",
     name: "Курсив",
     icon: "text",
+    summary: "Наклонное начертание",
+    keywords: "emph italic",
     template: "_${текст}_",
   },
   {
@@ -278,6 +1042,8 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "mark",
     name: "Моноширинный",
     icon: "code",
+    summary: "Код внутри строки",
+    keywords: "raw code",
     template: "`${код}`",
   },
   {
@@ -285,14 +1051,99 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     category: "mark",
     name: "Зачёркнутый",
     icon: "text",
+    summary: "Линия поверх текста",
+    keywords: "strike",
     template: "#strike[${текст}]",
+  },
+  {
+    id: "underline",
+    category: "mark",
+    name: "Подчёркнутый",
+    icon: "text",
+    summary: "Линия под текстом",
+    keywords: "underline",
+    template: "#underline[${текст}]",
+  },
+  {
+    id: "overline",
+    category: "mark",
+    name: "Надчёркнутый",
+    icon: "text",
+    summary: "Линия над текстом",
+    keywords: "overline",
+    template: "#overline[${текст}]",
+  },
+  {
+    id: "highlight",
+    category: "mark",
+    name: "Маркер",
+    icon: "text",
+    summary: "Цветная подложка под словами",
+    keywords: "highlight",
+    template: "#highlight[${текст}]",
+  },
+  {
+    id: "smallcaps",
+    category: "mark",
+    name: "Капитель",
+    icon: "text",
+    summary: "Строчные в виде малых прописных",
+    keywords: "smallcaps",
+    template: "#smallcaps[${Текст}]",
   },
   {
     id: "super",
     category: "mark",
     name: "Верхний индекс",
     icon: "text",
+    summary: "Степень или знак сноски",
+    keywords: "super",
     template: "#super[${2}]",
+  },
+  {
+    id: "sub",
+    category: "mark",
+    name: "Нижний индекс",
+    icon: "text",
+    summary: "Индекс под строкой",
+    keywords: "sub",
+    template: "#sub[${2}]",
+  },
+  {
+    id: "upper",
+    category: "mark",
+    name: "Прописные",
+    icon: "text",
+    summary: "Переводит текст в верхний регистр",
+    keywords: "upper",
+    template: "#upper[${текст}]",
+  },
+  {
+    id: "text-style",
+    category: "mark",
+    name: "Цвет и насыщенность",
+    icon: "text",
+    summary: "Разовая правка шрифта на куске текста",
+    keywords: "text fill weight",
+    template: '#text(fill: ${red}, weight: "${bold}")[${текст}]',
+  },
+  {
+    id: "linebreak",
+    category: "mark",
+    name: "Перенос строки",
+    icon: "text",
+    summary: "Новая строка внутри абзаца",
+    keywords: "linebreak",
+    template: "#linebreak()",
+  },
+  {
+    id: "comment",
+    category: "mark",
+    name: "Комментарий",
+    icon: "text",
+    summary: "Заметка для себя, на бумагу не попадёт",
+    template: "// ${комментарий}",
+    block: true,
   },
 ];
 
@@ -308,11 +1159,22 @@ export function snippetPreview(template: string, limit = 18): string {
   return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
 }
 
-/** Подходит ли элемент под строку поиска: по названию и по самому коду. */
+/**
+ * Элемент каталога по имени. `undefined` — такого имени нет: панель вставки и
+ * прочие «короткие пути» ссылаются на элементы именами, и опечатка обязана
+ * оборачиваться отсутствующей кнопкой, а не вставкой чужого шаблона.
+ */
+export function elementById(id: string): TypstElement | undefined {
+  return TYPST_ELEMENTS.find((element) => element.id === id);
+}
+
+/** Подходит ли элемент под строку поиска: по названию, коду и именам Typst. */
 export function matchesQuery(element: TypstElement, query: string): boolean {
   if (query === "") return true;
   return (
     element.name.toLowerCase().includes(query) ||
-    element.template.toLowerCase().includes(query)
+    element.template.toLowerCase().includes(query) ||
+    element.summary.toLowerCase().includes(query) ||
+    (element.keywords?.toLowerCase().includes(query) ?? false)
   );
 }

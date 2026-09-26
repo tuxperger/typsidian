@@ -3,6 +3,7 @@ import type {
   Board,
   BoardEvent,
   BoardWriteProfile,
+  CommandId,
   DiffLine,
   EditConflict,
   Embed,
@@ -11,12 +12,20 @@ import type {
   FileKind,
   FileStamp,
   InsertionEdit,
+  EditOutcome,
+  EditRequest,
+  ElementAtResult,
+  ElementSpec,
+  RenderOutcome,
+  RenderRequest,
   InsertionPoint,
   NameCheck,
   Note,
   PreviewState,
+  ResolvedBinding,
   SearchQuery,
   SearchResults,
+  Shortcut,
   Template,
   TemplateEvent,
   TemplateLibraryView,
@@ -224,6 +233,20 @@ export interface VaultClient {
     content: string,
   ): Promise<InsertionEdit>;
 
+  // ── Параметры элементов Typst (фича 008) ─────────────────────────────
+  //
+  // Чистые функции ядра: на web — статические методы wasm, на desktop и
+  // Android — команды Tauri. Формы запроса и ответа одни (FR-022).
+
+  /** Схема элемента каталога; `undefined` — вставляется сразу (FR-003). */
+  elementSchema(id: string): Promise<ElementSpec | undefined>;
+  /** Элемент, непосредственно содержащий каретку (FR-006, FR-016). */
+  elementAt(text: string, offset: number): Promise<ElementAtResult>;
+  /** «Будет вставлено» (FR-004, FR-005). */
+  renderElement(request: RenderRequest): Promise<RenderOutcome>;
+  /** Точечные замены для правки на месте (FR-008, FR-009). */
+  planElementEdit(request: EditRequest): Promise<EditOutcome>;
+
   /**
    * Затрагивает ли событие файла библиотеку заготовок (FR-003).
    *
@@ -256,4 +279,31 @@ export interface VaultClient {
    */
   markSection(folder: string): Promise<VaultOverrides>;
   unmarkSection(folder: string): Promise<VaultOverrides>;
+
+  // ── Сочетания клавиш ────────────────────────────────────────────────
+
+  /**
+   * Действующие сочетания всех команд: умолчание ядра, если пользователь не
+   * задал своего.
+   *
+   * Чистая функция от уже прочитанных настроек, но через клиента: на desktop и
+   * Android wasm не загружается вовсе, и «разобрать сочетание» там умеет только
+   * нативная сторона. Разбирать их вторично в TypeScript нельзя — это второй
+   * источник истины о том, что такое сочетание (принцип I).
+   *
+   * `mac` решает только подпись (⌘ против Ctrl); само сочетание от платформы не
+   * зависит, иначе файл настроек стал бы непереносимым между машинами.
+   */
+  keybindings(overrides: VaultOverrides, mac: boolean): Promise<ResolvedBinding[]>;
+
+  /**
+   * Назначает команде сочетание, либо снимает его при `null`.
+   *
+   * Снятое сочетание — не то же, что умолчание: команда остаётся в палитре, но
+   * клавишами не вызывается. Для возврата к умолчанию есть `resetKeybinding`.
+   */
+  setKeybinding(command: CommandId, shortcut: Shortcut | null): Promise<VaultOverrides>;
+
+  /** Возвращает команду к умолчанию ядра. */
+  resetKeybinding(command: CommandId): Promise<VaultOverrides>;
 }

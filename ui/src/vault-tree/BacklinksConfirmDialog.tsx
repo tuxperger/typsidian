@@ -1,4 +1,5 @@
 import type { Note } from "../wasm-core/typsidian_core.js";
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 /** Операция, ради которой спрашивают подтверждение (FR-027, FR-028). */
 export type BacklinksOperation = "delete" | "rename";
@@ -64,7 +65,12 @@ export function BacklinksConfirmDialog({
   onConfirm,
   onCancel,
 }: BacklinksConfirmDialogProps): React.JSX.Element | null {
-  if (!request || request.affected.length === 0) return null;
+  const shown = request !== null && request.affected.length > 0;
+  // Escape здесь — то же, что «Отмена»: операция ещё не началась, и отказ от
+  // неё ничего не теряет.
+  useDismissOnEscape(shown ? onCancel : null);
+
+  if (!shown) return null;
 
   return (
     <div

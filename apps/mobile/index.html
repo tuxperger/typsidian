@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- `viewport-fit=cover` и запрет масштабирования — против двух вещей,
+         которые WebView на Android делает по умолчанию и которые ломают
+         редактор: полосы по краям экрана с вырезом и зум по двойному тапу
+         посреди набора текста. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Typsidian</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

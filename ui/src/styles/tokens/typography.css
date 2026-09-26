@@ -7,17 +7,26 @@
  * на Google Fonts, но FR-042 (фича 004) запрещает приложению любые сетевые
  * обращения во время работы, а `next/font` кладёт шрифт в статику и раздаёт со
  * своего же origin. Стек дизайн-системы остаётся запасным вариантом.
+ *
+ * У каждого `var(--font-ibm-plex-*)` обязано быть **своё** запасное значение,
+ * и вот почему. `next/font` есть только в web-сборке; на desktop и Android
+ * переменных `--font-ibm-plex-*` не существует вовсе. Подстановка
+ * неопределённой переменной без запасного значения делает всё объявление
+ * недействительным на этапе вычисления, и `font-family` становится `inherit` —
+ * то есть шрифтом документа по умолчанию. Проверено в chromium: без запасного
+ * значения весь интерфейс, включая редактор, рисуется Times New Roman, а не
+ * моноширинным стеком, который здесь перечислен.
  */
 :root {
   /* Families */
-  --font-sans: var(--font-ibm-plex-sans), "IBM Plex Sans", system-ui, -apple-system,
-    "Segoe UI", Roboto, sans-serif;
-  --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", "SF Mono", ui-monospace, Menlo,
-    monospace;
+  --font-sans: var(--font-ibm-plex-sans, "IBM Plex Sans"), "IBM Plex Sans", system-ui,
+    -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono, "IBM Plex Mono"), "IBM Plex Mono", "SF Mono",
+    ui-monospace, Menlo, monospace;
   /* Только для текста «бумаги» в предпросмотре — handoff § Typography.
    * Приходит из `next/font` тем же путём, что и Plex (см. шапку файла). */
-  --font-serif: var(--font-source-serif), "Source Serif 4", ui-serif, Georgia,
-    "Times New Roman", serif;
+  --font-serif: var(--font-source-serif, "Source Serif 4"), "Source Serif 4", ui-serif,
+    Georgia, "Times New Roman", serif;
 
   /* Weights */
   --weight-regular: 400;

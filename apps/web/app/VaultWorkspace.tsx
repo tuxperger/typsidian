@@ -1,7 +1,11 @@
 "use client";
 
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
-import { openWebVault } from "@typsidian/ui/vault-client-web.js";
+import {
+  lastWebVault,
+  openWebVault,
+  openWebVaultById,
+} from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 
 /**
@@ -22,10 +26,25 @@ export function VaultWorkspace(): React.JSX.Element {
   return (
     <Workspace
       openVaultFolder={openWebVault}
+      // FR-007: последний открытый vault предлагается на экране приветствия.
+      // Хендл папки хранит `WebStore` в IndexedDB; разрешение на неё
+      // переспрашивается уже по нажатию — браузер выдаёт его только в
+      // обработчике жеста пользователя.
+      lastVault={lastWebVault}
       // Клиент открытого vault нужен разделу «Vault»: политика расположения
       // файлов вставок и помеченные разделы живут внутри vault, а не в
       // хранилище устройства (фича 006, FR-002).
-      settings={(client) => <SettingsPanel vaultClient={client} />}
+      //
+      // `reopen` — вторая половина переключения vault (US2 фичи 004, AS3):
+      // панель меняет текущий vault в настройках, а открывает выбранный
+      // рабочая область, потому что клиентом владеет она.
+      settings={(client, reopen, preview) => (
+        <SettingsPanel
+          vaultClient={client}
+          preview={preview}
+          onVaultSwitched={(id) => reopen(() => openWebVaultById(id))}
+        />
+      )}
     />
   );
 }

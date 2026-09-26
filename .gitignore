@@ -15,9 +15,10 @@ ui/dist/wasm-core/
 
 # --- Сборка пакетов ---
 # ui/dist собирается из ui/src через `pnpm --filter @typsidian/ui build`,
-# apps/desktop/dist — вывод Vite.
+# apps/desktop/dist и apps/mobile/dist — вывод Vite.
 ui/dist/
 apps/desktop/dist/
+apps/mobile/dist/
 
 # --- Next.js ---
 .next/
@@ -29,6 +30,11 @@ out/
 # --- Tauri ---
 # gen/schemas перегенерируется на каждой сборке из capabilities/.
 apps/desktop/src-tauri/gen/schemas/
+apps/mobile/src-tauri/gen/schemas/
+
+# gen/android, наоборот, коммитится: там лежат правки, которых в шаблоне нет
+# (разрешение на общую память в AndroidManifest.xml и MainActivity.kt). Своим
+# .gitignore проект Gradle сам отсекает всё пересобираемое.
 
 # --- Локальное состояние ---
 .claude/settings.local.json

@@ -1162,6 +1162,39 @@ impl WebBackend {
         crate::templates::plan_insertion(text_length, &point, content)
     }
 
+    // ── Параметры элементов (фича 008, contracts/element-params.md) ────────
+    //
+    // Статические: функции чистые, vault не нужен — как `planInsertion`.
+
+    /// Схема элемента каталога; `undefined` — параметров нет, элемент
+    /// вставляется сразу (FR-003).
+    #[wasm_bindgen(js_name = elementSchema)]
+    pub fn element_schema_js(id: &str) -> Option<crate::elements::ElementSpec> {
+        crate::elements::element_schema(id)
+    }
+
+    /// Элемент, непосредственно содержащий каретку (FR-006, FR-016).
+    #[wasm_bindgen(js_name = elementAt)]
+    pub fn element_at_js(text: &str, offset: usize) -> crate::elements::ElementAtResult {
+        crate::elements::element_at(text, offset)
+    }
+
+    /// «Будет вставлено» (FR-004, FR-005).
+    #[wasm_bindgen(js_name = renderElement)]
+    pub fn render_element_js(
+        request: crate::elements::RenderRequest,
+    ) -> crate::elements::RenderOutcome {
+        crate::elements::render(&request)
+    }
+
+    /// Точечные замены для правки на месте (FR-008, FR-009).
+    #[wasm_bindgen(js_name = planElementEdit)]
+    pub fn plan_element_edit_js(
+        request: crate::elements::EditRequest,
+    ) -> crate::elements::EditOutcome {
+        crate::elements::plan(&request)
+    }
+
     /// Затрагивает ли событие файла библиотеку заготовок (FR-003).
     ///
     /// Спрашивается у ядра, а не выводится в интерфейсе сверкой пути с
@@ -1225,6 +1258,53 @@ impl WebBackend {
         crate::vault::vault_settings::VaultSettingsError,
     > {
         crate::vault::vault_settings::set_section(self, Path::new(folder), false).await
+    }
+
+    // ── Сочетания клавиш ────────────────────────────────────────────────
+    //
+    // Та же дыра, о которой сказано выше: правила в
+    // `crate::settings::keybindings` есть, но без этих трёх вызовов ни панель
+    // настроек, ни обработчик нажатий до них не добираются.
+
+    /// Действующие сочетания всех команд.
+    ///
+    /// Чистая функция от уже прочитанных настроек, а не ещё одно чтение файла:
+    /// UI держит `VaultOverrides` у себя, и второй поход на диск дал бы второй
+    /// источник истины о том же.
+    ///
+    /// `mac` приходит снаружи: платформу ядро не знает, а подпись сочетания от
+    /// неё зависит.
+    #[wasm_bindgen(js_name = keybindings)]
+    pub fn keybindings_js(
+        overrides: crate::vault::vault_settings::VaultOverrides,
+        mac: bool,
+    ) -> Vec<crate::settings::keybindings::ResolvedBinding> {
+        crate::settings::keybindings::resolve(&overrides.keybindings, mac)
+    }
+
+    /// Назначает команде сочетание либо снимает его (`shortcut: undefined`).
+    #[wasm_bindgen(js_name = setKeybinding)]
+    pub async fn set_keybinding_js(
+        &mut self,
+        command: crate::settings::keybindings::CommandId,
+        shortcut: Option<crate::settings::keybindings::Shortcut>,
+    ) -> Result<
+        crate::vault::vault_settings::VaultOverrides,
+        crate::vault::vault_settings::SetKeybindingError,
+    > {
+        crate::vault::vault_settings::set_keybinding(self, command, shortcut).await
+    }
+
+    /// Возвращает команду к умолчанию ядра.
+    #[wasm_bindgen(js_name = resetKeybinding)]
+    pub async fn reset_keybinding_js(
+        &mut self,
+        command: crate::settings::keybindings::CommandId,
+    ) -> Result<
+        crate::vault::vault_settings::VaultOverrides,
+        crate::vault::vault_settings::VaultSettingsError,
+    > {
+        crate::vault::vault_settings::reset_keybinding(self, command).await
     }
 
     // ── Вставки досок в заметки (фича 002, US2 и US3) ───────────────────

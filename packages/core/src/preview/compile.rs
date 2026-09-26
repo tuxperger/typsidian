@@ -10,7 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 use typst::foundations::Bytes;
-use typst::syntax::package::{PackageSpec, PackageVersion};
 use typst::syntax::FileId;
 use typst_layout::PagedDocument;
 
@@ -18,7 +17,10 @@ use super::cache::PackageCache;
 use super::diagnostics::{sort_by_location, translate, Diagnostic, DiagnosticSeverity};
 use super::fonts::FontSet;
 use super::pages::{render_pages, RenderedPage};
-use super::packages::{fetch_and_install, InstallError, InstallReport, TemplateSource};
+use super::packages::{
+    fetch_and_install, source_url, verify_installed, FingerprintCheck, InstallError,
+    InstallReport, TemplateSource,
+};
 use super::resolve::{read_dependency, vault_path, ResolveError};
 use super::snapshot::{DependencySnapshot, SnapshotError};
 use super::world::PreviewWorld;
@@ -204,9 +206,21 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
     )
     .await?;
 
-    let missing = missing_templates(&failures);
+    // Шаблоны, за которыми идти некуда (`@local/…` без указанного адреса),
+    // отсеиваются сразу: для них поведение то же, что до фичи 007, — причина
+    // «шаблона нет» уже стоит среди отказов, а сообщение о загрузке было бы
+    // выдумкой о попытке, которой не было (FR-005, US1 AS4).
+    let missing: Vec<String> = missing_templates(&failures)
+        .into_iter()
+        .filter(|spec| policy.has_source(spec))
+        .collect();
     if missing.is_empty() {
-        return Ok(with_resolve_failures(document, failures));
+        let mut document = with_resolve_failures(document, failures);
+        document
+            .diagnostics
+            .extend(fingerprint_notes(backend, packages).await);
+        sort_by_location(&mut document.diagnostics);
+        return Ok(document);
     }
 
     let mut notes: Vec<Diagnostic> = Vec::new();
@@ -231,6 +245,7 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
                         &report.fingerprint[..12.min(report.fingerprint.len())]
                     ),
                     location: None,
+                    template: None,
                 });
             }
             Err(error) => {
@@ -239,6 +254,8 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
                     severity: DiagnosticSeverity::Error,
                     message: error.to_string(),
                     location: None,
+                    // Кнопка «загрузить» в интерфейсе — по этому полю.
+                    template: Some(spec.clone()),
                 });
             }
         }
@@ -258,8 +275,56 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
             .await?;
     let mut document = with_resolve_failures(document, failures);
     document.diagnostics.extend(notes);
+    document
+        .diagnostics
+        .extend(fingerprint_notes(backend, packages).await);
     sort_by_location(&mut document.diagnostics);
     Ok(document)
+}
+
+/// Замечания о шаблонах, чьё содержимое разошлось с записанным отпечатком
+/// (FR-023).
+///
+/// Ничего не переустанавливает: правка установленного шаблона может быть
+/// намеренной, и молча вернуть её назад значило бы стереть работу пользователя.
+/// Дело этой функции — сказать, что содержимое уже не то, которое было
+/// получено.
+///
+/// Сверяется то, что документ действительно читал, и раз за сеанс: сверка
+/// читает все файлы шаблона с диска, а на каждую сборку это вернуло бы те самые
+/// чтения, ради устранения которых заведён кэш.
+async fn fingerprint_notes<B: VaultBackend>(
+    backend: &B,
+    packages: &PackageCache,
+) -> Vec<Diagnostic> {
+    let mut notes = Vec::new();
+    for spec in packages.specs() {
+        if !packages.mark_verified(&spec) {
+            continue;
+        }
+        if let FingerprintCheck::Diverged { recorded, actual } =
+            verify_installed(backend, &spec).await
+        {
+            notes.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "содержимое шаблона {spec} разошлось с записанным отпечатком \
+                     ({} вместо {}); приложение его не переустанавливает",
+                    short(&actual),
+                    short(&recorded)
+                ),
+                location: None,
+                template: None,
+            });
+        }
+    }
+    notes
+}
+
+/// Отпечаток в сообщении — первые двенадцать знаков: этого хватает, чтобы
+/// сличить два значения глазами, а полная строка заняла бы всю ширину панели.
+fn short(digest: &str) -> &str {
+    &digest[..12.min(digest.len())]
 }
 
 /// Что делать с недостающими шаблонами (FR-004, FR-009).
@@ -282,6 +347,14 @@ impl TemplatePolicy {
             .map(|(_, url)| TemplateSource::Url { url: url.clone() })
             .unwrap_or(TemplateSource::Registry)
     }
+
+    /// Есть ли у шаблона источник: указанный адрес либо реестр, обслуживающий
+    /// его пространство имён. Нет источника — нет и повода говорить о загрузке.
+    fn has_source(&self, spec: &str) -> bool {
+        parse_spec(spec)
+            .and_then(|parsed| source_url(&parsed, &self.source_for(spec)))
+            .is_some()
+    }
 }
 
 /// Спецификации шаблонов, которых не хватило, — из структурных причин отказа.
@@ -298,6 +371,26 @@ fn missing_templates(failures: &[(String, ResolveError)]) -> Vec<String> {
         }
     }
     specs
+}
+
+/// Установить шаблон по явному запросу пользователя (FR-010).
+///
+/// Отличается от пути сборки ровно одним: выключателя автозагрузки здесь нет.
+/// Выключен **автоматический** поход в сеть, а не сама возможность получить
+/// шаблон — иначе настройка запирала бы дверь, которую пользователь только что
+/// попросил открыть.
+///
+/// Адрес по-прежнему берётся из настроек папки: указанный пользователем для
+/// этого шаблона либо общий реестр (FR-004).
+pub async fn install_template<B: VaultBackend>(
+    backend: &mut B,
+    spec_text: &str,
+    policy: &TemplatePolicy,
+) -> Result<InstallReport, InstallError> {
+    let spec = parse_spec(spec_text).ok_or_else(|| InstallError::VersionNotFound {
+        spec: spec_text.to_string(),
+    })?;
+    fetch_and_install(backend, &spec, &policy.source_for(spec_text)).await
 }
 
 async fn install_missing<B: VaultBackend>(
@@ -321,27 +414,10 @@ async fn install_missing<B: VaultBackend>(
 /// Нужен потому, что причина отказа несёт спецификацию **строкой** — ровно той,
 /// что видит пользователь. Хранить в ней разобранную структуру значило бы
 /// протащить тип компилятора через границу WASM ради одного места.
-fn parse_spec(text: &str) -> Option<PackageSpec> {
-    let rest = text.strip_prefix('@')?;
-    let (namespace, rest) = rest.split_once('/')?;
-    let (name, version) = rest.split_once(':')?;
-    let mut parts = version.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some(PackageSpec {
-        namespace: namespace.into(),
-        name: name.into(),
-        version: PackageVersion {
-            major,
-            minor,
-            patch,
-        },
-    })
-}
+///
+/// Разбор один на модуль: реестр установленного хранит те же строки, и вторая
+/// его копия разошлась бы с этой при первой же правке.
+use super::packages::parse_spec;
 
 /// Один проход сборки. Возвращает результат и снимок обратно — в нём
 /// накопленные файлы и список того, чего не хватило.
@@ -408,6 +484,7 @@ fn with_resolve_failures(
             // Места в тексте у такой ошибки нет: она про файл целиком, а не
             // про позицию в нём. Перехода к ней быть не должно (FR-033).
             location: None,
+            template: None,
         });
     }
     document.outcome = CompileOutcome::Failed;

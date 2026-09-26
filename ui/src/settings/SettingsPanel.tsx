@@ -11,6 +11,7 @@ import { AppearanceSection } from "./AppearanceSection.js";
 import { useAppearance } from "./applyToDocument.js";
 import { applyWithNoteSave, describeApplyOutcome } from "./applyWithNoteSave.js";
 import { KeybindingsSection } from "./KeybindingsSection.js";
+import { ShortcutsSection } from "./ShortcutsSection.js";
 import {
   changeOf,
   useSettings,
@@ -21,6 +22,9 @@ import { describeVaultActionError, useVaultList, type ConfirmSwitch } from "./us
 import { VaultSection } from "./VaultSection.js";
 import { useVaultSettings } from "./useVaultSettings.js";
 import type { VaultClient } from "../vault-client.js";
+import type { PreviewClient } from "../preview-client.js";
+import { TemplatesSection } from "./TemplatesSection.js";
+import { useShortcuts } from "../workspace/useShortcuts.js";
 
 /**
  * Панель настроек: четыре раздела и **ни одной кнопки «сохранить» или
@@ -63,6 +67,20 @@ export interface SettingsPanelProps {
    * ради одной настройки. `null` — vault не открыт, и выбирать нечего.
    */
   vaultClient?: VaultClient | null;
+  /**
+   * Vault переключён: ядро приняло смену `current_vault` (US2 фичи 004, AS3).
+   *
+   * Панель на этом и заканчивает: открыть выбранный vault в окне она не может
+   * — клиентом владеет рабочая область, и переоткрытие делает она. Без этого
+   * колбэка переключение меняло бы настройку, оставляя дерево на заметках
+   * прежней папки.
+   */
+  onVaultSwitched?: (id: string) => void;
+  /**
+   * Клиент предпросмотра (фича 007): перечень установленных внешних шаблонов в
+   * разделе «Vault». `null` — сборка ещё не готова, перечня нет.
+   */
+  preview?: PreviewClient | null;
 }
 
 export function SettingsPanel({
@@ -70,6 +88,8 @@ export function SettingsPanel({
   saveNote,
   fullBackendUnavailableReason = null,
   vaultClient = null,
+  onVaultSwitched,
+  preview = null,
 }: SettingsPanelProps = {}): React.JSX.Element {
   const {
     state,
@@ -84,8 +104,12 @@ export function SettingsPanel({
     onChanged: refresh,
     queue,
     ...(confirmSwitch ? { confirmSwitch } : {}),
+    ...(onVaultSwitched ? { onSwitched: onVaultSwitched } : {}),
   });
   const vaultSettings = useVaultSettings(vaultClient);
+  // Сочетания клавиш живут в настройках vault, а не устройства: см.
+  // `VaultSettingsPanel` — из-за этого они доступны и на desktop/Android.
+  const shortcuts = useShortcuts(vaultClient, vaultSettings.overrides);
   // Открытый раздел. «Vault» по умолчанию — первый пункт макета и то, с чего
   // начинается работа: без выбранной папки остальные разделы не о чем.
   const [section, setSection] = useState<SettingsSection>("vault");
@@ -163,12 +187,25 @@ export function SettingsPanel({
     if (outcome) setModeMessage(describeApplyOutcome(outcome));
   };
 
+  // Показываются и применяются **действующие** значения: устройство как слой
+  // по умолчанию, vault перекрывает записанное в нём (FR-030). Иначе тема или
+  // размер, ушедшие в vault, не отобразились бы в самой панели, которая их и
+  // поменяла, — и не доехали бы до редактора.
+  const settings =
+    state.store && vaultSettings.overrides && state.settings
+      ? state.store.resolveWithVault(vaultSettings.overrides)
+      : state.settings;
+
   // FR-017, SC-002: тема и размер шрифта доходят до остального интерфейса через
   // CSS-переменные на корне документа — в том числе когда значения изменились
   // снаружи, а не через панель.
-  useAppearance(state.settings);
+  //
+  // Второе место, ставящее ту же переменную, — `Workspace`: он применяет
+  // перекрытие vault во всех трёх оболочках. Разойтись они не могут: там, где
+  // перекрытие задано, оно же и есть действующее значение.
+  useAppearance(settings);
 
-  if (state.isLoading || !state.settings) {
+  if (state.isLoading || !settings) {
     return <p role="status">Загружаем настройки…</p>;
   }
 
@@ -177,14 +214,6 @@ export function SettingsPanel({
   // «диссертация-2026», но это подписи макета, а не факты приложения.
   const version = WebStore.version();
   const vaultName = vaultClient?.rootName ?? null;
-
-  // Показываются **действующие** значения: устройство как слой по умолчанию,
-  // vault перекрывает записанное в нём (FR-030). Иначе тема, ушедшая в
-  // vault, не отобразилась бы в самой панели, которая её и переключила.
-  const settings =
-    state.store && vaultSettings.overrides
-      ? state.store.resolveWithVault(vaultSettings.overrides)
-      : state.settings;
 
   return (
     <div className="ts-settings" aria-label="Настройки">
@@ -263,13 +292,21 @@ export function SettingsPanel({
             sections={(vaultSettings.overrides?.sections ?? []).map(
               (marked) => marked.path,
             )}
-            autoDownloadTemplates={
-              vaultSettings.overrides
-                ? (vaultSettings.overrides.auto_download_templates ?? true)
-                : null
-            }
-            onChangeAutoDownloadTemplates={vaultSettings.setAutoDownloadTemplates}
           />
+        )}
+
+        {section === "templates" && (
+          // Отдельный пункт, как в панели папки desktop/Android (007 FR-016):
+          // внизу раздела «Vault» его не находили.
+          <section aria-label="Шаблоны">
+            <div className="ts-settings__head">
+              <h2>Шаблоны</h2>
+              <span className="ts-settings__meta">
+                {vaultName === null ? "vault не открыт" : `настройки папки · ${vaultName}`}
+              </span>
+            </div>
+            <TemplatesSection vaultSettings={vaultSettings} preview={preview} />
+          </section>
         )}
 
         {section === "keybindings" && (
@@ -292,6 +329,21 @@ export function SettingsPanel({
                 режим пользователь узнаёт словами, а не по молчаливому
                 бездействию. */}
             {modeMessage && <p role="status">{modeMessage}</p>}
+
+            {/* Сочетания команд приложения — рядом с режимом редактирования, но
+                это разные вещи: выше настраивается, чем обрабатываются клавиши
+                внутри редактора, здесь — какими клавишами вызываются команды
+                самого приложения. Хранятся они в настройках vault, поэтому и
+                вызовы идут через `vaultSettings`, а не через `route`. */}
+            <ShortcutsSection
+              bindings={shortcuts.bindings}
+              error={vaultSettings.error}
+              onAssign={(command, shortcut) =>
+                void vaultSettings.setKeybinding(command, shortcut)
+              }
+              onClear={(command) => void vaultSettings.setKeybinding(command, null)}
+              onReset={(command) => void vaultSettings.resetKeybinding(command)}
+            />
           </>
         )}
 
@@ -318,13 +370,19 @@ export function SettingsPanel({
  */
 const SECTIONS: { id: SettingsSection; title: string }[] = [
   { id: "vault", title: "Vault" },
+  { id: "templates", title: "Шаблоны" },
   { id: "appearance", title: "Внешний вид" },
   { id: "keybindings", title: "Кейбиндинги" },
   { id: "advanced", title: "Дополнительно" },
 ];
 
 /** Какой раздел показан. */
-export type SettingsSection = "vault" | "appearance" | "keybindings" | "advanced";
+export type SettingsSection =
+  | "vault"
+  | "templates"
+  | "appearance"
+  | "keybindings"
+  | "advanced";
 
 /**
  * Причина отказа берётся из плана, вернувшегося из ядра (FR-016): UI

@@ -123,6 +123,38 @@ impl PreviewEngine {
         .await
         .map_err(|err| JsError::new(&format!("{err:?}")))
     }
+
+    /// Установить шаблон по явному запросу пользователя (FR-010).
+    ///
+    /// Выключатель автозагрузки здесь не спрашивается намеренно: выключен
+    /// **автоматический** поход в сеть, а не сама возможность получить шаблон.
+    /// Адрес по-прежнему берётся из настроек папки.
+    #[wasm_bindgen(js_name = installTemplate)]
+    pub async fn install_template_js(
+        &self,
+        backend: &mut crate::vault::web::WebBackend,
+        spec: &str,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> Result<super::packages::InstallReport, super::packages::InstallError> {
+        let report =
+            super::compile::install_template(backend, spec, &overrides.template_policy()).await?;
+        // Ту же версию могли поставить поверх: прежние байты уходят из кэша,
+        // а отметка о сверке отпечатка снимается — содержимое теперь другое.
+        if let Some(parsed) = super::packages::parse_spec(spec) {
+            self.packages.forget(&parsed);
+            self.packages.forget_verified(&parsed);
+        }
+        Ok(report)
+    }
+
+    /// Установленные шаблоны — имя, версия, источник и отпечаток (US5 AS1).
+    #[wasm_bindgen(js_name = installedTemplates)]
+    pub async fn installed_templates_js(
+        &self,
+        backend: &crate::vault::web::WebBackend,
+    ) -> Vec<super::packages::InstalledTemplate> {
+        super::packages::installed_templates(backend).await
+    }
 }
 
 impl Default for PreviewEngine {

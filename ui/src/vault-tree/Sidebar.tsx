@@ -9,6 +9,8 @@ import { CreateFileMenu, type CreateKind } from "./CreateFileMenu.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
 import { VaultTreeActions, useVaultTreeActions } from "./VaultTreeActions.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
+import { useContextMenu } from "../menu/ContextMenu.js";
+import type { ShortcutsState } from "../workspace/useShortcuts.js";
 
 // Боковая панель целиком — шапка с поиском и «+», дерево, подвал
 // (макет «Typsidian Доски» § Sidebar).
@@ -48,6 +50,10 @@ export interface SidebarProps {
    * Ревизия — чтобы повторный выбор той же заготовки снова открыл ввод.
    */
   createFromTemplate?: { template: Template; revision: number } | null;
+  /** Действующие сочетания — уезжают в меню создания файла. */
+  shortcuts: ShortcutsState;
+  /** Вставить ссылку на заметку в открытую — пункт контекстного меню дерева. */
+  onInsertLink?: ((note: Note) => void) | undefined;
 }
 
 export function Sidebar({
@@ -63,8 +69,11 @@ export function Sidebar({
   templates = [],
   onOpenTemplates,
   createFromTemplate = null,
+  shortcuts,
+  onInsertLink,
 }: SidebarProps): React.JSX.Element {
   const [filter, setFilter] = useState("");
+  const contextMenu = useContextMenu();
 
   // Разделы читаются здесь, а не приходят сверху: дерево — единственное
   // место, где их помечают, а панель настроек пересоздаётся при каждом
@@ -112,7 +121,7 @@ export function Sidebar({
     <aside className="ts-sidebar">
       {/* Шапка панели: поиск занимает всю ширину, «+» — квадрат 32px справа. */}
       <div className="ts-sidebar__search">
-        <div className="ts-search">
+        <div className="ts-searchfield">
           <Icon name="search" size={13} />
           <input
             type="search"
@@ -130,15 +139,33 @@ export function Sidebar({
           onCreate={(kind: CreateKind, template?: Template | null) =>
             actions.beginCreate("", kind, template ?? null)
           }
+          shortcuts={shortcuts}
         />
       </div>
 
-      <nav className="ts-tree" aria-label="Заметки">
+      {/* Правый клик по пустому месту дерева — создание в корне. Строки
+          заметок и папок открывают своё меню и до этого обработчика событие
+          не пускают. */}
+      <nav
+        className="ts-tree"
+        aria-label="Заметки"
+        onContextMenu={(event) => {
+          if (actions.state.pendingPath !== null) return;
+          contextMenu.open(event, [
+            { label: "Создать заметку", run: () => actions.beginCreate("") },
+            { label: "Создать доску", run: () => actions.beginCreate("", "board") },
+            ...(onOpenTemplates
+              ? [{ label: "Заметка из заготовки…", run: onOpenTemplates }]
+              : []),
+          ]);
+        }}
+      >
         <VaultTreeActions
           notes={visible}
           openPath={openPath}
           actions={actions}
           onOpenNote={onOpenNote}
+          onInsertLink={onInsertLink}
         />
       </nav>
 

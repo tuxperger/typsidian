@@ -30,6 +30,7 @@ use super::backend::{ReadError, VaultBackend, WriteError};
 use super::sections::SectionMark;
 use super::service_dir;
 use crate::boards::placement::AssetsPlacement;
+use crate::settings::keybindings::{CommandId, KeybindingEntry, Shortcut, ShortcutProblem};
 use crate::settings::{ModePreference, Theme};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -65,6 +66,19 @@ pub struct VaultOverrides {
     /// реестра: подмена реестра целиком превратила бы любую заметку в источник
     /// неожиданного кода.
     pub template_sources: Vec<TemplateSourceEntry>,
+
+    /// Сочетания клавиш команд приложения.
+    ///
+    /// Не `Option`: пустой список — это «ничего не переназначено», и отличать
+    /// его от «не задано» здесь не от чего. Команда, которой в списке нет,
+    /// работает на умолчании ядра; команда с `shortcut: None` — со снятым
+    /// сочетанием, и эти два состояния различны (см.
+    /// [`crate::settings::keybindings::KeybindingEntry`]).
+    ///
+    /// Принадлежит папке заметок, а не устройству: панель настроек существует
+    /// пока только в web-сборке, а до настроек уровня vault добираются все три
+    /// оболочки через один и тот же `VaultBackend`.
+    pub keybindings: Vec<KeybindingEntry>,
 }
 
 /// Адрес архива, указанный пользователем для одного шаблона (фича 007, FR-004).
@@ -116,6 +130,11 @@ pub enum VaultSettingsError {
     NotWritable,
     #[error("не удалось прочитать или записать настройки vault")]
     Io,
+    /// Адрес шаблона задан негодно: спецификация не разбирается или адрес не
+    /// `http(s)://…` (фича 007, FR-004). Файл при этом не тронут — ни эта
+    /// запись, ни остальные.
+    #[error("адрес для шаблона «{spec}» задан негодно")]
+    InvalidTemplateSource { spec: String },
 }
 
 /// Читает настройки уровня vault.
@@ -135,6 +154,22 @@ pub async fn read_vault_settings<B: VaultBackend>(
     }
 }
 
+/// Годится ли пара «шаблон → адрес» (фича 007, FR-004).
+///
+/// Спецификация обязана разбираться тем же разбором, которым сборка ищет
+/// источник: иначе опечатка в имени молча оставила бы шаблон на реестре, а
+/// пользователь считал бы, что указал свой адрес. Адрес — только `http(s)`:
+/// прочие схемы загрузчик не обслуживает, и принять их значило бы отложить
+/// отказ до первой сборки.
+pub fn is_valid_template_source(entry: &TemplateSourceEntry) -> bool {
+    let url = entry.url.trim();
+    let has_host = |rest: &str| !rest.is_empty() && !rest.starts_with('/');
+    crate::preview::packages::parse_spec(entry.spec.trim()).is_some()
+        && (url.strip_prefix("https://").is_some_and(has_host)
+            || url.strip_prefix("http://").is_some_and(has_host))
+        && !url.chars().any(char::is_whitespace)
+}
+
 /// Записывает настройки уровня vault поверх существующего файла.
 ///
 /// Ключи, дописанные пользователем руками, переживают запись из панели — тот же
@@ -144,6 +179,18 @@ pub async fn write_vault_settings<B: VaultBackend>(
     backend: &mut B,
     overrides: &VaultOverrides,
 ) -> Result<(), VaultSettingsError> {
+    // Проверка до первой записи: негодный адрес не должен оставить после
+    // себя ни служебной папки, ни полупереписанного файла.
+    if let Some(bad) = overrides
+        .template_sources
+        .iter()
+        .find(|entry| !is_valid_template_source(entry))
+    {
+        return Err(VaultSettingsError::InvalidTemplateSource {
+            spec: bad.spec.clone(),
+        });
+    }
+
     ensure_service_dir(backend).await?;
 
     let path = service_dir::vault_settings_path();
@@ -240,6 +287,106 @@ pub async fn set_section<B: VaultBackend>(
     Ok(overrides)
 }
 
+/// Почему сочетание не назначено.
+///
+/// Отдельно от [`VaultSettingsError`]: негодное сочетание — это проверка
+/// значения, не зависящая от состояния хранилища, и путать её с отказом диска
+/// нельзя. Пользователю про них говорят разное.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(tag = "kind", content = "reason")]
+pub enum SetKeybindingError {
+    #[error("сочетание не годится: {0}")]
+    Invalid(ShortcutProblem),
+    #[error("настройки vault не записаны: {0}")]
+    Storage(VaultSettingsError),
+}
+
+/// Назначает команде сочетание либо снимает его.
+///
+/// `shortcut: None` — снять: команда останется в палитре, но клавишами
+/// вызываться не будет. Это не то же, что «вернуть умолчание», — для возврата
+/// служит [`reset_keybinding`].
+///
+/// Живёт в ядре, а не в двух биндингах, по той же причине, что `set_section`:
+/// «какое сочетание допустимо» — правило, и две его копии на границе native и
+/// web разошлись бы молча.
+///
+/// Конфликт с другой командой отказом **не является**: он показывается в
+/// разобранном виде ([`crate::settings::keybindings::ResolvedBinding`]), а
+/// разрешает его пользователь. Запрет заставил бы расставлять сочетания в
+/// определённом порядке — поменять местами два сочетания стало бы невозможно.
+///
+/// Возвращает обновлённый набор настроек — по той же причине, что `set_section`:
+/// UI обязан показать новое состояние, и второй запрос за уже посчитанным был
+/// бы лишним кругом через границу.
+pub async fn set_keybinding<B: VaultBackend>(
+    backend: &mut B,
+    command: CommandId,
+    shortcut: Option<Shortcut>,
+) -> Result<VaultOverrides, SetKeybindingError> {
+    if let Some(candidate) = &shortcut {
+        if let Some(problem) = candidate.problem() {
+            return Err(SetKeybindingError::Invalid(problem));
+        }
+    }
+
+    let mut overrides = read_vault_settings(backend)
+        .await
+        .map_err(SetKeybindingError::Storage)?;
+    // Нормализация здесь, а не у вызывающей стороны: хранимое значение обязано
+    // быть каноничным независимо от того, как его собрали.
+    let shortcut = shortcut.map(|value| Shortcut::normalize(value.mod_key, value.shift, value.alt, &value.key));
+
+    match overrides
+        .keybindings
+        .iter_mut()
+        .find(|entry| entry.command == command)
+    {
+        Some(existing) => existing.shortcut = shortcut,
+        None => overrides
+            .keybindings
+            .push(KeybindingEntry { command, shortcut }),
+    }
+    sort_keybindings(&mut overrides);
+
+    write_vault_settings(backend, &overrides)
+        .await
+        .map_err(SetKeybindingError::Storage)?;
+    Ok(overrides)
+}
+
+/// Возвращает команду к умолчанию ядра — убирает запись целиком.
+///
+/// Отдельно от `set_keybinding(None)`: там `None` означает «снять сочетание»,
+/// здесь — «забыть, что его меняли». Одной функцией эти два действия не
+/// выражаются.
+pub async fn reset_keybinding<B: VaultBackend>(
+    backend: &mut B,
+    command: CommandId,
+) -> Result<VaultOverrides, VaultSettingsError> {
+    let mut overrides = read_vault_settings(backend).await?;
+    let before = overrides.keybindings.len();
+    overrides.keybindings.retain(|entry| entry.command != command);
+    // Ничего не изменилось — не трогаем файл: лишняя запись на каждый клик это
+    // лишний повод его испортить (тот же довод, что в `move_sections`).
+    if overrides.keybindings.len() == before {
+        return Ok(overrides);
+    }
+    sort_keybindings(&mut overrides);
+    write_vault_settings(backend, &overrides).await?;
+    Ok(overrides)
+}
+
+/// Порядок записей в файле детерминирован: иначе правка одного сочетания
+/// переставляла бы строки в файле, который пользователь может читать глазами.
+fn sort_keybindings(overrides: &mut VaultOverrides) {
+    overrides
+        .keybindings
+        .sort_by_key(|entry| entry.command.as_str());
+}
+
 /// Переносит пометки вслед за переименованием папки средствами приложения
 /// (FR-018) и сохраняет их, если что-то изменилось.
 ///
@@ -307,6 +454,7 @@ fn to_settings_error(error: WriteError) -> VaultSettingsError {
 const ASSETS_TABLE: &str = "assets";
 const SETTINGS_TABLE: &str = "settings";
 const TEMPLATES_TABLE: &str = "templates";
+const KEYBINDINGS_TABLE: &str = "keybindings";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -318,6 +466,12 @@ struct FileShape {
     settings: SettingsTable,
     #[serde(default)]
     templates: TemplatesTable,
+    /// Имя команды → текстовая форма сочетания. `null` — сочетание снято.
+    ///
+    /// Объект, а не массив: файл читают глазами, и `"search": "Mod+Shift+F"`
+    /// понятнее списка записей с двумя полями.
+    #[serde(default)]
+    keybindings: std::collections::BTreeMap<String, Option<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -400,6 +554,34 @@ impl FileShape {
                 .sources
                 .into_iter()
                 .map(|(spec, url)| TemplateSourceEntry { spec, url })
+                .collect(),
+            keybindings: self
+                .keybindings
+                .into_iter()
+                .filter_map(|(name, text)| {
+                    // Незнакомая команда и неразбираемое сочетание
+                    // **отбрасываются молча** — как непригодная пометка раздела
+                    // выше. Одна испорченная строка не повод объявить файл
+                    // нечитаемым и лишить пользователя остальных настроек;
+                    // отброшенная команда просто остаётся на умолчании.
+                    let command = CommandId::parse(&name)?;
+                    let shortcut = match text {
+                        // `null` — сочетание снято пользователем. Это значение,
+                        // а не отсутствие записи.
+                        None => None,
+                        Some(text) => {
+                            let parsed = Shortcut::parse(&text)?;
+                            // Недопустимое сочетание — как если бы его не
+                            // задали: правило не имеет права разойтись с тем,
+                            // что проверяет панель (принцип II).
+                            if parsed.problem().is_some() {
+                                return None;
+                            }
+                            Some(parsed)
+                        }
+                    };
+                    Some(KeybindingEntry { command, shortcut })
+                })
                 .collect(),
         }
     }
@@ -492,6 +674,28 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
             Value::Object(sources)
         }),
     );
+
+    // Таблица сочетаний переписывается целиком, а не по ключу: запись здесь
+    // всегда содержит полный список назначенного, и ключ, которого в нём нет,
+    // означает возврат команды к умолчанию. Оставлять его в файле значило бы
+    // сохранить назначение, которое пользователь только что снял.
+    if overrides.keybindings.is_empty() {
+        document.remove(KEYBINDINGS_TABLE);
+    } else {
+        let mut table = Map::new();
+        for entry in &overrides.keybindings {
+            table.insert(
+                entry.command.as_str().to_string(),
+                match &entry.shortcut {
+                    Some(shortcut) => Value::from(shortcut.to_text()),
+                    // Снятое сочетание пишется как `null`: отсутствие ключа уже
+                    // занято смыслом «умолчание».
+                    None => Value::Null,
+                },
+            );
+        }
+        document.insert(KEYBINDINGS_TABLE.to_string(), Value::Object(table));
+    }
 
     prune_empty_object(&mut document, ASSETS_TABLE);
     prune_empty_object(&mut document, SETTINGS_TABLE);
@@ -591,7 +795,79 @@ mod tests {
                 spec: "@preview/codly:1.3.0".to_string(),
                 url: "https://example.org/codly.tar.gz".to_string(),
             }],
+            keybindings: vec![
+                KeybindingEntry {
+                    command: CommandId::CommandPalette,
+                    shortcut: Some(Shortcut::normalize(true, false, true, "p")),
+                },
+                KeybindingEntry {
+                    command: CommandId::Search,
+                    shortcut: None,
+                },
+            ],
         }
+    }
+
+    #[test]
+    fn a_keybinding_survives_the_round_trip() {
+        let text = render("", &sample());
+        let parsed = parse(&text).unwrap();
+        assert_eq!(parsed.keybindings, sample().keybindings);
+        // В файле сочетание лежит словами, а не структурой: его читают глазами.
+        assert!(text.contains("\"command-palette\": \"Mod+Alt+P\""), "{text}");
+    }
+
+    #[test]
+    fn a_removed_shortcut_is_null_not_a_missing_key() {
+        // Отсутствие ключа уже занято смыслом «умолчание», поэтому снятое
+        // сочетание обязано быть записано явно.
+        let text = render("", &sample());
+        assert!(text.contains("\"search\": null"), "{text}");
+
+        let parsed = parse(&text).unwrap();
+        let search = parsed
+            .keybindings
+            .iter()
+            .find(|entry| entry.command == CommandId::Search)
+            .expect("снятое сочетание — это запись, а не её отсутствие");
+        assert_eq!(search.shortcut, None);
+    }
+
+    #[test]
+    fn an_unusable_keybinding_is_dropped_without_failing_the_file() {
+        // Та же политика, что у непригодной пометки раздела: одна испорченная
+        // строка не лишает пользователя остальных настроек.
+        let text = r#"{
+          "keybindings": {
+            "command-palette": "Mod+P",
+            "нет-такой-команды": "Mod+Q",
+            "search": "не сочетание вовсе",
+            "templates": "F",
+            "new-file": "Mod+Escape"
+          },
+          "settings": {"theme": "dark"}
+        }"#;
+        let overrides = parse(text).expect("лишняя строка не делает файл нечитаемым");
+        assert_eq!(overrides.theme, Some(Theme::Dark));
+        // Уцелела ровно годная запись: незнакомая команда, неразбираемая
+        // строка, сочетание без модификатора и занятая клавиша отброшены.
+        assert_eq!(overrides.keybindings.len(), 1);
+        assert_eq!(overrides.keybindings[0].command, CommandId::CommandPalette);
+    }
+
+    #[test]
+    fn clearing_every_keybinding_removes_the_table() {
+        let previous = render("", &sample());
+        let cleared = VaultOverrides {
+            keybindings: Vec::new(),
+            ..sample()
+        };
+        let rewritten = render(&previous, &cleared);
+        assert!(
+            !rewritten.contains("keybindings"),
+            "пустая таблица — мусор, оставленный приложением: {rewritten}"
+        );
+        assert_eq!(parse(&rewritten).unwrap(), cleared);
     }
 
     #[test]

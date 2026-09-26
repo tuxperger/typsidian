@@ -14,9 +14,15 @@ import {
   type VaultOperationError,
 } from "../vault-tree/ErrorBanner.js";
 import { OpenVault } from "../vault-tree/OpenVault.js";
-import { useVault, type VaultOpener } from "../vault-tree/useVault.js";
+import {
+  useVault,
+  type LastVault,
+  type LastVaultLookup,
+  type VaultOpener,
+} from "../vault-tree/useVault.js";
 import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
+import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 
 import { DEFAULT_NEW_BOARD_NAME } from "../vault-tree/VaultTreeActions.js";
 import { Sidebar } from "../vault-tree/Sidebar.js";
@@ -36,6 +42,16 @@ import { PreviewPane, type CompileStatus } from "../preview/PreviewPane.js";
 import type { PreviewClient } from "../preview-client.js";
 import { Icon, IconSprite } from "../icons/Icons.js";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.js";
+import { PaneDivider } from "./PaneDivider.js";
+import { useDismissOnEscape } from "./useDismissOnEscape.js";
+import {
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SPLIT_MAX,
+  SPLIT_MIN,
+  usePaneLayout,
+} from "./usePaneLayout.js";
+import { useShortcuts } from "./useShortcuts.js";
 import { GraphView } from "../graph/GraphView.js";
 import { SearchOverlay } from "../search/SearchOverlay.js";
 import { TemplateGallery } from "../templates/TemplateGallery.js";
@@ -43,6 +59,7 @@ import { SaveAsTemplateDialog } from "../templates/SaveAsTemplateDialog.js";
 import { useTemplateLibrary } from "../templates/useTemplateLibrary.js";
 import { plainInputTarget } from "../templates/insertion/plainInputTarget.js";
 import type { EditorView } from "@codemirror/view";
+import { ContextMenuProvider, copyText, useContextMenu } from "../menu/ContextMenu.js";
 
 export interface WorkspaceProps {
   /**
@@ -51,6 +68,16 @@ export interface WorkspaceProps {
    * столе — нативный диалог ОС. Всё остальное поведение общее.
    */
   openVaultFolder: VaultOpener;
+  /**
+   * Последний открытый vault (FR-007). Приходит извне по той же причине, что и
+   * жест выбора папки: ссылку на папку хранит хранилище устройства, а оно у
+   * каждого клиента своё — `settings.json` через команды Tauri на native,
+   * `WebStore` поверх OPFS и IndexedDB в браузере.
+   *
+   * Не передан — экран приветствия просто не предлагает продолжить. Это не
+   * отказ: оболочка без хранилища устройства и не обязана ничего помнить.
+   */
+  lastVault?: LastVaultLookup;
   /**
    * Панель настроек (фича 004). Приходит извне, а не импортируется здесь,
    * потому что её хранилище платформенное: `SettingsPanel` работает через
@@ -65,7 +92,24 @@ export interface WorkspaceProps {
    * Функция, а не готовый узел: клиент появляется только после открытия
    * папки, и панель обязана увидеть именно текущий.
    */
-  settings?: (client: VaultClient | null) => React.ReactNode;
+  settings?: (
+    client: VaultClient | null,
+    /**
+     * Переоткрыть окно на другом vault (US2 фичи 004): панель настроек
+     * переключает текущий vault, и дерево обязано показать заметки выбранного,
+     * а не остаться на прежних.
+     *
+     * Жест приходит от панели — она одна знает, какой vault выбран, — а
+     * исполняет его рабочая область: клиентом vault владеет она.
+     */
+    reopen: (opener: VaultOpener) => void,
+    /**
+     * Клиент предпросмотра (фича 007): через него идёт перечень установленных
+     * шаблонов и их явная загрузка. `null` — сборка на этом клиенте ещё не
+     * готова, и раздел шаблонов показывает только настройки.
+     */
+    preview: PreviewClient | null,
+  ) => React.ReactNode;
   /**
    * Компилятор предпросмотра (фича 005). Приходит извне по той же причине, что
    * и панель настроек: на web это wasm в том же процессе, на рабочем столе —
@@ -94,11 +138,23 @@ export interface WorkspaceProps {
  * теперь настоящий свёрстанный документ (фича 005): её заполняет
  * `PreviewPane`, собирая заметку из буфера редактора через `PreviewClient`.
  */
-export function Workspace({
+export function Workspace(props: WorkspaceProps): React.JSX.Element {
+  // Контекстное меню — одно на рабочую область: его открывают дерево, редактор,
+  // предпросмотр и шапка, и каждое из них лежит внутри.
+  return (
+    <ContextMenuProvider>
+      <WorkspaceView {...props} />
+    </ContextMenuProvider>
+  );
+}
+
+function WorkspaceView({
   openVaultFolder,
+  lastVault,
   settings,
   preview = null,
 }: WorkspaceProps): React.JSX.Element {
+  const contextMenu = useContextMenu();
   const [openNote, setOpenNote] = useState<Note | null>(null);
   // Текст открытой заметки из буфера редактора: предпросмотр собирается из
   // него, а не из файла на диске (FR-002).
@@ -125,6 +181,9 @@ export function Workspace({
     lastMs: null,
   });
   const [rebuildToken, setRebuildToken] = useState(0);
+  // «Параметры элемента» из палитры (фича 008, FR-006): редактор ловит смену
+  // счётчика и открывает форму для элемента под кареткой.
+  const [paramsRequest, setParamsRequest] = useState(0);
   // Последнее изменение файла в vault. Передаётся вниз, а не обрабатывается
   // здесь: `pollEvents` осушает очередь ядра, поэтому второй подписчик на
   // события заметки перехватывал бы их у первого (FR-005 фичи 002).
@@ -164,11 +223,58 @@ export function Workspace({
     Parameters<typeof useConflictResolution>[0]
   >(null);
   const conflicts = useConflictResolution(clientForConflicts);
-  // Настройки уровня vault нужны предпросмотру: в них живёт выключатель
-  // автозагрузки шаблонов и адреса, указанные пользователем (фича 007).
-  const templateSettings = useVaultSettings(clientForConflicts);
+  // Размеры колонок. Значения по умолчанию — из макета; двигает их
+  // пользователь границами между колонками.
+  const panes = usePaneLayout();
+  // Настройки открытого vault. Нужны здесь троим: предпросмотру (выключатель
+  // автозагрузки шаблонов и адреса, указанные пользователем, — фича 007),
+  // сочетаниям клавиш и размеру шрифта редактора. Все трое живут в настройках
+  // vault, а не устройства, и потому доступны всем трём оболочкам (у desktop и
+  // Android хранилища устройства нет).
+  const vaultSettings = useVaultSettings(clientForConflicts);
+  const shortcuts = useShortcuts(clientForConflicts, vaultSettings.overrides);
 
-  const { state, openVault, refresh } = useVault(openVaultFolder, {
+  // Размер шрифта редактора доходит до CodeMirror переменной на корне
+  // документа. Применяется здесь, а не в панели настроек: панель платформенная
+  // и к тому же смонтирована только пока открыта, а размер обязан действовать
+  // с первого кадра после открытия папки (FR-017).
+  //
+  // Отсутствие значения означает «перекрытия нет», а не «13 пикселей»: под
+  // этим слоем на web лежит слой устройства, и у него своя переменная — см.
+  // `applyToDocument`. Поэтому снятие здесь возвращает размер устройства, а не
+  // обнуляет его.
+  //
+  // Через управление, а не через голое применение: кегль меняется жестом поверх
+  // текста и ступенями в статус-баре, и шаг обязан быть видно сразу, а в
+  // настройки папки он уезжает после паузы — файл на диск на каждый щелчок
+  // колеса писать нельзя.
+  const editorFontSize = useEditorFontSizeControl(
+    vaultSettings.overrides?.editor_font_size ?? null,
+    vaultSettings.setEditorFontSize,
+  );
+
+  // Панель настроек — такое же наложение, как палитра и галерея, и закрывается
+  // той же клавишей. Сама панель об этом не знает: она платформенная и приходит
+  // пропом, а Escape — правило рабочей области.
+  const closeSettings = useCallback(() => setShowSettings(false), []);
+
+  // Панель настроек пишет файл vault своим экземпляром `useVaultSettings`, а
+  // предпросмотр и сочетания читают этот — общего состояния у них нет. Без
+  // перечитывания выключенная в панели автозагрузка шаблонов не доходила бы до
+  // сборки, пока папку не переоткроют (007 FR-011: «немедленно»).
+  const reloadVaultSettings = vaultSettings.reload;
+  const settingsWereShown = useRef(false);
+  useEffect(() => {
+    if (showSettings) {
+      settingsWereShown.current = true;
+    } else if (settingsWereShown.current) {
+      settingsWereShown.current = false;
+      void reloadVaultSettings();
+    }
+  }, [showSettings, reloadVaultSettings]);
+  useDismissOnEscape(showSettings ? closeSettings : null);
+
+  const { state, openVault, openVaultWith, refresh } = useVault(openVaultFolder, {
     onConflictDetected: (notePath) => conflicts.noteConflicted(notePath, "diskChanged"),
     onNoteDeletedWithUnsavedEdits: (notePath) =>
       conflicts.noteConflicted(notePath, "deleted"),
@@ -184,6 +290,61 @@ export function Workspace({
     onNoteCreated: fileChanged,
     onAnyEvent: noticeEvent,
   });
+
+  // Последний открытый vault (FR-007). Спрашивается один раз: после открытия
+  // экран приветствия не показывается, а ответ к тому времени уже неверен —
+  // последним стал бы открытый сейчас.
+  //
+  // Отказ хранилища здесь молчит намеренно: предложить продолжить не удалось —
+  // остаётся обычный выбор папки, и сообщать об этом пользователю нечего.
+  const [offered, setOffered] = useState<LastVault | null>(null);
+  // Молчаливое открытие пробуется ровно один раз за жизнь окна. Иначе отказ
+  // (папка исчезла между вопросом и открытием) превратился бы в цикл попыток,
+  // а отмена пользователя — в невозможность остаться на экране приветствия.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!lastVault) return;
+    let cancelled = false;
+    void (async () => {
+      let found: LastVault | null = null;
+      try {
+        found = await lastVault();
+      } catch {
+        found = null;
+      }
+      if (cancelled) return;
+      setOffered(found);
+      // «Мгновенно» — это здесь: запомненный vault открывается сам, без
+      // единого нажатия. Кнопка остаётся для случая, когда молчаливо открыть
+      // нельзя (в браузере отозвано разрешение на папку) — см. `readyToOpen`.
+      if (found?.readyToOpen && !autoOpened.current) {
+        autoOpened.current = true;
+        await openVaultWith(found.open);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lastVault, openVaultWith]);
+
+  /**
+   * Переоткрыть окно на другом vault (US2 фичи 004, AS3).
+   *
+   * Открытая заметка и её текст сбрасываются здесь, а не в `useVault`: это
+   * состояние рабочей области, и принадлежит оно прежнему vault. Оставить его
+   * значило бы показать редактор с заметкой, которой в открытой папке нет.
+   */
+  const reopenVault = useCallback(
+    async (opener: VaultOpener) => {
+      setOpenNote(null);
+      setEditorText("");
+      // Панель настроек закрывается: переключение сделано ради дерева заметок,
+      // а оно под ней.
+      setShowSettings(false);
+      await openVaultWith(opener);
+    },
+    [openVaultWith],
+  );
 
   // `useConflictResolution` создаётся до того, как появится backend, поэтому
   // связываем их, как только vault открыт.
@@ -226,10 +387,35 @@ export function Workspace({
     [isBoardOpen, board],
   );
 
+  /**
+   * Версия, принятая при разрешении конфликта, — вниз, в редактор (FR-022).
+   *
+   * Ревизия, а не просто текст: принять внешнюю можно дважды подряд, и вторая
+   * такая же строка обязана примениться так же, как первая.
+   */
+  const [acceptedExternal, setAcceptedExternal] = useState<{
+    path: string;
+    text: string;
+    revision: number;
+  } | null>(null);
+
   const handleAcceptExternal = useCallback(async () => {
+    // Путь спрашивается до разрешения: после него конфликт снят и текущего
+    // конфликта уже нет.
+    const path = conflicts.current?.notePath ?? null;
     const external = await conflicts.acceptExternal();
     // `null` — внешней версии нет: заметку удалили снаружи (FR-025).
-    if (external === null) setOpenNote(null);
+    if (external === null) {
+      setOpenNote(null);
+      return;
+    }
+    if (path !== null) {
+      setAcceptedExternal((previous) => ({
+        path,
+        text: external,
+        revision: (previous?.revision ?? 0) + 1,
+      }));
+    }
   }, [conflicts]);
 
   // Доски vault для выбора при вставке (FR-018). Тот же список, что в дереве:
@@ -344,33 +530,6 @@ export function Workspace({
     setGetEditorView(() => getView);
   }, []);
 
-  // ⌘K открывает и закрывает палитру откуда угодно, Escape — только закрывает
-  // (handoff § Screens 3). Слушатель здесь, а не в самой палитре: открыть её
-  // нужно и тогда, когда её в дереве компонентов ещё нет. ⌘⇧F — расширенный
-  // поиск, то же сочетание, что в таблице команд макета «Утилиты».
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      const accel = event.metaKey || event.ctrlKey;
-      if (accel && event.shiftKey && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setSearchOpen((open) => !open);
-      } else if (accel && event.shiftKey && event.key.toLowerCase() === "t") {
-        // Галерея заготовок (фича 003). ⌘⇧T свободно: ⌘⇧F занят поиском,
-        // ⌘⇧N — созданием доски, ⌘⇧E макет отдаёт логу экспорта, которого в
-        // приложении нет.
-        event.preventDefault();
-        setTemplatesOpen((open) => !open);
-      } else if (accel && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPaletteOpen((open) => !open);
-      } else if (event.key === "Escape") {
-        setPaletteOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   const toggleView = useCallback(() => {
     // Уход с рабочей области обязан дописать доску: дебаунс автосохранения
     // иначе выстрелит в уже размонтированное полотно.
@@ -378,31 +537,82 @@ export function Workspace({
     setView((current) => (current === "workspace" ? "graph" : "workspace"));
   }, [isBoardOpen, board]);
 
+  // Глобальные сочетания. Слушатель здесь, а не в самих наложениях: открыть
+  // палитру нужно и тогда, когда её в дереве компонентов ещё нет.
+  //
+  // Какие именно клавиши — решают настройки уровня vault через ядро
+  // (`settings::keybindings`), а не этот файл: раньше они были зашиты прямо
+  // здесь, и переназначить их было нечем.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (shortcuts.matches("search", event)) {
+        event.preventDefault();
+        setSearchOpen((open) => !open);
+      } else if (shortcuts.matches("templates", event)) {
+        event.preventDefault();
+        setTemplatesOpen((open) => !open);
+      } else if (shortcuts.matches("command-palette", event)) {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if (shortcuts.matches("toggle-graph", event)) {
+        event.preventDefault();
+        toggleView();
+      } else if (shortcuts.matches("rebuild-preview", event)) {
+        event.preventDefault();
+        setRebuildToken((token) => token + 1);
+      }
+      // Escape здесь больше не разбирается: закрытием наложений занят
+      // `useDismissOnEscape`, и закрывает он **верхнее** из открытых. Отдельная
+      // ветка тут закрывала бы палитру заодно с диалогом поверх неё.
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcuts, toggleView]);
+
   /**
    * Команды палитры. Только те, что действительно что-то делают: список из
    * макета содержит экспорт BibTeX и переключение vim-режима, которых в
    * приложении нет, а мёртвая строка в палитре хуже её отсутствия.
    */
+  // Ссылка на заметку из контекстного меню дерева — в позицию курсора открытой
+  // заметки. Путь от корня vault (`[[/путь]]`): так ссылка не зависит от папки,
+  // в которой лежит открытая заметка (`graph::resolve_link_target`).
+  const insertLink = useMemo(() => {
+    if (getEditorView === null || openNote === null || isBoard(openNote)) return undefined;
+    return (target: Note) => {
+      const view = getEditorView();
+      if (view === null) return;
+      view.dispatch(view.state.replaceSelection(`[[/${target.path.toString()}]]`), {
+        userEvent: "input",
+        scrollIntoView: true,
+      });
+      view.focus();
+    };
+  }, [getEditorView, openNote]);
+
   const commands = useMemo<PaletteCommand[]>(() => {
     const items: PaletteCommand[] = [
       {
         id: "graph",
         title: view === "graph" ? "Вернуться в Workspace" : "Открыть граф связей",
         icon: "network",
+        // Подпись берётся у ядра, а не пишется здесь: после переназначения
+        // литерал в палитре начал бы врать про клавиши.
+        meta: shortcuts.displayOf("toggle-graph"),
         run: toggleView,
       },
       {
         id: "search",
         title: "Расширенный поиск",
         icon: "search",
-        meta: "⌘⇧F",
+        meta: shortcuts.displayOf("search"),
         run: () => setSearchOpen(true),
       },
       {
         id: "templates",
         title: "Шаблоны и сниппеты",
         icon: "file",
-        meta: "⌘⇧T",
+        meta: shortcuts.displayOf("templates"),
         run: () => setTemplatesOpen(true),
       },
       {
@@ -415,9 +625,21 @@ export function Workspace({
         id: "rebuild",
         title: "Пересобрать предпросмотр",
         icon: "refresh",
+        meta: shortcuts.displayOf("rebuild-preview"),
         run: () => setRebuildToken((token) => token + 1),
       },
     ];
+    // Только при открытой текстовой заметке: в доске и в графе править
+    // параметры элемента Typst негде, а мёртвая строка хуже её отсутствия.
+    if (view === "workspace" && openNote !== null && !isBoard(openNote)) {
+      items.push({
+        id: "element-params",
+        title: "Параметры элемента",
+        icon: "terminal",
+        meta: shortcuts.displayOf("element-params"),
+        run: () => setParamsRequest((request) => request + 1),
+      });
+    }
     if (settings !== undefined) {
       items.push({
         id: "settings",
@@ -427,7 +649,7 @@ export function Workspace({
       });
     }
     return items;
-  }, [view, toggleView, createBoard, settings]);
+  }, [view, toggleView, createBoard, settings, shortcuts, openNote]);
 
   if (!state.client) {
     return (
@@ -436,7 +658,13 @@ export function Workspace({
           <span className="ts-wordmark__slash">/</span>typsidian
         </h1>
         <p>Выберите папку с заметками — она станет vault. Файлы остаются на вашем диске.</p>
-        <OpenVault isLoading={state.isLoading} error={state.error} onOpen={openVault} />
+        <OpenVault
+          isLoading={state.isLoading}
+          error={state.error}
+          onOpen={openVault}
+          last={offered}
+          {...(offered ? { onOpenLast: () => void openVaultWith(offered.open) } : {})}
+        />
       </main>
     );
   }
@@ -447,8 +675,75 @@ export function Workspace({
           остальное ссылается на них через `<use>`. */}
       <IconSprite />
 
-      <header className="ts-header">
+      <header
+        className="ts-header"
+        onContextMenu={(event) => {
+          const path = openNote?.path.toString() ?? null;
+          contextMenu.open(event, [
+            ...(path === null
+              ? []
+              : [
+                  {
+                    label: "Копировать путь заметки",
+                    run: async () => {
+                      const failure = await copyText(path);
+                      contextMenu.notify(failure ?? `Скопировано: ${path}`);
+                    },
+                  },
+                  { kind: "separator" as const },
+                ]),
+            {
+              label: panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов",
+              run: panes.toggleSidebar,
+            },
+            {
+              label: view === "graph" ? "Вернуться в Workspace" : "Открыть граф связей",
+              shortcut: shortcuts.displayOf("toggle-graph"),
+              run: toggleView,
+            },
+            ...(view === "workspace"
+              ? [
+                  {
+                    label: "Пересобрать предпросмотр",
+                    shortcut: shortcuts.displayOf("rebuild-preview"),
+                    disabled: compile.isBuilding,
+                    run: () => setRebuildToken((token) => token + 1),
+                  },
+                ]
+              : []),
+            { kind: "separator" },
+            {
+              label: "Палитра команд",
+              shortcut: shortcuts.displayOf("command-palette"),
+              run: () => setPaletteOpen(true),
+            },
+            {
+              label: "Расширенный поиск",
+              shortcut: shortcuts.displayOf("search"),
+              run: () => setSearchOpen(true),
+            },
+            ...(settings !== undefined
+              ? [{ label: "Настройки", run: () => setShowSettings(true) }]
+              : []),
+          ]);
+        }}
+      >
         <div className="ts-header__group">
+          {/* Дерево файлов убирается целиком — тексту и предпросмотру остаётся
+              всё окно. Кнопка в шапке, а не в самой панели: скрытой панели на
+              экране нет, и вернуть её было бы нечем. */}
+          <button
+            type="button"
+            className="ts-btn ts-btn--icon"
+            aria-pressed={!panes.sidebarHidden}
+            title={panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов"}
+            aria-label={
+              panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов"
+            }
+            onClick={panes.toggleSidebar}
+          >
+            <Icon name="layout" size={14} />
+          </button>
           <span className="ts-wordmark">
             <span className="ts-wordmark__slash">/</span>typsidian
           </span>
@@ -505,6 +800,9 @@ export function Workspace({
             {view === "workspace" ? "Граф" : "Workspace"}
           </button>
 
+          {/* Кнопка показывает действующее сочетание, а не ⌘K из макета:
+              после переназначения подпись обязана следовать за клавишами.
+              Значок ⌘ остаётся, только пока сочетание его содержит. */}
           <button
             type="button"
             className="ts-btn ts-btn--cmd"
@@ -512,7 +810,12 @@ export function Workspace({
             aria-label="Открыть палитру команд"
             onClick={() => setPaletteOpen(true)}
           >
-            <Icon name="cmd" size={12} />K
+            {shortcuts.displayOf("command-palette") || (
+              <>
+                <Icon name="cmd" size={12} />
+                K
+              </>
+            )}
           </button>
 
           {settings !== undefined && (
@@ -556,21 +859,43 @@ export function Workspace({
           onBack={toggleView}
         />
       ) : (
-      <div className="ts-body">
-        <Sidebar
-          client={state.client}
-          notes={state.notes}
-          openPath={openNote?.path.toString() ?? null}
-          folderCount={folderCount}
-          onOpenNote={openEntry}
-          onNotesChanged={refresh}
-          onCreated={(path) => void openPath(path)}
-          onError={setOperationError}
-          onOpenGraph={toggleView}
-          templates={templates}
-          onOpenTemplates={() => setTemplatesOpen(true)}
-          createFromTemplate={createFromTemplate}
-        />
+      <div className="ts-body" ref={panes.bodyRef} style={panes.style}>
+        {/* Скрытое дерево не рендерится вовсе, а не сжимается до нуля: панель
+            нулевой ширины оставляла бы в раскладке свою рамку и по-прежнему
+            читала бы vault ради счётчика в подвале. */}
+        {!panes.sidebarHidden && (
+          <>
+            <Sidebar
+              client={state.client}
+              notes={state.notes}
+              openPath={openNote?.path.toString() ?? null}
+              folderCount={folderCount}
+              onOpenNote={openEntry}
+              onNotesChanged={refresh}
+              onCreated={(path) => void openPath(path)}
+              onError={setOperationError}
+              onOpenGraph={toggleView}
+              templates={templates}
+              onOpenTemplates={() => setTemplatesOpen(true)}
+              createFromTemplate={createFromTemplate}
+              shortcuts={shortcuts}
+              onInsertLink={insertLink}
+            />
+
+            {/* Граница панели и остального окна. Стоит и при открытой доске:
+                доска занимает место пары «редактор + предпросмотр», а панель —
+                нет. */}
+            <PaneDivider
+              label="Ширина боковой панели"
+              now={panes.sidebarWidth}
+              min={SIDEBAR_MIN_WIDTH}
+              max={SIDEBAR_MAX_WIDTH}
+              onDrag={panes.dragSidebar}
+              onStep={panes.stepSidebar}
+              onReset={panes.resetSidebar}
+            />
+          </>
+        )}
 
         {/* FR-006, FR-007 фичи 002: доска занимает место панели
             «редактор + preview» в том же окне, отдельного окна не открывается;
@@ -597,11 +922,28 @@ export function Workspace({
               onClose={() => setOpenNote(null)}
               boards={boards}
               externalChange={lastChange}
+              acceptedExternal={acceptedExternal}
               onOpenBoard={openBoard}
               onCreateBoard={() => void createBoard()}
               onContentChange={setEditorText}
               onEditorReady={editorReady}
               onSaveAsTemplate={setSavingTemplate}
+              fontSize={editorFontSize}
+              shortcuts={shortcuts}
+              paramsRequest={paramsRequest}
+            />
+
+            {/* Доля считается в процентах, а не в пикселях: ширина колонки
+                зависит от размера окна, а доля — нет, и озвучивать пиксели,
+                меняющиеся сами по себе, значило бы врать скринридеру. */}
+            <PaneDivider
+              label="Граница редактора и предпросмотра"
+              now={panes.editorShare * 100}
+              min={SPLIT_MIN * 100}
+              max={SPLIT_MAX * 100}
+              onDrag={panes.dragSplit}
+              onStep={panes.stepSplit}
+              onReset={panes.resetSplit}
             />
 
             {/* Компилятор от открытого vault приоритетнее переданного пропом:
@@ -616,7 +958,7 @@ export function Workspace({
               // Фича 007: настройки решают, идти ли за недостающим шаблоном
               // в сеть. Читаются здесь, а не в панели: панель предпросмотра
               // vault-клиентом не владеет.
-              vaultOverrides={templateSettings.overrides}
+              vaultOverrides={vaultSettings.overrides}
             />
           </>
         )}
@@ -709,7 +1051,11 @@ export function Workspace({
                 в два столбца (меню слева, содержимое справа), и обёртка со
                 своим padding сдвинула бы границу между ними. */}
             <div className="ts-sheet__body ts-sheet__body--flush">
-              {settings?.(state.client ?? null)}
+              {settings?.(
+                state.client ?? null,
+                (opener) => void reopenVault(opener),
+                state.preview ?? preview ?? null,
+              )}
             </div>
           </div>
         </div>

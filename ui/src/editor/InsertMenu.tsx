@@ -27,12 +27,19 @@ import {
   type SymbolCategory,
 } from "./mathSymbols.js";
 import { parseSnippet } from "./snippet.js";
+import { ElementSample } from "./elementSamples.js";
+import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 // Меню вставки элементов Typst (макет «Typsidian Вставка» → § Меню вставки и
 // § Палитра математики). Открывается по ⌘E у каретки.
 //
 // Меню ничего не вставляет само: оно объявляет наверх выбранный шаблон, а
 // правит текст редактор — как палитра команд не знает, что делают её команды.
+//
+// Выбор один на мышь и на клавиатуру: наведение выделяет строку так же, как
+// ↑↓, и предпросмотр показывает то, на что человек смотрит. Иначе подсвечены
+// две строки сразу — одна под курсором, другая под стрелками, — и код в
+// третьей колонке относится ко второй.
 //
 // Расхождение с макетом: третья колонка показывает код сниппета, а не
 // отрисованный образец. Настоящая отрисовка требует компилятора (он в колонке
@@ -48,6 +55,11 @@ export interface CaretAnchor {
 }
 
 export interface InsertRequest {
+  /**
+   * Запись каталога: по ней ядро решает, открывать ли форму параметров
+   * (фича 008). Нет у символов математики — те вставляются сразу.
+   */
+  id?: string;
   template: string;
   block: boolean;
 }
@@ -79,6 +91,10 @@ export function InsertMenu({
 
   const menuRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  // Чем выбрана строка в последний раз. Подтягивать список к выбранной строке
+  // нужно только под стрелками: под мышью строка и так под курсором, а
+  // доводка её «до края» уехала бы из-под пальца вместе со списком.
+  const navigation = useRef<"keyboard" | "pointer">("keyboard");
 
   const needle = query.trim().toLowerCase();
 
@@ -122,7 +138,9 @@ export function InsertMenu({
         setActive(0);
         return;
       }
-      onInsert({ template: element.template, block: element.block ?? false });
+      // Открывать ли форму параметров, решает ядро по записи каталога
+      // (фича 008) — меню передаёт id и уходит.
+      onInsert({ id: element.id, template: element.template, block: element.block ?? false });
     },
     [onInsert],
   );
@@ -140,10 +158,17 @@ export function InsertMenu({
     setActive(0);
   }, []);
 
+  /** Наведение выбирает строку: предпросмотр обязан идти за курсором. */
+  const pointAt = useCallback((index: number) => {
+    navigation.current = "pointer";
+    setActive(index);
+  }, []);
+
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       const step = (delta: number, wrap: boolean): void => {
         event.preventDefault();
+        navigation.current = "keyboard";
         setActive((current) => {
           if (rowCount === 0) return 0;
           const next = current + delta;
@@ -152,12 +177,33 @@ export function InsertMenu({
         });
       };
 
+      // Соседний раздел на рельсе — тот же ряд, что и в списке, только слева.
+      const stepCategory = (delta: number): void => {
+        event.preventDefault();
+        navigation.current = "keyboard";
+        setCategory((current) => {
+          const order: (ElementCategory | null)[] = [
+            null,
+            ...ELEMENT_CATEGORIES.map((section) => section.id),
+          ];
+          const at = order.indexOf(current);
+          const next = Math.min(order.length - 1, Math.max(0, at + delta));
+          return order[next] ?? null;
+        });
+        setActive(0);
+      };
+
       // В списке шаг — строка и по кругу, в сетке — столбец или ряд и до края:
       // «прокрутка» сетки по кругу выглядит как случайный прыжок.
       if (event.key === "ArrowDown") step(mode === "symbols" ? SYMBOL_COLUMNS : 1, mode === "elements");
       else if (event.key === "ArrowUp") step(mode === "symbols" ? -SYMBOL_COLUMNS : -1, mode === "elements");
       else if (event.key === "ArrowRight" && mode === "symbols") step(1, false);
       else if (event.key === "ArrowLeft" && mode === "symbols") step(-1, false);
+      // Пустой ввод — двигать каретку в поле поиска некуда, и ←→ достаются
+      // рельсе разделов. С набранным запросом они снова правят текст: отнять у
+      // поля ввода стрелки значило бы отнять у него правку.
+      else if (event.key === "ArrowRight" && query === "") stepCategory(1);
+      else if (event.key === "ArrowLeft" && query === "") stepCategory(-1);
       else if (event.key === "Enter") {
         event.preventDefault();
         if (mode === "elements") {
@@ -177,9 +223,15 @@ export function InsertMenu({
 
   // Выбранная строка обязана оставаться видимой при навигации с клавиатуры.
   useEffect(() => {
+    if (navigation.current === "pointer") return;
     const selected = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     selected?.scrollIntoView({ block: "nearest" });
   }, [active, mode]);
+
+  // Escape закрывает меню откуда угодно — общим для всех наложений
+  // механизмом. Поверх меню может стоять диалог параметров; тогда Escape
+  // достаётся ему, а меню закроется следующим нажатием.
+  useDismissOnEscape(onClose);
 
   // Нажатие мимо меню закрывает его: это всплывающая панель у каретки, а не
   // модальное окно, и затемнения под ней нет.
@@ -315,6 +367,10 @@ export function InsertMenu({
                     role="option"
                     aria-selected={index === active}
                     className="ts-insert__row"
+                    // `mousemove`, а не `mouseenter`: под стрелками список
+                    // едет под неподвижным курсором, и «вход» в приехавшую
+                    // строку отобрал бы выбор у клавиатуры.
+                    onMouseMove={() => pointAt(index)}
                     onClick={() => insertElement(element)}
                   >
                     <Icon name={element.icon} size={13} className="ts-insert__icon" />
@@ -335,9 +391,15 @@ export function InsertMenu({
             </div>
 
             <div className="ts-insert__preview">
-              <span className="ts-eyebrow">код</span>
               {activeElement ? (
                 <>
+                  {/* Мини-«бумага» с образцом того, как элемент выглядит на
+                      странице (макет § Меню вставки). Показывается не всегда:
+                      у элементов, меняющих настройки документа, местного вида
+                      нет, и колонка честно остаётся с одним кодом. */}
+                  <ElementPaper element={activeElement} />
+                  <p className="ts-insert__summary">{activeElement.summary}</p>
+                  <span className="ts-eyebrow">код</span>
                   <pre className="ts-insert__code">
                     <SnippetCode template={activeElement.template} />
                   </pre>
@@ -347,7 +409,10 @@ export function InsertMenu({
                   </span>
                 </>
               ) : (
-                <pre className="ts-insert__code" />
+                <>
+                  <span className="ts-eyebrow">код</span>
+                  <pre className="ts-insert__code" />
+                </>
               )}
             </div>
           </>
@@ -362,6 +427,7 @@ export function InsertMenu({
                   aria-selected={index === active}
                   aria-label={symbol.name}
                   className="ts-insert__tile"
+                  onMouseMove={() => pointAt(index)}
                   onClick={() => insertSymbol(symbol)}
                 >
                   <span className="ts-insert__glyph" aria-hidden="true">
@@ -380,6 +446,39 @@ export function InsertMenu({
         )}
       </div>
 
+      {/* Нижняя полоса палитры символов (макет § Палитра математики): глиф на
+          «бумаге», строка, которая уйдёт в буфер, и кнопка вставки. Полоса и
+          отвечает на главный вопрос палитры — «а что именно окажется в
+          тексте»: в документ идёт имя (`sum`), а не сам глиф (∑). */}
+      {mode === "symbols" && (
+        <div className="ts-insert__chosen">
+          {activeSymbol ? (
+            <>
+              <span className="ts-insert__paper" aria-hidden="true">
+                {activeSymbol.glyph}
+              </span>
+              <span className="ts-insert__chosen-code">
+                {parseSnippet(symbolTemplate(activeSymbol)).text}
+              </span>
+              <span className="ts-spacer" />
+              <button
+                type="button"
+                className="ts-btn ts-btn--accent"
+                onClick={() => insertSymbol(activeSymbol)}
+              >
+                Вставить
+                <span className="ts-insert__shortcut">
+                  <Icon name="cmd" size={11} />
+                  <Icon name="enter" size={11} />
+                </span>
+              </button>
+            </>
+          ) : (
+            <span className="ts-insert__chosen-code">символ не выбран</span>
+          )}
+        </div>
+      )}
+
       <div className="ts-insert__hints">
         <span>
           <Icon name="updown" size={11} />
@@ -396,10 +495,29 @@ export function InsertMenu({
         <span className="ts-spacer" />
         <span>
           {mode === "elements"
-            ? "esc закрыть"
+            ? "←→ разделы · esc закрыть"
             : "в текст идёт имя символа, не глиф"}
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Лист «бумаги» с образцом элемента.
+ *
+ * Подписан «образец», а не «предпросмотр»: это схема формы, а не результат
+ * сборки — компилятор сюда не зовут, иначе движение по списку упиралось бы в
+ * очередь к ядру. Образца нет — нет и листа: пустая рамка утверждала бы, что
+ * элемент ничего не рисует.
+ */
+function ElementPaper({ element }: { element: TypstElement }): React.JSX.Element | null {
+  const sample = ElementSample({ element });
+  if (sample === null) return null;
+  return (
+    <div className="ts-sample" aria-hidden="true">
+      <div className="ts-sample__paper">{sample}</div>
+      <span className="ts-sample__caption-note">образец</span>
     </div>
   );
 }

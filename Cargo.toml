@@ -1,12 +1,17 @@
 [workspace]
 resolver = "2"
-members = ["packages/core", "apps/desktop/src-tauri"]
+members = [
+  "packages/core",
+  "packages/shell",
+  "apps/desktop/src-tauri",
+  "apps/mobile/src-tauri",
+]
 
 # Корневые `cargo build`/`cargo test` работают только с ядром.
 #
-# Оболочка рабочего стола остаётся членом workspace (общий `Cargo.lock`, общий
-# `target/`), но в сборку по умолчанию не входит: она собирается своим
-# `cargo tauri build` либо явным `-p typsidian-desktop`. Без этого
+# Оболочки остаются членами workspace (общий `Cargo.lock`, общий `target/`), но
+# в сборку по умолчанию не входят: они собираются своим `cargo tauri build`
+# либо явным `-p typsidian-desktop` / `-p typsidian-mobile`. Без этого
 # `cargo build --target wasm32-unknown-unknown` в корне тянул бы Tauri, GTK и
 # WebKit под wasm32 и падал на `getrandom` — а именно эта команда проверяет
 # второй таргет ядра (принцип II).

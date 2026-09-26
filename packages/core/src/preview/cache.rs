@@ -23,7 +23,7 @@
 //! чтения, которое он должен был устранить. Их перечитывание и так почти
 //! ничего не стоит: дорога здесь пересборка, а не чтение.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use typst::foundations::Bytes;
@@ -47,6 +47,8 @@ use super::snapshot::DependencySnapshot;
 #[derive(Debug, Default)]
 pub struct PackageCache {
     files: Mutex<HashMap<FileId, Bytes>>,
+    /// Шаблоны, чей отпечаток уже сверен в этом сеансе (фича 007, FR-023).
+    verified: Mutex<HashSet<PackageSpec>>,
 }
 
 impl PackageCache {
@@ -93,6 +95,43 @@ impl PackageCache {
             VirtualRoot::Package(known) => *known != *spec,
             VirtualRoot::Project => true,
         });
+    }
+
+    /// Шаблоны, чьи файлы этот сеанс уже читал.
+    ///
+    /// Отсюда сборка узнаёт, у каких шаблонов сверять отпечаток (фича 007,
+    /// FR-023): проверять надо то, что документ действительно использовал, а не
+    /// всё установленное — перечислить установленное `VaultBackend` всё равно
+    /// не умеет.
+    pub fn specs(&self) -> Vec<PackageSpec> {
+        let files = self.files.lock().expect("кэш шаблонов");
+        let mut specs: Vec<PackageSpec> = Vec::new();
+        for id in files.keys() {
+            if let VirtualRoot::Package(spec) = id.root() {
+                if !specs.contains(spec) {
+                    specs.push(spec.clone());
+                }
+            }
+        }
+        specs
+    }
+
+    /// Отмечает шаблон сверенным; `true` — сверяем впервые.
+    ///
+    /// Сверка читает все файлы шаблона с диска, и делать это на каждую сборку
+    /// значило бы возвращать те самые чтения, ради устранения которых заведён
+    /// кэш. Раз за сеанс достаточно: подменить файл незаметно для пользователя,
+    /// который тут же продолжает печатать, всё равно нельзя — сеанс начнётся
+    /// заново при следующем открытии папки.
+    pub fn mark_verified(&self, spec: &PackageSpec) -> bool {
+        let mut verified = self.verified.lock().expect("сверенные шаблоны");
+        verified.insert(spec.clone())
+    }
+
+    /// Забывает отметку о сверке — например, после переустановки шаблона.
+    pub fn forget_verified(&self, spec: &PackageSpec) {
+        let mut verified = self.verified.lock().expect("сверенные шаблоны");
+        verified.remove(spec);
     }
 
     /// Сколько файлов шаблонов сейчас удержано. Нужно проверкам и диагностике.

@@ -1,0 +1,157 @@
+/* Обзор папок устройства (`FolderPicker.tsx`).
+ *
+ * Стили лежат здесь, а не в `ui/src/styles/app.css`: обзор — часть мобильной
+ * оболочки, на web и рабочем столе папку выбирает системный диалог, и этих
+ * правил там нет вовсе. Токены при этом общие — те же, что у всего остального
+ * интерфейса (`ui/src/styles/tokens`).
+ *
+ * Все селекторы начинаются с `.ts-`: правило по роли или по голому тегу
+ * залетело бы внутрь DOM Excalidraw, который этому окну не принадлежит
+ * (принцип VIII).
+ */
+
+.ts-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* Вырез и системные полосы: окно растянуто под них (`viewport-fit=cover` в
+   * index.html), и без отступов шапка обзора уехала бы под часы. */
+  padding: max(var(--space-4), env(safe-area-inset-top)) var(--space-4)
+    max(var(--space-4), env(safe-area-inset-bottom));
+  background: var(--steel-950);
+  color: var(--steel-300);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+/* Всё, кроме списка, занимает ровно свою высоту: без этого список забирает
+ * себе весь экран и сплющивает соседей — проверено на устройстве, строка пути
+ * сжималась до полоски в несколько пикселей. Растягивается один список. */
+.ts-picker__head,
+.ts-picker__path,
+.ts-picker__empty,
+.ts-picker__error,
+.ts-picker__actions {
+  flex: 0 0 auto;
+}
+
+.ts-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.ts-picker__title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-100);
+}
+
+/* Длинный путь переносится, а не обрезается: обрезанный путь перестаёт
+ * различать две папки с одинаковым именем, а выбирают здесь именно по нему. */
+.ts-picker__path {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-picker__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  /* Инерционная прокрутка пальцем внутри списка, а не всего окна. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 48px — минимальная цель для пальца (Material). Меньше делать нечего: по
+ * этим строкам ходят именно пальцем, а не мышью, как по всему остальному
+ * интерфейсу. */
+.ts-picker__row {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: var(--border-width) solid var(--border-default);
+  background: transparent;
+  color: var(--steel-200);
+  font-family: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-picker__row:disabled {
+  opacity: 0.5;
+}
+
+.ts-picker__row--up {
+  color: var(--steel-400);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.ts-picker__empty {
+  margin: 0;
+  color: var(--steel-500);
+}
+
+.ts-picker__error {
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--orange-600);
+  border-radius: var(--radius-md);
+  color: var(--orange-400);
+}
+
+.ts-picker__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.ts-picker__new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.ts-picker__name {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-100);
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+.ts-picker__name:focus {
+  outline: none;
+  border-color: var(--orange-500);
+}
+
+/* Кнопки обзора — те же `.ts-btn`, что везде, но выше: 28px рассчитаны на
+ * мышь. */
+.ts-picker .ts-btn {
+  height: 40px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+}

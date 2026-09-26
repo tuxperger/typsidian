@@ -58,6 +58,12 @@ export function useVaultList(
      */
     queue: WasmCallQueue;
     confirmSwitch?: ConfirmSwitch;
+    /**
+     * Ядро приняло смену текущего vault (US2 AS3). Сам vault после этого
+     * обязан открыться в окне — делает это владелец рабочей области, не этот
+     * хук: клиента vault у него нет и заводить его здесь нечего.
+     */
+    onSwitched?: (id: string) => void;
   },
 ): {
   error: VaultActionError | null;
@@ -68,7 +74,7 @@ export function useVaultList(
   dismissError: () => void;
 } {
   const [error, setError] = useState<VaultActionError | null>(null);
-  const { onChanged, confirmSwitch, queue } = options;
+  const { onChanged, confirmSwitch, onSwitched, queue } = options;
 
   const addFolder = useCallback(async () => {
     if (!store) return;
@@ -121,11 +127,15 @@ export function useVaultList(
           return;
         }
         await onChanged();
+        // Vault переключён — окну пора открыть выбранный (US2 AS3). После
+        // `onChanged`, а не вместо него: список обязан показать новое текущее
+        // состояние независимо от того, что сделает окно.
+        onSwitched?.(id);
       } catch (cause) {
         setError(classify(cause));
       }
     },
-    [store, onChanged, confirmSwitch, queue],
+    [store, onChanged, confirmSwitch, onSwitched, queue],
   );
 
   const setLabel = useCallback(
