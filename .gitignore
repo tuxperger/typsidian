@@ -4,6 +4,7 @@ node_modules/
 # --- Rust ---
 # Один паттерн покрывает и корневой target/, и apps/desktop/src-tauri/target/.
 target/
+result/
 *.rs.bk
 
 # --- wasm-pack ---
