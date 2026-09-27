@@ -44,13 +44,22 @@ use typsidian_core::vault::conflict::{DiffLine, EditConflict};
 use typsidian_core::vault::index::Note;
 use typsidian_core::vault::native::NativeBackend;
 use typsidian_core::vault::events::VaultEvent;
-use typsidian_core::settings::apply::{ApplyContext, SettingsChange};
+use typsidian_core::settings::apply::{
+    self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, SettingsChange,
+};
+use typsidian_core::settings::diagnostics::{self, Diagnostics};
+use typsidian_core::settings::editor_mode::{EditorModeBridge, NullBridge};
+use typsidian_core::settings::events::SettingsEvent;
+use typsidian_core::settings::vaults::{VaultId, VaultRecord};
+use typsidian_core::settings::Settings;
 use typsidian_core::settings::folder_ref::{FolderRegistry, Resolved};
 use typsidian_core::settings::keybindings::{
     self as keybindings_core, CommandId, ResolvedBinding, Shortcut,
 };
 use typsidian_core::settings::native::NativeStore;
-use typsidian_core::settings::store::{SettingsStore, StoreError};
+use typsidian_core::settings::store::{
+    SettingsStore, StorageState, StoreCapabilities, StoreError,
+};
 use typsidian_core::vault::vault_settings::{
     self, SetKeybindingError, VaultOverrides, VaultSettingsError,
 };
@@ -494,6 +503,20 @@ async fn open_device_store(app: &AppHandle) -> Result<NativeStore, StoreError> {
     }
 }
 
+/// Хранилище устройства из состояния окна; открывает его при первом вопросе.
+///
+/// Одно место на все команды ниже: ленивое открытие, повторённое в каждой,
+/// разошлось бы при первой же правке запасного пути Android.
+async fn device_store<'a>(
+    app: &AppHandle,
+    guard: &'a mut Option<NativeStore>,
+) -> Result<&'a mut NativeStore, StoreError> {
+    if guard.is_none() {
+        *guard = Some(open_device_store(app).await?);
+    }
+    Ok(guard.as_mut().expect("хранилище только что открыто"))
+}
+
 /// Запоминает открытую папку как последний vault.
 #[tauri::command]
 async fn remember_vault(
@@ -502,10 +525,7 @@ async fn remember_vault(
     path: String,
 ) -> Answer<(), StoreError> {
     let mut guard = device.0.lock().await;
-    if guard.is_none() {
-        *guard = Some(open_device_store(&app).await?);
-    }
-    let store = guard.as_mut().expect("хранилище только что открыто");
+    let store = device_store(&app, &mut guard).await?;
     remember_opened_vault(store, PathBuf::from(path)).await
 }
 
@@ -519,11 +539,205 @@ async fn last_vault(
     device: State<'_, Device>,
 ) -> Answer<Option<LastVaultView>, StoreError> {
     let mut guard = device.0.lock().await;
-    if guard.is_none() {
-        *guard = Some(open_device_store(&app).await?);
-    }
-    let store = guard.as_mut().expect("хранилище только что открыто");
+    let store = device_store(&app, &mut guard).await?;
     Ok(last_opened_vault(store).await)
+}
+
+// ── Панель настроек устройства (фича 004) ───────────────────────────────────
+//
+// Те же операции, что `WebStore` отдаёт через wasm-bindgen, — чтобы панель
+// настроек на рабочем столе и Android была той же самой, что в браузере, а не
+// урезанной до настроек папки. Решения по-прежнему принимает ядро: куда
+// уходит правка (`target_for`), какой набор возвращает к умолчаниям, как
+// слои складываются в действующие значения.
+
+/// Всё, что панель читает из хранилища разом, — ответ одной команды.
+///
+/// Одним снимком, а не пятью командами: между пятью вызовами наблюдатель мог
+/// бы перечитать файл, и панель показала бы значения из двух разных версий.
+#[derive(Debug, serde::Serialize)]
+pub struct DeviceSnapshot {
+    settings: Settings,
+    capabilities: StoreCapabilities,
+    storage_state: StorageState,
+    diagnostics: Diagnostics,
+    known_vaults: Vec<VaultRecord>,
+}
+
+async fn snapshot_of(store: &NativeStore) -> DeviceSnapshot {
+    DeviceSnapshot {
+        settings: SettingsStore::settings(store).clone(),
+        capabilities: store.capabilities(),
+        storage_state: store.storage_state(),
+        diagnostics: native_diagnostics(store),
+        known_vaults: store.records_with_availability().await,
+    }
+}
+
+/// Диагностика раздела «Дополнительно» (FR-039).
+///
+/// Моста к Neovim в оболочке пока нет, поэтому состояние режима берётся у
+/// `NullBridge` — ядро само называет причину недоступности, а не окно.
+fn native_diagnostics(store: &NativeStore) -> Diagnostics {
+    let bridge = NullBridge::default();
+    diagnostics::collect(
+        bridge.current_mode(),
+        bridge.availability(),
+        store.capabilities(),
+        store.storage_state(),
+    )
+}
+
+#[tauri::command]
+async fn device_settings(
+    app: AppHandle,
+    device: State<'_, Device>,
+) -> Answer<DeviceSnapshot, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    Ok(snapshot_of(store).await)
+}
+
+/// События хранилища с прошлого вызова (FR-013). Pull, как и на web: наблюдатель
+/// ядра только взводит флаг, разбор — здесь.
+#[tauri::command]
+async fn device_settings_events(
+    app: AppHandle,
+    device: State<'_, Device>,
+) -> Answer<Vec<SettingsEvent>, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    Ok(store.poll_events().await)
+}
+
+/// Применить набор и вернуть план вместе со свежим снимком.
+#[derive(Debug, serde::Serialize)]
+pub struct AppliedSettings {
+    plan: ApplyPlan,
+    snapshot: DeviceSnapshot,
+}
+
+#[tauri::command]
+async fn apply_device_settings(
+    app: AppHandle,
+    device: State<'_, Device>,
+    change: SettingsChange,
+) -> Answer<AppliedSettings, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    // Контекст — тот же, что у `WebStore.apply`: предусловия смены режима
+    // проверяет вызывающая сторона через `RequiresNoteSave` (research.md §9).
+    let plan = store.apply(&change, &ApplyContext::unobstructed()).await;
+    Ok(AppliedSettings {
+        plan,
+        snapshot: snapshot_of(store).await,
+    })
+}
+
+/// Набор, возвращающий значения к умолчаниям (FR-037).
+#[tauri::command]
+fn settings_reset_change() -> SettingsChange {
+    settings_apply::reset_to_defaults()
+}
+
+/// Куда уходит правка — в устройство или в vault (фича 006, FR-029).
+#[tauri::command]
+fn settings_change_target(change: SettingsChange, vault_is_open: bool) -> ChangeTarget {
+    settings_apply::target_for(&change, vault_is_open)
+}
+
+/// Действующие значения: устройство под перекрытием vault (FR-030).
+#[tauri::command]
+async fn resolve_device_settings(
+    app: AppHandle,
+    device: State<'_, Device>,
+    overrides: VaultOverrides,
+) -> Answer<Settings, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    Ok(typsidian_core::settings::resolve(
+        SettingsStore::settings(store),
+        &overrides,
+    ))
+}
+
+/// Набор, делающий действующие значения умолчаниями устройства (FR-031).
+#[tauri::command]
+async fn device_defaults_change(
+    app: AppHandle,
+    device: State<'_, Device>,
+    overrides: VaultOverrides,
+) -> Answer<SettingsChange, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    let effective =
+        typsidian_core::settings::resolve(SettingsStore::settings(store), &overrides);
+    Ok(settings_apply::device_defaults_change(&effective))
+}
+
+/// Показать каталог настроек в файловом менеджере (FR-036).
+#[tauri::command]
+async fn reveal_device_settings(
+    app: AppHandle,
+    device: State<'_, Device>,
+) -> Answer<(), StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    store.reveal()
+}
+
+/// Добавить папку в список известных vault (FR-020): ту же папку реестр ядра
+/// сведёт к существующей записи.
+#[tauri::command]
+async fn add_known_vault(
+    app: AppHandle,
+    device: State<'_, Device>,
+    path: String,
+) -> Answer<String, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    let id = store.add(PathBuf::from(&path), path).await?;
+    Ok(id.as_str().to_string())
+}
+
+#[tauri::command]
+async fn set_known_vault_label(
+    app: AppHandle,
+    device: State<'_, Device>,
+    id: String,
+    label: Option<String>,
+) -> Answer<(), StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    store.set_label(&VaultId::from_raw(id), label)
+}
+
+/// Забыть запись; папка на диске не трогается (FR-024).
+#[tauri::command]
+async fn forget_known_vault(
+    app: AppHandle,
+    device: State<'_, Device>,
+    id: String,
+) -> Answer<(), StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    store.forget(&VaultId::from_raw(id)).await
+}
+
+/// Путь известного vault, чтобы его открыть. `None` — связь утрачена, а
+/// розыск запрещён (FR-023).
+#[tauri::command]
+async fn resolve_known_vault(
+    app: AppHandle,
+    device: State<'_, Device>,
+    id: String,
+) -> Answer<Option<String>, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    Ok(match store.resolve(&VaultId::from_raw(id)).await {
+        Resolved::Resolved(path) => Some(path.to_string_lossy().into_owned()),
+        _ => None,
+    })
 }
 
 // ── Дерево и файлы ──────────────────────────────────────────────────────────
@@ -1216,6 +1430,18 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             browse_create_dir,
             remember_vault,
             last_vault,
+            device_settings,
+            device_settings_events,
+            apply_device_settings,
+            settings_reset_change,
+            settings_change_target,
+            resolve_device_settings,
+            device_defaults_change,
+            reveal_device_settings,
+            add_known_vault,
+            set_known_vault_label,
+            forget_known_vault,
+            resolve_known_vault,
             list,
             read,
             write,

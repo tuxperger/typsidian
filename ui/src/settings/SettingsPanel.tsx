@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { WebStore } from "../wasm-core/typsidian_core.js";
+import { useEffect, useState } from "react";
 import type {
   ApplyPlan,
   ModePreference,
   OutageReason,
+  Settings,
   SettingsChange,
 } from "../wasm-core/typsidian_core.js";
+import type { DeviceSettingsClient } from "./device-settings-client.js";
 import { AdvancedSection } from "./AdvancedSection.js";
 import { AppearanceSection } from "./AppearanceSection.js";
 import { useAppearance } from "./applyToDocument.js";
@@ -36,6 +37,13 @@ import { useShortcuts } from "../workspace/useShortcuts.js";
  * перечитывается (FR-026).
  */
 export interface SettingsPanelProps {
+  /**
+   * Хранилище настроек устройства (фича 004). Приходит от оболочки, потому что
+   * оно у каждой своё: `WebStore` поверх OPFS в браузере, `settings.json` в
+   * каталоге конфигурации ОС за командами Tauri на рабочем столе и Android.
+   * Сама панель от этого одна и та же во всех трёх оболочках.
+   */
+  device: DeviceSettingsClient;
   /**
    * Предупреждение перед переключением vault (FR-022, SC-008). Передаётся
    * владельцем vault-бэкенда: машинерия несохранённых правок и неразрешённых
@@ -84,13 +92,14 @@ export interface SettingsPanelProps {
 }
 
 export function SettingsPanel({
+  device,
   confirmSwitch,
   saveNote,
   fullBackendUnavailableReason = null,
   vaultClient = null,
   onVaultSwitched,
   preview = null,
-}: SettingsPanelProps = {}): React.JSX.Element {
+}: SettingsPanelProps): React.JSX.Element {
   const {
     state,
     apply,
@@ -98,17 +107,15 @@ export function SettingsPanel({
     makeSettingsDefault,
     refresh,
     dismissNotice,
-    queue,
-  } = useSettings();
-  const vaults = useVaultList(state.store, {
+  } = useSettings(device);
+  const vaults = useVaultList(device, {
     onChanged: refresh,
-    queue,
     ...(confirmSwitch ? { confirmSwitch } : {}),
     ...(onVaultSwitched ? { onSwitched: onVaultSwitched } : {}),
   });
   const vaultSettings = useVaultSettings(vaultClient);
   // Сочетания клавиш живут в настройках vault, а не устройства: см.
-  // `VaultSettingsPanel` — из-за этого они доступны и на desktop/Android.
+  // шорткаты едут вместе с папкой заметок, а не с устройством.
   const shortcuts = useShortcuts(vaultClient, vaultSettings.overrides);
   // Открытый раздел. «Vault» по умолчанию — первый пункт макета и то, с чего
   // начинается работа: без выбранной папки остальные разделы не о чем.
@@ -127,7 +134,7 @@ export function SettingsPanel({
    */
   const route = async (change: SettingsChange): Promise<void> => {
     const vaultIsOpen = vaultSettings.overrides !== null;
-    const target = WebStore.changeTarget(change, vaultIsOpen);
+    const target = await device.changeTarget(change, vaultIsOpen);
     if (target.target === "Device") {
       await apply(change);
       return;
@@ -191,10 +198,31 @@ export function SettingsPanel({
   // по умолчанию, vault перекрывает записанное в нём (FR-030). Иначе тема или
   // размер, ушедшие в vault, не отобразились бы в самой панели, которая их и
   // поменяла, — и не доехали бы до редактора.
-  const settings =
-    state.store && vaultSettings.overrides && state.settings
-      ? state.store.resolveWithVault(vaultSettings.overrides)
-      : state.settings;
+  //
+  // Слои складывает ядро, и за его границей это асинхронный вопрос. Пока ответ
+  // не пришёл, показывается прежний — иначе при каждой правке тема мигала бы
+  // значением устройства.
+  const [resolved, setResolved] = useState<Settings | null>(null);
+  const overrides = vaultSettings.overrides;
+  useEffect(() => {
+    if (!state.settings || !overrides) {
+      setResolved(null);
+      return;
+    }
+    let cancelled = false;
+    device.resolveWithVault(overrides).then(
+      (next) => {
+        if (!cancelled) setResolved(next);
+      },
+      () => {
+        // Не сложилось — остаются значения устройства, панель не падает.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [device, state.settings, overrides]);
+  const settings = overrides && resolved ? resolved : state.settings;
 
   // FR-017, SC-002: тема и размер шрифта доходят до остального интерфейса через
   // CSS-переменные на корне документа — в том числе когда значения изменились
@@ -212,7 +240,7 @@ export function SettingsPanel({
   // Подвал меню: версия — из ядра, имя папки — у клиента открытого vault.
   // Ни то, ни другое не пишется здесь литералом: в макете стоят «0.9.2» и
   // «диссертация-2026», но это подписи макета, а не факты приложения.
-  const version = WebStore.version();
+  const version = state.diagnostics?.app_version ?? "";
   const vaultName = vaultClient?.rootName ?? null;
 
   return (
@@ -351,7 +379,7 @@ export function SettingsPanel({
           <AdvancedSection
             capabilities={state.capabilities}
             diagnostics={state.diagnostics}
-            onReveal={() => state.store?.reveal()}
+            onReveal={() => void device.reveal().catch(() => {})}
             onResetToDefaults={() => void runReset()}
             resetMessage={resetMessage}
           />

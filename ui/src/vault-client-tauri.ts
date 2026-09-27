@@ -105,6 +105,22 @@ export async function openVaultAt(path: string): Promise<VaultOpenResult> {
 }
 
 /**
+ * Открыть известный vault по его записи — жест переключения из панели настроек
+ * (US2 фичи 004, AS3). Тот же `openWebVaultById` на web.
+ */
+export async function openTauriVaultById(id: string): Promise<VaultOpenResult> {
+  let path: string | null;
+  try {
+    path = await invoke<string | null>("resolve_known_vault", { id });
+  } catch (cause) {
+    return { ok: false, error: { kind: "OpenFailed", message: String(cause) } };
+  }
+  // Папки больше нет, а розыск запрещён (FR-023) — та же причина, что на web.
+  if (path === null) return { ok: false, error: { kind: "OpenFailed", message: "NotFound" } };
+  return openVaultAt(path);
+}
+
+/**
  * Последний открытый vault по данным хранилища настроек устройства (FR-007).
  *
  * Общий для рабочего стола и Android: хранилище там одно и то же —

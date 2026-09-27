@@ -16,12 +16,7 @@ import type { VaultOpenResult } from "@typsidian/ui/vault-tree/useVault.js";
 export async function openDesktopVault(): Promise<VaultOpenResult> {
   let chosen: string | null;
   try {
-    const selection = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Выберите папку с заметками",
-    });
-    chosen = typeof selection === "string" ? selection : null;
+    chosen = await pickDesktopFolder();
   } catch (cause) {
     return { ok: false, error: { kind: "OpenFailed", message: String(cause) } };
   }
@@ -30,4 +25,19 @@ export async function openDesktopVault(): Promise<VaultOpenResult> {
   if (chosen === null) return { ok: false, error: { kind: "PickerCancelled" } };
 
   return openVaultAt(chosen);
+}
+
+/**
+ * Диалог ОС «выберите папку». `null` — закрыт без выбора.
+ *
+ * Отдельно от открытия: тем же диалогом панель настроек добавляет папку в
+ * список известных vault, не открывая её.
+ */
+export async function pickDesktopFolder(): Promise<string | null> {
+  const selection = await openFolderDialog({
+    directory: true,
+    multiple: false,
+    title: "Выберите папку с заметками",
+  });
+  return typeof selection === "string" ? selection : null;
 }

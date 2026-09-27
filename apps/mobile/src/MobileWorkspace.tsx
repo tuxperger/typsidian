@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { VaultSettingsPanel } from "@typsidian/ui/settings/VaultSettingsPanel.js";
-import { lastTauriVault } from "@typsidian/ui/vault-client-tauri.js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
+import { tauriDeviceSettings } from "@typsidian/ui/settings/device-settings-tauri.js";
+import { lastTauriVault, openTauriVaultById } from "@typsidian/ui/vault-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { lastMobileFolder, openMobileVault } from "./openMobileVault.js";
@@ -27,6 +28,10 @@ import { useFolderPicker } from "./useFolderPicker.js";
 export function MobileWorkspace(): React.JSX.Element {
   const picker = useFolderPicker();
   const openVaultFolder = useCallback(() => openMobileVault(picker.pick), [picker.pick]);
+  // Та же панель настроек, что на web и рабочем столе; «добавить папку» идёт
+  // через тот же обзор, что и открытие vault. `picker.pick` стабилен, поэтому
+  // клиент один на всё время жизни окна.
+  const device = useMemo(() => tauriDeviceSettings(picker.pick), [picker.pick]);
 
   // Откуда начать обзор: последний открытый vault (FR-007). Спрашивается на
   // монтировании, а не при открытии обзора, — чтобы список был готов к первому
@@ -49,12 +54,14 @@ export function MobileWorkspace(): React.JSX.Element {
         // То же предложение продолжить с последним vault, что на рабочем столе
         // и на web, и из того же хранилища настроек устройства (FR-007).
         lastVault={lastTauriVault}
-        // Та же урезанная панель, что на рабочем столе, и по той же причине:
-        // `SettingsPanel` работает через `WebStore` (OPFS + IndexedDB), а эта
-        // сборка wasm не грузит вовсе. Само хранилище устройства ей доступно —
-        // последний vault приходит именно оттуда, — но через команды оболочки,
-        // а не через объект ядра, которого в окне нет.
-        settings={(client) => <VaultSettingsPanel client={client} />}
+        settings={(client, reopen, preview) => (
+          <SettingsPanel
+            device={device}
+            vaultClient={client}
+            preview={preview}
+            onVaultSwitched={(id) => reopen(() => openTauriVaultById(id))}
+          />
+        )}
       />
       {picker.isOpen && (
         <FolderPicker startAt={startAt} onChoose={picker.choose} onCancel={picker.cancel} />

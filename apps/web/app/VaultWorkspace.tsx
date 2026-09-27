@@ -1,12 +1,19 @@
 "use client";
 
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
+import { webDeviceSettings } from "@typsidian/ui/settings/device-settings-web.js";
 import {
   lastWebVault,
   openWebVault,
   openWebVaultById,
 } from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
+
+/**
+ * Хранилище настроек устройства — `WebStore` поверх OPFS. Один объект на
+ * страницу: панель подписывается на него эффектами.
+ */
+const device = webDeviceSettings();
 
 /**
  * Оболочка web-клиента (plan.md → Project Structure).
@@ -40,6 +47,7 @@ export function VaultWorkspace(): React.JSX.Element {
       // рабочая область, потому что клиентом владеет она.
       settings={(client, reopen, preview) => (
         <SettingsPanel
+          device={device}
           vaultClient={client}
           preview={preview}
           onVaultSwitched={(id) => reopen(() => openWebVaultById(id))}

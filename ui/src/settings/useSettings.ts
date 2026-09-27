@@ -1,20 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  WebStore,
-  type ApplyPlan,
-  type ConfigDiskState,
-  type Diagnostics,
-  type EditorMode,
-  type Settings,
-  type SettingsChange,
-  type SettingsEvent,
-  type StorageState,
-  type StoreCapabilities,
-  type VaultOverrides,
-  type VaultRecord,
+import { useCallback, useEffect, useState } from "react";
+import type {
+  ApplyPlan,
+  ConfigDiskState,
+  Diagnostics,
+  EditorMode,
+  Settings,
+  SettingsChange,
+  SettingsEvent,
+  StorageState,
+  StoreCapabilities,
+  VaultOverrides,
+  VaultRecord,
 } from "../wasm-core/typsidian_core.js";
-import { type WasmCallQueue } from "../wasm-call-queue.js";
-import { deviceStore, deviceStoreQueue } from "./deviceStore.js";
+import type { DeviceSettingsClient } from "./device-settings-client.js";
 
 // Принцип I конституции: этот хук не переизобретает логику настроек — он только
 // вызывает ядро (contracts/settings-store-trait.md) и разбирает уже готовые
@@ -25,9 +23,10 @@ import { deviceStore, deviceStoreQueue } from "./deviceStore.js";
 // Строится по образцу `../vault-tree/useVault.ts`.
 
 /**
- * Интервал сверки хранилища. В вебе внешнее изменение приходит только из другой
- * вкладки того же происхождения (research.md §3), и обнаруживается оно
- * периодической сверкой: ≤1 с, чтобы уложиться в бюджет SC-014 (≤2 с).
+ * Интервал сверки хранилища: ≤1 с, чтобы уложиться в бюджет SC-014 (≤2 с). В
+ * вебе внешнее изменение приходит только из другой вкладки того же
+ * происхождения (research.md §3); на native наблюдатель ядра лишь взводит
+ * флаг, и опрос забирает уже готовое событие.
  */
 export const SETTINGS_POLL_INTERVAL_MS = 1000;
 
@@ -39,7 +38,6 @@ export interface StorageNotice {
 }
 
 export interface SettingsState {
-  store: WebStore | null;
   settings: Settings | null;
   capabilities: StoreCapabilities | null;
   storageState: StorageState | null;
@@ -55,7 +53,6 @@ export interface SettingsState {
 }
 
 const INITIAL_STATE: SettingsState = {
-  store: null,
   settings: null,
   capabilities: null,
   storageState: null,
@@ -137,7 +134,7 @@ function addNotice(notices: StorageNotice[], next: StorageNotice): StorageNotice
   return [...withoutSameKind, next];
 }
 
-export function useSettings(): {
+export function useSettings(client: DeviceSettingsClient): {
   state: SettingsState;
   /**
    * Применить изменение. Возвращает план, вернувшийся из ядра: разбор
@@ -147,11 +144,10 @@ export function useSettings(): {
    */
   apply: (change: SettingsChange) => Promise<ApplyPlan | null>;
   /**
-   * Сброс к умолчаниям (FR-037). Набор изменений собирает ядро
-   * (`WebStore.resetToDefaults`), а применяется он тем же `apply`, что и
-   * обычное изменение — поэтому наследует все его предусловия: неразрешённый
-   * конфликт отменяет сброс целиком, а список известных vault не затрагивается
-   * (FR-038, SC-011).
+   * Сброс к умолчаниям (FR-037). Набор изменений собирает ядро, а применяется
+   * он тем же `apply`, что и обычное изменение — поэтому наследует все его
+   * предусловия: неразрешённый конфликт отменяет сброс целиком, а список
+   * известных vault не затрагивается (FR-038, SC-011).
    */
   resetToDefaults: () => Promise<ApplyPlan | null>;
   /**
@@ -167,85 +163,45 @@ export function useSettings(): {
   ) => Promise<ApplyPlan | null>;
   refresh: () => Promise<void>;
   dismissNotice: (kind: StorageNotice["kind"]) => void;
-  /**
-   * Очередь доступа к `state.store`. Отдаётся наружу, потому что владелец
-   * store'а обязан быть один: любой другой код, зовущий его методы напрямую
-   * (`useVaultList`), обязан встать в ту же очередь, иначе наложится на цикл
-   * опроса — см. `wasm-call-queue.ts`.
-   */
-  queue: WasmCallQueue;
 } {
   const [state, setState] = useState<SettingsState>(INITIAL_STATE);
-  const storeRef = useRef<WebStore | null>(null);
 
-  // `WebStore` — такой же объект за границей wasm-bindgen, как `WebBackend`:
-  // его `async`-методы с `&mut self` (`apply`, `pollEvents`, `addVault`, …)
-  // держат заимствование до конца future, и наложение цикла опроса на жест
-  // пользователя падает с «recursive use of an object detected». Поэтому все
-  // обращения к экземпляру идут через очередь (см. `wasm-call-queue.ts`);
-  // синхронные геттеры вроде `settings()` читаются внутри той же операции, а не
-  // рядом с ней — иначе они попадут в чужое окно заимствования.
-  // Очередь приходит из `deviceStore`, а не заводится здесь: экземпляр
-  // хранилища один на страницу (его открывает и экран приветствия, предлагая
-  // последний vault), и очередь к нему обязана быть той же самой.
-  const queue = deviceStoreQueue;
-
+  // Какой границей идёт вызов — wasm-bindgen или команда Tauri — хук не знает:
+  // очередь к объекту ядра на web и блокировка хранилища на native живут в
+  // реализациях `DeviceSettingsClient`.
   const refresh = useCallback(async () => {
-    const store = storeRef.current;
-    if (!store) return;
-    const snapshot = await queue.run(async () => ({
-      knownVaults: (await store.knownVaults()) as VaultRecord[],
-      settings: store.settings(),
-      capabilities: store.capabilities(),
-      storageState: store.storageState(),
-      diagnostics: store.diagnostics(),
-    }));
+    const snapshot = await client.snapshot();
     setState((prev) => ({ ...prev, ...snapshot }));
-  }, [queue]);
+  }, [client]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const store = await deviceStore();
+      const snapshot = await client.snapshot();
       if (cancelled) return;
-      storeRef.current = store;
-      const snapshot = await queue.run(async () => ({
-        knownVaults: (await store.knownVaults()) as VaultRecord[],
-        settings: store.settings(),
-        capabilities: store.capabilities(),
-        storageState: store.storageState(),
-        diagnostics: store.diagnostics(),
-      }));
-      if (cancelled) return;
-      setState({
-        ...INITIAL_STATE,
-        store,
-        ...snapshot,
-        isLoading: false,
-      });
+      setState({ ...INITIAL_STATE, ...snapshot, isLoading: false });
     })();
     return () => {
       cancelled = true;
     };
-  }, [queue]);
+  }, [client]);
 
   // Сверка с диском и разбор событий (FR-013, SC-014). Опрос, а не подписка:
   // ядро отдаёт события pull-методом, чтобы не требовать object-safe Stream.
   useEffect(() => {
-    if (!state.store) return;
+    if (state.isLoading) return;
     let cancelled = false;
     let inFlight = false;
 
     const tick = async (): Promise<void> => {
-      const store = storeRef.current;
-      if (!store || inFlight || cancelled) return;
+      if (inFlight || cancelled) return;
       inFlight = true;
       try {
-        const events = (await queue.runInternal(() =>
-          store.pollEvents(),
-        )) as SettingsEvent[];
+        const events: SettingsEvent[] = await client.pollEvents();
         if (cancelled || events.length === 0) return;
         setState((prev) => events.reduce(reduceSettingsEvent, prev));
+      } catch {
+        // Хранилище не ответило на этот раз — следующий тик спросит снова.
       } finally {
         inFlight = false;
       }
@@ -256,49 +212,30 @@ export function useSettings(): {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [state.store, queue]);
+  }, [state.isLoading, client]);
 
   const apply = useCallback(
     async (change: SettingsChange): Promise<ApplyPlan | null> => {
-      const store = storeRef.current;
-      if (!store) return null;
-      const applied = await queue.run(async () => {
-        const plan = await store.apply(change);
-        return {
-          settings: store.settings(),
-          storageState: store.storageState(),
-          capabilities: store.capabilities(),
-          diagnostics: store.diagnostics(),
-          lastPlan: plan,
-        };
-      });
-      setState((prev) => ({ ...prev, ...applied }));
-      return applied.lastPlan;
+      const { plan, snapshot } = await client.apply(change);
+      setState((prev) => ({ ...prev, ...snapshot, lastPlan: plan }));
+      return plan;
     },
-    [queue],
+    [client],
   );
 
   // Набор изменений строит ядро, а не этот хук: собрать его здесь значило бы
   // завести умолчания во втором месте (принцип I).
   const resetToDefaults = useCallback(
-    async (): Promise<ApplyPlan | null> => apply(WebStore.resetToDefaults()),
-    [apply],
+    async (): Promise<ApplyPlan | null> => apply(await client.resetChange()),
+    [apply, client],
   );
 
   // Набор строит ядро по тем же слоям, что применяет `resolve` — здесь
   // только применение, тем же `apply`, что и любое другое изменение.
   const makeSettingsDefault = useCallback(
-    async (overrides: VaultOverrides): Promise<ApplyPlan | null> => {
-      const store = storeRef.current;
-      if (!store) return null;
-      // Синхронный геттер читается внутри операции очереди, а не рядом с ней:
-      // иначе он попадёт в чужое окно заимствования wasm-bindgen.
-      const change = await queue.run(async () =>
-        store.deviceDefaultsChange(overrides),
-      );
-      return apply(change);
-    },
-    [apply, queue],
+    async (overrides: VaultOverrides): Promise<ApplyPlan | null> =>
+      apply(await client.defaultsChange(overrides)),
+    [apply, client],
   );
 
   const dismissNotice = useCallback((kind: StorageNotice["kind"]) => {
@@ -315,6 +252,5 @@ export function useSettings(): {
     makeSettingsDefault,
     refresh,
     dismissNotice,
-    queue,
   };
 }

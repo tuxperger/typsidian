@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import type { WebStore } from "../wasm-core/typsidian_core.js";
-import type { WasmCallQueue } from "../wasm-call-queue.js";
+import type { DeviceSettingsClient } from "./device-settings-client.js";
+import { changeOf } from "./useSettings.js";
 
 // Принцип I: ни одна функция здесь не решает, «та ли это папка» и можно ли
 // переключаться. Выбор папки — жест пользователя, который обязан произойти в
@@ -47,16 +47,9 @@ export function describeVaultActionError(error: VaultActionError): string | null
 export type ConfirmSwitch = (nextVaultId: string) => boolean | Promise<boolean>;
 
 export function useVaultList(
-  store: WebStore | null,
+  client: DeviceSettingsClient,
   options: {
     onChanged: () => void | Promise<void>;
-    /**
-     * Очередь доступа к `store` — та же, что у `useSettings`. Методы store'а
-     * заимствуют объект ядра на всё время своей future, поэтому звать их в
-     * обход очереди значит наложиться на цикл опроса настроек
-     * (`wasm-call-queue.ts`).
-     */
-    queue: WasmCallQueue;
     confirmSwitch?: ConfirmSwitch;
     /**
      * Ядро приняло смену текущего vault (US2 AS3). Сам vault после этого
@@ -74,37 +67,27 @@ export function useVaultList(
   dismissError: () => void;
 } {
   const [error, setError] = useState<VaultActionError | null>(null);
-  const { onChanged, confirmSwitch, onSwitched, queue } = options;
+  const { onChanged, confirmSwitch, onSwitched } = options;
 
   const addFolder = useCallback(async () => {
-    if (!store) return;
     setError(null);
-    const picker = (
-      window as unknown as {
-        showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
-      }
-    ).showDirectoryPicker;
-    if (!picker) {
-      setError({ kind: "NotSupported" });
-      return;
-    }
     try {
-      // Жест пользователя: `showDirectoryPicker` нельзя вызвать из ядра —
-      // по той же причине, что и в `vault-tree/useVault.ts`.
-      const handle = await picker();
-      // Ссылка передаётся ядру **не разбирая** её. Повторное добавление той же
-      // папки ядро само сведёт к существующей записи (FR-020), а две разные
-      // папки с одинаковым именем останутся двумя записями.
-      await queue.run(() => store.addVault(handle, handle.name));
-      await onChanged();
+      // Жест выбора папки у каждой платформы свой, и делает его клиент. Ссылку
+      // на папку ядро получает не разобранной: повторное добавление той же
+      // папки оно само сведёт к существующей записи (FR-020).
+      const outcome = await client.addFolder();
+      if (outcome.kind === "unsupported") {
+        setError({ kind: "NotSupported" });
+        return;
+      }
+      if (outcome.kind === "added") await onChanged();
     } catch (cause) {
       setError(classify(cause));
     }
-  }, [store, onChanged, queue]);
+  }, [client, onChanged]);
 
   const switchTo = useCallback(
     async (id: string) => {
-      if (!store) return;
       setError(null);
       // Предупреждения о несохранённых правках и конфликтах — существующая
       // машинерия фичи 001, а не новая проверка (FR-022).
@@ -113,15 +96,7 @@ export function useVaultList(
         if (!allowed) return;
       }
       try {
-        const plan = await queue.run(() =>
-          store.apply({
-            theme: undefined,
-            editor_font_size: undefined,
-            current_vault: id,
-            editor_mode_preference: undefined,
-            editor_config_path: undefined,
-          }),
-        );
+        const { plan } = await client.apply(changeOf({ current_vault: id }));
         if (plan.outcome === "Rejected") {
           setError({ kind: "SwitchBlocked", message: describeReject(plan.reason.kind) });
           return;
@@ -135,37 +110,35 @@ export function useVaultList(
         setError(classify(cause));
       }
     },
-    [store, onChanged, confirmSwitch, onSwitched, queue],
+    [client, onChanged, confirmSwitch, onSwitched],
   );
 
   const setLabel = useCallback(
     async (id: string, label: string | null) => {
-      if (!store) return;
       setError(null);
       try {
-        await queue.run(() => store.setVaultLabel(id, label ?? undefined));
+        await client.setVaultLabel(id, label);
         await onChanged();
       } catch (cause) {
         setError(classify(cause));
       }
     },
-    [store, onChanged, queue],
+    [client, onChanged],
   );
 
   const forget = useCallback(
     async (id: string) => {
-      if (!store) return;
       setError(null);
       try {
         // FR-024: убирается запись и ссылка на неё; папка и заметки на диске
         // не трогаются — ядро к ним и не обращается.
-        await queue.run(() => store.forgetVault(id));
+        await client.forgetVault(id);
         await onChanged();
       } catch (cause) {
         setError(classify(cause));
       }
     },
-    [store, onChanged, queue],
+    [client, onChanged],
   );
 
   const dismissError = useCallback(() => setError(null), []);
@@ -179,6 +152,11 @@ function classify(cause: unknown): VaultActionError {
     if (cause.name === "NotAllowedError" || cause.name === "SecurityError") {
       return { kind: "PermissionDenied" };
     }
+  }
+  // Отказ хранилища приходит объектом `StoreError` — с командой Tauri так же,
+  // как с wasm-bindgen; `String()` превратил бы его в «[object Object]».
+  if (typeof cause === "object" && cause !== null && "kind" in cause) {
+    return { kind: "Failed", message: String((cause as { kind: unknown }).kind) };
   }
   return { kind: "Failed", message: String(cause) };
 }
