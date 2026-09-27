@@ -3,9 +3,9 @@
 //! Форма параметров, которая раньше была только у рисунка и таблицы, здесь
 //! становится общим правилом каталога вставки. Три опоры:
 //!
-//! 1. [`schema`] — **схема параметров**: файл `schema.json`, где явно перечислены
-//!    все параметры каждого элемента каталога. Машинная часть сверяется с самим
-//!    Typst тестом (research.md §1).
+//! 1. [`schema`] — **схема параметров**: читается из самого Typst в момент
+//!    обращения — полный набор параметров любой встроенной функции, без файла
+//!    схемы и без его сверки (research.md §1).
 //! 2. [`locate`] — элемент под кареткой ищется по синтаксическому дереву
 //!    Typst, а не регулярками (research.md §2).
 //! 3. [`edit`] — правка применяется **точечными заменами**: меняется только
@@ -27,7 +27,10 @@ pub mod values;
 pub use edit::{plan_element_edit, PlanEditError, TextEdit};
 pub use locate::{element_at, ElementAtResult, ParsedElement, UnavailableReason};
 pub use render::{render_element, RenderedElement};
-pub use schema::{element_schema, schema, ElementSpec, ElementSyntax, ParamKind, ParamSpec};
+pub use schema::{
+    element_schema, element_schema_for, key_for, spec, ElementSpec, ElementSyntax, ParamKind,
+    ParamSpec,
+};
 pub use values::{FieldError, FieldProblem, FieldValue, ParamValue};
 
 

@@ -9,9 +9,14 @@
 ## Форма
 
 ```rust
-/// Схема элемента каталога (FR-001a). `None` — у элемента нет параметров:
-/// он вставляется сразу (FR-003).
-pub fn element_schema(id: &str) -> Option<ElementSpec>;
+/// Схема элемента по ключу (`call:figure`) — для правки (FR-001a). Параметры
+/// читаются из Typst. `None` — такой функции нет или у неё нет параметров.
+pub fn element_schema(key: &str) -> Option<ElementSpec>;
+
+/// Схема элемента, который вставляет шаблон каталога (текст без полей
+/// сниппета), с начальными значениями из шаблона (FR-001d). `None` — шаблон не
+/// элемент с параметрами: вставляется сразу (FR-003).
+pub fn element_schema_for(template: &str) -> Option<ElementSpec>;
 
 /// Элемент, непосредственно содержащий каретку (FR-006, FR-016).
 /// Каретка на границе элемента (перед `#`, сразу после `)`/`]`/метки) считается внутри.
@@ -70,7 +75,8 @@ pub fn plan_element_edit(
 
 | Ядро | wasm (`WebBackend`, static) | Tauri (`packages/shell`) | `VaultClient` |
 |------|------|------|------|
-| `element_schema` | `elementSchema(id)` | `element_schema` | `elementSchema(id)` |
+| `element_schema` | `elementSchema(key)` | `element_schema` | `elementSchema(key)` |
+| `element_schema_for` | `elementSchemaFor(template)` | `element_schema_for` | `elementSchemaFor(template)` |
 | `element_at` | `elementAt(text, offset)` | `element_at` | `elementAt(text, offset)` |
 | `render_element` | `renderElement(id, values, label)` | `render_element` | `renderElement(…)` |
 | `plan_element_edit` | `planElementEdit(text, parsed, values, label)` | `plan_element_edit` | `planElementEdit(…)` |

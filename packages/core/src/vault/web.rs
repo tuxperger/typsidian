@@ -1166,11 +1166,18 @@ impl WebBackend {
     //
     // Статические: функции чистые, vault не нужен — как `planInsertion`.
 
-    /// Схема элемента каталога; `undefined` — параметров нет, элемент
-    /// вставляется сразу (FR-003).
+    /// Схема элемента по ключу (`call:figure`) — для правки найденного
+    /// элемента; `undefined` — параметров нет.
     #[wasm_bindgen(js_name = elementSchema)]
     pub fn element_schema_js(id: &str) -> Option<crate::elements::ElementSpec> {
         crate::elements::element_schema(id)
+    }
+
+    /// Схема элемента, который вставляет шаблон каталога (текст без полей
+    /// сниппета); `undefined` — вставляется сразу (FR-003).
+    #[wasm_bindgen(js_name = elementSchemaFor)]
+    pub fn element_schema_for_js(template: &str) -> Option<crate::elements::ElementSpec> {
+        crate::elements::element_schema_for(template)
     }
 
     /// Элемент, непосредственно содержащий каретку (FR-006, FR-016).

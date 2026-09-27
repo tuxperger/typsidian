@@ -1117,10 +1117,18 @@ fn plan_insertion(
 // Открытого vault не требуют: функции чистые. Те же формы запроса и ответа,
 // что на wasm-границе (FR-022).
 
-/// Схема элемента каталога; `None` — вставляется сразу (FR-003).
+/// Схема элемента по ключу (`call:figure`) — для правки; `None` — параметров
+/// нет.
 #[tauri::command]
 fn element_schema(id: String) -> Option<typsidian_core::elements::ElementSpec> {
     typsidian_core::elements::element_schema(&id)
+}
+
+/// Схема элемента, который вставляет шаблон каталога; `None` — вставляется
+/// сразу (FR-003).
+#[tauri::command]
+fn element_schema_for(template: String) -> Option<typsidian_core::elements::ElementSpec> {
+    typsidian_core::elements::element_schema_for(&template)
 }
 
 /// Элемент под кареткой (FR-006, FR-016).
@@ -1250,6 +1258,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             save_as_template,
             plan_insertion,
             element_schema,
+            element_schema_for,
             element_at,
             render_element,
             plan_element_edit,

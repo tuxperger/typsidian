@@ -314,3 +314,20 @@ description: "Task list for Element Parameters"
 4. Наполнение схемы на весь каталог (T023–T026) — каждое наполнение сразу проверяется
    тестом сверки и кругом «вставка → разбор».
 5. US4, US5, Polish.
+
+## Пересмотр 2026-09-26: схема из Typst без файла
+
+Решение владельца проекта (research §1, FR-001, FR-001b, FR-001d, FR-001e, FR-012b,
+SC-001a). Задачи T004, T006, T023–T026 выше описывают прежний файл схемы и сохранены
+как история.
+
+- [X] T060 `schema.rs`: `ElementSpec` из `Func::params()` по ключу «синтаксис + путь»,
+      кэш на процесс; `schema.json` и `examples/element-schema.rs` удалены
+- [X] T061 `element_schema_for(template)`: элемент и начальные значения — разбором
+      шаблона каталога; граница wasm (`elementSchemaFor`) и Tauri (`element_schema_for`)
+- [X] T062 `locate.rs`: элемент — любой вызов встроенной функции Typst, `set`, заголовок,
+      блок кода, формула; вложенный элемент рисунка — из текста
+- [X] T063 Подпись поля — имя Typst, подсказка — `docs`; основные — по правилу FR-012b
+- [X] T064 Тесты: набор параметров против `Func::params()`, круг по всем шаблонам
+      `ui/src/editor/typstElements.ts` на обоих таргетах
+- [X] T065 Прогон `wasm-pack test --headless --chrome` для `elements_wasm.rs` (27 из 27)

@@ -401,7 +401,9 @@ function ParamField({
 
   return (
     <label className="ts-field">
-      <span className="ts-field__label">
+      {/* Подсказка — первый абзац справочника Typst: подпись поля — имя
+          параметра, и что он делает, объясняет сам Typst. */}
+      <span className="ts-field__label" title={param.docs || undefined}>
         {param.title}
         {param.required && !param.variadic && <span className="ts-field__req"> *</span>}
       </span>

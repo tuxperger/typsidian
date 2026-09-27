@@ -19,15 +19,12 @@ nix develop
 ```bash
 cargo test -p typsidian-core --test elements_native
 wasm-pack test --headless --chrome packages/core --test elements_wasm
-cargo test -p typsidian-core elements::        # тесты схемы против Func::params()
+cargo test -p typsidian-core --test elements_native   # схема из Func::params(), круг по каталогу
 ```
 
-Схема и Typst разошлись (новый параметр после обновления Typst) — тест схемы красный и
-называет элемент и параметр. Черновик недостающих записей печатает генератор:
-
-```bash
-cargo run -p typsidian-core --example element-schema -- --check
-```
+Схема читается из Typst, поэтому после обновления Typst сверять и дописывать нечего:
+новый параметр появляется в форме сам. Круг «вставка → разбор → правка» по каждой
+записи каталога UI покажет запись, шаблон которой перестал собираться.
 
 Гейт принципа IV — после правки ядра обе пересборки:
 

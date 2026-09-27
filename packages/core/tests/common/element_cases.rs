@@ -6,11 +6,10 @@
 
 #![allow(dead_code)]
 
-use typsidian_core::elements::schema::schema_problems;
 use typsidian_core::elements::{
-    element_at, element_schema, plan_element_edit, render_element, schema, ElementAtResult,
-    ElementSyntax, FieldProblem, FieldValue, ParsedElement, PlanEditError, TextEdit,
-    UnavailableReason,
+    element_at, element_schema, element_schema_for, plan_element_edit, render_element,
+    ElementAtResult, ElementSpec, ElementSyntax, FieldProblem, FieldValue, ParsedElement,
+    PlanEditError, TextEdit, UnavailableReason,
 };
 use typst::syntax::parse;
 
@@ -91,8 +90,7 @@ fn has_syntax_error(text: &str) -> bool {
 }
 
 /// Текст элемента в том окружении, где он живёт: формулы — внутри `$ … $`.
-fn in_context(id: &str, text: &str) -> String {
-    let spec = element_schema(id).expect("схема");
+fn in_context(spec: &ElementSpec, text: &str) -> String {
     if spec.syntax == ElementSyntax::Call && spec.typst.starts_with("math.") {
         format!("$ {text} $")
     } else {
@@ -100,78 +98,176 @@ fn in_context(id: &str, text: &str) -> String {
     }
 }
 
-/// Поля вставки по начальным значениям схемы.
-fn prefilled(id: &str) -> Vec<FieldValue> {
-    element_schema(id)
-        .expect("схема")
-        .prefill
+/// Каталог вставки — тот самый, что видит пользователь: пары «id записи —
+/// шаблон без полей сниппета». Читается из `ui/src/editor/typstElements.ts`,
+/// чтобы тест проверял ровно то, что вставляет приложение, а не свою копию.
+fn catalog() -> Vec<(String, String)> {
+    const SOURCE: &str = include_str!("../../../../ui/src/editor/typstElements.ts");
+    let mut out = Vec::new();
+    let mut rest = SOURCE;
+    while let Some(at) = rest.find("id: \"") {
+        rest = &rest[at + 5..];
+        let Some(end) = rest.find('"') else { break };
+        let id = rest[..end].to_string();
+        let next_id = rest.find("id: \"").unwrap_or(rest.len());
+        let Some(template_at) = rest[..next_id].find("template:") else { continue };
+        let literal = rest[template_at + "template:".len()..].trim_start();
+        if let Some(template) = js_string(literal) {
+            out.push((id, snippet_text(&template)));
+        }
+    }
+    assert!(out.len() > 50, "каталог не прочитан: {} записей", out.len());
+    out
+}
+
+/// Строковый литерал JS в начале `text`: кавычки `"` или `'`, экранирование.
+fn js_string(text: &str) -> Option<String> {
+    let mut chars = text.chars();
+    let quote = chars.next().filter(|q| *q == '"' || *q == '\'')?;
+    let mut out = String::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                other => out.push(other),
+            },
+            ch if ch == quote => return Some(out),
+            ch => out.push(ch),
+        }
+    }
+    None
+}
+
+/// Шаблон сниппета без разметки полей — как `parseSnippet` в `snippet.ts`.
+fn snippet_text(template: &str) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find('}') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        out.push_str(&after[..end]);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Схема записи каталога по её id.
+fn catalog_spec(id: &str) -> ElementSpec {
+    let (_, template) = catalog()
+        .into_iter()
+        .find(|(known, _)| known == id)
+        .unwrap_or_else(|| panic!("в каталоге нет «{id}»"));
+    element_schema_for(&template).unwrap_or_else(|| panic!("«{id}» не элемент: {template}"))
+}
+
+/// Поля вставки по начальным значениям — так их отдаёт форма.
+fn prefilled(spec: &ElementSpec) -> Vec<FieldValue> {
+    spec.initial
         .iter()
-        .map(|prefill| source(&prefill.name, &prefill.value))
+        .map(|value| source(&value.name, &value.source))
+        .chain(spec.prefill.iter().map(|prefill| source(&prefill.name, &prefill.value)))
         .collect()
 }
 
-// ── Схема (SC-001a) ─────────────────────────────────────────────────────────
+// ── Схема из Typst (SC-001a) ────────────────────────────────────────────────
 
-pub fn the_schema_matches_typst() {
-    let problems = schema_problems();
-    assert!(problems.is_empty(), "схема разошлась с Typst:\n{}", problems.join("\n"));
+/// Полный набор параметров — ровно тот, что описывает Typst, в его порядке.
+pub fn every_parameter_comes_from_typst() {
+    for (key, path) in [
+        ("call:figure", "figure"),
+        ("call:image", "image"),
+        ("call:math.frac", "math.frac"),
+        ("call:polygon.regular", "polygon.regular"),
+        ("call:table.cell", "table.cell"),
+    ] {
+        let spec = element_schema(key).unwrap_or_else(|| panic!("{key}"));
+        let func = typsidian_core::elements::schema::typst_func(path).unwrap();
+        let expected: Vec<String> = func
+            .params()
+            .filter_map(|info| info.to_native())
+            .map(|info| info.name.to_string())
+            .collect();
+        let names: Vec<String> = spec.params.iter().map(|p| p.name.clone()).collect();
+        assert_eq!(names, expected, "{key}");
+    }
+    // `set` — только допускаемое в `set`.
+    let set = element_schema("set:text").unwrap();
+    assert!(set.params.iter().all(|p| p.settable));
+    assert!(set.params.iter().all(|p| p.name != "body"));
+    assert_eq!(element_schema("call:no-such-function"), None);
 }
 
-pub fn every_element_has_a_titled_main_parameter() {
-    for element in &schema().elements {
-        let Some(spec) = element_schema(&element.id) else { continue };
-        assert!(spec.params.iter().any(|p| p.main), "{}: нет основного", spec.id);
-        assert!(spec.params.iter().all(|p| !p.title.trim().is_empty()), "{}", spec.id);
+/// Подпись — имя параметра, подсказка — из справочника Typst.
+pub fn titles_and_hints_come_from_typst() {
+    let spec = element_schema("call:figure").unwrap();
+    let caption = spec.param("caption").unwrap();
+    assert_eq!(caption.title, "caption");
+    assert!(!caption.docs.is_empty() && !caption.docs.contains('\n'), "{:?}", caption.docs);
+    let body = spec.param("body").unwrap();
+    assert!(!body.docs.contains('@'), "ссылки справочника раскрыты: {:?}", body.docs);
+}
+
+pub fn every_catalog_element_has_a_main_parameter() {
+    for (id, template) in catalog() {
+        let Some(spec) = element_schema_for(&template) else { continue };
+        assert!(spec.params.iter().any(|p| p.main), "{id}: нет основного");
+        assert!(spec.params.iter().all(|p| !p.title.is_empty()), "{id}");
     }
 }
 
 pub fn a_heading_inserts_without_a_form_and_a_code_block_with_one() {
     // contracts § «Когда форма».
-    assert!(!element_schema("heading-2").unwrap().opens_form_on_insert());
-    assert!(element_schema("code-block").unwrap().opens_form_on_insert());
-    assert!(element_schema("figure").unwrap().opens_form_on_insert());
-    assert!(element_schema("columns").unwrap().opens_form_on_insert());
-    assert_eq!(element_schema("no-such-element"), None, "без схемы — сниппет (FR-003)");
+    assert_eq!(catalog_spec("heading-2").form_on_insert, Some(false));
+    assert_eq!(catalog_spec("code-block").form_on_insert, Some(true));
+    assert_eq!(catalog_spec("figure").form_on_insert, Some(true));
+    assert_eq!(catalog_spec("columns").form_on_insert, Some(true));
+    assert_eq!(element_schema_for("просто текст"), None, "не элемент — сниппет (FR-003)");
+    assert_eq!(element_schema_for("- пункт"), None, "список — сниппет");
 }
 
 // ── Вставка (US1) ───────────────────────────────────────────────────────────
 
-/// Круг «вставка → разбор → правка без изменений» для **каждого** элемента
-/// схемы (SC-003, SC-007, FR-009).
+/// Круг «вставка → разбор → правка без изменений» для **каждой** записи
+/// каталога, которая оказалась элементом (SC-003, SC-007, FR-009).
 pub fn every_element_round_trips() {
-    for element in &schema().elements {
-        let id = element.id.as_str();
-        let rendered = render_element(id, &prefilled(id), None, &[])
+    let mut checked = 0;
+    for (id, template) in catalog() {
+        let Some(spec) = element_schema_for(&template) else { continue };
+        checked += 1;
+        let rendered = render_element(&spec.id, &prefilled(&spec), None, &[])
             .unwrap_or_else(|errors| panic!("{id}: вставка не собралась: {errors:?}"));
-        let text = in_context(id, &rendered.text);
+        let text = in_context(&spec, &rendered.text);
         assert!(!has_syntax_error(&text), "{id}: синтаксическая ошибка в «{text}»");
 
-        let offset = at(&text, rendered.text.trim_start_matches('#').split('(').next().unwrap_or(""));
-        let parsed = found(&text, offset);
-        let canonical = element.same_as.as_deref().unwrap_or(id);
-        assert!(
-            parsed.id == canonical || parsed.id == id,
-            "{id}: разобран как {} в «{text}»",
-            parsed.id
-        );
+        let start = if text.starts_with("$ ") && !rendered.text.starts_with('$') { 2 } else { 0 };
+        let parsed = found(&text, start);
+        assert_eq!(parsed.id, spec.id, "{id}: разобран иначе в «{text}»");
         let edits = plan_element_edit(&text, &parsed, &fields_as_read(&parsed), parsed.label.as_deref())
             .unwrap_or_else(|error| panic!("{id}: {error:?}"));
         assert!(edits.is_empty(), "{id}: правка без изменений дала {edits:?} на «{text}»");
     }
+    assert!(checked > 50, "проверено всего {checked} элементов");
 }
 
 pub fn defaults_are_not_written() {
     // FR-013: зазор до подписи на умолчании в текст не попадает.
-    let mut fields = prefilled("figure");
+    let figure = catalog_spec("figure");
+    let mut fields = prefilled(&figure);
     fields.push(source("gap", "0.65em"));
-    let text = render_element("figure", &fields, None, &[]).unwrap().text;
+    let text = render_element(&figure.id, &fields, None, &[]).unwrap().text;
     assert!(!text.contains("gap"), "{text}");
     assert!(text.starts_with("#figure(\n  image(\"data/график.png\", width: 80%),"), "{text}");
 }
 
 pub fn strings_and_content_are_quoted_by_the_core() {
     let text = render_element(
-        "external-link",
+        "call:link",
         &[plain("dest", "https://a.b/\"x\""), plain("body", "сайт")],
         None,
         &[],
@@ -183,11 +279,11 @@ pub fn strings_and_content_are_quoted_by_the_core() {
 
 pub fn required_and_wrong_values_are_named() {
     // FR-015.
-    let errors = render_element("image", &[plain("width", "80%")], None, &[]).unwrap_err();
+    let errors = render_element("call:image", &[plain("width", "80%")], None, &[]).unwrap_err();
     assert!(errors.iter().any(|e| e.name == "source" && e.problem == FieldProblem::Required));
 
     let errors = render_element(
-        "image",
+        "call:image",
         &[plain("source", "a.png"), source("width", "\"широко\"")],
         None,
         &[],
@@ -196,7 +292,7 @@ pub fn required_and_wrong_values_are_named() {
     assert!(errors.iter().any(|e| e.name == "width" && e.problem == FieldProblem::WrongKind));
 
     let errors = render_element(
-        "image",
+        "call:image",
         &[plain("source", "a.png"), source("fit", "\"squash\"")],
         None,
         &[],
@@ -204,22 +300,23 @@ pub fn required_and_wrong_values_are_named() {
     .unwrap_err();
     assert!(errors.iter().any(|e| e.name == "fit" && e.problem == FieldProblem::NotAnOption));
 
-    let errors = render_element("image", &[plain("source", "a.png"), source("width", "80% +")], None, &[])
+    let errors = render_element("call:image", &[plain("source", "a.png"), source("width", "80% +")], None, &[])
         .unwrap_err();
     assert!(errors.iter().any(|e| e.name == "width" && e.problem == FieldProblem::Unparsable));
 
     // Выражение принимается: вычислить его форма не может (FR-012a).
-    assert!(render_element("image", &[plain("source", "a.png"), source("width", "100% - 2cm")], None, &[]).is_ok());
+    assert!(render_element("call:image", &[plain("source", "a.png"), source("width", "100% - 2cm")], None, &[]).is_ok());
 }
 
 pub fn labels_are_written_and_checked() {
     let taken = vec!["fig:taken".to_string()];
-    let text = render_element("figure", &prefilled("figure"), Some("fig:new"), &taken).unwrap().text;
+    let figure = catalog_spec("figure");
+    let text = render_element(&figure.id, &prefilled(&figure), Some("fig:new"), &taken).unwrap().text;
     assert!(text.ends_with(") <fig:new>"), "{text}");
 
-    let errors = render_element("figure", &prefilled("figure"), Some("fig:taken"), &taken).unwrap_err();
+    let errors = render_element(&figure.id, &prefilled(&figure), Some("fig:taken"), &taken).unwrap_err();
     assert!(errors.iter().any(|e| e.problem == FieldProblem::LabelTaken));
-    let errors = render_element("figure", &prefilled("figure"), Some("fig bad"), &taken).unwrap_err();
+    let errors = render_element(&figure.id, &prefilled(&figure), Some("fig bad"), &taken).unwrap_err();
     assert!(errors.iter().any(|e| e.problem == FieldProblem::LabelInvalid));
 }
 
@@ -238,8 +335,8 @@ pub fn values_are_read_from_the_text() {
 
 pub fn the_caret_on_the_boundary_is_inside() {
     let text = "до #columns(2)[x] после";
-    assert_eq!(found(text, at(text, "#")).id, "columns", "перед #");
-    assert_eq!(found(text, at(text, "] после") + 1).id, "columns", "после ]");
+    assert_eq!(found(text, at(text, "#")).id, "call:columns", "перед #");
+    assert_eq!(found(text, at(text, "] после") + 1).id, "call:columns", "после ]");
     assert!(matches!(element_at(text, 1), ElementAtResult::None), "вне элемента");
 }
 
@@ -313,14 +410,16 @@ pub fn a_value_reset_to_default_is_removed_with_its_comma() {
 pub fn the_inner_element_is_edited_through_the_outer_form() {
     let text = "#figure(image(\"a.png\", width: 80%), caption: [a]) <fig:x>";
     let element = found(text, 2);
-    assert_eq!(element.id, "figure");
+    assert_eq!(element.id, "call:figure>body=image");
     assert!(element.inner);
     assert!(element.values.iter().any(|v| v.name == "body.width" && v.source == "80%"));
     let changed = edit(text, &element, &[source("body.width", "60%")]);
     assert_eq!(changed, "#figure(image(\"a.png\", width: 60%), caption: [a]) <fig:x>");
 
     let table = "#figure(table(columns: 2, [A], [B]), caption: [t])";
-    assert_eq!(found(table, 2).id, "figure-table");
+    assert_eq!(found(table, 2).id, "call:figure>body=table");
+    assert_eq!(found(table, 2).label, None);
+    assert_eq!(element_schema(&found(table, 2).id).unwrap().label.unwrap().prefix, "tbl");
 }
 
 pub fn labels_are_edited() {
@@ -421,9 +520,9 @@ pub fn ambiguous_markup_is_refused_with_a_reason() {
 pub fn the_innermost_element_is_chosen() {
     // FR-016.
     let text = "#columns(2)[ #figure(image(\"a.png\", width: 50%)) текст ]";
-    assert_eq!(found(text, at(text, "a.png")).id, "image");
-    assert_eq!(found(text, at(text, "figure")).id, "figure");
-    assert_eq!(found(text, at(text, "текст")).id, "columns");
+    assert_eq!(found(text, at(text, "a.png")).id, "call:image");
+    assert_eq!(found(text, at(text, "figure")).id, "call:figure>body=image");
+    assert_eq!(found(text, at(text, "текст")).id, "call:columns");
 
     // Правка внутреннего не трогает внешний.
     let inner = found(text, at(text, "a.png"));
@@ -431,10 +530,22 @@ pub fn the_innermost_element_is_chosen() {
     assert_eq!(changed, "#columns(2)[ #figure(image(\"a.png\", width: 70%)) текст ]");
 }
 
+/// Поправки там, где описание Typst расходится с тем, что функция принимает.
+pub fn typst_description_gaps_are_corrected() {
+    // `factor` у `scale` позиционный, хотя `Func::params()` отдаёт его именованным.
+    let text = "#scale(150%)[текст]";
+    let element = found(text, 2);
+    assert_eq!(element.values.iter().find(|v| v.name == "factor").unwrap().source, "150%");
+    assert_eq!(edit(text, &element, &[source("factor", "200%")]), "#scale(200%)[текст]");
+    // `text(…)[…]`: содержимое, а не строка.
+    let text = "#text(fill: red)[*жирный*]";
+    assert_eq!(edit(text, &found(text, 2), &[source("fill", "blue")]), "#text(fill: blue)[*жирный*]");
+}
+
 pub fn math_calls_are_found_inside_formulas() {
     let text = "$ frac(a, b) + 1 $";
     let element = found(text, at(text, "frac") + 1);
-    assert_eq!(element.id, "math-frac");
+    assert_eq!(element.id, "call:math.frac");
     let changed = edit(text, &element, &[plain("denom", "c + d")]);
     assert_eq!(changed, "$ frac(a, c + d) + 1 $");
 }
@@ -442,16 +553,16 @@ pub fn math_calls_are_found_inside_formulas() {
 pub fn initial_values_come_ready_from_the_core() {
     // Форма заполняется при вставке так же, как при правке: строки без
     // кавычек, содержимое без скобок, вложенный элемент — полями `body.*`.
-    let figure = element_schema("figure").unwrap();
+    let figure = catalog_spec("figure");
     assert!(figure.initial_inner);
     let get = |name: &str| figure.initial.iter().find(|v| v.name == name).cloned();
     assert_eq!(get("body.source").unwrap().plain, "data/график.png");
     assert_eq!(get("caption").unwrap().plain, "Подпись");
     assert_eq!(figure.form_on_insert, Some(true));
 
-    let code = element_schema("code-block").unwrap();
+    let code = catalog_spec("code-block");
     assert_eq!(code.initial.iter().find(|v| v.name == "lang").unwrap().plain, "rust");
 
-    let frac = element_schema("math-frac").unwrap();
+    let frac = catalog_spec("math-frac");
     assert_eq!(frac.initial.iter().find(|v| v.name == "denom").unwrap().source, "b");
 }

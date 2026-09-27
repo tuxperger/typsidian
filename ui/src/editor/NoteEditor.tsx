@@ -34,7 +34,7 @@ import {
   NOTHING_TO_EDIT,
   useElementAtCaret,
 } from "./useElementAtCaret.js";
-import type { SnippetFieldState } from "./snippet.js";
+import { parseSnippet, type SnippetFieldState } from "./snippet.js";
 import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 import { useContextMenu } from "../menu/ContextMenu.js";
 import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
@@ -229,7 +229,11 @@ export function NoteEditor({
   const insertElement = useCallback(
     async (request: InsertRequest) => {
       setInsertMenu(null);
-      const spec = request.id ? await client.elementSchema(request.id) : undefined;
+      // Какой это элемент и какие у него параметры, ядро узнаёт по самому
+      // шаблону — разбором Typst, а не по списку в ядре.
+      const spec = request.id
+        ? await client.elementSchemaFor(parseSnippet(request.template).text)
+        : undefined;
       if (spec?.form_on_insert && request.id) {
         setParamForm({
           spec,
@@ -279,7 +283,8 @@ export function NoteEditor({
       setInsertMenu(null);
       setParamForm({
         spec,
-        title: elementById(found.element.id)?.name ?? spec.typst,
+        // Имя функции Typst: правится любой вызов, а не только записи каталога.
+        title: spec.typst,
         mode: { kind: "edit", parsed: found.element },
         block: false,
       });

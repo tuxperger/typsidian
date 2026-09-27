@@ -9,13 +9,18 @@ mod common;
 use common::element_cases as cases;
 
 #[test]
-fn the_schema_matches_typst() {
-    cases::the_schema_matches_typst();
+fn every_parameter_comes_from_typst() {
+    cases::every_parameter_comes_from_typst();
 }
 
 #[test]
-fn every_element_has_a_titled_main_parameter() {
-    cases::every_element_has_a_titled_main_parameter();
+fn titles_and_hints_come_from_typst() {
+    cases::titles_and_hints_come_from_typst();
+}
+
+#[test]
+fn every_catalog_element_has_a_main_parameter() {
+    cases::every_catalog_element_has_a_main_parameter();
 }
 
 #[test]
@@ -126,6 +131,11 @@ fn ambiguous_markup_is_refused_with_a_reason() {
 #[test]
 fn the_innermost_element_is_chosen() {
     cases::the_innermost_element_is_chosen();
+}
+
+#[test]
+fn typst_description_gaps_are_corrected() {
+    cases::typst_description_gaps_are_corrected();
 }
 
 #[test]

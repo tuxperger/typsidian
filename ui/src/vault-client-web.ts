@@ -211,6 +211,7 @@ export function webVaultClient(
       WebBackend.planInsertion(textLength, point, content),
     // Фича 008: чистые функции ядра — статические, без очереди вызовов.
     elementSchema: async (id) => WebBackend.elementSchema(id),
+    elementSchemaFor: async (template) => WebBackend.elementSchemaFor(template),
     elementAt: async (text, offset) => WebBackend.elementAt(text, offset),
     renderElement: async (request) => WebBackend.renderElement(request),
     planElementEdit: async (request) => WebBackend.planElementEdit(request),

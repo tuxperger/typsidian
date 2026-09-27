@@ -334,6 +334,8 @@ export function tauriVaultClient(
     // Фича 008: те же функции ядра командами Tauri.
     elementSchema: async (id) =>
       (await invoke<ElementSpec | null>("element_schema", { id })) ?? undefined,
+    elementSchemaFor: async (template) =>
+      (await invoke<ElementSpec | null>("element_schema_for", { template })) ?? undefined,
     elementAt: (text, offset) =>
       invoke<ElementAtResult>("element_at", { text, offset }),
     renderElement: (request) => invoke<RenderOutcome>("render_element", { request }),

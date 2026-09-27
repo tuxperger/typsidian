@@ -238,8 +238,17 @@ export interface VaultClient {
   // Чистые функции ядра: на web — статические методы wasm, на desktop и
   // Android — команды Tauri. Формы запроса и ответа одни (FR-022).
 
-  /** Схема элемента каталога; `undefined` — вставляется сразу (FR-003). */
+  /**
+   * Схема элемента по ключу из ядра (`call:figure`) — для правки найденного
+   * элемента. Параметры ядро читает из самого Typst.
+   */
   elementSchema(id: string): Promise<ElementSpec | undefined>;
+  /**
+   * Схема элемента, который вставляет шаблон каталога (текст без полей
+   * сниппета); `undefined` — не элемент с параметрами, вставляется сразу
+   * (FR-003).
+   */
+  elementSchemaFor(template: string): Promise<ElementSpec | undefined>;
   /** Элемент, непосредственно содержащий каретку (FR-006, FR-016). */
   elementAt(text: string, offset: number): Promise<ElementAtResult>;
   /** «Будет вставлено» (FR-004, FR-005). */

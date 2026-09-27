@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use typst::syntax::{parse, LinkedNode, Side, SyntaxKind, SyntaxNode};
 
-use super::schema::{schema, ElementSpec, ElementSyntax, ParamSpec};
+use super::schema::{inner_param_of, key_for, raw_spec, ElementSpec, ElementSyntax, ParamSpec};
 use super::values::{has_error, literal_matches, plain_of, quote, ParamValue};
 use super::{byte_at, utf16_at};
 
@@ -231,41 +231,50 @@ fn climb(leaf: LinkedNode) -> Option<(&'static ElementSpec, LinkedNode)> {
     None
 }
 
-/// Элемент схемы, которому соответствует узел.
+/// Элемент, которому соответствует узел: вызов встроенной функции Typst,
+/// правило `set`, заголовок, блок кода или формула. Функция без параметров и
+/// функция, которой в Typst нет (своя из шаблона пользователя), элементом не
+/// считаются — подъём продолжается к внешнему.
 fn spec_of(node: &LinkedNode) -> Option<&'static ElementSpec> {
-    let candidates = |syntax: ElementSyntax, path: &str| {
-        schema()
-            .elements
-            .iter()
-            .filter(move |spec| spec.same_as.is_none() && spec.syntax == syntax)
-            .filter(move |spec| spec.typst == path)
-            .collect::<Vec<_>>()
+    let found = |syntax: ElementSyntax, path: &str, inner: Option<(&str, &str)>| {
+        raw_spec(&key_for(syntax, path, inner))
     };
 
     match node.kind() {
         SyntaxKind::FuncCall => {
             let callee = node.children().next()?;
+            if !matches!(callee.kind(), SyntaxKind::Ident | SyntaxKind::FieldAccess) {
+                return None;
+            }
             let path = callee.get().full_text().to_string();
+            // `#math.frac(…)` в коде — не тот вызов, что `frac(…)` в формуле:
+            // аргументы там — код, а форма формулы пишет их разметкой.
             if path.starts_with("math.") {
                 return None;
             }
-            pick_by_inner(node, candidates(ElementSyntax::Call, &path))
+            if let Some(param) = inner_param_of(&path) {
+                if let Some(inner) = inner_callee(node, &path, param) {
+                    if let Some(spec) = found(ElementSyntax::Call, &path, Some((param, &inner))) {
+                        return Some(spec);
+                    }
+                }
+            }
+            found(ElementSyntax::Call, &path, None)
         }
         SyntaxKind::MathCall => {
             let callee = node.children().next()?;
-            let path = format!("math.{}", callee.get().full_text());
-            candidates(ElementSyntax::Call, &path).into_iter().next()
+            if callee.kind() != SyntaxKind::MathIdent {
+                return None;
+            }
+            found(ElementSyntax::Call, &format!("math.{}", callee.get().full_text()), None)
         }
         SyntaxKind::SetRule => {
             let target = node
                 .children()
                 .find(|child| matches!(child.kind(), SyntaxKind::Ident | SyntaxKind::FieldAccess))?;
-            let path = target.get().full_text().to_string();
-            candidates(ElementSyntax::Set, &path).into_iter().next()
+            found(ElementSyntax::Set, &target.get().full_text(), None)
         }
-        SyntaxKind::Heading => candidates(ElementSyntax::MarkupHeading, "heading")
-            .into_iter()
-            .next(),
+        SyntaxKind::Heading => found(ElementSyntax::MarkupHeading, "heading", None),
         SyntaxKind::Raw => {
             let fenced = node
                 .children()
@@ -274,50 +283,28 @@ fn spec_of(node: &LinkedNode) -> Option<&'static ElementSpec> {
             if !fenced {
                 return None;
             }
-            candidates(ElementSyntax::MarkupRaw, "raw").into_iter().next()
+            found(ElementSyntax::MarkupRaw, "raw", None)
         }
-        SyntaxKind::Equation => candidates(ElementSyntax::MarkupEquation, "math.equation")
-            .into_iter()
-            .next(),
+        SyntaxKind::Equation => found(ElementSyntax::MarkupEquation, "math.equation", None),
         _ => None,
     }
 }
 
-/// Несколько записей схемы на одну функцию (рисунок с изображением и рисунок
-/// с таблицей): выбирается та, чей вложенный элемент стоит в тексте.
-fn pick_by_inner(
-    node: &LinkedNode,
-    candidates: Vec<&'static ElementSpec>,
-) -> Option<&'static ElementSpec> {
-    if candidates.len() <= 1 {
-        return candidates.into_iter().next();
+/// Функция, вызванная в параметре `param` вызова `node`: `image` в
+/// `#figure(image("a.png"))`. `None` — там не вызов встроенной функции.
+fn inner_callee(node: &LinkedNode, path: &str, param: &str) -> Option<String> {
+    let outer = raw_spec(&key_for(ElementSyntax::Call, path, None))?;
+    let args = node.children().find(|child| child.kind() == SyntaxKind::Args)?;
+    let value = inner_arg(&args, &outer.params, param)?;
+    if value.kind() != SyntaxKind::FuncCall {
+        return None;
     }
-    let args = node.children().find(|child| child.kind() == SyntaxKind::Args);
-    let callees: Vec<String> = args
-        .iter()
-        .flat_map(|args| args.children())
-        .filter_map(|arg| {
-            let call = match arg.kind() {
-                SyntaxKind::FuncCall => arg,
-                SyntaxKind::Named => arg.children().last()?,
-                _ => return None,
-            };
-            (call.kind() == SyntaxKind::FuncCall)
-                .then(|| call.children().next().map(|c| c.get().full_text().to_string()))
-                .flatten()
-        })
-        .collect();
-    candidates
-        .iter()
-        .find(|spec| {
-            spec.inner.as_ref().is_some_and(|inner| {
-                schema()
-                    .get(&inner.element)
-                    .is_some_and(|target| callees.iter().any(|c| *c == target.typst))
-            })
-        })
-        .copied()
-        .or_else(|| candidates.into_iter().next())
+    let callee = value.children().next()?;
+    if !matches!(callee.kind(), SyntaxKind::Ident | SyntaxKind::FieldAccess) {
+        return None;
+    }
+    let name = callee.get().full_text().to_string();
+    raw_spec(&key_for(ElementSyntax::Call, &name, None)).map(|_| name)
 }
 
 /// Разбор найденного элемента.
@@ -373,7 +360,7 @@ fn build<'a>(text: &str, spec: &'static ElementSpec, node: LinkedNode<'a>) -> Lo
 
                 // Вложенный элемент: его параметры — в той же форме.
                 if let Some(inner_spec) = &spec.inner {
-                    let target = schema().get(&inner_spec.element);
+                    let target = super::schema::spec(&inner_spec.element);
                     let body = inner_arg(&args, &spec.params, &inner_spec.param);
                     if let (Some(target), Some(body)) = (target, body) {
                         let callee = body.children().next().map(|c| c.get().full_text());

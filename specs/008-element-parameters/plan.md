@@ -9,11 +9,9 @@
 Форма параметров, которая сейчас есть только у рисунка и таблицы, становится общим
 правилом каталога вставки. Три опоры:
 
-1. **Схема параметров** — файл `packages/core/src/elements/schema.json`, где явно
-   перечислены **все** параметры каждого элемента каталога, с русскими подписями и
-   признаком «основной». Машинная часть схемы сверяется с самим Typst
-   (`Func::params()`) тестом ядра — полнота доказывается, а не декларируется
-   (research §1).
+1. **Схема параметров** — читается из самого Typst (`Func::params()`) в момент
+   обращения: **все** параметры любой встроенной функции, подписи — имена Typst,
+   подсказки — из справочника. Файла схемы нет (research §1, пересмотрено 2026-09-26).
 2. **Разбор парсером Typst** — элемент под кареткой ищется по синтаксическому дереву
    `typst::syntax`, а не регулярками в UI (research §2). Нынешний разбор рисунка из
    `ui/src/editor/typstElements.ts` переезжает в ядро (принцип I).
@@ -92,13 +90,11 @@ specs/008-element-parameters/
 packages/core/
 ├── src/elements/                 # НОВЫЙ модуль
 │   ├── mod.rs                    # публичные функции контракта
-│   ├── schema.json               # схема параметров — все параметры всех элементов
-│   ├── schema.rs                 # ElementSpec/ParamSpec, загрузка, сверка с Func::params()
+│   ├── schema.rs                 # ElementSpec/ParamSpec из Func::params(), ключи, кэш
 │   ├── locate.rs                 # element_at: LinkedNode → ParsedElement / Unavailable
 │   ├── values.rs                 # литерал / выражение, проверка по ParamKind
 │   ├── render.rs                 # render_element
 │   └── edit.rs                   # plan_element_edit: точечные TextEdit
-├── examples/element-schema.rs    # генератор: машинная часть схемы из Typst
 ├── src/settings/keybindings.rs   # + CommandId::ElementParams, умолчание Mod+Shift+E
 ├── src/vault/web.rs              # + 4 статических метода WebBackend
 └── tests/

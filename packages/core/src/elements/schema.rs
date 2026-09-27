@@ -1,22 +1,31 @@
 //! Схема параметров элементов (data-model.md «Схема параметров», research.md §1).
 //!
-//! Схема — файл `schema.json` рядом с этим модулем. В нём **явно перечислены**
-//! все параметры каждого элемента каталога вставки: так их видно, их правят, и
-//! каждое изменение заметно в diff. Машинные поля параметра (вид значения,
-//! умолчание, позиционный ли он) порождаются из самого Typst генератором
-//! `examples/element-schema.rs`; подписи и признак «основной» пишутся руками.
-//! Расхождение файла с Typst ловит тест [`machine_params`] — полнота схемы
-//! доказывается, а не декларируется (SC-001a).
+//! Схемы как файла нет: параметры каждого элемента **читаются из самого Typst**
+//! в момент обращения — `Func::params()` отдаёт имя, вид значения, умолчание,
+//! позиционность, обязательность и описание любого параметра встроенной
+//! функции. Поэтому полнота не выверяется и не проверяется тестом — она
+//! следует из построения (SC-001a): после обновления Typst форма сама
+//! показывает новый набор параметров.
 //!
-//! Схема поставляется в составе ядра и одна на все клиенты (FR-001c): её
-//! читает только ядро, пользователь её не меняет.
+//! Элемент называется **ключом** — синтаксис и путь функции Typst:
+//! `call:figure`, `set:text`, `markup-heading:heading`, `call:math.frac`.
+//! Рисунок с вложенным элементом несёт его в ключе: `call:figure>body=image`.
+//! Какой элемент вставляет запись каталога, ядро узнаёт, разобрав её шаблон
+//! парсером Typst ([`element_schema_for`]), — отдельного списка элементов в
+//! ядре нет.
+//!
+//! В коде остаются только правила, которых в описании Typst нет по природе,
+//! каждое с причиной рядом: профиль разметки (research.md §7), поправка вида
+//! у `text`, позиционность `factor` у `scale` и вложенный элемент рисунка с
+//! префиксом его метки.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 /// Как элемент выглядит в тексте заметки.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(rename_all = "kebab-case")]
@@ -31,6 +40,29 @@ pub enum ElementSyntax {
     MarkupRaw,
     /// `$ … $` / `$…$` — выключная или строчная формула.
     MarkupEquation,
+}
+
+impl ElementSyntax {
+    fn tag(self) -> &'static str {
+        match self {
+            ElementSyntax::Call => "call",
+            ElementSyntax::Set => "set",
+            ElementSyntax::MarkupHeading => "markup-heading",
+            ElementSyntax::MarkupRaw => "markup-raw",
+            ElementSyntax::MarkupEquation => "markup-equation",
+        }
+    }
+
+    fn from_tag(tag: &str) -> Option<Self> {
+        Some(match tag {
+            "call" => ElementSyntax::Call,
+            "set" => ElementSyntax::Set,
+            "markup-heading" => ElementSyntax::MarkupHeading,
+            "markup-raw" => ElementSyntax::MarkupRaw,
+            "markup-equation" => ElementSyntax::MarkupEquation,
+            _ => return None,
+        })
+    }
 }
 
 /// Метка `<prefix:…>` после элемента (research.md §6).
@@ -49,15 +81,15 @@ pub struct LabelSpec {
 pub struct InnerSpec {
     /// Параметр внешнего элемента, в котором стоит вложенный: `body`.
     pub param: String,
-    /// Id вложенного элемента схемы.
+    /// Ключ вложенного элемента: `call:image`.
     pub element: String,
-    /// Параметры вложенного элемента — подставляются при загрузке схемы, в
-    /// файле их нет (одно описание на элемент).
+    /// Параметры вложенного элемента.
     #[serde(default)]
     pub params: Vec<ParamSpec>,
 }
 
-/// Начальное значение поля при вставке — запись Typst.
+/// Служебное значение, которое форма не показывает, но отдаёт ядру как есть:
+/// `@body` — текст заголовка, кода или формулы.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
@@ -73,17 +105,25 @@ pub struct Prefill {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ParamKind {
     /// Выбор из списка (FR-014). Варианты — записью Typst: `"top"`, `center`.
-    Choice { options: Vec<String> },
+    Choice {
+        options: Vec<String>,
+    },
     Bool,
     Int,
     Float,
     /// Число с единицей: `2cm`, `80%`, `1fr`, `45deg`.
-    Numeric { units: Vec<String> },
+    Numeric {
+        units: Vec<String>,
+    },
     String,
     /// Содержимое `[…]`.
     Content,
-    AutoOr { inner: Box<ParamKind> },
-    NoneOr { inner: Box<ParamKind> },
+    AutoOr {
+        inner: Box<ParamKind>,
+    },
+    NoneOr {
+        inner: Box<ParamKind>,
+    },
     /// Поле «как есть»: тип, который форма не рисует виджетом (массивы,
     /// словари, функции, обводки) — исходный текст Typst.
     Expression,
@@ -95,8 +135,12 @@ pub enum ParamKind {
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct ParamSpec {
     pub name: String,
-    /// Как параметр называется пользователю.
+    /// Как параметр называется пользователю — его имя в Typst: то же слово,
+    /// что он пишет в тексте заметки и видит в справочнике.
     pub title: String,
+    /// Первый абзац описания параметра из Typst — подсказка к полю.
+    #[serde(default)]
+    pub docs: String,
     /// Основной — виден в форме сразу (FR-012b).
     #[serde(default)]
     pub main: bool,
@@ -113,25 +157,14 @@ pub struct ParamSpec {
     /// Принимает сколько угодно позиционных значений (ячейки таблицы).
     #[serde(default)]
     pub variadic: bool,
-    /// Поправка к виду значения там, где описание Typst расходится с тем, что
-    /// функция принимает на деле: `text(…)[содержимое]` описан как строка, но
-    /// собственный конструктор принимает `[…]`. Пишется руками, с причиной рядом
-    /// в `override_reason`; сверка с Typst идёт по исходному `kind`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub override_kind: Option<ParamKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub override_reason: Option<String>,
-    /// Вид значения по описанию Typst, если он поправлен (`override_kind`).
-    #[serde(skip)]
-    pub typst_kind: Option<ParamKind>,
 }
 
-/// Элемент каталога со своими параметрами.
+/// Элемент со своими параметрами.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct ElementSpec {
-    /// Тот же id, что у записи каталога вставки в UI.
+    /// Ключ элемента: `call:figure`, `set:text`, `call:figure>body=image`.
     pub id: String,
     /// Путь функции Typst: `figure`, `math.frac`, `polygon.regular`.
     pub typst: String,
@@ -140,23 +173,18 @@ pub struct ElementSpec {
     pub label: Option<LabelSpec>,
     #[serde(default)]
     pub inner: Option<InnerSpec>,
+    /// Служебные значения вставки (`@body`) — из шаблона каталога.
     #[serde(default)]
     pub prefill: Vec<Prefill>,
     #[serde(default)]
     pub params: Vec<ParamSpec>,
-    /// Открывать ли форму при вставке. В файле необязателен: по умолчанию —
-    /// правило SC-001 (≥ 2 параметров или обязательный без умолчания), схема
-    /// может переопределить его явно (contracts § «Когда форма»).
+    /// Открывать ли форму при вставке — уже решённое ядром правило
+    /// (contracts § «Когда форма»).
     #[serde(default)]
     pub form_on_insert: Option<bool>,
-    /// Запись только для вставки: при правке этот вид элемента разбирается
-    /// под записью, на которую указывает `same_as`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub same_as: Option<String>,
-    /// Начальные значения полей при вставке — `prefill`, прочитанный тем же
-    /// разбором, что и при правке: форма заполняется одинаково в обоих режимах
-    /// и не разбирает запись Typst сама (принцип I). В файле их нет, их
-    /// вычисляет [`element_schema`].
+    /// Начальные значения полей при вставке — шаблон каталога, прочитанный
+    /// тем же разбором, что и при правке: форма заполняется одинаково в обоих
+    /// режимах и не разбирает запись Typst сама (принцип I).
     #[serde(default)]
     pub initial: Vec<super::values::ParamValue>,
     /// Вложенный элемент показан при вставке (`initial` содержит его поля).
@@ -171,136 +199,331 @@ impl ElementSpec {
 
     /// Открывает ли вставка форму (contracts § «Когда форма»).
     pub fn opens_form_on_insert(&self) -> bool {
-        self.form_on_insert.unwrap_or_else(|| {
-            self.params.len() >= 2
-                || self
-                    .params
-                    .iter()
-                    .any(|param| param.required && param.default.is_none() && !param.variadic)
-        })
+        match self.syntax {
+            // Язык кода — единственное, что стоит выбрать при вставке блока,
+            // и выбирается он в форме, а не набором после вставки.
+            ElementSyntax::MarkupRaw => true,
+            // Уровень заголовка и вид формулы задаёт сама запись каталога.
+            ElementSyntax::MarkupHeading | ElementSyntax::MarkupEquation => false,
+            ElementSyntax::Call | ElementSyntax::Set => {
+                self.params.len() >= 2
+                    || self
+                        .params
+                        .iter()
+                        .any(|param| param.required && param.default.is_none() && !param.variadic)
+            }
+        }
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct SchemaFile {
-    typst: String,
-    elements: Vec<ElementSpec>,
-}
+// ── Ключ элемента ──────────────────────────────────────────────────────────
 
-/// Вся схема: версия Typst, для которой она собрана, и элементы.
-#[derive(Debug)]
-pub struct Schema {
-    pub typst: String,
-    pub elements: Vec<ElementSpec>,
-}
-
-impl Schema {
-    pub fn get(&self, id: &str) -> Option<&ElementSpec> {
-        self.elements.iter().find(|element| element.id == id)
+/// Ключ элемента по синтаксису, пути функции и вложенному элементу.
+pub fn key_for(syntax: ElementSyntax, path: &str, inner: Option<(&str, &str)>) -> String {
+    match inner {
+        Some((param, element)) => format!("{}:{path}>{param}={element}", syntax.tag()),
+        None => format!("{}:{path}", syntax.tag()),
     }
 }
 
-const SCHEMA_JSON: &str = include_str!("schema.json");
+/// Разбор ключа обратно: синтаксис, путь, вложенный (`param`, путь).
+fn split_key(key: &str) -> Option<(ElementSyntax, &str, Option<(&str, &str)>)> {
+    let (tag, rest) = key.split_once(':')?;
+    let syntax = ElementSyntax::from_tag(tag)?;
+    match rest.split_once('>') {
+        Some((path, inner)) => {
+            let (param, element) = inner.split_once('=')?;
+            Some((syntax, path, Some((param, element))))
+        }
+        None => Some((syntax, rest, None)),
+    }
+}
 
-/// Схема, прочитанная один раз за процесс.
+// ── Правила, которых нет в описании Typst ──────────────────────────────────
+
+/// Профиль разметки (research.md §7): в записи `== Текст`, ```` ```lang ````
+/// и `$…$` физически выражается ровно один параметр функции — остальные
+/// пишутся только вызовом, и форма разметки их не предлагает.
+fn markup_profile(syntax: ElementSyntax) -> Option<(&'static str, &'static str)> {
+    match syntax {
+        ElementSyntax::MarkupHeading => Some(("heading", "level")),
+        ElementSyntax::MarkupRaw => Some(("raw", "lang")),
+        ElementSyntax::MarkupEquation => Some(("math.equation", "block")),
+        ElementSyntax::Call | ElementSyntax::Set => None,
+    }
+}
+
+/// Поправка вида значения там, где описание Typst расходится с тем, что
+/// функция принимает на деле.
 ///
-/// Файл — часть сборки: не разобрался — сборка неверна, а не данные
-/// пользователя, поэтому паника здесь уместна и ловится первым же тестом.
-pub fn schema() -> &'static Schema {
-    static SCHEMA: OnceLock<Schema> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        let file: SchemaFile =
-            serde_json::from_str(SCHEMA_JSON).expect("schema.json обязан разбираться");
-        let mut elements = file.elements;
+/// `text(…)[содержимое]`: позиционный `text` описан строкой, но собственный
+/// конструктор `text` принимает и `[…]` — без поправки форма взяла бы
+/// содержимое в кавычки и сломала бы разметку внутри него.
+fn corrected_kind(path: &str, param: &str, kind: ParamKind) -> ParamKind {
+    match (path, param) {
+        ("text", "text") => ParamKind::Content,
+        _ => kind,
+    }
+}
 
-        // Поправки к виду значения: форма пользуется поправкой, сверка с Typst —
-        // исходным видом.
-        for element in &mut elements {
-            for param in &mut element.params {
-                if let Some(kind) = param.override_kind.clone() {
-                    param.typst_kind = Some(std::mem::replace(&mut param.kind, kind));
-                }
-            }
-        }
+/// Поправка позиционности там, где описание Typst её теряет.
+///
+/// `scale(150%)`: в исходнике Typst `factor` помечен `#[positional]`, но поле
+/// объявлено `#[external]`, и `Func::params()` отдаёт его только именованным.
+/// Без поправки обычная запись `#scale(150%)[…]` не разбиралась бы вовсе.
+fn corrected_positional(path: &str, param: &str, positional: bool) -> bool {
+    positional || matches!((path, param), ("scale", "factor"))
+}
 
-        // Записи `same_as` получают параметры и метку своей основной записи:
-        // одно описание параметров на функцию Typst.
-        let originals = elements.clone();
-        for element in &mut elements {
-            if let Some(base) = element.same_as.as_deref() {
-                let base = originals
-                    .iter()
-                    .find(|candidate| candidate.id == base)
-                    .unwrap_or_else(|| panic!("same_as «{base}» не найден"));
-                element.params = base.params.clone();
-                if element.label.is_none() {
-                    element.label = base.label.clone();
-                }
-            }
-        }
-        // Вложенному элементу — параметры его записи.
-        let resolved = elements.clone();
-        for element in &mut elements {
-            if let Some(inner) = element.inner.as_mut() {
-                let target = resolved
-                    .iter()
-                    .find(|candidate| candidate.id == inner.element)
-                    .unwrap_or_else(|| panic!("inner «{}» не найден", inner.element));
-                inner.params = target.params.clone();
-            }
-        }
-        Schema {
-            typst: file.typst,
-            elements,
-        }
+/// У каких функций содержимое — вложенный элемент со своими параметрами в той
+/// же форме: рисунок держит `image(…)` или `table(…)`, и править размер
+/// картинки отдельной формой было бы неудобно.
+pub(crate) fn inner_param_of(path: &str) -> Option<&'static str> {
+    match path {
+        "figure" => Some("body"),
+        _ => None,
+    }
+}
+
+/// Префикс метки элемента (research.md §6). Метка у рисунка — договорённость
+/// оформления, а не часть языка: `fig:` у картинки, `tbl:` у таблицы, `lst:` у
+/// листинга.
+fn label_of(path: &str, inner: Option<&str>) -> Option<LabelSpec> {
+    if path != "figure" {
+        return None;
+    }
+    let prefix = match inner {
+        Some("table") => "tbl",
+        Some("raw") => "lst",
+        _ => "fig",
+    };
+    Some(LabelSpec {
+        prefix: prefix.to_string(),
     })
 }
 
-/// Схема элемента каталога (FR-001a). `None` — у элемента нет параметров:
-/// он вставляется сразу (FR-003).
-pub fn element_schema(id: &str) -> Option<ElementSpec> {
-    schema()
-        .get(id)
-        .filter(|element| !element.params.is_empty())
-        .map(|element| {
-            // Правило «открывать ли форму» отдаётся уже решённым: интерфейс его
-            // не повторяет (принцип I).
-            let mut element = element.clone();
-            element.form_on_insert = Some(element.opens_form_on_insert());
-            if let Some(parsed) = initial_values(&element) {
-                element.initial = parsed.values;
-                element.initial_inner = parsed.inner;
-            }
-            element
-        })
+// ── Сборка из Typst ────────────────────────────────────────────────────────
+
+/// Элемент по ключу. Собирается из Typst при первом обращении и дальше
+/// берётся из кэша: описание функций за время работы не меняется. `None` —
+/// такой функции в Typst нет.
+pub fn spec(key: &str) -> Option<&'static ElementSpec> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<&'static ElementSpec>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(found) = cache.lock().ok()?.get(key) {
+        return *found;
+    }
+    // Сборка — без блокировки: вложенный элемент собирается тем же путём.
+    let built: Option<&'static ElementSpec> = build(key).map(|spec| &*Box::leak(Box::new(spec)));
+    let mut guard = cache.lock().ok()?;
+    // Число ключей ограничено числом функций Typst — утечка конечна.
+    Some(*guard.entry(key.to_string()).or_insert(built)).flatten()
 }
 
-// ── Сверка с Typst ─────────────────────────────────────────────────────────
+fn build(key: &str) -> Option<ElementSpec> {
+    let (syntax, path, inner) = split_key(key)?;
+    let params: Vec<ParamSpec> = match markup_profile(syntax) {
+        Some((function, only)) => {
+            if path != function {
+                return None;
+            }
+            params_of(function, syntax)?
+                .into_iter()
+                .filter(|param| param.name == only)
+                // Единственный параметр разметки и есть основной.
+                .map(|param| ParamSpec {
+                    main: true,
+                    ..param
+                })
+                .collect()
+        }
+        None => params_of(path, syntax)?,
+    };
+
+    let inner = match inner {
+        Some((param, element)) => {
+            if inner_param_of(path) != Some(param) {
+                return None;
+            }
+            let element = key_for(ElementSyntax::Call, element, None);
+            let target = spec(&element)?;
+            Some(InnerSpec {
+                param: param.to_string(),
+                element,
+                params: target.params.clone(),
+            })
+        }
+        None => None,
+    };
+    let inner_path = inner
+        .as_ref()
+        .and_then(|inner| split_key(&inner.element).map(|(_, path, _)| path.to_string()));
+
+    Some(ElementSpec {
+        id: key.to_string(),
+        typst: path.to_string(),
+        syntax,
+        label: if syntax == ElementSyntax::Call {
+            label_of(path, inner_path.as_deref())
+        } else {
+            None
+        },
+        inner,
+        prefill: Vec::new(),
+        params,
+        form_on_insert: None,
+        initial: Vec::new(),
+        initial_inner: false,
+    })
+}
+
+/// Параметры функции так, как их описывает Typst.
+fn params_of(path: &str, syntax: ElementSyntax) -> Option<Vec<ParamSpec>> {
+    let machine = machine_params(path, syntax)?;
+    Some(
+        machine
+            .into_iter()
+            .map(|param| {
+                let positional = corrected_positional(path, &param.name, param.positional);
+                ParamSpec {
+                    title: param.name.clone(),
+                    kind: corrected_kind(path, &param.name, param.kind),
+                    // Без позиционного и обязательного элемент не записать —
+                    // они видны сразу; остальное в «Все параметры» (FR-012b).
+                    main: positional || param.required,
+                    docs: param.docs,
+                    name: param.name,
+                    default: param.default,
+                    positional,
+                    required: param.required,
+                    settable: param.settable,
+                    variadic: param.variadic,
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Схема элемента для правки (FR-001a). `None` — такого элемента нет или у
+/// него нет параметров: он вставляется сразу (FR-003).
+pub fn element_schema(key: &str) -> Option<ElementSpec> {
+    let spec = spec(key).filter(|spec| !spec.params.is_empty())?;
+    let mut spec = spec.clone();
+    // Правило «открывать ли форму» отдаётся уже решённым: интерфейс его не
+    // повторяет (принцип I).
+    spec.form_on_insert = Some(spec.opens_form_on_insert());
+    ensure_main(&mut spec.params);
+    Some(spec)
+}
+
+/// Порог, до которого параметры без явного основного показываются все сразу.
+const SHOW_ALL_UP_TO: usize = 3;
+
+/// Форма без единого видимого поля бесполезна: у `#pagebreak()` нет ни
+/// позиционных, ни обязательных параметров. Когда их немного, основными
+/// становятся все; когда много (`set text` — три десятка), основные задаёт
+/// текст элемента, а остальное ждёт в «Все параметры» (FR-012b).
+fn ensure_main(params: &mut [ParamSpec]) {
+    if params.len() <= SHOW_ALL_UP_TO && !params.iter().any(|param| param.main) {
+        for param in params {
+            param.main = true;
+        }
+    }
+}
+
+/// Схема элемента, который вставляет запись каталога, — по тексту её шаблона
+/// (без полей сниппета).
+///
+/// Шаблон разбирается тем же разбором, что и элемент в заметке: из него ядро
+/// узнаёт функцию Typst, а значения шаблона становятся начальными значениями
+/// формы. Вызов из формулы (`frac(a, b)`) читается внутри `$ … $`. `None` —
+/// шаблон не элемент с параметрами (список, выделение), и он вставляется
+/// сниппетом (FR-003).
+pub fn element_schema_for(template: &str) -> Option<ElementSpec> {
+    use super::locate::{element_at, ElementAtResult};
+
+    let text = template.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let whole = |text: &str, offset: usize, end: usize| match element_at(text, offset) {
+        ElementAtResult::Found { element } if element.from == offset && element.to == end => {
+            Some(element)
+        }
+        _ => None,
+    };
+    let units = text.encode_utf16().count();
+    let parsed = whole(text, 0, units).or_else(|| {
+        let wrapped = format!("$ {text} $");
+        whole(&wrapped, 2, 2 + units).filter(|parsed| parsed.id.starts_with("call:math."))
+    })?;
+
+    let mut spec = element_schema(&parsed.id)?;
+    // Что шаблон задал — видно сразу: без этого `#set text(font: …)` открыл
+    // бы форму, где выбранный шаблоном шрифт спрятан под «Все параметры».
+    for value in &parsed.values {
+        match value.name.split_once('.') {
+            Some((_, name)) => {
+                if let Some(inner) = spec.inner.as_mut() {
+                    if let Some(param) = inner.params.iter_mut().find(|p| p.name == name) {
+                        param.main = true;
+                    }
+                }
+            }
+            None => {
+                if let Some(param) = spec.params.iter_mut().find(|p| p.name == value.name) {
+                    param.main = true;
+                }
+            }
+        }
+    }
+    if let Some(body) = markup_body(spec.syntax, text) {
+        spec.prefill.push(Prefill {
+            name: "@body".into(),
+            value: body,
+        });
+    }
+    spec.initial_inner = parsed.inner;
+    spec.initial = parsed.values;
+    Some(spec)
+}
+
+/// Текст внутри разметки — то, что форма не правит, но обязана вставить.
+fn markup_body(syntax: ElementSyntax, text: &str) -> Option<String> {
+    match syntax {
+        ElementSyntax::MarkupHeading => Some(text.trim_start_matches('=').trim().to_string()),
+        ElementSyntax::MarkupRaw => {
+            let inside = text.trim_start_matches('`');
+            let (_, rest) = inside.split_once('\n')?;
+            Some(
+                rest.trim_end_matches('`')
+                    .trim_end_matches('\n')
+                    .to_string(),
+            )
+        }
+        ElementSyntax::MarkupEquation => Some(text.trim_matches('$').trim().to_string()),
+        ElementSyntax::Call | ElementSyntax::Set => None,
+    }
+}
+
+/// Схема без вычисленных полей — для сборки текста.
+pub(crate) fn raw_spec(key: &str) -> Option<&'static ElementSpec> {
+    spec(key).filter(|spec| !spec.params.is_empty())
+}
+
+// ── Описание функций Typst ─────────────────────────────────────────────────
 
 /// Машинная часть параметра — то, что говорит о нём сам Typst.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineParam {
     pub name: String,
+    pub docs: String,
     pub kind: ParamKind,
     pub default: Option<String>,
     pub positional: bool,
     pub required: bool,
     pub settable: bool,
     pub variadic: bool,
-}
-
-impl MachineParam {
-    pub fn of(param: &ParamSpec) -> Self {
-        MachineParam {
-            name: param.name.clone(),
-            kind: param.typst_kind.clone().unwrap_or_else(|| param.kind.clone()),
-            default: param.default.clone(),
-            positional: param.positional,
-            required: param.required,
-            settable: param.settable,
-            variadic: param.variadic,
-        }
-    }
 }
 
 /// Функция Typst по пути: `figure`, `math.frac`, `polygon.regular`.
@@ -330,8 +553,8 @@ pub fn typst_func(path: &str) -> Option<typst::foundations::Func> {
     }
 }
 
-/// Что Typst говорит о параметрах функции — в той форме, в какой они лежат в
-/// схеме. Для `set` — только допускаемые в `set` (research.md §7).
+/// Что Typst говорит о параметрах функции. Для `set` — только допускаемые в
+/// `set` (research.md §7).
 pub fn machine_params(path: &str, syntax: ElementSyntax) -> Option<Vec<MachineParam>> {
     use typst::foundations::Repr;
 
@@ -342,6 +565,7 @@ pub fn machine_params(path: &str, syntax: ElementSyntax) -> Option<Vec<MachinePa
         .filter(|info| syntax != ElementSyntax::Set || info.settable)
         .map(|info| MachineParam {
             name: info.name.to_string(),
+            docs: first_paragraph(info.docs),
             kind: kind_of(&info.input),
             default: info.default.map(|default| default().repr().to_string()),
             positional: info.positional,
@@ -351,6 +575,48 @@ pub fn machine_params(path: &str, syntax: ElementSyntax) -> Option<Vec<MachinePa
         })
         .collect();
     Some(params)
+}
+
+/// Первый абзац описания из справочника Typst одной строкой.
+///
+/// Ссылки справочника `@image[картинка]` становятся своим текстом, голые
+/// `@image` — именем: в подсказке у поля ссылаться некуда.
+fn first_paragraph(docs: &str) -> String {
+    let paragraph = docs.trim().split("\n\n").next().unwrap_or_default();
+    let flat = paragraph.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::with_capacity(flat.len());
+    let mut chars = flat.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '@' {
+            out.push(ch);
+            continue;
+        }
+        let mut target = String::new();
+        while let Some(&next) = chars.peek() {
+            if next.is_alphanumeric() || matches!(next, '.' | ':' | '-' | '_') {
+                target.push(next);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        // Точка в конце предложения попала в имя — она не часть ссылки.
+        let dots = target.len() - target.trim_end_matches('.').len();
+        let target = target.trim_end_matches('.');
+        if dots == 0 && chars.peek() == Some(&'[') {
+            chars.next();
+            for inner in chars.by_ref() {
+                if inner == ']' {
+                    break;
+                }
+                out.push(inner);
+            }
+        } else {
+            out.push_str(target.rsplit(':').next().unwrap_or(target));
+            out.push_str(&".".repeat(dots));
+        }
+    }
+    out
 }
 
 /// Варианты значения выравнивания и направления — идентификаторы Typst.
@@ -396,15 +662,33 @@ pub fn kind_of(info: &typst::foundations::CastInfo) -> ParamKind {
     let (mut any, mut auto, mut none) = (false, false, false);
     let mut options = Vec::new();
     let mut types = Vec::new();
-    walk(info, &mut any, &mut auto, &mut none, &mut options, &mut types);
+    walk(
+        info,
+        &mut any,
+        &mut auto,
+        &mut none,
+        &mut options,
+        &mut types,
+    );
     // Типы, которые в тексте заметки литералом не пишутся: их значение всегда
     // выражение (`it => …`, `read(…, encoding: none)`). Выбрать поле для
     // остальных они не мешают — выражение в таком параметре всё равно
     // сохранится как есть (FR-012a). Без этого `numbering: "1"` (строка или
     // функция) и путь к картинке (строка или байты) остались бы без поля.
     const NOT_LITERAL: [&str; 13] = [
-        "function", "bytes", "selector", "dictionary", "array", "module", "type",
-        "location", "regex", "arguments", "counter", "state", "label",
+        "function",
+        "bytes",
+        "selector",
+        "dictionary",
+        "array",
+        "module",
+        "type",
+        "location",
+        "regex",
+        "arguments",
+        "counter",
+        "state",
+        "label",
     ];
     let before = types.len();
     types.retain(|ty| !NOT_LITERAL.contains(ty));
@@ -476,113 +760,4 @@ pub fn kind_of(info: &typst::foundations::CastInfo) -> ParamKind {
         };
     }
     kind
-}
-
-/// Расхождения схемы с Typst — пустой список, если схема полна и точна
-/// (SC-001a). Общий для теста и генератора.
-pub fn schema_problems() -> Vec<String> {
-    let mut problems = Vec::new();
-    let schema = schema();
-    let mut seen = std::collections::HashSet::new();
-
-    for element in &schema.elements {
-        if !seen.insert(element.id.as_str()) {
-            problems.push(format!("{}: id повторён", element.id));
-        }
-        if element.same_as.is_some() {
-            continue;
-        }
-        let Some(machine) = machine_params(&element.typst, element.syntax) else {
-            problems.push(format!("{}: в Typst нет функции {}", element.id, element.typst));
-            continue;
-        };
-        let markup = matches!(
-            element.syntax,
-            ElementSyntax::MarkupHeading | ElementSyntax::MarkupRaw | ElementSyntax::MarkupEquation
-        );
-
-        for param in &element.params {
-            if param.title.trim().is_empty() {
-                problems.push(format!("{}.{}: нет подписи", element.id, param.name));
-            }
-            match machine.iter().find(|known| known.name == param.name) {
-                None => problems.push(format!(
-                    "{}.{}: такого параметра у {} нет",
-                    element.id, param.name, element.typst
-                )),
-                Some(known) if *known != MachineParam::of(param) => problems.push(format!(
-                    "{}.{}: в схеме {:?}, в Typst {:?}",
-                    element.id,
-                    param.name,
-                    MachineParam::of(param),
-                    known
-                )),
-                Some(_) => {}
-            }
-        }
-        // Профиль разметки — подмножество по замыслу (research.md §7); у
-        // остальных — полный набор, в порядке справочника Typst.
-        if !markup {
-            let names: Vec<&str> = element.params.iter().map(|p| p.name.as_str()).collect();
-            let expected: Vec<&str> = machine.iter().map(|p| p.name.as_str()).collect();
-            if names != expected {
-                problems.push(format!(
-                    "{}: параметры {:?}, в Typst {:?}",
-                    element.id, names, expected
-                ));
-            }
-        }
-        if !element.params.is_empty() && !element.params.iter().any(|p| p.main) {
-            problems.push(format!("{}: нет ни одного основного параметра", element.id));
-        }
-    }
-    problems
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_schema_matches_typst() {
-        let problems = schema_problems();
-        assert!(problems.is_empty(), "схема разошлась с Typst:\n{}", problems.join("\n"));
-    }
-}
-
-/// Начальные значения: элемент собирается из `prefill` и читается обратно.
-fn initial_values(element: &ElementSpec) -> Option<super::locate::ParsedElement> {
-    use super::locate::{element_at, ElementAtResult};
-    use super::values::FieldValue;
-
-    let fields: Vec<FieldValue> = element
-        .prefill
-        .iter()
-        .map(|prefill| FieldValue {
-            name: prefill.name.clone(),
-            source: Some(prefill.value.clone()),
-            plain: None,
-        })
-        .collect();
-    let rendered = super::render::render_element(&element.id, &fields, None, &[]).ok()?;
-    // Вызов из формулы читается только внутри формулы.
-    let math = element.syntax == ElementSyntax::Call && element.typst.starts_with("math.");
-    let (text, offset) = if math {
-        (format!("$ {} $", rendered.text), 2)
-    } else {
-        (rendered.text, 0)
-    };
-    match element_at(&text, offset) {
-        ElementAtResult::Found { element } => Some(element),
-        _ => None,
-    }
-}
-
-/// Схема элемента без вычисленных полей — для сборки текста, которой
-/// начальные значения не нужны (и которая сама их вычисляет).
-pub(crate) fn raw_spec(id: &str) -> Option<ElementSpec> {
-    schema()
-        .get(id)
-        .filter(|element| !element.params.is_empty())
-        .cloned()
 }
