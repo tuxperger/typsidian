@@ -30,6 +30,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Имя и версия пакета берутся из `tauri.conf.json`, а не из тега: без
+      # этой сверки тег `v0.2.0` выпустил бы релиз с `Typsidian_0.1.0_amd64.deb`.
+      - name: Тег совпадает с версией оболочки
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::тег $GITHUB_REF_NAME, а в tauri.conf.json версия $version"
+            exit 1
+          fi
+
       - name: Системные библиотеки Tauri
         run: |
           sudo apt-get update
