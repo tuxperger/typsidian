@@ -54,6 +54,16 @@ jobs:
       - name: Разрешить песочницу chromium
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # На образе раннера предустановлен Google Chrome своей версии, и
+      # chromedriver из флейка находит по PATH его раньше, чем chromium из
+      # dev-shell: версии не сходятся, сессия не создаётся. Локально системного
+      # браузера нет — оставляем раннеру тоже только тот, что даёт флейк.
+      - name: Убрать системные браузеры
+        run: |
+          sudo rm -f /usr/bin/google-chrome /usr/bin/google-chrome-stable \
+            /usr/bin/chromium /usr/bin/chromium-browser /usr/bin/chromedriver
+          sudo rm -rf /opt/google/chrome
+
       # Typst собирается долго; ключ — лок-файлы зависимостей и тулчейна.
       - uses: actions/cache@v4
         id: cargo-cache
