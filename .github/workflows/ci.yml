@@ -1,0 +1,67 @@
+# Гейты качества на каждый пуш и PR — те же, что локально:
+# `.specify/scripts/typsidian/gates.sh all` (Definition of done конституции).
+#
+# Тулчейн берётся из флейка, как и на машине разработчика: вне `nix develop`
+# нет ни cargo, ни pnpm, ни wasm-pack, и версии wasm-bindgen в `Cargo.lock` и
+# CLI обязаны совпадать — флейк это и гарантирует.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Гейты (ядро под оба таргета, типы, i18n, web)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Ubuntu 24.04 запрещает непривилегированные user namespaces через
+      # AppArmor, а без них песочница chromium не стартует — и
+      # wasm-bindgen-test падает ещё до первого теста.
+      - name: Разрешить песочницу chromium
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Typst собирается долго; ключ — лок-файлы зависимостей и тулчейна.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('flake.lock', 'Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Dev-shell
+        run: nix develop -c true
+
+      - name: Зависимости фронтенда
+        run: nix develop -c pnpm install --frozen-lockfile
+
+      - name: Гейты ядра (fmt, i18n, оба таргета, cargo test, wasm-bindgen-test)
+        run: nix develop -c .specify/scripts/typsidian/gates.sh core
+
+      - name: Гейты фронтенда (wasm → ui → typecheck)
+        run: nix develop -c .specify/scripts/typsidian/gates.sh ui
+
+      - name: Роадмап соответствует спекам
+        run: .specify/scripts/typsidian/roadmap.sh --check
+
+      - name: Сборка web-клиента
+        run: nix develop -c pnpm build

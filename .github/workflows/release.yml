@@ -1,0 +1,85 @@
+# Сборка оболочки рабочего стола и выпуск релиза.
+#
+#   тег `v*`            → .deb прикладывается к GitHub Release
+#   ручной запуск       → .deb остаётся артефактом прогона
+#
+# Собирается НЕ через флейк: бинарь из dev-shell слинкован с библиотеками из
+# /nix/store и на обычном Debian/Ubuntu не запустится. Здесь — системные
+# WebKitGTK и rustup, как у пользователя пакета. Ubuntu 22.04 выбрана как
+# самая старая glibc, на которой есть webkit2gtk-4.1.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Те же версии, что даёт dev-shell флейка.
+  TAURI_CLI_VERSION: "2.11.4"
+  PNPM_VERSION: "12.3.4"
+
+jobs:
+  desktop-deb:
+    name: Typsidian .deb (x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Системные библиотеки Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev build-essential pkg-config file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack,tauri-cli@${{ env.TAURI_CLI_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Порядок тот же, что в `nix/desktop.nix`: оболочке wasm не нужен, но
+      # `ui` без сгенерированных типов ядра не проходит `tsc`.
+      - name: Ядро под wasm32 → ui/src/wasm-core
+        run: pnpm build:wasm
+
+      - name: "@typsidian/ui → ui/dist"
+        run: pnpm --filter @typsidian/ui build
+
+      - name: cargo tauri build
+        working-directory: apps/desktop
+        run: cargo tauri build --bundles deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: typsidian-deb
+          path: target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" target/release/bundle/deb/*.deb \
+            --title "Typsidian $GITHUB_REF_NAME" --generate-notes
