@@ -1,0 +1,51 @@
+# Хуки фаз Spec Kit для Typsidian.
+#
+# Закрепляют гейты из конституции («Рабочий процесс и гейты качества») так,
+# чтобы их нельзя было пропустить, переходя от фазы к фазе:
+#
+# - после specify — clarify: неоднозначности снимаются до плана, а не в нём;
+# - после tasks   — analyze: конституция прямо запрещает его пропускать;
+# - после implement — quality-gates-typsidian (Definition of done), затем
+#   converge: сверка кода со spec/plan/tasks, чтобы «реализовано» означало
+#   «сделано всё из tasks.md», а не «задачи отмечены».
+#
+# specs/ROADMAP.md здесь не хук: его перегенерирует хук Claude Code
+# (.claude/hooks/post-edit.sh) при каждой правке артефакта спеки.
+#
+# Команда пишется через точки; агент превращает её в скилл с дефисами
+# (`speckit.clarify` → `/speckit-clarify`).
+
+hooks:
+  after_specify:
+    - extension: typsidian-gates
+      command: speckit.clarify
+      description: Снять неоднозначности спеки до планирования
+      optional: false
+      enabled: true
+
+  before_plan:
+    - extension: typsidian-gates
+      command: speckit.checklist
+      description: Гейт качества требований перед планом (конституция, шаг 2)
+      optional: true
+      prompt: Прогнать чеклист качества требований перед планированием?
+      enabled: true
+
+  after_tasks:
+    - extension: typsidian-gates
+      command: speckit.analyze
+      description: Read-only гейт согласованности spec/plan/tasks (MUST NOT пропускаться)
+      optional: false
+      enabled: true
+
+  after_implement:
+    - extension: typsidian-gates
+      command: quality-gates.typsidian
+      description: Definition of done из конституции — оба таргета ядра, тесты, типы, i18n
+      optional: false
+      enabled: true
+    - extension: typsidian-gates
+      command: speckit.converge
+      description: Сверить код со спекой и дописать в tasks.md то, что не построено
+      optional: false
+      enabled: true
