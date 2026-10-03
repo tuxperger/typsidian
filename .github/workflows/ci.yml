@@ -56,6 +56,7 @@ jobs:
 
       # Typst собирается долго; ключ — лок-файлы зависимостей и тулчейна.
       - uses: actions/cache@v4
+        id: cargo-cache
         with:
           path: |
             target
@@ -67,6 +68,15 @@ jobs:
 
       - name: Dev-shell
         run: nix develop -c true
+
+      # wasm-bindgen-test при незапустившемся браузере сообщает только
+      # «http status: 404» — и то через полчаса сборки. Здесь chromium
+      # запускается напрямую: причина видна сразу и своими словами.
+      - name: Chromium из dev-shell стартует
+        run: |
+          # CHROME_PATH выставляет shellHook, раскрыть его должен внутренний sh.
+          # shellcheck disable=SC2016
+          nix develop -c sh -c '"$CHROME_PATH" --headless --disable-gpu --dump-dom about:blank'
 
       - name: Зависимости фронтенда
         run: nix develop -c pnpm install --frozen-lockfile
@@ -82,3 +92,14 @@ jobs:
 
       - name: Сборка web-клиента
         run: nix develop -c pnpm build
+
+      # actions/cache сохраняет только зелёный прогон, а красный на гейтах
+      # иначе каждый раз пересобирал бы Typst с нуля.
+      - uses: actions/cache/save@v4
+        if: failure() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('flake.lock', 'Cargo.lock') }}
