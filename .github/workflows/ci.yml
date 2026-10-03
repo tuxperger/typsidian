@@ -19,6 +19,16 @@ concurrency:
 permissions:
   contents: read
 
+# Раннер даёт ~14 ГБ свободного места, а dev-shell (chromium, WebKitGTK) и
+# сборка Typst под два таргета с тестами в них не помещаются: первый прогон
+# упал на `cargo test` с «No space left on device». Отладочная информация —
+# большая часть `target/`, и в CI её никто не читает; инкрементальная сборка
+# на чистом раннере тоже только занимает место.
+env:
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   gates:
     name: Гейты (ядро под оба таргета, типы, i18n, web)
@@ -26,6 +36,13 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      # Предустановленные SDK, которыми сборка не пользуется: ~25 ГБ.
+      - name: Освободить диск раннера
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
 
       - uses: cachix/install-nix-action@v31
         with:
