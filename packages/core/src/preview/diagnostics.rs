@@ -5,6 +5,7 @@
 //! конкретного файла (research.md §7). Разделение «ошибка/предупреждение»
 //! берётся из формы `Warned`, а не из разбора текста сообщения (FR-018).
 
+use crate::messages::AppMessage;
 use serde::{Deserialize, Serialize};
 use typst::diag::{Severity, SourceDiagnostic};
 use typst::syntax::FileId;
@@ -43,8 +44,11 @@ pub struct DiagnosticLocation {
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
-    /// Причина словами. Общий текст «не удалось собрать» запрещён (FR-012) —
-    /// здесь всегда сообщение самого компилятора.
+    /// Причина словами. Общий текст «не удалось собрать» запрещён (FR-012).
+    ///
+    /// У замечаний компилятора — его собственный текст, он показывается как
+    /// есть (010 FR-004). У замечаний приложения — [`AppMessage::log_text`],
+    /// текст для журналов: показывается не он, а [`Diagnostic::app`].
     pub message: String,
     /// Место; `None` для замечания без привязки к файлу.
     pub location: Option<DiagnosticLocation>,
@@ -58,14 +62,30 @@ pub struct Diagnostic {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub template: Option<String>,
+    /// Сообщение приложения — вид и параметры (фича 010, FR-002).
+    ///
+    /// `Some` ⇔ замечание сформировало само приложение, и интерфейс собирает
+    /// его текст на языке пользователя; `None` — это замечание Typst.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub app: Option<AppMessage>,
+}
+
+impl Diagnostic {
+    /// Замечание приложения без места в тексте.
+    pub fn app(severity: DiagnosticSeverity, message: AppMessage) -> Self {
+        Self {
+            severity,
+            message: message.log_text(),
+            location: None,
+            template: None,
+            app: Some(message),
+        }
+    }
 }
 
 /// Переводит диагностику компилятора в форму для UI.
-pub fn translate(
-    world: &dyn World,
-    main: FileId,
-    diagnostic: &SourceDiagnostic,
-) -> Diagnostic {
+pub fn translate(world: &dyn World, main: FileId, diagnostic: &SourceDiagnostic) -> Diagnostic {
     let severity = match diagnostic.severity {
         Severity::Error => DiagnosticSeverity::Error,
         Severity::Warning => DiagnosticSeverity::Warning,
@@ -76,6 +96,7 @@ pub fn translate(
         message: diagnostic.message.to_string(),
         location: locate(world, main, diagnostic),
         template: None,
+        app: None,
     }
 }
 

@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n/index.js";
+
 export interface BulkChangeIndicatorProps {
   /**
    * Идёт ли сейчас массовое изменение. Считать нужно именно вложенностью
@@ -18,10 +20,11 @@ export interface BulkChangeIndicatorProps {
 export function BulkChangeIndicator({
   active,
 }: BulkChangeIndicatorProps): React.JSX.Element | null {
+  const { t } = useI18n();
   if (!active) return null;
   return (
     <div role="status" aria-live="polite">
-      <p>Идёт массовое обновление vault — дерево приводится в соответствие с диском.</p>
+      <p>{t("tree.bulkChange")}</p>
     </div>
   );
 }

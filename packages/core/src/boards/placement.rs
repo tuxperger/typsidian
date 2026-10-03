@@ -116,7 +116,8 @@ fn relative_to(from: &Path, target: &Path) -> String {
         .take_while(|(left, right)| left == right)
         .count();
 
-    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), from.len() - shared).collect();
+    let mut parts: Vec<String> =
+        std::iter::repeat_n("..".to_string(), from.len() - shared).collect();
     parts.extend(
         target[shared..]
             .iter()
@@ -199,7 +200,12 @@ mod tests {
     fn section_root_falls_back_to_the_vault_root_without_an_error() {
         // FR-006: отсутствие помеченных предков — не ошибка.
         assert_eq!(
-            path_of(AssetsPlacement::SectionRoot, "Личное/Мысли.typ", &["Работа"]).as_deref(),
+            path_of(
+                AssetsPlacement::SectionRoot,
+                "Личное/Мысли.typ",
+                &["Работа"]
+            )
+            .as_deref(),
             Some("assets/Мысли/board-47dc7994.svg")
         );
     }

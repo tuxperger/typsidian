@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../icons/Icons.js";
-import { plural } from "../plural.js";
+import { useI18n, type I18n } from "../i18n/index.js";
 import type { Note } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "./useDismissOnEscape.js";
 
@@ -16,6 +16,11 @@ import { useDismissOnEscape } from "./useDismissOnEscape.js";
 export interface PaletteCommand {
   id: string;
   title: string;
+  /**
+   * Название по-английски — палитра находит команду и по нему, на любом языке
+   * интерфейса (фича 010, FR-024). Показывается всегда `title`.
+   */
+  titleEn?: string;
   /** Подсказка справа — сочетание клавиш; пустая, если его нет. */
   meta?: string;
   icon: IconName;
@@ -40,6 +45,8 @@ export function CommandPalette({
   onOpenNote,
   onClose,
 }: CommandPaletteProps): React.JSX.Element {
+  const i18n = useI18n();
+  const { t } = i18n;
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -54,15 +61,19 @@ export function CommandPalette({
         kind: "note" as const,
         key: `note:${note.path}`,
         title: note.name,
-        meta: describeChangedAt(note.stamp.mtime_millis),
+        meta: describeChangedAt(i18n, note.stamp.mtime_millis),
         note,
       }));
-  }, [notes, query]);
+  }, [notes, query, i18n]);
 
   const commandRows = useMemo<Row[]>(() => {
     const needle = query.trim().toLowerCase();
     return commands
-      .filter((command) => command.title.toLowerCase().includes(needle))
+      .filter(
+        (command) =>
+          command.title.toLowerCase().includes(needle) ||
+          (command.titleEn?.toLowerCase().includes(needle) ?? false),
+      )
       .map((command) => ({
         kind: "command" as const,
         key: `command:${command.id}`,
@@ -131,7 +142,7 @@ export function CommandPalette({
         className="ts-palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Палитра команд"
+        aria-label={t("palette.label")}
         onKeyDown={onKeyDown}
       >
         <div className="ts-palette__search">
@@ -149,8 +160,8 @@ export function CommandPalette({
             aria-controls="ts-palette-list"
             aria-activedescendant={rows[active] ? rowId(rows[active]) : undefined}
             value={query}
-            aria-label="Введите команду или название заметки"
-            placeholder="Введите команду или название заметки…"
+            aria-label={t("palette.inputLabel")}
+            placeholder={t("palette.placeholder")}
             onChange={(event) => {
               setQuery(event.target.value);
               setActive(0);
@@ -159,7 +170,7 @@ export function CommandPalette({
           <button
             type="button"
             className="ts-btn ts-btn--ghost"
-            aria-label="Закрыть палитру"
+            aria-label={t("palette.close")}
             onClick={onClose}
           >
             <Icon name="x" size={12} />
@@ -169,7 +180,7 @@ export function CommandPalette({
         <ul className="ts-palette__list" id="ts-palette-list" role="listbox" ref={listRef}>
           {noteRows.length > 0 && (
             <li className="ts-palette__group" role="presentation">
-              Заметки
+              {t("palette.groupNotes")}
             </li>
           )}
           {noteRows.map((row) => (
@@ -183,7 +194,7 @@ export function CommandPalette({
 
           {commandRows.length > 0 && (
             <li className="ts-palette__group" role="presentation">
-              Команды
+              {t("palette.groupCommands")}
             </li>
           )}
           {commandRows.map((row) => (
@@ -197,7 +208,7 @@ export function CommandPalette({
 
           {rows.length === 0 && (
             <li className="ts-palette__empty" role="presentation">
-              ничего не найдено
+              {t("palette.nothingFound")}
             </li>
           )}
         </ul>
@@ -205,15 +216,15 @@ export function CommandPalette({
         <div className="ts-palette__hints">
           <span>
             <Icon name="updown" size={11} />
-            навигация
+            {t("palette.hintNavigate")}
           </span>
           <span>
             <Icon name="enter" size={11} />
-            открыть
+            {t("palette.hintOpen")}
           </span>
           <span>
             <Icon name="x" size={11} />
-            esc закрыть
+            {t("palette.hintClose")}
           </span>
         </div>
       </div>
@@ -265,19 +276,18 @@ function PaletteRow({
  * `packages/core/src/vault/web.rs`), и показывать вместо этого «55 лет назад»
  * было бы враньём. В таком случае мета просто пустая.
  */
-function describeChangedAt(mtimeMillis: number): string {
+function describeChangedAt(i18n: I18n, mtimeMillis: number): string {
   if (!mtimeMillis) return "";
   const elapsed = Date.now() - mtimeMillis;
   if (elapsed < 0) return "";
 
-  // `plural` уже подставляет само число — снаружи его дублировать нельзя.
   const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 1) return "изменено сейчас";
-  if (minutes < 60) return `${plural(minutes, "минуту", "минуты", "минут")} назад`;
+  if (minutes < 1) return i18n.t("palette.changedNow");
+  if (minutes < 60) return i18n.formatRelative(-minutes, "minute");
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${plural(hours, "час", "часа", "часов")} назад`;
+  if (hours < 24) return i18n.formatRelative(-hours, "hour");
 
   const days = Math.floor(hours / 24);
-  return `${plural(days, "день", "дня", "дней")} назад`;
+  return i18n.formatRelative(-days, "day");
 }

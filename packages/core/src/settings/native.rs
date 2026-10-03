@@ -70,7 +70,8 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), StoreError> {
     {
         use std::io::Write;
         let mut file = std::fs::File::create(&temporary).map_err(|_| StoreError::Io)?;
-        file.write_all(contents.as_bytes()).map_err(|_| StoreError::Io)?;
+        file.write_all(contents.as_bytes())
+            .map_err(|_| StoreError::Io)?;
         // Без fsync rename может опередить попадание данных на носитель, и
         // при потере питания на месте окажется пустой файл вместо старого.
         file.sync_all().map_err(|_| StoreError::Io)?;
@@ -220,15 +221,13 @@ impl NativeStore {
     /// перестала бы работать после первого же `rename`.
     fn start_watch(&mut self) {
         let dirty = self.dirty.clone();
-        let Ok(mut debouncer) = new_debouncer(
-            WATCH_DEBOUNCE,
-            None,
-            move |result: DebounceEventResult| {
+        let Ok(mut debouncer) =
+            new_debouncer(WATCH_DEBOUNCE, None, move |result: DebounceEventResult| {
                 if result.is_ok() {
                     dirty.store(true, Ordering::Relaxed);
                 }
-            },
-        ) else {
+            })
+        else {
             return;
         };
         if debouncer

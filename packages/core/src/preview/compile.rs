@@ -16,14 +16,15 @@ use typst_layout::PagedDocument;
 use super::cache::PackageCache;
 use super::diagnostics::{sort_by_location, translate, Diagnostic, DiagnosticSeverity};
 use super::fonts::FontSet;
-use super::pages::{render_pages, RenderedPage};
 use super::packages::{
-    fetch_and_install, source_url, verify_installed, FingerprintCheck, InstallError,
-    InstallReport, TemplateSource,
+    fetch_and_install, source_url, verify_installed, FingerprintCheck, InstallError, InstallReport,
+    TemplateSource,
 };
+use super::pages::{render_pages, RenderedPage};
 use super::resolve::{read_dependency, vault_path, ResolveError};
 use super::snapshot::{DependencySnapshot, SnapshotError};
 use super::world::PreviewWorld;
+use crate::messages::{AppMessage, FingerprintActual};
 use crate::vault::backend::VaultBackend;
 
 /// Чем закончилась сборка (data-model.md «CompileOutcome»).
@@ -68,7 +69,7 @@ pub fn compile_note(
     let main = DependencySnapshot::file_id(note_path)?;
     let mut snapshot = DependencySnapshot::new();
     snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
-    Ok(compile_with(main, note_path, snapshot, revision, fonts).0)
+    Ok(compile_with(main, note_path, snapshot, revision, fonts, &Render::Pages).0)
 }
 
 /// Собирает заметку, догружая связанные файлы через vault (T014-T015).
@@ -93,11 +94,44 @@ pub async fn compile_note_resolved<B: VaultBackend>(
     revision: u64,
     fonts: FontSet,
 ) -> Result<CompiledDocument, SnapshotError> {
-    let (document, failures) =
-        compile_collecting_failures(backend, packages, note_path, source_text, revision, fonts)
-            .await?;
+    let (document, _, failures) = compile_collecting_failures(
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+        &Render::Pages,
+    )
+    .await?;
     Ok(with_resolve_failures(document, failures))
 }
+
+/// Что получить из свёрстанного документа (009/research.md §3).
+///
+/// Цикл резолва один на предпросмотр и экспорт: второй его экземпляр был бы
+/// вторым мнением о том, как собирается заметка, и разошёлся бы с первым при
+/// первой же правке. Различается только последний шаг — во что превратить
+/// `PagedDocument`.
+#[derive(Debug, Clone)]
+pub(crate) enum Render {
+    /// Страницы SVG с текстовым слоем — для предпросмотра.
+    Pages,
+    /// Файл PDF — для экспорта (фича 009).
+    Pdf(PdfMeta),
+}
+
+/// Метаданные PDF, которые задаёт приложение, а не документ (009/research.md §2).
+#[derive(Debug, Clone)]
+pub(crate) struct PdfMeta {
+    /// Стабильный идентификатор документа между экспортами одной заметки —
+    /// путь заметки в vault.
+    pub ident: String,
+}
+
+/// Байты PDF последнего прохода. `None` — документ не собран или вывод был
+/// страницами.
+pub(crate) type PdfBytes = Option<Vec<u8>>;
 
 /// То же, но причины отказов возвращаются **структурно**, а не превращёнными в
 /// текст диагностик.
@@ -113,7 +147,8 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
     source_text: &str,
     revision: u64,
     fonts: FontSet,
-) -> Result<(CompiledDocument, Vec<(String, ResolveError)>), SnapshotError> {
+    render: &Render,
+) -> Result<(CompiledDocument, PdfBytes, Vec<(String, ResolveError)>), SnapshotError> {
     let main = DependencySnapshot::file_id(note_path)?;
     let mut snapshot = DependencySnapshot::new();
     snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
@@ -126,14 +161,30 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
     // пользователя названным (FR-021).
     let mut failures: Vec<(String, ResolveError)> = Vec::new();
 
+    // Шрифты из папки vault (FR-027): список — на каждую сборку, чтобы шрифт,
+    // положенный в папку, действовал без переоткрытия заметки (FR-029).
+    let (vault_fonts, font_problems) = packages.vault_fonts().load(backend).await;
+    let fonts = fonts.with_fonts(vault_fonts);
+    let with_font_problems = |(mut document, pdf): (CompiledDocument, PdfBytes)| {
+        // Предупреждение, а не ошибка: без этого файла документ всё равно
+        // собирается — с подстановкой шрифта, о которой скажет сам Typst.
+        document.diagnostics.extend(
+            font_problems
+                .iter()
+                .map(|problem| Diagnostic::app(DiagnosticSeverity::Warning, problem.app_message())),
+        );
+        (document, pdf)
+    };
+
     loop {
-        let (document, mut returned) =
-            compile_with(main, note_path, snapshot, revision, fonts.clone());
+        let (document, pdf, mut returned) =
+            compile_with(main, note_path, snapshot, revision, fonts.clone(), render);
 
         let missing = returned.missing();
         if missing.is_empty() || !returned.begin_iteration() {
             packages.absorb(&returned);
-            return Ok((document, failures));
+            let (document, pdf) = with_font_problems((document, pdf));
+            return Ok((document, pdf, failures));
         }
 
         // Проход считается продуктивным, если хоть один файл догрузился. Без
@@ -160,9 +211,11 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
         }
 
         if !progressed {
-            let (document, returned) = compile_with(main, note_path, returned, revision, fonts);
+            let (document, pdf, returned) =
+                compile_with(main, note_path, returned, revision, fonts, render);
             packages.absorb(&returned);
-            return Ok((document, failures));
+            let (document, pdf) = with_font_problems((document, pdf));
+            return Ok((document, pdf, failures));
         }
 
         snapshot = returned;
@@ -196,13 +249,72 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
     fonts: FontSet,
     policy: &TemplatePolicy,
 ) -> Result<CompiledDocument, SnapshotError> {
-    let (document, failures) = compile_collecting_failures(
+    let (document, _) = build_with_templates(
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+        policy,
+        &Render::Pages,
+    )
+    .await?;
+    Ok(document)
+}
+
+/// Тело [`compile_note_with_templates`] с выбором вывода: тот же путь
+/// доустановки шаблонов обслуживает и экспорт в PDF (фича 009), иначе заметка
+/// с внешним шаблоном собиралась бы в предпросмотре и не собиралась в экспорте.
+///
+/// Байты PDF возвращаются только вместе с документом без ошибок: отказ,
+/// дописанный после сборки (непрочитанный файл, неудачная установка), делает
+/// документ несобранным, и файл из него писать нельзя (009 FR-008).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn build_with_templates<B: VaultBackend>(
+    backend: &mut B,
+    packages: &PackageCache,
+    note_path: &str,
+    source_text: &str,
+    revision: u64,
+    fonts: FontSet,
+    policy: &TemplatePolicy,
+    render: &Render,
+) -> Result<(CompiledDocument, PdfBytes), SnapshotError> {
+    let (document, pdf) = build_installing_templates(
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+        policy,
+        render,
+    )
+    .await?;
+    let pdf = pdf.filter(|_| document.outcome == CompileOutcome::Succeeded);
+    Ok((document, pdf))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn build_installing_templates<B: VaultBackend>(
+    backend: &mut B,
+    packages: &PackageCache,
+    note_path: &str,
+    source_text: &str,
+    revision: u64,
+    fonts: FontSet,
+    policy: &TemplatePolicy,
+    render: &Render,
+) -> Result<(CompiledDocument, PdfBytes), SnapshotError> {
+    let (document, pdf, failures) = compile_collecting_failures(
         backend,
         packages,
         note_path,
         source_text,
         revision,
         fonts.clone(),
+        render,
     )
     .await?;
 
@@ -220,7 +332,7 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
             .diagnostics
             .extend(fingerprint_notes(backend, packages).await);
         sort_by_location(&mut document.diagnostics);
-        return Ok(document);
+        return Ok((document, pdf));
     }
 
     let mut notes: Vec<Diagnostic> = Vec::new();
@@ -235,27 +347,28 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
                     packages.forget(&parsed);
                 }
                 // FR-006: молчаливой загрузки не бывает — что и откуда.
-                notes.push(Diagnostic {
-                    severity: DiagnosticSeverity::Warning,
-                    message: format!(
-                        "шаблон {} загружен с {} ({} файлов, отпечаток {})",
-                        report.spec,
-                        report.url,
-                        report.file_count,
-                        &report.fingerprint[..12.min(report.fingerprint.len())]
-                    ),
-                    location: None,
-                    template: None,
-                });
+                notes.push(Diagnostic::app(
+                    DiagnosticSeverity::Warning,
+                    AppMessage::TemplateDownloaded {
+                        spec: report.spec,
+                        url: report.url,
+                        file_count: u32::try_from(report.file_count).unwrap_or(u32::MAX),
+                        fingerprint: report.fingerprint,
+                    },
+                ));
             }
             Err(error) => {
                 // FR-007: причина и тот адрес, к которому обращались.
                 notes.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    message: error.to_string(),
-                    location: None,
                     // Кнопка «загрузить» в интерфейсе — по этому полю.
                     template: Some(spec.clone()),
+                    ..Diagnostic::app(
+                        DiagnosticSeverity::Error,
+                        AppMessage::TemplateInstallFailed {
+                            spec: spec.clone(),
+                            reason: error,
+                        },
+                    )
                 });
             }
         }
@@ -265,21 +378,28 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
         let mut document = with_resolve_failures(document, failures);
         document.diagnostics.extend(notes);
         sort_by_location(&mut document.diagnostics);
-        return Ok(document);
+        return Ok((document, pdf));
     }
 
     // Пересборка: теперь недостающие шаблоны на месте. Прежние причины отказов
     // не переносятся — они относились к состоянию до установки.
-    let (document, failures) =
-        compile_collecting_failures(backend, packages, note_path, source_text, revision, fonts)
-            .await?;
+    let (document, pdf, failures) = compile_collecting_failures(
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+        render,
+    )
+    .await?;
     let mut document = with_resolve_failures(document, failures);
     document.diagnostics.extend(notes);
     document
         .diagnostics
         .extend(fingerprint_notes(backend, packages).await);
     sort_by_location(&mut document.diagnostics);
-    Ok(document)
+    Ok((document, pdf))
 }
 
 /// Замечания о шаблонах, чьё содержимое разошлось с записанным отпечатком
@@ -302,29 +422,25 @@ async fn fingerprint_notes<B: VaultBackend>(
         if !packages.mark_verified(&spec) {
             continue;
         }
-        if let FingerprintCheck::Diverged { recorded, actual } =
-            verify_installed(backend, &spec).await
-        {
-            notes.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                message: format!(
-                    "содержимое шаблона {spec} разошлось с записанным отпечатком \
-                     ({} вместо {}); приложение его не переустанавливает",
-                    short(&actual),
-                    short(&recorded)
-                ),
-                location: None,
-                template: None,
-            });
-        }
+        let (recorded, actual) = match verify_installed(backend, &spec).await {
+            FingerprintCheck::Diverged { recorded, actual } => {
+                (recorded, FingerprintActual::Digest { digest: actual })
+            }
+            FingerprintCheck::FileMissing { recorded, name } => {
+                (recorded, FingerprintActual::FileMissing { name })
+            }
+            FingerprintCheck::Matches | FingerprintCheck::Unknown => continue,
+        };
+        notes.push(Diagnostic::app(
+            DiagnosticSeverity::Warning,
+            AppMessage::TemplateFingerprintDiverged {
+                spec: spec.to_string(),
+                recorded,
+                actual,
+            },
+        ));
     }
     notes
-}
-
-/// Отпечаток в сообщении — первые двенадцать знаков: этого хватает, чтобы
-/// сличить два значения глазами, а полная строка заняла бы всю ширину панели.
-fn short(digest: &str) -> &str {
-    &digest[..12.min(digest.len())]
 }
 
 /// Что делать с недостающими шаблонами (FR-004, FR-009).
@@ -427,7 +543,8 @@ fn compile_with(
     snapshot: DependencySnapshot,
     revision: u64,
     fonts: FontSet,
-) -> (CompiledDocument, DependencySnapshot) {
+    render: &Render,
+) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
     let world = PreviewWorld::new(main, snapshot, fonts.into_fonts());
     let compiled = typst::compile::<PagedDocument>(&world);
 
@@ -437,11 +554,21 @@ fn compile_with(
         .map(|d| translate(&world, main, d))
         .collect();
 
-    let (outcome, pages) = match compiled.output {
-        Ok(document) => (CompileOutcome::Succeeded, render_pages(&document)),
-        Err(errors) => {
+    let (outcome, pages, pdf) = match (compiled.output, render) {
+        (Ok(document), Render::Pages) => (CompileOutcome::Succeeded, render_pages(&document), None),
+        // Вывод в PDF тоже может отказать: например, шрифт без нужных таблиц
+        // или изображение, которое экспорт не умеет встроить. Такой отказ —
+        // диагностика того же вида, что ошибка сборки, и файл тогда не пишется.
+        (Ok(document), Render::Pdf(meta)) => match typst_pdf::pdf(&document, &pdf_options(meta)) {
+            Ok(bytes) => (CompileOutcome::Succeeded, Vec::new(), Some(bytes)),
+            Err(errors) => {
+                diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
+                (CompileOutcome::Failed, Vec::new(), None)
+            }
+        },
+        (Err(errors), _) => {
             diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
-            (CompileOutcome::Failed, Vec::new())
+            (CompileOutcome::Failed, Vec::new(), None)
         }
     };
 
@@ -455,9 +582,27 @@ fn compile_with(
             pages,
             diagnostics,
         },
+        pdf,
         world.into_snapshot(),
     )
 }
+
+/// Параметры PDF (009/research.md §2).
+///
+/// `timestamp: None` — дата документа берётся только из `set document(date:)`:
+/// часов в wasm без JS нет, а одинаковый результат двух экспортов одной
+/// заметки проверяется тестами побайтно.
+fn pdf_options(meta: &PdfMeta) -> typst_pdf::PdfOptions {
+    typst_pdf::PdfOptions {
+        ident: typst::foundations::Smart::Custom(meta.ident.clone()),
+        creator: typst::foundations::Smart::Custom(Some(PDF_CREATOR.to_owned())),
+        timestamp: None,
+        ..typst_pdf::PdfOptions::default()
+    }
+}
+
+/// Метка создателя в метаданных PDF (009 FR-004).
+pub(crate) const PDF_CREATOR: &str = "Typsidian (Typst 0.15.1)";
 
 /// Дописывает к результату причины, по которым связанные файлы не прочитались.
 ///
@@ -471,21 +616,15 @@ fn with_resolve_failures(
         return document;
     }
     for (path, error) in failures {
-        document.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Error,
-            // `describe_owned`, а не `describe`: у отсутствующего шаблона имя
-            // несёт сама причина, и подставленный слева путь внутри пакета
-            // пользователю ничего не говорит — он писал в заметке `@preview/…`
-            // (фича 006, FR-037).
-            message: match &error {
-                ResolveError::PackageMissing { .. } => error.describe_owned(),
-                _ => format!("{path}: {}", error.describe()),
-            },
-            // Места в тексте у такой ошибки нет: она про файл целиком, а не
-            // про позицию в нём. Перехода к ней быть не должно (FR-033).
-            location: None,
-            template: None,
-        });
+        // Места в тексте у такой ошибки нет: она про файл целиком, а не про
+        // позицию в нём. Перехода к ней быть не должно (FR-033). У
+        // отсутствующего шаблона имя несёт сама причина: путь внутри пакета
+        // пользователю ничего не говорит, он писал в заметке `/…`
+        // (фича 006, FR-037).
+        document.diagnostics.push(Diagnostic::app(
+            DiagnosticSeverity::Error,
+            AppMessage::from_resolve(&path, &error),
+        ));
     }
     document.outcome = CompileOutcome::Failed;
     document

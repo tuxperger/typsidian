@@ -1,6 +1,7 @@
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { openVaultAt } from "@typsidian/ui/vault-client-tauri.js";
 import type { VaultOpenResult } from "@typsidian/ui/vault-tree/useVault.js";
+import { currentI18n } from "@typsidian/ui/i18n/index.js";
 
 /**
  * Жест выбора папки на рабочем столе (001 T115).
@@ -18,7 +19,7 @@ export async function openDesktopVault(): Promise<VaultOpenResult> {
   try {
     chosen = await pickDesktopFolder();
   } catch (cause) {
-    return { ok: false, error: { kind: "OpenFailed", message: String(cause) } };
+    return { ok: false, error: { kind: "OpenFailed", detail: String(cause) } };
   }
   // `null` — диалог закрыт без выбора. Отмена ошибкой не считается:
   // пользователь передумал (Assumptions).
@@ -37,7 +38,8 @@ export async function pickDesktopFolder(): Promise<string | null> {
   const selection = await openFolderDialog({
     directory: true,
     multiple: false,
-    title: "Выберите папку с заметками",
+    // Язык — на момент вызова: диалог рисует ОС, перерисовать его нельзя.
+    title: currentI18n().t("shell.pickFolderTitle"),
   });
   return typeof selection === "string" ? selection : null;
 }

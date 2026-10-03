@@ -16,8 +16,11 @@ import type {
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
+import { Icon } from "../icons/Icons.js";
 import { PreviewPage } from "./PreviewPage.js";
 import { describeInstallError } from "./describeInstallError.js";
+import { diagnosticText } from "../i18n/messages.js";
+import { useI18n, type Phrase } from "../i18n/index.js";
 import { copyText, useContextMenu } from "../menu/ContextMenu.js";
 
 // Принцип I: панель ничего не решает про документ. «Собрался или нет»,
@@ -84,6 +87,13 @@ export interface PreviewPaneProps {
    * этим значениям, панель их только передаёт (принцип I).
    */
   vaultOverrides?: VaultOverrides | null;
+  /**
+   * Экспорт открытой заметки в PDF (фича 009, FR-005). `undefined` — кнопки
+   * нет: экспорт недоступен этому клиенту или открыта не заметка.
+   */
+  onExport?: (() => void) | undefined;
+  /** Экспорт идёт — кнопка недоступна, пока не пришёл итог. */
+  exporting?: boolean;
 }
 
 /** Что показывает панель прямо сейчас (data-model.md «PreviewState»). */
@@ -94,6 +104,11 @@ interface PreviewState {
   isStale: boolean;
   isBuilding: boolean;
   diagnostics: Diagnostic[];
+  /**
+   * Сборка не состоялась вовсе — вызов ядра отказал, диагностик нет. Здесь
+   * техническое описание отказа как есть: формулирует его не приложение.
+   */
+  failure: string | null;
 }
 
 const INITIAL: PreviewState = {
@@ -101,6 +116,7 @@ const INITIAL: PreviewState = {
   isStale: false,
   isBuilding: false,
   diagnostics: [],
+  failure: null,
 };
 
 export function PreviewPane({
@@ -110,7 +126,10 @@ export function PreviewPane({
   onStatus,
   rebuildToken = 0,
   vaultOverrides = null,
+  onExport,
+  exporting = false,
 }: PreviewPaneProps): React.JSX.Element {
+  const { t } = useI18n();
   const [state, setState] = useState<PreviewState>(INITIAL);
   const [lastMs, setLastMs] = useState<number | null>(null);
   // Масштаб — дело показа, а не документа: сборка от него не зависит, поэтому
@@ -139,7 +158,7 @@ export function PreviewPane({
   const [installing, setInstalling] = useState<string | null>(null);
   const [installNote, setInstallNote] = useState<{
     ok: boolean;
-    text: string;
+    text: Phrase;
   } | null>(null);
 
   // Сообщение об установке относится к заметке, из которой её попросили.
@@ -156,7 +175,13 @@ export function PreviewPane({
         // FR-006: что и откуда — и при явной загрузке тоже.
         setInstallNote({
           ok: true,
-          text: `Шаблон ${report.spec} загружен с ${report.url} (${report.file_count} файлов, отпечаток ${report.fingerprint.slice(0, 12)}).`,
+          text: (tr) =>
+            tr("app.templateDownloaded", {
+              spec: report.spec,
+              url: report.url,
+              fileCount: report.file_count,
+              fingerprint: report.fingerprint,
+            }),
         });
         setInstallRound((round) => round + 1);
       } catch (cause) {
@@ -210,19 +235,15 @@ export function PreviewPane({
             isStale: document.outcome !== "Succeeded",
             isBuilding: false,
             diagnostics: document.diagnostics,
+            failure: null,
           }));
         } catch (cause) {
           setState((prev) => ({
             ...prev,
             isBuilding: false,
             isStale: true,
-            diagnostics: [
-              {
-                severity: "Error",
-                message: `Сборка не состоялась: ${String(cause)}`,
-                location: undefined,
-              },
-            ],
+            diagnostics: [],
+            failure: String(cause),
           }));
         }
       })();
@@ -298,25 +319,26 @@ export function PreviewPane({
   const percent = Math.round(zoom * 100);
 
   return (
-    <section className="ts-pane ts-pane--preview" aria-label="Предпросмотр">
+    <section className="ts-pane ts-pane--preview" aria-label={t("preview.label")}>
       <div className="ts-pane__toolbar">
-        <span className="ts-eyebrow">Предпросмотр</span>
+        <span className="ts-eyebrow">{t("preview.label")}</span>
         <span className="ts-pane__meta ts-pane__meta--sep">·</span>
-        <span className="ts-pane__meta">A4 · 21×29.7 см</span>
+        <span className="ts-pane__meta" title={t("preview.pageSize")}>{t("preview.pageSize")}</span>
         <span className="ts-spacer" />
-        {state.isBuilding && <span className="ts-tag">собирается…</span>}
+        {/* В узкой колонке метка сжимается многоточием — полный текст в подсказке. */}
+        {state.isBuilding && <span className="ts-tag" title={t("preview.building")}>{t("preview.building")}</span>}
         {state.isStale && !state.isBuilding && (
-          <span className="ts-tag">не соответствует тексту</span>
+          <span className="ts-tag" title={t("preview.stale")}>{t("preview.stale")}</span>
         )}
 
-        <div className="ts-zoom" role="group" aria-label="Масштаб предпросмотра">
+        <div className="ts-zoom" role="group" aria-label={t("preview.zoom.label")}>
           <button
             type="button"
             className="ts-btn ts-zoom__step"
             onClick={() => shiftZoom(setZoomIndex, -1)}
             disabled={zoomIndex === 0}
-            aria-label="Уменьшить масштаб"
-            title="Уменьшить масштаб (Ctrl + колесо)"
+            aria-label={t("preview.zoom.out")}
+            title={t("preview.zoom.outHint")}
           >
             −
           </button>
@@ -326,8 +348,8 @@ export function PreviewPane({
             type="button"
             className="ts-btn ts-zoom__value"
             onClick={() => setZoomIndex(ZOOM_DEFAULT)}
-            aria-label={`Масштаб ${percent}%, вернуть 100%`}
-            title="Вернуть 100 %"
+            aria-label={t("preview.zoom.value", { percent })}
+            title={t("preview.zoom.reset")}
           >
             {percent}&nbsp;%
           </button>
@@ -336,12 +358,25 @@ export function PreviewPane({
             className="ts-btn ts-zoom__step"
             onClick={() => shiftZoom(setZoomIndex, 1)}
             disabled={zoomIndex === ZOOM_STEPS.length - 1}
-            aria-label="Увеличить масштаб"
-            title="Увеличить масштаб (Ctrl + колесо)"
+            aria-label={t("preview.zoom.in")}
+            title={t("preview.zoom.inHint")}
           >
             +
           </button>
         </div>
+
+        {onExport !== undefined && (
+          <button
+            type="button"
+            className="ts-btn"
+            onClick={onExport}
+            disabled={exporting || notePath === null}
+            title={t("workspace.exportPdf")}
+          >
+            <Icon name="download" size={11} />
+            {exporting ? "PDF…" : "PDF"}
+          </button>
+        )}
       </div>
 
       {/* Масштаб уходит в CSS переменной: ширину листа и деления линеек считает
@@ -364,7 +399,7 @@ export function PreviewPane({
               : "";
           contextMenu.open(event, [
             {
-              label: "Копировать",
+              label: t("editor.menu.copy"),
               disabled: selected === "",
               run: async () => {
                 const failure = await copyText(selected);
@@ -373,23 +408,23 @@ export function PreviewPane({
             },
             { kind: "separator" },
             {
-              label: "Пересобрать",
+              label: t("workspace.rebuild"),
               disabled: !client || notePath === null,
               run: () => setMenuRound((round) => round + 1),
             },
             { kind: "separator" },
             {
-              label: "Увеличить",
+              label: t("preview.zoom.inShort"),
               disabled: zoomIndex === ZOOM_STEPS.length - 1,
               run: () => shiftZoom(setZoomIndex, 1),
             },
             {
-              label: "Уменьшить",
+              label: t("preview.zoom.outShort"),
               disabled: zoomIndex === 0,
               run: () => shiftZoom(setZoomIndex, -1),
             },
             {
-              label: "Масштаб 100 %",
+              label: t("preview.zoom.hundred"),
               disabled: zoomIndex === ZOOM_DEFAULT,
               run: () => setZoomIndex(ZOOM_DEFAULT),
             },
@@ -432,14 +467,19 @@ export function PreviewPane({
             {/* Ошибки — на месте предпросмотра, а не строчкой внизу: собранного
                 вида всё равно нет или он устарел, и главное на панели сейчас
                 они. Список остаётся полным и в порядке появления (FR-016). */}
-            {errors.length > 0 && (
+            {(errors.length > 0 || state.failure !== null) && (
               <div className="ts-failure" role="alert">
                 <p className="ts-failure__head">
                   {state.shown
-                    ? "Заметка не собралась — показан прошлый вид"
-                    : "Показывать нечего: заметка ещё ни разу не собралась"}
+                    ? t("preview.failedShowingPrevious")
+                    : t("preview.failedNothingToShow")}
                 </p>
                 <ul className="ts-failure__list">
+                  {state.failure !== null && (
+                    <li className="ts-diagnostics__error">
+                      {t("preview.buildFailed", { detail: state.failure })}
+                    </li>
+                  )}
                   {errors.map((d, i) => (
                     <DiagnosticItem
                       key={`e${i}`}
@@ -454,13 +494,13 @@ export function PreviewPane({
 
             {state.shown ? (
               state.shown.pages.map((page) => <PreviewPage key={page.index} page={page} />)
-            ) : errors.length === 0 ? (
+            ) : errors.length === 0 && state.failure === null ? (
               // Пустая панель без объяснения запрещена (FR-014, SC-004).
               <div className="ts-placeholder">
                 {notePath === null ? (
-                  <p>Откройте заметку, чтобы увидеть её свёрстанный вид.</p>
+                  <p>{t("preview.openNote")}</p>
                 ) : (
-                  <p>Собирается…</p>
+                  <p>{t("preview.buildingLong")}</p>
                 )}
               </div>
             ) : null}
@@ -473,14 +513,14 @@ export function PreviewPane({
           className="ts-diagnostics ts-diagnostics__install"
           role={installNote.ok ? "status" : "alert"}
         >
-          {installNote.text}
+          {installNote.text(t)}
         </p>
       )}
 
       {/* Предупреждения сборку не ломают (FR-018) и остаются внизу: поднимать
           их на место документа значило бы приравнять к ошибкам. */}
       {warnings.length > 0 && (
-        <ul className="ts-diagnostics" aria-label="Предупреждения">
+        <ul className="ts-diagnostics" aria-label={t("preview.warnings")}>
           {warnings.map((d, i) => (
             <DiagnosticItem key={`w${i}`} diagnostic={d} />
           ))}
@@ -520,6 +560,7 @@ function DiagnosticItem({
   /** Какой шаблон ставится прямо сейчас. */
   installing?: string | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const template = diagnostic.template;
   const place = diagnostic.location;
   return (
@@ -530,7 +571,9 @@ function DiagnosticItem({
           : "ts-diagnostics__warning"
       }
     >
-      <span>{diagnostic.message}</span>
+      {/* Сообщение приложения — на языке интерфейса, Typst — как есть
+          (010 FR-004); текст собирается при рендере (FR-014). */}
+      <span>{diagnosticText(t, diagnostic)}</span>
       {place && (
         <span className="ts-diagnostics__place">
           {" "}
@@ -546,7 +589,7 @@ function DiagnosticItem({
             disabled={installing !== null}
             onClick={() => void onInstall(template)}
           >
-            {installing === template ? "Загружается…" : "Загрузить шаблон"}
+            {installing === template ? t("preview.installing") : t("preview.install")}
           </button>
         </>
       )}

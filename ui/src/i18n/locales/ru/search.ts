@@ -1,0 +1,36 @@
+import type { Translation } from "../define.js";
+import { ruN } from "../define.js";
+import type { search as en } from "../en/search.js";
+
+export const search: Translation<typeof en> = {
+  "search.title": "Поиск по vault",
+  "search.placeholder": "искать по заметкам…",
+  "search.inputLabel": "Строка поиска",
+  "search.regexHint": "Искать регулярным выражением",
+  "search.caseHint": "Различать регистр",
+  "search.close": "Закрыть поиск",
+  "search.filters": "фильтры",
+  "search.linksToDisabled": "Откройте заметку, чтобы искать ссылающиеся на неё",
+  "search.linksToHint": "Только заметки, ссылающиеся на открытую",
+  "search.linksTo": (p) => `ссылается на ${p.name}`,
+  "search.openNote": "открытую заметку",
+  "search.modeLabel": "И / ИЛИ",
+  "search.modeGroup": "Как складывать условия",
+  "search.and": "И",
+  "search.or": "ИЛИ",
+  "search.queryLabel": "запрос:",
+  "search.nothingFound": "ничего не найдено",
+  "search.emptyHint": "Введите строку или включите фильтр — поиск идёт по всем заметкам vault.",
+  "search.vaultRoot": "корень vault",
+  "search.matches": (p) => ruN(p.count, "# совпадение", "# совпадения", "# совпадений"),
+  "search.notes": (p) => ruN(p.count, "# заметка", "# заметки", "# заметок"),
+  "search.line": (p) => `стр. ${p.line} · `,
+  "search.truncated": (p) => `Показаны первые ${p.count} заметок — уточните запрос.`,
+  "search.open": "открыть",
+  "search.navigate": "↑↓ выбор",
+  "search.escClose": "Esc закрыть",
+  "search.busy": "ищем…",
+  "search.echoCase": "с учётом регистра",
+  "search.echoNone": "условий нет",
+  "search.badPattern": (p) => `Неверное регулярное выражение: ${p.detail}`,
+};

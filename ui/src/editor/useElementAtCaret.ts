@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { VaultClient } from "../vault-client.js";
 import type { ElementAtResult, UnavailableReason } from "../wasm-core/typsidian_core.js";
+import type { Translate } from "../i18n/index.js";
 
 /**
  * Пауза после движения каретки, после которой спрашивается элемент под ней
@@ -44,20 +45,18 @@ export function useElementAtCaret(
  * Почему «Параметры» недоступны — словами (FR-011). Одна формулировка на все
  * места вызова: панель, контекстное меню, палитру и сочетание (T042).
  */
-export function describeUnavailable(reason: UnavailableReason): string {
+export function describeUnavailable(t: Translate, reason: UnavailableReason): string {
   switch (reason.kind) {
     case "Unclosed":
-      return "Параметры недоступны: в элементе незакрытая скобка или кавычка.";
+      return t("editor.params.unclosed");
     case "DuplicateParam":
-      return `Параметры недоступны: параметр ${reason.name} указан дважды.`;
+      return t("editor.params.duplicate", { name: reason.name });
     case "SpreadArgs":
-      return "Параметры недоступны: аргументы разворачиваются через «..», их значения известны только при сборке.";
+      return t("editor.params.spread");
     case "UnknownPositional":
-      return "Параметры недоступны: значений без имени больше, чем принимает элемент.";
+      return t("editor.params.unknownPositional");
     case "MathRows":
-      return "Параметры недоступны: строки матрицы через «;» форма не разбирает.";
+      return t("editor.params.mathRows");
   }
 }
 
-/** Подпись для мест вызова, когда править нечего (US2 AS5). */
-export const NOTHING_TO_EDIT = "Каретка не в элементе с параметрами — править нечего.";

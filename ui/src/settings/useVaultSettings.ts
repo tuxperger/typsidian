@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { VaultClient } from "../vault-client.js";
+import type { Phrase, Translate } from "../i18n/index.js";
 import type {
   AssetsPlacement,
   CommandId,
@@ -26,7 +27,7 @@ export interface VaultSettingsState {
   /** `null` — ещё не прочитано либо vault не открыт. */
   overrides: VaultOverrides | null;
   /** Причина отказа последней операции, названная ядром. */
-  error: string | null;
+  error: Phrase | null;
   setAssetsPlacement: (placement: AssetsPlacement) => Promise<void>;
   /**
    * Ходить ли в сеть за недостающими шаблонами (фича 007, FR-009).
@@ -41,6 +42,12 @@ export interface VaultSettingsState {
    * отклоняется с названной причиной, и файл не меняется.
    */
   setTemplateSources: (sources: TemplateSourceEntry[]) => Promise<boolean>;
+  /**
+   * Папка экспорта в PDF (фича 009, FR-028). `null` — вернуть умолчание
+   * `export`. Годность и нормальную форму проверяет ядро при записи: негодная
+   * папка отклоняется с причиной, и прежнее значение остаётся (FR-029).
+   */
+  setExportFolder: (folder: string | null) => Promise<boolean>;
   /**
    * Применяет к перекрытиям vault набор изменений, который ядро направило сюда
    * (фича 006, FR-029).
@@ -80,7 +87,7 @@ export function useVaultSettings(
   client: VaultClient | null,
 ): VaultSettingsState {
   const [overrides, setOverrides] = useState<VaultOverrides | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Phrase | null>(null);
 
   const reload = useCallback(async () => {
     if (client === null) {
@@ -94,7 +101,7 @@ export function useVaultSettings(
       // Причина показывается, но не придумывается: у отказа записи в
       // недоступный на запись vault и у испорченного файла разные последствия
       // для пользователя (FR-025, FR-034).
-      setError(describe(cause));
+      setError(() => describe(cause));
     }
   }, [client]);
 
@@ -118,7 +125,7 @@ export function useVaultSettings(
         // Причина ставится **после** перечитывания: удачное чтение сбрасывает
         // ошибку, и в обратном порядке отказ записи исчезал, не показавшись.
         await reload();
-        setError(describe(cause));
+        setError(() => describe(cause));
         return false;
       }
     },
@@ -131,6 +138,18 @@ export function useVaultSettings(
       await write({ ...overrides, auto_download_templates: enabled });
     },
     [overrides, write],
+  );
+
+  const setExportFolder = useCallback(
+    async (folder: string | null) => {
+      if (overrides === null) return false;
+      const written = await write({ ...overrides, export_folder: folder ?? undefined });
+      // Ядро хранит папку в нормальной форме (`pdf\2026/` → `pdf/2026`):
+      // показать надо записанное, а не набранное.
+      if (written) await reload();
+      return written;
+    },
+    [overrides, write, reload],
   );
 
   const setTemplateSources = useCallback(
@@ -195,7 +214,7 @@ export function useVaultSettings(
         );
         setError(null);
       } catch (cause) {
-        setError(describe(cause));
+        setError(() => describe(cause));
       }
     },
     [client],
@@ -220,7 +239,7 @@ export function useVaultSettings(
         setOverrides(await client.setKeybinding(command, shortcut));
         setError(null);
       } catch (cause) {
-        setError(describeKeybinding(cause));
+        setError(() => describeKeybinding(cause));
       }
     },
     [client],
@@ -233,7 +252,7 @@ export function useVaultSettings(
         setOverrides(await client.resetKeybinding(command));
         setError(null);
       } catch (cause) {
-        setError(describe(cause));
+        setError(() => describe(cause));
       }
     },
     [client],
@@ -245,6 +264,7 @@ export function useVaultSettings(
     setAssetsPlacement,
     setAutoDownloadTemplates,
     setTemplateSources,
+    setExportFolder,
     applyChange,
     setEditorFontSize,
     markSection,
@@ -259,19 +279,19 @@ export function useVaultSettings(
  * Отказ назначить сочетание. Негодное сочетание и отказ диска — разные вещи и
  * для пользователя: первое чинится другой клавишей, второе — нет.
  */
-function describeKeybinding(cause: unknown): string {
+function describeKeybinding(cause: unknown): Phrase {
   if (typeof cause === "object" && cause !== null && "kind" in cause) {
     const failure = cause as { kind: string; reason?: { kind?: string } };
     if (failure.kind === "Invalid") {
       switch (failure.reason?.kind) {
         case "NoModifier":
-          return "Нужен модификатор: сочетание без него срабатывало бы при наборе текста.";
+          return (t) => t("settings.keys.noModifier");
         case "ReservedKey":
-          return "Эта клавиша занята интерфейсом — Escape, Enter, Tab и стрелки назначить нельзя.";
+          return (t) => t("settings.keys.reservedKey");
         case "NoKey":
-          return "Нажмите клавишу вместе с модификатором — одного модификатора мало.";
+          return (t) => t("settings.keys.noKey");
         default:
-          return "Такое сочетание назначить нельзя.";
+          return (t) => t("settings.keys.invalid");
       }
     }
     if (failure.kind === "Storage") {
@@ -282,20 +302,47 @@ function describeKeybinding(cause: unknown): string {
 }
 
 /** Причина отказа словами ядра; общего «что-то пошло не так» здесь нет. */
-function describe(cause: unknown): string {
+function describe(cause: unknown): Phrase {
   if (typeof cause === "object" && cause !== null && "kind" in cause) {
     switch ((cause as { kind: string }).kind) {
       case "Unreadable":
-        return "Файл настроек vault не разбирается. Он не перезаписан — поправьте его вручную.";
+        return (t) => t("settings.vaultStore.unreadable");
       case "NotWritable":
-        return "Vault недоступен на запись: настройки уровня vault сохранить некуда.";
+        return (t) => t("settings.vaultStore.notWritable");
       case "NoVaultOpen":
-        return "Vault не открыт.";
+        return (t) => t("settings.vaultStore.noVaultOpen");
       case "InvalidTemplateSource":
-        return `Адрес для шаблона «${(cause as { spec?: string }).spec ?? ""}» не сохранён: нужна спецификация вида @preview/имя:1.2.3 и адрес http(s)://…`;
+        {
+        const spec = (cause as { spec?: string }).spec ?? "";
+        return (t) => t("settings.vaultStore.invalidTemplateSource", { spec });
+      }
+      case "InvalidExportFolder":
+        {
+        const problem = (cause as { problem?: { kind?: string } }).problem?.kind;
+        return (t) =>
+          t("settings.vaultStore.invalidExportFolder", {
+            problem: describeExportFolderProblem(t, problem),
+          });
+      }
       default:
         break;
     }
   }
-  return "Настройки vault прочитать или записать не удалось.";
+  return (t) => t("settings.vaultStore.failed");
+}
+
+/** Почему папка экспорта не годится — словами (009 FR-029). */
+function describeExportFolderProblem(t: Translate, kind: string | undefined): string {
+  switch (kind) {
+    case "Empty":
+      return t("settings.exportFolder.empty");
+    case "Absolute":
+      return t("settings.exportFolder.absolute");
+    case "LeavesVault":
+      return t("settings.exportFolder.leavesVault");
+    case "ServiceFolder":
+      return t("settings.exportFolder.serviceFolder");
+    default:
+      return t("settings.exportFolder.invalid");
+  }
 }

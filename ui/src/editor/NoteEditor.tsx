@@ -27,17 +27,17 @@ import {
 } from "./InsertMenu.js";
 import { useNoteAutoSave, type NoteSaveState } from "./useNoteAutoSave.js";
 import { InsertPanel, useInsertPanelVisible } from "./InsertPanel.js";
-import { elementById, type TypstElement } from "./typstElements.js";
+import { elementById, type LocalizedElement } from "./typstElements.js";
 import { ParamForm, type ParamFormMode } from "./ParamForm.js";
 import {
   describeUnavailable,
-  NOTHING_TO_EDIT,
   useElementAtCaret,
 } from "./useElementAtCaret.js";
 import { parseSnippet, type SnippetFieldState } from "./snippet.js";
 import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 import { useContextMenu } from "../menu/ContextMenu.js";
 import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
+import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 export interface NoteEditorProps {
   client: VaultClient;
@@ -138,10 +138,11 @@ export function NoteEditor({
   shortcuts,
   paramsRequest = 0,
 }: NoteEditorProps): React.JSX.Element {
+  const { t } = useI18n();
   const [content, setContent] = useState("");
   const [readError, setReadError] = useState<ReadError | null>(null);
   const [isInserting, setIsInserting] = useState(false);
-  const [insertError, setInsertError] = useState<string | null>(null);
+  const [insertError, setInsertError] = useState<Phrase | null>(null);
   const [isChoosingBoard, setIsChoosingBoard] = useState(false);
   // Вставка идёт в позицию курсора, а её знает только сам textarea.
   // Позиция курсора нужна двум разным потребителям: статус-бару — на отрисовку,
@@ -237,7 +238,7 @@ export function NoteEditor({
       if (spec?.form_on_insert && request.id) {
         setParamForm({
           spec,
-          title: elementById(request.id)?.name ?? spec.typst,
+          title: elementById(t, request.id)?.name ?? spec.typst,
           mode: { kind: "insert" },
           block: request.block,
         });
@@ -248,7 +249,7 @@ export function NoteEditor({
       // бы двумя путями сразу.
       applyTemplate(request.template, request.block);
     },
-    [applyTemplate, client],
+    [applyTemplate, client, t],
   );
 
   /** Текст заметки сейчас — форме, чтобы ядро сверяло элемент и метки. */
@@ -271,11 +272,11 @@ export function NoteEditor({
       const at = offset ?? view?.state.selection.main.head ?? caretRef.current.offset;
       const found = await client.elementAt(text, at);
       if (found.kind === "None") {
-        contextMenu.notify(NOTHING_TO_EDIT);
+        contextMenu.notify(t("editor.params.nothingToEdit"));
         return;
       }
       if (found.kind === "Unavailable") {
-        contextMenu.notify(describeUnavailable(found.reason));
+        contextMenu.notify(describeUnavailable(t, found.reason));
         return;
       }
       const spec = await client.elementSchema(found.element.id);
@@ -289,7 +290,7 @@ export function NoteEditor({
         block: false,
       });
     },
-    [client, content, contextMenu],
+    [client, content, contextMenu, t],
   );
 
   const closeForm = useCallback(() => {
@@ -353,7 +354,7 @@ export function NoteEditor({
    * здесь не заводится.
    */
   const insertFromPanel = useCallback(
-    (element: TypstElement) => {
+    (element: LocalizedElement) => {
       void insertElement({
         id: element.id,
         template: element.template,
@@ -466,7 +467,10 @@ export function NoteEditor({
           boardContent,
         });
         if (!written.ok) {
-          setInsertError(`Вставить доску не удалось: ${written.reason}.`);
+          const reason = written.reason;
+          setInsertError(() => (tr: Translate) =>
+            tr("editor.insertBoard.failedWith", { reason: reason(tr) }),
+          );
           return;
         }
 
@@ -480,7 +484,7 @@ export function NoteEditor({
         autoSave.changed(next);
         setIsChoosingBoard(false);
       } catch (cause) {
-        setInsertError(describeInsertFailure(cause));
+        setInsertError(() => describeInsertFailure(cause));
       } finally {
         setIsInserting(false);
       }
@@ -533,12 +537,12 @@ export function NoteEditor({
 
   if (!note) {
     return (
-      <section className="ts-pane ts-pane--editor" aria-label="Заметка">
+      <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
         <div className="ts-pane__toolbar">
-          <span className="ts-eyebrow">Редактор</span>
+          <span className="ts-eyebrow">{t("editor.eyebrow")}</span>
         </div>
         <div className="ts-placeholder">
-          <p role="status">Выберите заметку в дереве.</p>
+          <p role="status">{t("editor.chooseNote")}</p>
         </div>
       </section>
     );
@@ -546,27 +550,27 @@ export function NoteEditor({
 
   if (readError) {
     return (
-      <section className="ts-pane ts-pane--editor" aria-label="Заметка">
+      <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
         <div className="ts-pane__toolbar">
           <h2 className="ts-pane__title">{note.name}</h2>
           <span className="ts-spacer" />
           <button type="button" className="ts-btn" onClick={onClose}>
-            Закрыть
+            {t("common.close")}
           </button>
         </div>
         <div className="ts-placeholder">
-          <p role="alert">{describeReadError(readError)}</p>
+          <p role="alert">{describeReadError(t, readError)}</p>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="ts-pane ts-pane--editor" aria-label="Заметка">
+    <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
       <div className="ts-pane__toolbar">
         <h2 className="ts-pane__title">{note.name}</h2>
         <span className="ts-spacer" />
-        <div role="group" aria-label="Действия с заметкой">
+        <div className="ts-group" role="group" aria-label={t("editor.actions")}>
           {/* Меню вставки открывается по ⌘E; кнопка здесь для того, кто про
               сочетание не знает, — сама она ничего не вставляет.
               Только открывает, не переключает: открытое меню закрывается от
@@ -578,29 +582,31 @@ export function NoteEditor({
           {!panelVisible && (
             <button
               type="button"
-              className="ts-btn"
+              className="ts-btn ts-btn--shrink"
               title={hintWith(
-                "Вставить элемент Typst",
+                t("editor.insertElementHint"),
                 shortcuts.displayOf("insert-menu"),
               )}
               aria-haspopup="dialog"
               aria-expanded={isInsertMenuOpen}
               onClick={openInsertMenu}
             >
-              Вставить элемент
+              {t("editor.insertElement")}
             </button>
           )}
           {/* SC-007: от открытой заметки до вставленной доски — два действия,
               эта кнопка и выбор доски в списке. */}
           <button
             type="button"
-            className="ts-btn"
+            className="ts-btn ts-btn--shrink"
+            // В узкой колонке подпись сжимается многоточием (010 SC-006).
+            title={t("editor.insertBoard")}
             onClick={() => {
               setInsertError(null);
               setIsChoosingBoard(true);
             }}
           >
-            Вставить доску
+            {t("editor.insertBoard")}
           </button>
           {/* SC-006: от открытой заметки до сохранённой заготовки — три
               действия, эта кнопка, ввод имени и подтверждение. Сохраняется
@@ -609,10 +615,11 @@ export function NoteEditor({
           {onSaveAsTemplate && (
             <button
               type="button"
-              className="ts-btn"
+              className="ts-btn ts-btn--shrink"
+              title={t("editor.saveAsTemplate")}
               onClick={() => onSaveAsTemplate(content)}
             >
-              Сохранить как заготовку
+              {t("editor.saveAsTemplate")}
             </button>
           )}
           {/* Выключатель панели вставки. В тулбаре, а не в самой панели:
@@ -621,17 +628,17 @@ export function NoteEditor({
             type="button"
             className="ts-btn"
             aria-pressed={panelVisible}
-            title="Панель вставки — строка кнопок над текстом"
+            title={t("editor.panelHint")}
             onClick={togglePanel}
           >
-            Панель
+            {t("editor.panel")}
           </button>
           {/* Кнопки «Сохранить» здесь нет намеренно: набранное уходит в файл
               само, а состояние записи видно в статус-баре. Оставить её значило
               бы завести второй путь к тому же `write` и второй ответ на вопрос
               «сохранено ли». */}
           <button type="button" className="ts-btn" onClick={onClose}>
-            Закрыть
+            {t("common.close")}
           </button>
         </div>
       </div>
@@ -646,7 +653,7 @@ export function NoteEditor({
             caretElement?.kind === "Found"
               ? { available: true }
               : caretElement?.kind === "Unavailable"
-                ? { available: false, reason: describeUnavailable(caretElement.reason) }
+                ? { available: false, reason: describeUnavailable(t, caretElement.reason) }
                 : null
           }
           paramsShortcut={shortcuts.displayOf("element-params")}
@@ -656,7 +663,8 @@ export function NoteEditor({
 
       <CodeEditor
         ref={editorRef}
-        ariaLabel={`Содержимое заметки ${note.name}`}
+        documentId={note.path.toString()}
+        ariaLabel={t("editor.contentLabel", { name: note.name })}
         value={content}
         onCaretMove={onCaretMove}
         onChange={(next) => {
@@ -725,7 +733,7 @@ export function NoteEditor({
           знающего позиции в тексте, — в textarea их не разместить, а врать о
           месте хуже, чем показать список. */}
       {embeds.embeds.length > 0 && (
-        <ul className="ts-embeds" aria-label="Вставленные доски">
+        <ul className="ts-embeds" aria-label={t("editor.embedsLabel")}>
           {embeds.embeds.map((embed) => (
             <li key={embed.id.value} className="ts-embeds__item">
               {onOpenBoard && <EmbedLink embed={embed} onOpenBoard={onOpenBoard} />}
@@ -745,7 +753,7 @@ export function NoteEditor({
         isOpen={isChoosingBoard}
         boards={boards}
         isInserting={isInserting}
-        error={insertError}
+        error={insertError === null ? null : insertError(t)}
         onInsert={(boardPath) => void insertBoard(boardPath)}
         {...(onCreateBoard ? { onCreateBoard } : {})}
         onCancel={() => setIsChoosingBoard(false)}
@@ -756,18 +764,16 @@ export function NoteEditor({
           (research.md §7), и кликабельная пилюля утверждала бы, что режим
           переключается. */}
       <div className="ts-statusbar">
-        <span className="ts-vim" title="Режим редактора: моста к Neovim в web-сборке нет">
+        <span className="ts-vim" title={t("editor.vimHint")}>
           NORMAL
         </span>
-        <span>
-          Ln {caret.line}, Col {caret.column}
-        </span>
-        <span>UTF-8</span>
+        <span>{t("editor.caret", { line: caret.line, column: caret.column })}</span>
+        <span className="ts-statusbar__minor">UTF-8</span>{/* i18n-ignore: имя кодировки */}
         {/* Состояние полей вставленного сниппета (макет «Вставка» § состояние
             полей): без счётчика подсветка говорит только «что-то выделено». */}
         {fieldState && (
           <span className="ts-fieldstate">
-            поле {fieldState.index} из {fieldState.count} · ⇥ следующее · esc выйти
+            {t("editor.fieldState", { index: fieldState.index, count: fieldState.count })}
           </span>
         )}
         <SaveIndicator state={autoSave.state} />
@@ -777,13 +783,13 @@ export function NoteEditor({
             тот же жест Ctrl/⌘ + колесо поверх текста. Значение — сама кнопка:
             нажатие снимает перекрытие папки и возвращает размер устройства. */}
         {fontSize && (
-          <div className="ts-zoom" role="group" aria-label="Размер шрифта редактора">
+          <div className="ts-zoom" role="group" aria-label={t("editor.fontSize.label")}>
             <button
               type="button"
               className="ts-btn ts-zoom__step"
               onClick={() => fontSize.step(-1)}
-              aria-label="Уменьшить шрифт редактора"
-              title="Уменьшить шрифт (Ctrl + колесо)"
+              aria-label={t("editor.fontSize.decrease")}
+              title={t("editor.fontSize.decreaseHint")}
             >
               −
             </button>
@@ -792,8 +798,8 @@ export function NoteEditor({
               className="ts-btn ts-zoom__value"
               onClick={fontSize.reset}
               disabled={!fontSize.isOverridden}
-              aria-label={`Шрифт ${fontSize.size} пикселей, вернуть размер по умолчанию`}
-              title="Вернуть размер по умолчанию"
+              aria-label={t("editor.fontSize.value", { size: fontSize.size })}
+              title={t("editor.fontSize.reset")}
             >
               {fontSize.size}&nbsp;px
             </button>
@@ -801,16 +807,16 @@ export function NoteEditor({
               type="button"
               className="ts-btn ts-zoom__step"
               onClick={() => fontSize.step(1)}
-              aria-label="Увеличить шрифт редактора"
-              title="Увеличить шрифт (Ctrl + колесо)"
+              aria-label={t("editor.fontSize.increase")}
+              title={t("editor.fontSize.increaseHint")}
             >
               +
             </button>
           </div>
         )}
 
-        <span>{countWords(content)}</span>
-        <span className="ts-tag">typst</span>
+        <span>{countWords(t, content)}</span>
+        <span className="ts-tag ts-statusbar__minor">typst</span>{/* i18n-ignore: имя языка разметки */}
       </div>
     </section>
   );
@@ -828,21 +834,22 @@ export function NoteEditor({
  * обязан узнать сразу, а не при следующем взгляде на строку.
  */
 function SaveIndicator({ state }: { state: NoteSaveState }): React.JSX.Element {
+  const { t } = useI18n();
   if (state.state === "Failed") {
     return (
       <p className="ts-save ts-save--failed" role="alert">
-        {state.reason}
+        {state.reason(t)}
       </p>
     );
   }
   const label =
     state.state === "Saving"
-      ? "сохранение…"
+      ? t("editor.save.saving")
       : state.state === "Dirty"
-        ? "не сохранено"
+        ? t("editor.save.dirty")
         : state.state === "Held"
-          ? "конфликт — сохранение приостановлено"
-          : "сохранено";
+          ? t("editor.save.held")
+          : t("editor.save.saved");
   return <p className="ts-save">{label}</p>;
 }
 
@@ -852,37 +859,28 @@ function SaveIndicator({ state }: { state: NoteSaveState }): React.JSX.Element {
  * Считает по пробелам, вместе с разметкой Typst: отделять команды от текста
  * значило бы разбирать язык, а разбор живёт в компиляторе, не здесь.
  */
-function countWords(text: string): string {
+function countWords(t: Translate, text: string): string {
   const count = text.split(/\s+/).filter((word) => word.length > 0).length;
-  const mod100 = count % 100;
-  const word =
-    mod100 >= 11 && mod100 <= 14
-      ? "слов"
-      : count % 10 === 1
-        ? "слово"
-        : count % 10 >= 2 && count % 10 <= 4
-          ? "слова"
-          : "слов";
-  return `${count} ${word}`;
+  return t("editor.words", { count });
 }
 
 /** Почему вставка не состоялась (FR-018, FR-019). */
-function describeInsertFailure(cause: unknown): string {
+function describeInsertFailure(cause: unknown): Phrase {
   const kind =
     typeof cause === "object" && cause !== null && "kind" in cause
       ? (cause as { kind: unknown }).kind
       : null;
   switch (kind) {
     case "NotANote":
-      return "Вставлять доску можно только в текстовую заметку.";
+      return (t) => t("editor.insertBoard.notANote");
     case "NotABoard":
-      return "Вставить можно только доску.";
+      return (t) => t("editor.insertBoard.notABoard");
     case "NotFound":
-      return "Доска не найдена — возможно, её удалили или переименовали снаружи.";
+      return (t) => t("editor.insertBoard.notFound");
     case "Unreadable":
-      return "Файл доски не читается: он повреждён или создан несовместимой версией.";
+      return (t) => t("editor.insertBoard.unreadable");
     default:
-      return "Вставить доску не удалось.";
+      return (t) => t("editor.insertBoard.failed");
   }
 }
 
@@ -891,14 +889,14 @@ function describeInsertFailure(cause: unknown): string {
  * отдельный случай: заметка существует и видна в дереве, отказано именно в
  * открытии, и пользователю важно понимать разницу.
  */
-function describeReadError(error: ReadError): string {
+function describeReadError(t: Translate, error: ReadError): string {
   switch (error.kind) {
     case "NotFound":
-      return "Заметка не найдена — возможно, её удалили или переименовали снаружи.";
+      return t("editor.read.notFound");
     case "TooLarge":
-      return "Заметка больше 10 МБ — это выше поддерживаемого размера, и открыть её нельзя. Файл на диске не тронут.";
+      return t("editor.read.tooLarge");
     case "Io":
-      return "Не удалось прочитать заметку с диска.";
+      return t("editor.read.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;

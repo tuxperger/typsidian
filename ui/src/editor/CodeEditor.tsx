@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef } from "react";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
   highlightActiveLine,
@@ -86,6 +86,15 @@ export interface CodeEditorProps {
    * Показывается в статус-баре.
    */
   onFieldState?: (state: SnippetFieldState | null) => void;
+  /**
+   * Какой документ открыт — обычно путь заметки. Редактор пересоздаётся только
+   * при его смене: вместе с экземпляром уходят история правок и курсор.
+   */
+  documentId: string;
+  /**
+   * Подпись поля для экранного диктора. Меняется без пересоздания редактора:
+   * она переведена, и смена языка не должна сбрасывать курсор (010 FR-013).
+   */
   ariaLabel: string;
   /** Правый клик по тексту — собственное меню редактора (см. `NoteEditor`). */
   onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -99,12 +108,15 @@ export function CodeEditor({
   onZoom,
   onSlashMenu,
   onFieldState,
+  documentId,
   ariaLabel,
   onContextMenu,
   ref,
 }: CodeEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // Подпись в отдельном отсеке: её замена — транзакция, а не новый редактор.
+  const labelCompartment = useRef(new Compartment()).current;
 
   useImperativeHandle(
     ref,
@@ -152,7 +164,7 @@ export function CodeEditor({
         doc: value,
         extensions: [
           ...baseExtensions,
-          EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+          labelCompartment.of(EditorView.contentAttributes.of({ "aria-label": ariaLabel })),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString());
             if (update.docChanged || update.selectionSet) {
@@ -192,9 +204,17 @@ export function CodeEditor({
       view.destroy();
       viewRef.current = null;
     };
-    // Пересоздание только при смене подписи, то есть при смене заметки.
+    // Пересоздание только при смене заметки; подпись догоняет эффект ниже.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ariaLabel]);
+  }, [documentId]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: labelCompartment.reconfigure(
+        EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+      ),
+    });
+  }, [ariaLabel, labelCompartment]);
 
   // Ctrl/⌘ + колесо — кегль текста, как масштаб листа в предпросмотре.
   // Слушатель вешается вручную и непассивным: `onWheel` React ставит пассивным,

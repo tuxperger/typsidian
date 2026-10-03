@@ -124,6 +124,34 @@ impl PreviewEngine {
         .map_err(|err| JsError::new(&format!("{err:?}")))
     }
 
+    /// Экспортирует заметку в PDF (фича 009, contracts/core-export-api.md).
+    ///
+    /// Метод движка, а не свободная функция: экспорту нужны те же шрифты и тот
+    /// же кэш шаблонов, что предпросмотру, — иначе заметка собиралась бы в
+    /// одном месте и не собиралась в другом.
+    ///
+    /// `source_text` — текст редактора открытой заметки; `undefined` —
+    /// читать с диска (пакет, FR-022). Вызывать через `wasm-call-queue`, как
+    /// `compile`: сборка занимает заимствование `WebBackend`.
+    #[wasm_bindgen(js_name = exportPdf)]
+    pub async fn export_pdf_js(
+        &self,
+        backend: &mut crate::vault::web::WebBackend,
+        note_path: &str,
+        source_text: Option<String>,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+    ) -> crate::export::ExportReport {
+        crate::export::export_note_pdf(
+            backend,
+            &self.packages,
+            note_path,
+            source_text.as_deref(),
+            self.fonts.clone(),
+            &overrides,
+        )
+        .await
+    }
+
     /// Установить шаблон по явному запросу пользователя (FR-010).
     ///
     /// Выключатель автозагрузки здесь не спрашивается намеренно: выключен

@@ -1,3 +1,4 @@
+import { useI18n, type Translate } from "../i18n/index.js";
 import type { LastVault, OpenVaultError } from "./useVault.js";
 
 export interface OpenVaultProps {
@@ -17,20 +18,24 @@ export interface OpenVaultProps {
  * Текст на каждый вариант отказа (FR-008) — без общего «что-то пошло не так».
  * `null` для отмены диалога: пользователь передумал, это не сбой (Assumptions).
  */
-function describeOpenVaultError(error: OpenVaultError): string | null {
+function describeOpenVaultError(t: Translate, error: OpenVaultError): string | null {
   switch (error.kind) {
     case "PickerCancelled":
       return null;
     case "PermissionDenied":
-      return "Доступ к выбранной папке не предоставлен. Откройте vault заново и разрешите доступ, когда браузер спросит.";
+      return t("errors.open.permissionDenied");
     case "NotSupported":
-      return "Этот браузер не умеет открывать локальные папки (нет File System Access API). Подойдёт браузер на основе Chromium — или используйте настольное приложение.";
+      return t("errors.open.notSupported");
     case "TooManyNotes":
       // FR-038: причина называется прямо, и сказано, что приложение цело —
       // отказ касается этой папки, а не работы вообще.
-      return "В этой папке больше 10 000 заметок — это выше поддерживаемого размера vault, и открыть её нельзя. Выберите папку поменьше или разделите её на несколько vault.";
+      return t("errors.open.tooManyNotes");
+    case "FolderNotFound":
+      return t("errors.open.folderNotFound");
+    case "NotADirectory":
+      return t("errors.open.notADirectory");
     case "OpenFailed":
-      return `Не удалось открыть vault: ${error.message}`;
+      return t("errors.open.failed", { detail: error.detail });
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -56,16 +61,21 @@ export function OpenVault({
   last = null,
   onOpenLast,
 }: OpenVaultProps): React.JSX.Element {
-  const message = error ? describeOpenVaultError(error) : null;
+  const { t } = useI18n();
+  const message = error ? describeOpenVaultError(t, error) : null;
   return (
     <div>
       {last && (
         <button type="button" onClick={onOpenLast} disabled={isLoading}>
-          {isLoading ? "Открываем…" : `Продолжить: ${last.label}`}
+          {isLoading ? t("tree.open.opening") : t("tree.open.continue", { label: last.label })}
         </button>
       )}
       <button type="button" onClick={onOpen} disabled={isLoading}>
-        {isLoading ? "Открываем…" : last ? "Выбрать другую папку" : "Открыть vault"}
+        {isLoading
+          ? t("tree.open.opening")
+          : last
+            ? t("tree.open.chooseAnother")
+            : t("tree.open.open")}
       </button>
       {message && <p role="alert">{message}</p>}
     </div>

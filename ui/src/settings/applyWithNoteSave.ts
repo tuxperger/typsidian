@@ -1,4 +1,5 @@
 import type { ApplyPlan, SettingsChange } from "../wasm-core/typsidian_core.js";
+import type { Phrase, Translate } from "../i18n/index.js";
 
 // contracts/frontend-settings.md: разбор `ApplyPlan` — единственное место, где
 // UI делает больше одного шага. И это именно **исполнение инструкции**,
@@ -84,16 +85,16 @@ export async function applyWithNoteSave(
 }
 
 /** Сообщение пользователю по итогу (FR-029 требует сообщить о сохранении). */
-export function describeApplyOutcome(outcome: ApplyOutcome): string | null {
+export function describeApplyOutcome(outcome: ApplyOutcome): Phrase | null {
   switch (outcome.kind) {
     case "applied":
       return null;
     case "appliedAfterSavingNote":
-      return `Заметка «${outcome.notePath}» сохранена перед сменой режима.`;
+      return (t) => t("settings.mode.savedBefore", { path: outcome.notePath });
     case "saveFailed":
-      return `Не удалось сохранить «${outcome.notePath}» — режим не изменён, правки не потеряны.`;
+      return (t) => t("settings.mode.saveFailed", { path: outcome.notePath });
     case "rejected":
-      return describeReject(outcome.plan.reason.kind);
+      return (t) => describeReject(t, outcome.plan.reason.kind);
     default: {
       const exhaustive: never = outcome;
       return exhaustive;
@@ -101,15 +102,15 @@ export function describeApplyOutcome(outcome: ApplyOutcome): string | null {
   }
 }
 
-function describeReject(kind: string): string {
+function describeReject(t: Translate, kind: string): string {
   switch (kind) {
     case "UnresolvedConflict":
-      return "Сначала нужно разрешить конфликт по открытой заметке — режим не изменён.";
+      return t("settings.mode.unresolvedConflict");
     case "SaveFailed":
-      return "Сохранить открытую заметку не удалось — режим не изменён, правки не потеряны.";
+      return t("settings.mode.noteSaveFailed");
     case "ValueOutOfRange":
-      return "Значение вне допустимого диапазона.";
+      return t("settings.mode.valueOutOfRange");
     default:
-      return "Хранилище настроек недоступно на запись.";
+      return t("settings.mode.storageNotWritable");
   }
 }

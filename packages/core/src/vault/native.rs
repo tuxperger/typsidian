@@ -53,6 +53,87 @@ fn move_to_trash(_path: &Path) -> bool {
     false
 }
 
+/// Записывает файл так, что на месте цели в любой момент лежит либо прежнее
+/// содержимое целиком, либо новое целиком (009 FR-030, research.md §4).
+///
+/// Запись идёт во временный файл, затем `sync_all` и `rename` на место. Сбой
+/// или убитый процесс между этими шагами оставляет прежний файл нетронутым, а
+/// временный — в `.typsidian/tmp/`, откуда его убирает следующее открытие
+/// vault.
+///
+/// Если `rename` из служебной папки невозможен из-за другой файловой системы
+/// (внутрь vault смонтировано что-то своё), временный файл кладётся рядом с
+/// целью под скрытым именем — `rename` в пределах одной папки атомарен всегда.
+pub(crate) fn write_atomically(root: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let target = root.join(path);
+    let tmp_dir = root.join(super::service_dir::tmp_dir());
+    std::fs::create_dir_all(&tmp_dir)?;
+    let tmp = tmp_dir.join(unique_tmp_name());
+    write_synced(&tmp, bytes)?;
+    match std::fs::rename(&tmp, &target) {
+        Ok(()) => Ok(()),
+        Err(error) if is_cross_device(&error) => {
+            let _ = std::fs::remove_file(&tmp);
+            let name = target
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let beside = target.with_file_name(format!(".{name}.{}", unique_tmp_name()));
+            write_synced(&beside, bytes)?;
+            std::fs::rename(&beside, &target).inspect_err(|_| {
+                let _ = std::fs::remove_file(&beside);
+            })
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(error)
+        }
+    }
+}
+
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let result = (|| {
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    result
+}
+
+/// Имя временного файла, уникальное в пределах машины: процесс и счётчик.
+/// Два окна на одном vault не должны писать в один и тот же временный файл.
+fn unique_tmp_name() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}-{}.typsidian-tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// `EXDEV`: переименование через границу файловых систем.
+fn is_cross_device(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(18)
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_NOT_SAME_DEVICE
+        error.raw_os_error() == Some(17)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = error;
+        false
+    }
+}
+
 fn stamp_for(path: &Path) -> std::io::Result<FileStamp> {
     let content = std::fs::read(path)?;
     let metadata = std::fs::metadata(path)?;
@@ -312,6 +393,59 @@ fn exceeds_note_limit(root: &Path, limit: usize) -> bool {
     false
 }
 
+/// Шрифты vault по метаданным, без чтения содержимого (FR-027).
+///
+/// Правила обхода те же, что у [`walk`]: скрытые каталоги и символические
+/// ссылки пропускаются. Порядок — по пути, чтобы набор шрифтов, а с ним и выбор
+/// начертания при совпадении имён, не зависел от порядка `read_dir`.
+fn walk_fonts(root: &Path) -> Vec<crate::vault::FontFile> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            if !file_type.is_file() || !crate::vault::is_font_file(relative) {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let modified_ms = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_millis() as i64);
+            found.push(crate::vault::FontFile {
+                path: relative.to_path_buf(),
+                size: metadata.len(),
+                modified_ms,
+            });
+        }
+    }
+    found.sort_by(|left, right| left.path.cmp(&right.path));
+    found
+}
+
 /// Нативная реализация `VaultBackend`: прямой `std::fs` + `notify` внутри
 /// процесса приложения — без обращения к Tauri fs-плагину по IPC (research.md §1).
 /// `index`/`cache`/`access_state` — за `Arc<Mutex<_>>`, потому что фоновая сверка
@@ -380,6 +514,10 @@ impl NativeBackend {
         if legacy.exists() {
             let _ = std::fs::remove_file(&legacy);
         }
+        // Временные файлы записи, оставшиеся от прерванного процесса: ни один
+        // из них не был переименован на место, значит ни один не нужен
+        // (009 SC-006).
+        let _ = std::fs::remove_dir_all(root.join(super::service_dir::tmp_dir()));
         let _ = std::fs::create_dir_all(&service_dir);
         existed
     }
@@ -521,10 +659,11 @@ impl NativeBackend {
                             // Блокировка не пересекает `.await` — иначе
                             // `std::sync::MutexGuard` не был бы Send.
                             let conflicted = match &known_stamp {
-                                Some(known) => conflicts
-                                    .lock()
-                                    .unwrap()
-                                    .observe_disk_change(&rel, known, &note.stamp),
+                                Some(known) => conflicts.lock().unwrap().observe_disk_change(
+                                    &rel,
+                                    known,
+                                    &note.stamp,
+                                ),
                                 None => false,
                             };
                             upsert_preserving_unsaved_edits(&mut idx, note.clone());
@@ -950,6 +1089,10 @@ impl VaultBackend for NativeBackend {
         self.index.lock().await.in_folder(folder)
     }
 
+    async fn list_fonts(&self) -> Vec<crate::vault::FontFile> {
+        walk_fonts(&self.root_path)
+    }
+
     /// Тот же приём, что у [`probe_access_state`], только про вложенную папку:
     /// дешёвые `metadata`/`read_dir` без файлов-пробников.
     async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {
@@ -1036,7 +1179,13 @@ impl VaultBackend for NativeBackend {
         // дереве не показывается (файлы шаблонов), а `classify` для них всё
         // равно вернул бы `Service`. Разбирать картинку как Typst-заметку было
         // бы прямой ошибкой.
-        std::fs::write(self.root_path.join(path), bytes).map_err(|_| WriteError::Io)
+        write_atomically(&self.root_path, path, bytes).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                WriteError::AccessDenied
+            } else {
+                WriteError::Io
+            }
+        })
     }
 
     async fn write(
@@ -1262,7 +1411,13 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn conflict_diff(&self, path: &Path) -> Vec<DiffLine> {
-        let Some(local) = self.conflicts.lock().unwrap().buffer(path).map(str::to_string) else {
+        let Some(local) = self
+            .conflicts
+            .lock()
+            .unwrap()
+            .buffer(path)
+            .map(str::to_string)
+        else {
             return Vec::new();
         };
         // Внешняя сторона читается с диска, а не берётся из `disk_snapshot`:
@@ -1274,7 +1429,12 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn resolve_conflict_keep_local(&mut self, path: &Path) -> Result<(), ResolveError> {
-        let buffer = self.conflicts.lock().unwrap().buffer(path).map(str::to_string);
+        let buffer = self
+            .conflicts
+            .lock()
+            .unwrap()
+            .buffer(path)
+            .map(str::to_string);
         let Some(buffer) = buffer else {
             return Err(ResolveError::NoPendingConflict);
         };

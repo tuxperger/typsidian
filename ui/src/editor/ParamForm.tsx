@@ -17,6 +17,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { describeUnavailable } from "./useElementAtCaret.js";
+import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 // Форма параметров элемента Typst (фича 008, макет «Typsidian Вставка» →
 // § Параметры блока).
@@ -75,6 +76,7 @@ export function ParamForm({
   onApply,
   onCancel,
 }: ParamFormProps): React.JSX.Element {
+  const { t } = useI18n();
   const editing = mode.kind === "edit";
   const parsed = mode.kind === "edit" ? mode.parsed : null;
   const params = spec.params ?? [];
@@ -116,7 +118,7 @@ export function ParamForm({
   );
 
   const [errors, setErrors] = useState<FieldError[]>([]);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<Phrase | null>(null);
   const [preview, setPreview] = useState<string>("");
   const [edits, setEdits] = useState<TextEdit[] | null>(null);
   const [rendered, setRendered] = useState<string | null>(null);
@@ -193,7 +195,7 @@ export function ParamForm({
           setRefusal(null);
         } else {
           setErrors([]);
-          setRefusal(describeRefusal(outcome.error));
+          setRefusal(() => describeRefusal(outcome.error));
         }
       }
     })();
@@ -242,7 +244,7 @@ export function ParamForm({
       className="ts-dialog ts-dialog--params"
       role="dialog"
       aria-modal="true"
-      aria-label={`${editing ? "Параметры" : "Вставить"}: ${title}`}
+      aria-label={t(editing ? "insert.form.editTitle" : "insert.form.insertTitle", { title })}
       onKeyDown={(event) => {
         // ⌘↵ применяет из любого поля (FR-017); обычный Enter оставлен полям.
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -254,12 +256,12 @@ export function ParamForm({
       <div className="ts-dialog__head ts-params__head">
         <Icon name="terminal" size={14} className="ts-params__icon" />
         <span className="ts-params__title">
-          {editing ? "Параметры" : "Вставить"}: {title}
+          {t(editing ? "insert.form.editTitle" : "insert.form.insertTitle", { title })}
         </span>
         <span className="ts-params__tag">
           {spec.syntax === "set" ? `#set ${spec.typst}` : `#${spec.typst}`}
         </span>
-        <button type="button" className="ts-btn ts-btn--icon" aria-label="Закрыть" onClick={onCancel}>
+        <button type="button" className="ts-btn ts-btn--icon" aria-label={t("common.close")} onClick={onCancel}>
           <Icon name="x" size={12} />
         </button>
       </div>
@@ -269,7 +271,7 @@ export function ParamForm({
 
         {labelPrefix !== null && (
           <label className="ts-field">
-            <span className="ts-field__label">Метка</span>
+            <span className="ts-field__label">{t("insert.form.label")}</span>
             <div className="ts-labelfield">
               {initialLabel.prefixed && (
                 <span className="ts-labelfield__prefix">{labelPrefix}:</span>
@@ -278,14 +280,14 @@ export function ParamForm({
                 className={`ts-field__input${labelError ? " ts-field__input--bad" : ""}`}
                 type="text"
                 value={labelText}
-                placeholder="без метки"
+                placeholder={t("insert.form.noLabel")}
                 aria-invalid={labelError !== undefined}
                 onChange={(event) => setLabelText(event.target.value)}
               />
             </div>
             {labelError && (
               <span className="ts-field__hint ts-field__hint--bad" role="alert">
-                {describeProblem(labelError)}
+                {describeProblem(t, labelError)}
               </span>
             )}
           </label>
@@ -298,7 +300,7 @@ export function ParamForm({
             onToggle={(event) => setShowAll(event.currentTarget.open)}
           >
             <summary className="ts-params__allhead">
-              Все параметры <span className="ts-params__count">{defs.rest.length}</span>
+              {t("insert.form.allParams")} <span className="ts-params__count">{defs.rest.length}</span>
             </summary>
             {showAll && <div className="ts-params__allbody">{defs.rest.map(renderField)}</div>}
           </details>
@@ -306,7 +308,7 @@ export function ParamForm({
 
         {refusal && (
           <p className="ts-field__hint ts-field__hint--bad" role="alert">
-            {refusal}
+            {refusal(t)}
           </p>
         )}
         {blockedReason && (
@@ -316,19 +318,19 @@ export function ParamForm({
         )}
 
         <div className="ts-params__output">
-          <span className="ts-eyebrow">{editing ? "Будет заменено на" : "Будет вставлено"}</span>
+          <span className="ts-eyebrow">{editing ? t("insert.form.willReplace") : t("insert.form.willInsert")}</span>
           <pre className="ts-insert__code">{preview}</pre>
         </div>
       </div>
 
       <div className="ts-dialog__actions ts-params__foot">
-        {labelFull && <span className="ts-params__note">ссылка @{labelFull}</span>}
+        {labelFull && <span className="ts-params__note">{t("insert.form.refNote", { label: labelFull })}</span>}
         <span className="ts-spacer" />
         <button type="button" className="ts-btn" onClick={onCancel}>
-          Отмена
+          {t("common.cancel")}
         </button>
         <button type="button" className="ts-btn ts-btn--accent" disabled={!canApply} onClick={apply}>
-          {editing ? "Применить" : "Вставить"}
+          {editing ? t("insert.form.apply") : t("insert.menu.insert")}
           <span className="ts-params__keys">⌘↵</span>
         </button>
       </div>
@@ -351,10 +353,11 @@ function ParamField({
   onChange: (name: string, text: string, expression: boolean) => void;
 }): React.JSX.Element {
   const { param, name } = def;
+  const { t } = useI18n();
   const text = state?.text ?? "";
   const expression = state?.expression ?? param.kind.type === "expression";
   const base = baseKind(param.kind);
-  const placeholder = param.default ? `по умолчанию ${param.default}` : "";
+  const placeholder = param.default ? t("insert.form.default", { value: param.default }) : "";
   const bad = problem !== undefined;
   const inputClass = `ts-field__input${expression ? " ts-field__input--code" : ""}${bad ? " ts-field__input--bad" : ""}`;
 
@@ -363,8 +366,8 @@ function ParamField({
     const options =
       base.type === "bool"
         ? [
-            { value: "true", label: "да" },
-            { value: "false", label: "нет" },
+            { value: "true", label: t("insert.form.yes") },
+            { value: "false", label: t("insert.form.no") },
           ]
         : base.options.map((option) => ({ value: option, label: option.replace(/^"|"$/g, "") }));
     const extra = wrappers(param.kind).map((value) => ({ value, label: value }));
@@ -376,7 +379,7 @@ function ParamField({
         aria-invalid={bad}
         onChange={(event) => onChange(name, event.target.value, false)}
       >
-        <option value="">{param.default ? `по умолчанию (${param.default})` : "—"}</option>
+        <option value="">{param.default ? t("insert.form.defaultParen", { value: param.default }) : "—"}</option>
         {[...extra, ...options].map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -410,12 +413,12 @@ function ParamField({
       {control}
       {expression && param.kind.type !== "expression" && (
         <span className="ts-field__hint">
-          Выражение Typst — сохранится как есть, пока вы его не измените.
+          {t("insert.form.expression")}
         </span>
       )}
       {bad && (
         <span className="ts-field__hint ts-field__hint--bad" role="alert">
-          {describeProblem(problem)}
+          {describeProblem(t, problem)}
         </span>
       )}
     </label>
@@ -491,34 +494,34 @@ function replaced(text: string, parsed: ParsedElement, edits: TextEdit[]): strin
   return out + text.slice(cursor, end);
 }
 
-export function describeProblem(problem: FieldProblem | undefined): string {
+export function describeProblem(t: Translate, problem: FieldProblem | undefined): string {
   switch (problem?.kind) {
     case "Required":
-      return "Обязательное поле.";
+      return t("insert.form.problem.required");
     case "Unparsable":
-      return "Запись не разбирается как значение Typst.";
+      return t("insert.form.problem.unparsable");
     case "WrongKind":
-      return "Значение не того вида — например, строка вместо длины.";
+      return t("insert.form.problem.wrongKind");
     case "NotAnOption":
-      return "Такого значения нет среди допустимых.";
+      return t("insert.form.problem.notAllowed");
     case "LabelTaken":
-      return "Такая метка уже есть в этой заметке — ссылки на неё сломаются.";
+      return t("insert.form.problem.duplicateLabel");
     case "LabelInvalid":
-      return "В метке допустимы буквы, цифры и знаки - _ . :";
+      return t("insert.form.problem.labelChars");
     default:
       return "";
   }
 }
 
-function describeRefusal(error: PlanEditError): string {
+function describeRefusal(error: PlanEditError): Phrase {
   switch (error.kind) {
     case "Stale":
-      return "Текст элемента изменился, пока форма была открыта. Откройте параметры заново — правка поверх не записана.";
+      return (t) => t("insert.form.refusal.stale");
     case "Gone":
-      return "Элемента на прежнем месте больше нет.";
+      return (t) => t("insert.form.refusal.gone");
     case "Unavailable":
-      return describeUnavailable(error.reason);
+      return (t) => describeUnavailable(t, error.reason);
     case "Invalid":
-      return "";
+      return () => "";
   }
 }

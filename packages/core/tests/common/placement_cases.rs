@@ -226,12 +226,12 @@ pub fn check_embed_recognition() {
 
     let note = Path::new("Проекты/Идея.typ");
     let text = concat!(
-        "#image(\"Идея.assets/board-aaaaaaaa.svg\")\n",       // прежняя раскладка
-        "#image(\"assets/Идея/board-bbbbbbbb.svg\")\n",       // новая, рядом с заметкой
-        "#image(\"../assets/Идея/board-cccccccc.svg\")\n",    // новая, в корне vault
-        "#image(\"Фото.png\")\n",                             // обычная картинка
-        "#image(\"assets/Идея/моя-картинка.svg\")\n",         // картинка в папке ассетов
-        "#image(\"assets/Другая/board-dddddddd.svg\")\n",     // снимок ЧУЖОЙ заметки
+        "#image(\"Идея.assets/board-aaaaaaaa.svg\")\n", // прежняя раскладка
+        "#image(\"assets/Идея/board-bbbbbbbb.svg\")\n", // новая, рядом с заметкой
+        "#image(\"../assets/Идея/board-cccccccc.svg\")\n", // новая, в корне vault
+        "#image(\"Фото.png\")\n",                       // обычная картинка
+        "#image(\"assets/Идея/моя-картинка.svg\")\n",   // картинка в папке ассетов
+        "#image(\"assets/Другая/board-dddddddd.svg\")\n", // снимок ЧУЖОЙ заметки
     );
 
     let found = embeds_of(note, text);

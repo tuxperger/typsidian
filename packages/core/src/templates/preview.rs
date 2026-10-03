@@ -266,6 +266,9 @@ mod tests {
         let content = "слово ".repeat(400);
         let taken = excerpt(&content);
         assert!(taken.chars().count() <= EXCERPT_CHARS);
-        assert!(!taken.ends_with("сло"), "обрубка посреди слова быть не должно");
+        assert!(
+            !taken.ends_with("сло"),
+            "обрубка посреди слова быть не должно"
+        );
     }
 }

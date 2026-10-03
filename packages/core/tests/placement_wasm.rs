@@ -117,3 +117,13 @@ async fn resetting_an_untouched_command_writes_nothing() {
 async fn a_bad_template_source_is_refused_before_writing() {
     cases::a_bad_template_source_is_refused_before_writing().await;
 }
+
+#[wasm_bindgen_test]
+async fn the_export_folder_is_validated_and_normalized() {
+    cases::the_export_folder_is_validated_and_normalized().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_bad_export_folder_in_the_file_is_dropped() {
+    cases::a_bad_export_folder_in_the_file_is_dropped().await;
+}

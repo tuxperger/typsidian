@@ -1,3 +1,4 @@
+import { useI18n, type Translate } from "../i18n/index.js";
 import type { Note } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
@@ -19,16 +20,15 @@ export interface BacklinksConfirmDialogProps {
   onCancel: () => void;
 }
 
-function describeConsequence(request: BacklinksConfirmRequest): string {
-  const count = request.affected.length;
-  const notes = count === 1 ? "заметка" : "заметки";
+function describeConsequence(t: Translate, request: BacklinksConfirmRequest): string {
+  const params = { name: request.note.name, count: request.affected.length };
   switch (request.operation) {
     case "delete":
-      return `После удаления «${request.note.name}» ${count} ${notes} останутся с битой ссылкой:`;
+      return t("tree.backlinks.deleteConsequence", params);
     case "rename":
       // Содержимое ссылающихся заметок приложение не переписывает, поэтому
       // после переименования их ссылки указывают на старое имя (FR-028).
-      return `После переименования «${request.note.name}» ${count} ${notes} продолжат ссылаться на старое имя, и эти ссылки станут битыми:`;
+      return t("tree.backlinks.renameConsequence", params);
     default: {
       const exhaustive: never = request.operation;
       return exhaustive;
@@ -36,12 +36,12 @@ function describeConsequence(request: BacklinksConfirmRequest): string {
   }
 }
 
-function confirmLabel(operation: BacklinksOperation): string {
+function confirmLabel(t: Translate, operation: BacklinksOperation): string {
   switch (operation) {
     case "delete":
-      return "Всё равно удалить";
+      return t("tree.backlinks.deleteAnyway");
     case "rename":
-      return "Всё равно переименовать";
+      return t("tree.backlinks.renameAnyway");
     default: {
       const exhaustive: never = operation;
       return exhaustive;
@@ -65,6 +65,7 @@ export function BacklinksConfirmDialog({
   onConfirm,
   onCancel,
 }: BacklinksConfirmDialogProps): React.JSX.Element | null {
+  const { t } = useI18n();
   const shown = request !== null && request.affected.length > 0;
   // Escape здесь — то же, что «Отмена»: операция ещё не началась, и отказ от
   // неё ничего не теряет.
@@ -77,20 +78,20 @@ export function BacklinksConfirmDialog({
       className="ts-dialog"
       role="alertdialog"
       aria-modal="true"
-      aria-label={`Ссылки на заметку ${request.note.name}`}
+      aria-label={t("tree.backlinks.dialogLabel", { name: request.note.name })}
     >
-      <p>{describeConsequence(request)}</p>
-      <ul aria-label="Заметки, чьи ссылки станут битыми">
+      <p>{describeConsequence(t, request)}</p>
+      <ul aria-label={t("tree.backlinks.affectedLabel")}>
         {request.affected.map((note) => (
           <li key={note.path}>{note.path}</li>
         ))}
       </ul>
-      <div role="group" aria-label="Подтверждение операции">
+      <div role="group" aria-label={t("tree.backlinks.confirmGroup")}>
         <button type="button" onClick={onConfirm}>
-          {confirmLabel(request.operation)}
+          {confirmLabel(t, request.operation)}
         </button>
         <button type="button" onClick={onCancel} autoFocus>
-          Отмена
+          {t("common.cancel")}
         </button>
       </div>
     </div>

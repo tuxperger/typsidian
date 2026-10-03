@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type { DiffLine, ResolveError } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import type { Translate } from "../i18n/index.js";
 
 // Принцип I: решение «есть ли конфликт», «что именно расходится» и «что
 // отбросить» принимает ядро (`ConflictRegistry`). Этот хук только вызывает
@@ -50,14 +51,14 @@ function asResolveError(cause: unknown): ResolveError | null {
   return null;
 }
 
-export function describeResolveError(error: ResolveError): string {
+export function describeResolveError(t: Translate, error: ResolveError): string {
   switch (error.kind) {
     case "NoPendingConflict":
-      return "Конфликт уже разрешён — возможно, в другом окне.";
+      return t("editor.conflict.resolve.noPending");
     case "AccessDenied":
-      return "Нет прав на запись в vault: сохранить свою версию сейчас нельзя. Правки остаются в памяти.";
+      return t("editor.conflict.resolve.accessDenied");
     case "Io":
-      return "Не удалось записать выбранную версию на диск. Правки не потеряны — попробуйте ещё раз.";
+      return t("editor.conflict.resolve.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { PreviewClient } from "../preview-client.js";
 import type { InstalledTemplate } from "../wasm-core/typsidian_core.js";
 import type { VaultSettingsState } from "./useVaultSettings.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 /**
  * Раздел «Шаблоны» (фича 007; макет «Typsidian Шаблоны из сети», карточка 1d
@@ -41,16 +42,15 @@ export function TemplatesSection({
   preview,
   showError = true,
 }: TemplatesSectionProps): React.JSX.Element {
+  const { t } = useI18n();
   const overrides = vaultSettings.overrides;
   // Пустой раздел без объяснения выглядел как отсутствие фичи: настройки
   // шаблонов принадлежат папке заметок, и без прочитанной папки их нет.
   if (overrides === null) {
     return vaultSettings.error !== null ? (
-      <p role="alert">{vaultSettings.error}</p>
+      <p role="alert">{vaultSettings.error(t)}</p>
     ) : (
-      <p role="status">
-        Откройте папку с заметками — настройки внешних шаблонов хранятся в ней.
-      </p>
+      <p role="status">{t("settings.templates.openVault")}</p>
     );
   }
 
@@ -59,18 +59,13 @@ export function TemplatesSection({
   return (
     <div className="ts-srows">
       {showError && vaultSettings.error !== null && (
-        <p role="alert">{vaultSettings.error}</p>
+        <p role="alert">{vaultSettings.error(t)}</p>
       )}
 
       <label className="ts-srow">
         <span className="ts-srow__text">
-          <span className="ts-srow__label">Загружать недостающие шаблоны</span>
-          <span className="ts-srow__hint">
-            Из официального реестра Typst и своих адресов. Заметка без
-            подключений в сеть не ходит никогда. Шаблон — код, исполняемый при
-            сборке: имя, версия и адрес каждой загрузки называются в
-            предпросмотре.
-          </span>
+          <span className="ts-srow__label">{t("settings.templates.autoDownload")}</span>
+          <span className="ts-srow__hint">{t("settings.templates.autoDownloadHint")}</span>
         </span>
         <input
           type="checkbox"
@@ -95,11 +90,8 @@ export function TemplatesSection({
 
       <div className="ts-srow ts-srow--last">
         <span className="ts-srow__text">
-          <span className="ts-srow__label">При выключенной автозагрузке</span>
-          <span className="ts-srow__hint">
-            Недостающий шаблон показывается в предпросмотре с кнопкой «Загрузить
-            шаблон» — выбор остаётся за пользователем.
-          </span>
+          <span className="ts-srow__label">{t("settings.templates.whenOff")}</span>
+          <span className="ts-srow__hint">{t("settings.templates.whenOffHint")}</span>
         </span>
       </div>
     </div>
@@ -119,6 +111,7 @@ function SourcesEditor({
   sources: SourceRow[];
   onChange: (next: SourceRow[]) => Promise<boolean>;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const [spec, setSpec] = useState("");
   const [url, setUrl] = useState("");
 
@@ -142,17 +135,14 @@ function SourcesEditor({
     <>
       <div className="ts-srow ts-srow--flat">
         <span className="ts-srow__text">
-          <span className="ts-srow__label">Свои адреса архивов</span>
-          <span className="ts-srow__hint">
-            Архив для конкретной версии шаблона берётся по указанному адресу, а
-            не из реестра. Прочие пространства имён остаются локальными.
-          </span>
+          <span className="ts-srow__label">{t("settings.templates.sources")}</span>
+          <span className="ts-srow__hint">{t("settings.templates.sourcesHint")}</span>
         </span>
       </div>
 
       <div className="ts-sources">
         {sources.length > 0 && (
-          <ul className="ts-sources__list" aria-label="Свои адреса шаблонов">
+          <ul className="ts-sources__list" aria-label={t("settings.templates.sourcesList")}>
             {sources.map((entry) => (
               <li key={entry.spec} className="ts-sources__row">
                 <span className="ts-sources__spec" title={entry.spec}>
@@ -164,8 +154,8 @@ function SourcesEditor({
                 <button
                   type="button"
                   className="ts-btn ts-sources__button"
-                  aria-label={`Убрать адрес для ${entry.spec}`}
-                  title="Убрать"
+                  aria-label={t("settings.templates.removeSource", { spec: entry.spec })}
+                  title={t("settings.templates.remove")}
                   onClick={() =>
                     void onChange(sources.filter((known) => known.spec !== entry.spec))
                   }
@@ -187,15 +177,15 @@ function SourcesEditor({
           <input
             type="text"
             className="ts-sources__spec"
-            aria-label="Шаблон"
-            placeholder="@preview/имя:1.0.0"
+            aria-label={t("settings.templates.spec")}
+            placeholder={t("settings.templates.specPlaceholder")}
             value={spec}
             onChange={(event) => setSpec(event.target.value)}
           />
           <input
             type="url"
             className="ts-sources__url"
-            aria-label="Адрес архива"
+            aria-label={t("settings.templates.url")}
             placeholder="https://…"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
@@ -203,8 +193,8 @@ function SourcesEditor({
           <button
             type="submit"
             className="ts-btn ts-sources__button"
-            aria-label="Добавить адрес"
-            title="Добавить"
+            aria-label={t("settings.templates.addSource")}
+            title={t("settings.templates.add")}
             disabled={spec.trim() === "" || url.trim() === ""}
           >
             +
@@ -221,6 +211,7 @@ function SourcesEditor({
  * сокращению нельзя, а подсказка по наведению на Android не появится.
  */
 function Fingerprint({ digest }: { digest: string }): React.JSX.Element {
+  const { t } = useI18n();
   const [full, setFull] = useState(false);
   const short =
     digest.length > 12 ? `${digest.slice(0, 4)}…${digest.slice(-4)}` : digest;
@@ -228,11 +219,11 @@ function Fingerprint({ digest }: { digest: string }): React.JSX.Element {
     <button
       type="button"
       className="ts-tag ts-tag--button"
-      title={full ? "Свернуть" : digest}
-      aria-label={full ? `Отпечаток ${digest}` : "Показать отпечаток целиком"}
+      title={full ? t("settings.templates.collapse") : digest}
+      aria-label={full ? t("settings.templates.fingerprintFull", { digest }) : t("settings.templates.showFingerprint")}
       onClick={() => setFull((value) => !value)}
     >
-      {full ? digest : `отпечаток ${short}`}
+      {full ? digest : t("settings.templates.fingerprintShort", { short })}
     </button>
   );
 }
@@ -243,6 +234,7 @@ function InstalledList({
 }: {
   preview: PreviewClient | null;
 }): React.JSX.Element | null {
+  const { t } = useI18n();
   const [installed, setInstalled] = useState<InstalledTemplate[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -267,39 +259,35 @@ function InstalledList({
       <div className="ts-srow ts-srow--flat">
         <span className="ts-srow__text">
           <span className="ts-srow__label">
-            Установленные
+            {t("settings.templates.installed")}
             {installed !== null && installed.length > 0 && (
-              <span className="ts-tag">{installed.length} установлено</span>
+              <span className="ts-tag">{t("settings.templates.installedCount", { count: installed.length })}</span>
             )}
           </span>
-          <span className="ts-srow__hint">
-            Одинаковый отпечаток на двух устройствах значит одинаковое
-            содержимое. Изменённый после установки шаблон предпросмотр назовёт,
-            но не перезапишет.
-          </span>
+          <span className="ts-srow__hint">{t("settings.templates.installedHint")}</span>
         </span>
         <button type="button" className="ts-btn" onClick={() => void load()}>
-          Обновить
+          {t("settings.templates.refresh")}
         </button>
       </div>
 
       <div className="ts-installed">
         {failed ? (
-          <p role="alert">Перечень установленных шаблонов прочитать не удалось.</p>
+          <p role="alert">{t("settings.templates.listFailed")}</p>
         ) : installed === null ? (
-          <p role="status" className="ts-srow__hint">Читается…</p>
+          <p role="status" className="ts-srow__hint">{t("settings.templates.reading")}</p>
         ) : installed.length === 0 ? (
           <p role="status" className="ts-srow__hint">
-            Приложение пока не устанавливало ни одного шаблона.
+            {t("settings.templates.none")}
           </p>
         ) : (
-          <ul className="ts-installed__list" aria-label="Установленные шаблоны">
+          <ul className="ts-installed__list" aria-label={t("settings.templates.installedList")}>
             {installed.map((entry) => (
               <li key={entry.spec} className="ts-installed__row">
                 <span className="ts-installed__dot" aria-hidden="true" />
                 <span className="ts-installed__spec">{entry.spec}</span>
                 <span className="ts-installed__source" title={entry.url || undefined}>
-                  {sourceLabel(entry.url)} · {entry.file_count} файлов
+                  {sourceLabel(t, entry.url)} · {t("settings.templates.files", { count: entry.file_count })}
                 </span>
                 <span className="ts-spacer" />
                 <Fingerprint digest={entry.fingerprint} />
@@ -313,7 +301,9 @@ function InstalledList({
 }
 
 /** «реестр» / «свой адрес» — как в строках списка макета 1b. */
-function sourceLabel(url: string): string {
-  if (url === "") return "источник неизвестен";
-  return url.startsWith("https://packages.typst.org/") ? "реестр" : "свой адрес";
+function sourceLabel(t: Translate, url: string): string {
+  if (url === "") return t("settings.templates.sourceUnknown");
+  return url.startsWith("https://packages.typst.org/")
+    ? t("settings.templates.sourceRegistry")
+    : t("settings.templates.sourceCustom");
 }

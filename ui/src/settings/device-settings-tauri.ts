@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ApplyPlan,
   ChangeTarget,
+  RoutedChange,
   Settings,
   SettingsChange,
   SettingsEvent,
@@ -38,6 +39,9 @@ export function tauriDeviceSettings(
     },
     changeTarget(change, vaultIsOpen) {
       return invoke<ChangeTarget>("settings_change_target", { change, vaultIsOpen });
+    },
+    routeChange(change, vaultIsOpen) {
+      return invoke<RoutedChange[]>("settings_route_change", { change, vaultIsOpen });
     },
     resolveWithVault(overrides) {
       return invoke<Settings>("resolve_device_settings", { overrides });

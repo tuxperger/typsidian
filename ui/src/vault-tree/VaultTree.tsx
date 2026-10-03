@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Note } from "../wasm-core/typsidian_core.js";
 import { buildTree, type TreeFolder, type TreeNode } from "./buildTree.js";
+import { useI18n } from "../i18n/index.js";
 
 export interface VaultTreeProps {
   notes: Note[];
@@ -14,14 +15,15 @@ export interface VaultTreeProps {
  * поддеревьях).
  */
 export function VaultTree({ notes, onOpenNote }: VaultTreeProps): React.JSX.Element {
+  const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
 
   if (notes.length === 0) {
-    return <p role="status">Vault пуст — создайте первую заметку.</p>;
+    return <p role="status">{t("tree.emptyNotes")}</p>;
   }
 
   return (
-    <ul role="tree" aria-label="Дерево заметок">
+    <ul role="tree" aria-label={t("tree.label")}>
       {tree.map((node) => (
         <TreeNodeView key={nodeKey(node)} node={node} onOpenNote={onOpenNote} />
       ))}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Embed } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { writeBoardSnapshot } from "./exportSnapshot.js";
+import type { Phrase } from "../i18n/index.js";
 
 // Вставки открытой заметки и их состояние (T057-T059, FR-026…FR-032).
 //
@@ -21,7 +22,7 @@ export interface NoteEmbeds {
   /** Идёт запись снимка. */
   isUpdating: boolean;
   /** Отказ последнего действия словами; `null` — отказа не было. */
-  error: string | null;
+  error: Phrase | null;
   /** Внешнее или своё изменение файла — повод пересчитать состояние вставок. */
   fileChanged: (path: string) => void;
   /**
@@ -40,7 +41,7 @@ export function useNoteEmbeds(
 ): NoteEmbeds {
   const [embeds, setEmbeds] = useState<Embed[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Phrase | null>(null);
   // Растёт при каждом поводе пересчитать: изменилась доска или снимок.
   const [revision, setRevision] = useState(0);
 
@@ -137,17 +138,17 @@ export function useNoteEmbeds(
 }
 
 /** Почему доску-источник не удалось прочитать (FR-031). */
-function describeBoardReadFailure(cause: unknown): string {
+function describeBoardReadFailure(cause: unknown): Phrase {
   const kind =
     typeof cause === "object" && cause !== null && "kind" in cause
       ? (cause as { kind: unknown }).kind
       : null;
   switch (kind) {
     case "NotFound":
-      return "доска-источник не найдена — её удалили или переместили";
+      return (t) => t("boards.embed.read.notFound");
     case "Unreadable":
-      return "файл доски не читается: он повреждён или создан несовместимой версией";
+      return (t) => t("boards.embed.read.unreadable");
     default:
-      return "доску-источник не удалось прочитать";
+      return (t) => t("boards.embed.read.failed");
   }
 }

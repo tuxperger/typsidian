@@ -4,6 +4,7 @@ import {
   describeResolveError,
   type ConflictEntry,
 } from "./useConflictResolution.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 export interface ConflictDialogProps {
   conflict: ConflictEntry | null;
@@ -17,12 +18,12 @@ export interface ConflictDialogProps {
   onDismissError: () => void;
 }
 
-function describeSituation(conflict: ConflictEntry): string {
+function describeSituation(t: Translate, conflict: ConflictEntry): string {
   switch (conflict.kind) {
     case "diskChanged":
-      return `Заметка «${conflict.notePath}» изменена вне приложения, а у вас есть несохранённые правки. Ни одна из версий пока не применена.`;
+      return t("editor.conflict.diskChanged", { path: conflict.notePath });
     case "deleted":
-      return `Заметка «${conflict.notePath}» удалена вне приложения, а у вас остались несохранённые правки. Они всё ещё в памяти — их можно сохранить заново.`;
+      return t("editor.conflict.deleted", { path: conflict.notePath });
     default: {
       const exhaustive: never = conflict.kind;
       return exhaustive;
@@ -30,15 +31,15 @@ function describeSituation(conflict: ConflictEntry): string {
   }
 }
 
-function acceptExternalLabel(conflict: ConflictEntry): string {
+function acceptExternalLabel(t: Translate, conflict: ConflictEntry): string {
   switch (conflict.kind) {
     case "diskChanged":
-      return "Принять внешнюю версию";
+      return t("editor.conflict.acceptExternal");
     case "deleted":
       // Внешней версии не существует: «принять внешнюю» здесь означает
       // согласиться с удалением (FR-025) — называть это «принять версию» было
       // бы неправдой.
-      return "Принять удаление и отбросить правки";
+      return t("editor.conflict.acceptDeletion");
     default: {
       const exhaustive: never = conflict.kind;
       return exhaustive;
@@ -70,6 +71,7 @@ export function ConflictDialog({
   onAcceptExternal,
   onDismissError,
 }: ConflictDialogProps): React.JSX.Element | null {
+  const { t } = useI18n();
   if (!conflict) return null;
 
   return (
@@ -77,34 +79,34 @@ export function ConflictDialog({
       className="ts-dialog"
       role="alertdialog"
       aria-modal="true"
-      aria-label={`Конфликт редактирования: ${conflict.notePath}`}
+      aria-label={t("editor.conflict.label", { path: conflict.notePath })}
     >
-      <p>{describeSituation(conflict)}</p>
+      <p>{describeSituation(t, conflict)}</p>
 
       {error && (
         <div role="alert">
-          <p>{describeResolveError(error)}</p>
+          <p>{describeResolveError(t, error)}</p>
           <button type="button" onClick={onDismissError}>
-            Понятно
+            {t("common.ok")}
           </button>
         </div>
       )}
 
-      <div role="group" aria-label="Что сделать с правками">
+      <div role="group" aria-label={t("editor.conflict.choice")}>
         <button type="button" disabled={isResolving} onClick={onKeepLocal}>
-          Оставить свою версию
+          {t("editor.conflict.keepLocal")}
         </button>
         <button type="button" disabled={isResolving} onClick={onAcceptExternal}>
-          {acceptExternalLabel(conflict)}
+          {acceptExternalLabel(t, conflict)}
         </button>
         {conflict.kind === "diskChanged" &&
           (diff === null ? (
             <button type="button" disabled={isResolving} onClick={onShowDiff}>
-              Посмотреть отличия
+              {t("editor.conflict.showDiff")}
             </button>
           ) : (
             <button type="button" onClick={onHideDiff}>
-              Скрыть отличия
+              {t("editor.conflict.hideDiff")}
             </button>
           ))}
       </div>

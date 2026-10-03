@@ -88,7 +88,9 @@ async fn read_text(file_handle: &JsValue) -> Result<String, JsValue> {
 /// содержимое читается только при расхождении.
 async fn file_meta(file_handle: &JsValue) -> Option<(f64, f64)> {
     let file = js_call0(file_handle, "getFile").await.ok()?;
-    let size = Reflect::get(&file, &JsValue::from_str("size")).ok()?.as_f64()?;
+    let size = Reflect::get(&file, &JsValue::from_str("size"))
+        .ok()?
+        .as_f64()?;
     let last_modified = Reflect::get(&file, &JsValue::from_str("lastModified"))
         .ok()?
         .as_f64()?;
@@ -120,7 +122,10 @@ fn request_to_promise(request: &web_sys::IdbRequest) -> js_sys::Promise {
             let _ = resolve.call1(&JsValue::NULL, &value);
         }) as Box<dyn FnOnce(JsValue)>);
         let on_error = Closure::once(Box::new(move |_event: JsValue| {
-            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("IndexedDB request failed"));
+            let _ = reject.call1(
+                &JsValue::NULL,
+                &JsValue::from_str("IndexedDB request failed"),
+            );
         }) as Box<dyn FnOnce(JsValue)>);
         request.set_onsuccess(Some(on_success.as_ref().unchecked_ref()));
         request.set_onerror(Some(on_error.as_ref().unchecked_ref()));
@@ -160,12 +165,15 @@ fn store_for(
     db: &web_sys::IdbDatabase,
     mode: web_sys::IdbTransactionMode,
 ) -> Result<web_sys::IdbObjectStore, JsValue> {
-    let transaction =
-        db.transaction_with_str_and_mode(IDB_STORE, mode)?;
+    let transaction = db.transaction_with_str_and_mode(IDB_STORE, mode)?;
     transaction.object_store(IDB_STORE)
 }
 
-async fn registry_put(db: &web_sys::IdbDatabase, key: &str, handle: &JsValue) -> Result<(), JsValue> {
+async fn registry_put(
+    db: &web_sys::IdbDatabase,
+    key: &str,
+    handle: &JsValue,
+) -> Result<(), JsValue> {
     let store = store_for(db, web_sys::IdbTransactionMode::Readwrite)?;
     let request = store.put_with_key(handle, &JsValue::from_str(key))?;
     JsFuture::from(request_to_promise(&request)).await?;
@@ -317,7 +325,9 @@ impl WebStore {
 
 impl SettingsStore for WebStore {
     async fn open() -> Result<Self, StoreError> {
-        let root = opfs_root().await.map_err(|_| StoreError::NoConfigDirectory)?;
+        let root = opfs_root()
+            .await
+            .map_err(|_| StoreError::NoConfigDirectory)?;
         let file = settings_file_handle(&root, true)
             .await
             .map_err(|_| StoreError::Io)?;
@@ -504,7 +514,9 @@ impl WebStore {
     /// Кладёт произвольный текст в файл настроек, минуя разбор, — так тест
     /// воспроизводит повреждённое хранилище.
     pub async fn overwrite_raw_for_test(text: &str) -> Result<(), StoreError> {
-        let root = opfs_root().await.map_err(|_| StoreError::NoConfigDirectory)?;
+        let root = opfs_root()
+            .await
+            .map_err(|_| StoreError::NoConfigDirectory)?;
         let file = settings_file_handle(&root, true)
             .await
             .map_err(|_| StoreError::Io)?;
@@ -523,8 +535,8 @@ impl WebStore {
         let Ok(root) = opfs_root().await else {
             return false;
         };
-        let Ok(function) =
-            Reflect::get(&root, &JsValue::from_str("getFileHandle")).and_then(|f| f.dyn_into::<js_sys::Function>())
+        let Ok(function) = Reflect::get(&root, &JsValue::from_str("getFileHandle"))
+            .and_then(|f| f.dyn_into::<js_sys::Function>())
         else {
             return false;
         };
@@ -662,7 +674,11 @@ impl WebStore {
         };
 
         let result = Object::new();
-        Reflect::set(&result, &JsValue::from_str("access"), &JsValue::from_str(access))?;
+        Reflect::set(
+            &result,
+            &JsValue::from_str("access"),
+            &JsValue::from_str(access),
+        )?;
         if let Some(handle) = handle {
             Reflect::set(&result, &JsValue::from_str("handle"), &handle)?;
         }
@@ -695,6 +711,17 @@ impl WebStore {
         vault_is_open: bool,
     ) -> super::apply::ChangeTarget {
         super::apply::target_for(&change, vault_is_open)
+    }
+
+    /// Раскладка набора по хранилищам (фича 010, FR-016): язык — всегда в
+    /// устройство, прочее — туда же, куда `changeTarget`. Интерфейс исполняет
+    /// записи по порядку и сам не решает, где живёт значение (принцип I).
+    #[wasm_bindgen(js_name = routeChange)]
+    pub fn route_change_js(
+        change: SettingsChange,
+        vault_is_open: bool,
+    ) -> Vec<super::apply::RoutedChange> {
+        super::apply::route(&change, vault_is_open)
     }
 
     /// Действующие значения при открытом vault: устройство как слой по

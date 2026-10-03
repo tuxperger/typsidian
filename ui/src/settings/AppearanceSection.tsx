@@ -1,10 +1,14 @@
-import type { Settings, Theme } from "../wasm-core/typsidian_core.js";
+import { LANGUAGES, useI18n } from "../i18n/index.js";
+import { primarySubtag } from "../i18n/resolve.js";
+import type { LanguageChoice, Settings, Theme } from "../wasm-core/typsidian_core.js";
 import { EditorFontSizeField } from "./EditorFontSizeField.js";
 
 export interface AppearanceSectionProps {
   settings: Settings;
   onChangeTheme: (theme: Theme) => void;
   onChangeFontSize: (size: number) => void;
+  /** Выбор языка интерфейса (фича 010, FR-010). Уходит в настройки устройства. */
+  onChangeLanguage: (choice: LanguageChoice) => void;
   /** Причина отказа из ядра (FR-016) — UI её показывает, но не придумывает. */
   rejectionMessage: string | null;
 
@@ -19,6 +23,9 @@ export interface AppearanceSectionProps {
   defaultsMessage?: string | null;
 }
 
+/** Значение пункта «как в системе» в списке: не код языка ни при каком выборе. */
+const SYSTEM = "system";
+
 /**
  * Раздел «Внешний вид» (T040, FR-015, FR-016).
  *
@@ -31,23 +38,52 @@ export function AppearanceSection({
   settings,
   onChangeTheme,
   onChangeFontSize,
+  onChangeLanguage,
   canMakeDefault = false,
   onMakeDefault,
   defaultsMessage = null,
   rejectionMessage,
 }: AppearanceSectionProps): React.JSX.Element {
+  const { t } = useI18n();
+  // Язык, которого эта версия не знает, показывается как «как в системе» — так
+  // он и действует (FR-018). Само значение в файле не трогается, пока
+  // пользователь не выберет язык явно.
+  const chosen = settings.language === undefined ? undefined : primarySubtag(settings.language);
+  const selected = LANGUAGES.some((language) => language.code === chosen) ? chosen : SYSTEM;
+
   return (
-    <section aria-label="Внешний вид">
-      <h2>Внешний вид</h2>
+    <section aria-label={t("settings.section.appearance")}>
+      <h2>{t("settings.section.appearance")}</h2>
 
       <label>
-        Тема
+        {t("settings.appearance.language")}
+        <select
+          value={selected}
+          onChange={(event) => {
+            const value = event.target.value;
+            onChangeLanguage(value === SYSTEM ? "system" : { tag: value });
+          }}
+        >
+          <option value={SYSTEM}>{t("settings.appearance.languageSystem")}</option>
+          {/* Каждый язык назван на самом себе (FR-011): человек, случайно
+              переключившийся на незнакомый язык, найдёт свой по написанию. */}
+          {LANGUAGES.map((language) => (
+            <option key={language.code} value={language.code} lang={language.code}>
+              {language.nativeName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="ts-field__hint">{t("settings.appearance.languageHint")}</p>
+
+      <label>
+        {t("settings.appearance.theme")}
         <select
           value={settings.theme ?? "light"}
           onChange={(event) => onChangeTheme(event.target.value as Theme)}
         >
-          <option value="light">Светлая</option>
-          <option value="dark">Тёмная</option>
+          <option value="light">{t("settings.appearance.themeLight")}</option>
+          <option value="dark">{t("settings.appearance.themeDark")}</option>
         </select>
       </label>
 
@@ -63,11 +99,9 @@ export function AppearanceSection({
           {/* FR-029: правка при открытом vault уходит в сам vault. Значит
               умолчания устройства меняются только этим явным действием — без
               него они не менялись бы никогда. */}
-          <p>
-            Эти значения принадлежат открытому vault и переезжают вместе с ним.
-          </p>
+          <p>{t("settings.appearance.vaultOwned")}</p>
           <button type="button" onClick={onMakeDefault}>
-            Сделать значениями по умолчанию
+            {t("settings.appearance.makeDefault")}
           </button>
           {defaultsMessage && <p role="status">{defaultsMessage}</p>}
         </>

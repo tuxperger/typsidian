@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardSaveState } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import type { Phrase } from "../i18n/index.js";
 
 // Принцип I: этот хук не решает, что считать содержимым и когда запись
 // допустима — он вызывает ядро и исполняет его ответ. Правило «из Failed нет
@@ -18,6 +19,15 @@ import type { VaultClient } from "../vault-client.js";
  */
 export const BOARD_AUTOSAVE_DEBOUNCE_MS = 800;
 
+/**
+ * Состояние сохранения доски для показа. То же, что `BoardSaveState` ядра, но
+ * причина отказа — фраза, а не готовая строка: показанный отказ обязан
+ * перерисоваться на новом языке (фича 010, FR-014).
+ */
+export type BoardSaveView =
+  | Exclude<BoardSaveState, { state: "Failed" }>
+  | { state: "Failed"; reason: Phrase };
+
 export interface BoardDocument {
   /** Содержимое, прочитанное из файла; `null` — доска ещё не загружена. */
   content: string | null;
@@ -27,9 +37,9 @@ export interface BoardDocument {
    * поэтому по этому номеру он пересоздаётся (contracts/board-engine-bridge.md).
    */
   contentRevision: number;
-  saveState: BoardSaveState;
+  saveState: BoardSaveView;
   /** Ошибка чтения доски словами; `null` — читается нормально. */
-  readError: string | null;
+  readError: Phrase | null;
   /** Движок сообщил об изменении рисунка. */
   changed: (next: string) => void;
   /**
@@ -60,8 +70,8 @@ export function useBoardDocument(
 ): BoardDocument {
   const [content, setContent] = useState<string | null>(null);
   const [contentRevision, setContentRevision] = useState(0);
-  const [saveState, setSaveState] = useState<BoardSaveState>({ state: "Clean" });
-  const [readError, setReadError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<BoardSaveView>({ state: "Clean" });
+  const [readError, setReadError] = useState<Phrase | null>(null);
 
   // Буфер держится в ref, а не в state: запись читает его из таймера и из
   // `flush`, и обе стороны должны видеть последний штрих, а не тот, что был на
@@ -111,7 +121,7 @@ export function useBoardDocument(
         setContent(text);
         setContentRevision((revision) => revision + 1);
       } catch (cause) {
-        if (!cancelled) setReadError(describeReadFailure(cause));
+        if (!cancelled) setReadError(() => describeReadFailure(cause));
       }
     })();
 
@@ -188,31 +198,31 @@ export function useBoardDocument(
 }
 
 /** Причина отказа записи словами (FR-010). */
-function describeWriteFailure(cause: unknown): string {
+function describeWriteFailure(cause: unknown): Phrase {
   const kind = kindOf(cause);
   switch (kind) {
     case "Conflicted":
-      return "Доска изменилась на диске — выберите, какую версию оставить.";
+      return (t) => t("boards.save.conflicted");
     case "ReadOnlyProfile":
-      return "На этом клиенте доска доступна только на просмотр.";
+      return (t) => t("boards.save.readOnlyProfile");
     case "VaultNotWritable":
-      return "Vault недоступен на запись — нарисованное не потеряно.";
+      return (t) => t("boards.save.vaultNotWritable");
     case "Io":
-      return "Не удалось записать доску на диск — нарисованное не потеряно.";
+      return (t) => t("boards.save.io");
     default:
-      return "Записать доску не удалось — нарисованное не потеряно.";
+      return (t) => t("boards.save.failed");
   }
 }
 
 /** Причина отказа чтения словами (FR-017). */
-function describeReadFailure(cause: unknown): string {
+function describeReadFailure(cause: unknown): Phrase {
   switch (kindOf(cause)) {
     case "NotFound":
-      return "Доска не найдена — возможно, её удалили или переименовали снаружи.";
+      return (t) => t("boards.read.notFound");
     case "Unreadable":
-      return "Файл доски не читается — он повреждён или создан несовместимой версией. Файл не тронут.";
+      return (t) => t("boards.read.unreadable");
     default:
-      return "Не удалось прочитать доску с диска.";
+      return (t) => t("boards.read.io");
   }
 }
 

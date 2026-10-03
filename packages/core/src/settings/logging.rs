@@ -123,7 +123,10 @@ pub fn relative_to_vault(vault_root: &Path, note_path: &Path) -> Option<PathBuf>
     if note_path.is_relative() {
         return Some(note_path.to_path_buf());
     }
-    note_path.strip_prefix(vault_root).ok().map(Path::to_path_buf)
+    note_path
+        .strip_prefix(vault_root)
+        .ok()
+        .map(Path::to_path_buf)
 }
 
 /// Журнал с ротацией двух файлов (FR-043).
@@ -230,7 +233,10 @@ mod tests {
             if text.is_empty() {
                 continue;
             }
-            assert!(text.ends_with('\n'), "журнал не должен обрываться посередине строки");
+            assert!(
+                text.ends_with('\n'),
+                "журнал не должен обрываться посередине строки"
+            );
         }
     }
 }

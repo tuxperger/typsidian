@@ -145,8 +145,7 @@ fn inner_args<'a>(
             _ => Some(arg),
         })
         .find(|node| {
-            node.kind() == SyntaxKind::FuncCall
-                && probe.is_none_or(|at| node.range().contains(&at))
+            node.kind() == SyntaxKind::FuncCall && probe.is_none_or(|at| node.range().contains(&at))
         })?;
     args_of(&body)
 }
@@ -175,7 +174,11 @@ impl Plan<'_, '_, '_> {
 
     /// Аргументы до закрывающей скобки: значения и запятые. В формуле значение
     /// — несколько узлов подряд, они сливаются в один.
-    fn items(&self, args: &LinkedNode, math: bool) -> (Vec<Item>, Option<Range<usize>>, Option<Range<usize>>) {
+    fn items(
+        &self,
+        args: &LinkedNode,
+        math: bool,
+    ) -> (Vec<Item>, Option<Range<usize>>, Option<Range<usize>>) {
         let mut items: Vec<Item> = Vec::new();
         let mut left = None;
         let mut right = None;
@@ -232,7 +235,8 @@ impl Plan<'_, '_, '_> {
             // другим, но равнозначным экранированием переписалась бы зря.
             if let Some(old) = old {
                 if field.source.as_deref() == Some(old.source.as_str())
-                    || (field.source.is_none() && field.plain.as_deref() == Some(old.plain.as_str()))
+                    || (field.source.is_none()
+                        && field.plain.as_deref() == Some(old.plain.as_str()))
                 {
                     continue;
                 }
@@ -315,7 +319,11 @@ impl Plan<'_, '_, '_> {
         match left {
             None => self.push(args.offset()..args.offset(), format!("({arg})")),
             Some(left) => {
-                let insert = if items.is_empty() { arg } else { format!("{arg}, ") };
+                let insert = if items.is_empty() {
+                    arg
+                } else {
+                    format!("{arg}, ")
+                };
                 self.push(left.end..left.end, insert);
             }
         }
@@ -351,8 +359,15 @@ impl Plan<'_, '_, '_> {
     }
 
     fn heading(&mut self) {
-        let Some(field) = self.field("level") else { return };
-        let Some(old) = self.located.values.iter().find(|value| value.name == "level") else {
+        let Some(field) = self.field("level") else {
+            return;
+        };
+        let Some(old) = self
+            .located
+            .values
+            .iter()
+            .find(|value| value.name == "level")
+        else {
             return;
         };
         let text = field.source.or(field.plain).unwrap_or_default();
@@ -367,7 +382,9 @@ impl Plan<'_, '_, '_> {
     }
 
     fn raw(&mut self) {
-        let Some(field) = self.field("lang") else { return };
+        let Some(field) = self.field("lang") else {
+            return;
+        };
         let wanted = field
             .plain
             .or_else(|| {
@@ -385,7 +402,11 @@ impl Plan<'_, '_, '_> {
             self.error("lang", FieldProblem::WrongKind);
             return;
         }
-        let old = self.located.values.iter().find(|value| value.name == "lang");
+        let old = self
+            .located
+            .values
+            .iter()
+            .find(|value| value.name == "lang");
         match old {
             Some(old) if old.plain == wanted => {}
             Some(old) => self.push(old.range.clone(), wanted),
@@ -400,7 +421,9 @@ impl Plan<'_, '_, '_> {
     }
 
     fn equation(&mut self) {
-        let Some(field) = self.field("block") else { return };
+        let Some(field) = self.field("block") else {
+            return;
+        };
         let wanted = field.source.or(field.plain).unwrap_or_default() == "true";
         let children: Vec<LinkedNode> = self.located.node.children().collect();
         let (Some(first), Some(last)) = (children.first(), children.last()) else {
@@ -458,11 +481,7 @@ impl Plan<'_, '_, '_> {
     }
 }
 
-fn label_taken(
-    root: &typst::syntax::SyntaxNode,
-    wanted: &str,
-    own: Option<&Range<usize>>,
-) -> bool {
+fn label_taken(root: &typst::syntax::SyntaxNode, wanted: &str, own: Option<&Range<usize>>) -> bool {
     fn walk(node: &LinkedNode, wanted: &str, own: Option<&Range<usize>>) -> bool {
         if node.kind() == SyntaxKind::Label && Some(&node.range()) != own {
             let text = node.get().full_text();

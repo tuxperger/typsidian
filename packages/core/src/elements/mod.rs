@@ -21,9 +21,6 @@ pub mod render;
 pub mod schema;
 pub mod values;
 
-
-
-
 pub use edit::{plan_element_edit, PlanEditError, TextEdit};
 pub use locate::{element_at, ElementAtResult, ParsedElement, UnavailableReason};
 pub use render::{render_element, RenderedElement};
@@ -32,7 +29,6 @@ pub use schema::{
     ParamSpec,
 };
 pub use values::{FieldError, FieldProblem, FieldValue, ParamValue};
-
 
 /// Смещение в байтах → в кодовых единицах UTF-16.
 pub(crate) fn utf16_at(text: &str, byte: usize) -> usize {
@@ -106,9 +102,13 @@ pub struct RenderRequest {
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(tag = "kind")]
 pub enum RenderOutcome {
-    Rendered { element: RenderedElement },
+    Rendered {
+        element: RenderedElement,
+    },
     /// Значения, которые элемент не примет (FR-015): «Применить» заперто.
-    Invalid { errors: Vec<FieldError> },
+    Invalid {
+        errors: Vec<FieldError>,
+    },
 }
 
 pub fn render(request: &RenderRequest) -> RenderOutcome {
@@ -120,7 +120,12 @@ pub fn render(request: &RenderRequest) -> RenderOutcome {
             }
         }
     }
-    match render_element(&request.id, &request.fields, request.label.as_deref(), &taken) {
+    match render_element(
+        &request.id,
+        &request.fields,
+        request.label.as_deref(),
+        &taken,
+    ) {
         Ok(element) => RenderOutcome::Rendered { element },
         Err(errors) => RenderOutcome::Invalid { errors },
     }
@@ -146,8 +151,12 @@ pub struct EditRequest {
 #[serde(tag = "kind")]
 pub enum EditOutcome {
     /// Замены — пустой список, если ничего не изменилось (FR-009).
-    Planned { edits: Vec<TextEdit> },
-    Refused { error: PlanEditError },
+    Planned {
+        edits: Vec<TextEdit>,
+    },
+    Refused {
+        error: PlanEditError,
+    },
 }
 
 pub fn plan(request: &EditRequest) -> EditOutcome {

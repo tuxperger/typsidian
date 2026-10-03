@@ -85,7 +85,10 @@ fn resolve_iterations_are_bounded() {
         assert!(allowed <= guard, "предел итераций не сработал");
     }
 
-    assert_eq!(allowed, u32::from(typsidian_core::preview::MAX_RESOLVE_ITERATIONS));
+    assert_eq!(
+        allowed,
+        u32::from(typsidian_core::preview::MAX_RESOLVE_ITERATIONS)
+    );
 }
 
 #[test]
@@ -120,13 +123,21 @@ fn a_real_note_compiles_into_pages_with_svg() {
     assert_eq!(doc.pages.len(), 1);
     assert!(doc.pages[0].svg.contains("<svg"), "ожидали настоящий SVG");
     assert!(doc.pages[0].width_pt > 0.0 && doc.pages[0].height_pt > 0.0);
-    assert!(doc.diagnostics.iter().all(|d| d.severity != DiagnosticSeverity::Error));
+    assert!(doc
+        .diagnostics
+        .iter()
+        .all(|d| d.severity != DiagnosticSeverity::Error));
 }
 
 #[test]
 fn multi_page_note_yields_one_entry_per_page() {
-    let doc = compile_note(MAIN, "Первая\n\n#pagebreak()\n\nВторая\n", 1, FontSet::builtin())
-        .unwrap();
+    let doc = compile_note(
+        MAIN,
+        "Первая\n\n#pagebreak()\n\nВторая\n",
+        1,
+        FontSet::builtin(),
+    )
+    .unwrap();
 
     assert_eq!(doc.pages.len(), 2);
     assert_eq!(doc.pages[0].index, 0);
@@ -158,9 +169,18 @@ fn a_broken_note_fails_with_a_named_reason_and_a_place() {
         .iter()
         .find(|d| d.severity == DiagnosticSeverity::Error)
         .expect("ошибка обязана быть названа");
-    assert!(!error.message.is_empty(), "общий текст без причины запрещён (FR-012)");
+    assert!(
+        !error.message.is_empty(),
+        "общий текст без причины запрещён (FR-012)"
+    );
+    // Сообщение Typst показывается как есть: вида приложения у него нет
+    // (фича 010, FR-004).
+    assert_eq!(error.app, None);
 
-    let place = error.location.as_ref().expect("место обязано быть указано (FR-013)");
+    let place = error
+        .location
+        .as_ref()
+        .expect("место обязано быть указано (FR-013)");
     assert!(place.is_open_note);
     assert_eq!(place.line, 1);
     assert!(place.byte_end >= place.byte_start);
@@ -174,6 +194,7 @@ fn a_broken_note_fails_with_a_named_reason_and_a_place() {
 mod common;
 
 use common::MemoryVault;
+use typsidian_core::messages::{AppMessage, FontProblem, ResolveReason};
 use typsidian_core::preview::{compile_note_resolved, PackageCache};
 use typsidian_core::vault::backend::ReadError;
 
@@ -220,11 +241,19 @@ async fn missing_image_is_named_with_its_reason_and_does_not_spin_the_loop() {
     .unwrap();
 
     assert_eq!(doc.outcome, CompileOutcome::Failed);
-    let named = doc
-        .diagnostics
-        .iter()
-        .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("нет.svg"));
-    assert!(named, "имя файла обязано дойти до пользователя: {:?}", doc.diagnostics);
+    let named = doc.diagnostics.iter().any(|d| {
+        d.severity == DiagnosticSeverity::Error
+            && d.app
+                == Some(AppMessage::DependencyUnreadable {
+                    path: "нет.svg".to_string(),
+                    reason: ResolveReason::NotFound,
+                })
+    });
+    assert!(
+        named,
+        "имя файла обязано дойти до пользователя: {:?}",
+        doc.diagnostics
+    );
 
     // Отказ не меняется в пределах одной сборки, поэтому файл спрашивается
     // один раз, а не восемь — по разу на каждый проход резолва.
@@ -247,10 +276,13 @@ async fn unreadable_dependency_reports_its_own_reason_not_a_generic_failure() {
     .unwrap();
 
     assert_eq!(doc.outcome, CompileOutcome::Failed);
-    let described = doc
-        .diagnostics
-        .iter()
-        .any(|d| d.message.contains("битая.svg") && d.message.contains("размер"));
+    let described = doc.diagnostics.iter().any(|d| {
+        d.app
+            == Some(AppMessage::DependencyUnreadable {
+                path: "битая.svg".to_string(),
+                reason: ResolveReason::TooLarge,
+            })
+    });
     assert!(
         described,
         "причина обязана отличаться от «файл не найден»: {:?}",
@@ -323,8 +355,14 @@ async fn template_files_survive_between_compiles() {
         first.diagnostics
     );
     let reads_after_first: u32 = vault.reads.borrow().values().sum();
-    assert!(reads_after_first > 0, "первая сборка обязана прочитать шаблон");
-    assert!(!packages.is_empty(), "прочитанные файлы шаблона обязаны осесть в кэше");
+    assert!(
+        reads_after_first > 0,
+        "первая сборка обязана прочитать шаблон"
+    );
+    assert!(
+        !packages.is_empty(),
+        "прочитанные файлы шаблона обязаны осесть в кэше"
+    );
 
     let second = compile_note_resolved(
         &vault,
@@ -489,4 +527,155 @@ async fn dependency_is_read_through_the_native_backend() {
         doc.diagnostics
     );
     assert_eq!(doc.revision, 7, "версия текста обязана дойти до результата");
+}
+
+// ── Шрифты из папки vault (T100, T102, FR-027…FR-029) ───────────────────
+//
+// Встроенный набор в этих проверках пуст: иначе шрифт нашёлся бы и без vault,
+// и проверка ничего бы не доказывала. В vault кладётся файл Libertinus из
+// `typst-assets` — настоящий шрифт, которому неоткуда взяться, кроме папки.
+
+/// Байты одного начертания Libertinus Serif.
+fn libertinus_bytes() -> Vec<u8> {
+    typst_assets::fonts()
+        .find(|bytes| {
+            typst::text::Font::new(Bytes::new(bytes.to_vec()), 0)
+                .is_some_and(|font| font.info().family == "Libertinus Serif")
+        })
+        .expect("Libertinus в typst-assets")
+        .to_vec()
+}
+
+const LIBERTINUS_NOTE: &str = "#set text(font: \"Libertinus Serif\")\nТекст\n";
+
+fn unknown_font(doc: &typsidian_core::preview::CompiledDocument) -> bool {
+    doc.diagnostics
+        .iter()
+        .any(|d| d.message.to_lowercase().contains("unknown font family"))
+}
+
+#[tokio::test]
+async fn font_from_vault_folder_is_available_to_the_note() {
+    let vault = MemoryVault::new().with_file("шрифты/Libertinus.OTF", libertinus_bytes());
+
+    let doc = compile_note_resolved(
+        &vault,
+        &PackageCache::new(),
+        MAIN,
+        LIBERTINUS_NOTE,
+        1,
+        FontSet::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "{:?}",
+        doc.diagnostics
+    );
+    assert!(
+        !unknown_font(&doc),
+        "шрифт из vault обязан найтись: {:?}",
+        doc.diagnostics
+    );
+}
+
+#[tokio::test]
+async fn font_outside_vault_is_reported_unknown() {
+    let doc = compile_note_resolved(
+        &MemoryVault::new(),
+        &PackageCache::new(),
+        MAIN,
+        LIBERTINUS_NOTE,
+        1,
+        FontSet::default(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        unknown_font(&doc),
+        "без файла в vault шрифта нет: {:?}",
+        doc.diagnostics
+    );
+}
+
+#[tokio::test]
+async fn vault_font_is_read_once_per_change_not_per_compile() {
+    let vault = MemoryVault::new().with_file("Libertinus.otf", libertinus_bytes());
+    let packages = PackageCache::new();
+
+    for revision in 1..=3 {
+        compile_note_resolved(
+            &vault,
+            &packages,
+            MAIN,
+            LIBERTINUS_NOTE,
+            revision,
+            FontSet::default(),
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(vault.read_count("Libertinus.otf"), 1);
+}
+
+#[tokio::test]
+async fn broken_vault_font_is_named_and_the_note_still_compiles() {
+    let vault = MemoryVault::new().with_file("шрифты/битый.ttf", "не шрифт");
+
+    let doc = compile_note_resolved(
+        &vault,
+        &PackageCache::new(),
+        MAIN,
+        "Текст\n",
+        1,
+        FontSet::builtin(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "{:?}",
+        doc.diagnostics
+    );
+    let named = doc.diagnostics.iter().any(|d| {
+        d.severity == DiagnosticSeverity::Warning
+            && d.app
+                == Some(AppMessage::VaultFontUnusable {
+                    path: "шрифты/битый.ttf".to_string(),
+                    reason: FontProblem::Invalid,
+                })
+    });
+    assert!(
+        named,
+        "битый шрифт обязан быть назван: {:?}",
+        doc.diagnostics
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Фича 010 — сообщения приложения (T042/T043): общие проверки из common/message_cases.rs
+// ---------------------------------------------------------------------------
+
+use common::message_cases as app_messages;
+
+#[test]
+fn every_variant_has_a_stable_json_shape() {
+    app_messages::every_variant_has_a_stable_json_shape();
+}
+
+#[test]
+fn a_diagnostic_carries_the_message_kind_only_when_the_app_made_it() {
+    app_messages::a_diagnostic_carries_the_message_kind_only_when_the_app_made_it();
+}
+
+#[test]
+fn log_text_names_the_user_values_verbatim() {
+    app_messages::log_text_names_the_user_values_verbatim();
 }

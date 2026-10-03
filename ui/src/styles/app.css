@@ -711,6 +711,9 @@ input.ts-sources__url:focus {
 /* Доли пары «редактор + предпросмотр». Макет задаёт 1:1 — это и есть запасное
  * значение; переменные ставит `usePaneLayout`, когда границу двигают. */
 .ts-pane--editor {
+  /* Ширина колонки, а не окна, решает, что убрать из строки состояния: при
+   * минимальном окне и при сдвинутой границе колонок узко одинаково. */
+  container: ts-editor-pane / inline-size;
   flex-grow: var(--ts-editor-grow, 1);
   background: var(--steel-950);
   border-right: var(--border-width) solid var(--border-default);
@@ -806,6 +809,48 @@ input.ts-sources__url:focus {
   height: 20px;
   padding: 0 var(--space-2);
   font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Строка в 26px и в узкой колонке остаётся одной строкой (010 SC-006):
+ * подписи и кнопки с длинной подписью (`ts-btn--shrink`, с полным текстом в
+ * подсказке) сжимаются многоточием и остаются на виду; короткие кнопки и
+ * группа масштаба не сжимаются — «З…» вместо «Закрыть» не прочесть. Переводы
+ * бывают длиннее исходных подписей, и перенос кнопки на второй ряд вылезал из
+ * 26px, а кнопки справа — за границу колонки. Прокрутка — крайний случай. */
+.ts-pane__toolbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.ts-pane__toolbar > * {
+  flex-shrink: 0;
+}
+.ts-pane__toolbar > .ts-pane__title,
+.ts-pane__toolbar > .ts-eyebrow,
+.ts-pane__toolbar > .ts-pane__meta,
+.ts-pane__toolbar > .ts-tag,
+.ts-pane__toolbar > .ts-btn--shrink,
+.ts-pane__toolbar > .ts-group > .ts-btn--shrink {
+  flex-shrink: 1;
+  min-width: 3ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Многоточие работает только у блочного текста: у inline-flex текст —
+ * анонимный flex-элемент, и `text-overflow` к нему не применяется. */
+.ts-pane__toolbar > .ts-btn--shrink,
+.ts-pane__toolbar > .ts-group > .ts-btn--shrink {
+  display: block;
+  line-height: 18px;
+}
+.ts-pane__toolbar > .ts-group {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.ts-pane__toolbar > .ts-spacer {
+  flex-shrink: 1;
 }
 
 .ts-pane__toolbar [role="group"] {
@@ -862,6 +907,14 @@ input.ts-sources__url:focus {
 
 .ts-statusbar p {
   margin: 0;
+}
+
+/* Кодировка и язык разметки — справочные и в этом приложении не меняются; в
+ * узкой колонке они уступают место позиции курсора и счётчику слов. */
+@container ts-editor-pane (max-width: 420px) {
+  .ts-statusbar__minor {
+    display: none;
+  }
 }
 
 /* Состояние автосохранения — единственное, что осталось от кнопки «Сохранить».
@@ -4485,4 +4538,511 @@ input.ts-sources__url:focus {
   color: var(--steel-200);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* ── Экспорт в PDF (фича 009; макет «Typsidian Утилиты» § Экспорт) ───────── */
+
+/* Итог экспорта одной заметки. Базовое оформление строки — у `.ts-notices`
+ * по роли; здесь только цвет кромки успеха и путь моноширинным. */
+.ts-notices > .ts-export-toast[role="status"] {
+  border-left-color: var(--success);
+}
+
+.ts-export-toast > svg {
+  color: var(--success);
+}
+
+.ts-export-toast--failed > svg {
+  color: var(--danger);
+}
+
+.ts-export-toast__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-export-toast__path {
+  font-family: var(--font-mono);
+  color: var(--steel-100);
+}
+
+/* Пилюля хода пакета в шапке: видна, пока Центр закрыт (FR-025). */
+.ts-export-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-300);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ts-export-pill:hover {
+  border-color: var(--orange-500);
+  color: var(--orange-400);
+}
+
+.ts-export-pill .ts-hazard {
+  width: 48px;
+}
+
+/* Лист Центра: 980px из макета, во всю высоту — список может быть длинным. */
+.ts-export {
+  display: flex;
+  flex-direction: column;
+  width: 980px;
+  max-width: 94%;
+  height: 100%;
+  min-height: 0;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.ts-export__head {
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 14px;
+  border-bottom: var(--border-width) solid var(--border-default);
+  color: var(--steel-400);
+}
+
+.ts-export__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--steel-100);
+}
+
+.ts-export__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-export__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.ts-export__list-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-export__toolbar {
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+.ts-export__hint {
+  color: var(--steel-600);
+}
+
+/* Кнопка-флажок: весь ряд «[✓] подпись» кликабелен одним элементом. */
+.ts-export__check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-export__check-label:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ts-export__check-label--row {
+  gap: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--steel-300);
+}
+
+.ts-export__cb {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--steel-700);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--steel-950);
+}
+
+.ts-export__cb--on {
+  border-color: var(--orange-500);
+  background: var(--orange-500);
+}
+
+.ts-export__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.ts-export__empty {
+  margin: 0;
+  padding: var(--space-4) 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-export__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px 14px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--steel-400);
+}
+
+.ts-export__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  color: var(--steel-600);
+}
+
+.ts-export__row--done {
+  opacity: 0.75;
+}
+
+.ts-export__row--active {
+  padding-left: 12px;
+  border-left: 2px solid var(--orange-500);
+  background: var(--steel-900);
+}
+
+.ts-export__row-check {
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ts-export__row-check:disabled {
+  cursor: default;
+}
+
+.ts-export__row--off .ts-export__row-check {
+  opacity: 0.4;
+}
+
+.ts-export__row-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--steel-200);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-export__row--off .ts-export__row-name {
+  color: var(--steel-500);
+}
+
+.ts-export__row--active .ts-export__row-name {
+  color: var(--steel-100);
+  font-weight: 500;
+}
+
+.ts-export__row-hazard {
+  width: 64px;
+  height: 4px;
+}
+
+.ts-export__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 55%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-export__state--idle {
+  color: var(--steel-600);
+}
+
+.ts-export__state--off {
+  color: var(--steel-700);
+}
+
+.ts-export__state--active {
+  color: var(--orange-400);
+}
+
+.ts-export__state--done {
+  color: var(--success);
+}
+
+.ts-export__state--warn {
+  color: var(--warning);
+}
+
+.ts-export__state--failed {
+  color: var(--danger);
+}
+
+.ts-export__skip {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--steel-400);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-export__skip:hover {
+  border-color: var(--orange-500);
+  color: var(--orange-400);
+}
+
+/* Правая колонка: 264px из макета. */
+.ts-export__side {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ts-export__side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ts-export__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ts-export__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+.ts-export__note {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--steel-600);
+}
+
+.ts-export__seg {
+  display: flex;
+  gap: 4px;
+}
+
+.ts-export__seg-item {
+  flex: 1;
+  padding: 5px 0;
+  border: var(--border-width) solid var(--orange-500);
+  border-radius: 2px;
+  background: rgba(255, 106, 0, 0.12);
+  color: var(--orange-400);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.ts-export__folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 5px 7px;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--steel-400);
+}
+
+.ts-export__folder-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-export__folder-edit {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--steel-500);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-export__folder-edit:hover {
+  color: var(--orange-400);
+}
+
+.ts-export__rule {
+  height: 1px;
+  background: var(--border-default);
+}
+
+.ts-export__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--steel-500);
+}
+
+.ts-export__progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ts-export__progress-key {
+  color: var(--steel-600);
+}
+
+.ts-export__progress-value {
+  color: var(--steel-200);
+}
+
+.ts-export__bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--steel-800);
+}
+
+.ts-export__bar-fill {
+  height: 100%;
+  background: var(--orange-500);
+  transition: width 150ms ease;
+}
+
+.ts-export__summary {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--steel-300);
+}
+
+.ts-export__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ts-export__recent li {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ts-export__recent-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--steel-300);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-export__recent-meta {
+  color: var(--steel-600);
+}
+
+.ts-export__actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-top: var(--border-width) solid var(--border-default);
+}
+
+.ts-export__actions .ts-btn {
+  justify-content: center;
+}
+
+.ts-export__foot {
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 14px;
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+.ts-export__badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--orange-500);
+  color: var(--steel-950);
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-export__bar-fill {
+    transition: none;
+  }
 }

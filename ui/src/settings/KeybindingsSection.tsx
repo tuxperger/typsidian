@@ -3,6 +3,7 @@ import type {
   EditorMode,
   OutageReason,
 } from "../wasm-core/typsidian_core.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 export interface KeybindingsSectionProps {
   mode: EditorMode | null;
@@ -40,44 +41,47 @@ export function KeybindingsSection({
   onApplyConfig,
   onLeavePlainInput,
 }: KeybindingsSectionProps): React.JSX.Element {
+  const { t } = useI18n();
   return (
-    <section aria-label="Кейбиндинги">
-      <h2>Кейбиндинги</h2>
+    <section aria-label={t("settings.section.keybindings")}>
+      <h2>{t("settings.section.keybindings")}</h2>
 
-      <p role="status">{describeMode(mode)}</p>
+      <p role="status">{describeMode(t, mode)}</p>
 
       {/* FR-035: переход в обычный ввод — заметное сообщение с причиной и
           действием возврата, а не тихая смена поведения редактора. */}
       {mode?.state === "PlainInput" && (
         <div role="alert">
-          <p>{describeOutage(mode.reason)}</p>
+          <p>{describeOutage(t, mode.reason)}</p>
           <button type="button" onClick={onLeavePlainInput}>
-            Вернуться к режиму редактирования
+            {t("settings.mode.backToEditing")}
           </button>
         </div>
       )}
 
-      <div role="group" aria-label="Режим редактирования">
+      <div role="group" aria-label={t("settings.mode.label")}>
         {fullBackendUnavailableReason ? (
           <p role="note">
-            Полноценный режим недоступен: {describeOutage(fullBackendUnavailableReason)}
+            {t("settings.mode.fullUnavailable", {
+              reason: describeOutage(t, fullBackendUnavailableReason),
+            })}
           </p>
         ) : (
           <button type="button" onClick={onChooseFullBackend}>
-            Полноценный режим
+            {t("settings.mode.full")}
           </button>
         )}
         <button type="button" onClick={onChooseSimplifiedEmulation}>
-          Упрощённая эмуляция
+          {t("settings.mode.simplified")}
         </button>
       </div>
 
-      <div role="group" aria-label="Конфиг">
+      <div role="group" aria-label={t("settings.config.label")}>
         <p>
-          Конфиг:{" "}
-          {configPath ? <code>{configPath}</code> : <em>не указан</em>}{" "}
+          {t("settings.config.prefix")}{" "}
+          {configPath ? <code>{configPath}</code> : <em>{t("settings.config.none")}</em>}{" "}
           <button type="button" onClick={onPickConfig}>
-            {configPath ? "Выбрать другой" : "Указать конфиг"}
+            {configPath ? t("settings.config.chooseOther") : t("settings.config.choose")}
           </button>
         </p>
         {configDiskState && (
@@ -106,30 +110,27 @@ function ConfigStatus({
   hasPath: boolean;
   onApplyConfig: () => void;
 }): React.JSX.Element | null {
+  const { t } = useI18n();
   switch (diskState) {
     case "inSync":
-      return <span role="note">Применён.</span>;
+      return <span role="note">{t("settings.config.applied")}</span>;
     case "changed":
       return (
         <>
-          <span role="note">Изменён, не применён.</span>
+          <span role="note">{t("settings.config.changed")}</span>
           <button type="button" onClick={onApplyConfig}>
-            Применить
+            {t("insert.form.apply")}
           </button>
         </>
       );
     case "missing":
       if (!hasPath) return null;
       return (
-        <span role="note">
-          Файл не найден. Ранее применённый конфиг продолжает действовать.
-        </span>
+        <span role="note">{t("settings.config.missing")}</span>
       );
     case "unreadable":
       return (
-        <span role="note">
-          Файл не читается. Ранее применённый конфиг продолжает действовать.
-        </span>
+        <span role="note">{t("settings.config.unreadable")}</span>
       );
     default: {
       const exhaustive: never = diskState;
@@ -138,17 +139,17 @@ function ConfigStatus({
   }
 }
 
-function describeMode(mode: EditorMode | null): string {
-  if (!mode) return "Состояние режима редактирования ещё не определено.";
+function describeMode(t: Translate, mode: EditorMode | null): string {
+  if (!mode) return t("settings.mode.unknown");
   switch (mode.state) {
     case "FullBackend":
-      return "Активен полноценный режим редактирования.";
+      return t("settings.mode.fullActive");
     case "SimplifiedEmulation":
-      return "Активна упрощённая эмуляция.";
+      return t("settings.mode.simplifiedActive");
     case "PlainInput":
       // Формулировка намеренно не смешивается с эмуляцией: отсутствие
       // vim-раскладки должно быть однозначно отличимо от штатного режима.
-      return "Обычный текстовый ввод: полноценный режим отказал, vim-раскладка сейчас не действует.";
+      return t("settings.mode.plainInput");
     default: {
       const exhaustive: never = mode;
       return exhaustive;
@@ -156,18 +157,18 @@ function describeMode(mode: EditorMode | null): string {
   }
 }
 
-function describeOutage(reason: OutageReason): string {
+function describeOutage(t: Translate, reason: OutageReason): string {
   switch (reason.kind) {
     case "ExternalProcessesUnavailable":
-      return "эта платформа не может запускать внешние процессы.";
+      return t("settings.outage.noProcesses");
     case "BackendNotInstalled":
-      return "подсистема не найдена на этом устройстве.";
+      return t("settings.outage.notInstalled");
     case "BackendStopped":
-      return "внешний процесс завершился или перестал отвечать.";
+      return t("settings.outage.stopped");
     case "ConfigMissingOnThisDevice":
       // Фича 006, FR-027: путь приехал вместе с папкой заметок с другой
       // машины. Чинится правкой пути, а не установкой подсистемы.
-      return "указанного конфига нет на этом устройстве.";
+      return t("settings.outage.configMissing");
     default: {
       const exhaustive: never = reason;
       return exhaustive;

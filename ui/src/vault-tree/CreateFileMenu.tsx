@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Icon, type IconName } from "../icons/Icons.js";
+import { useI18n, type MessageKey } from "../i18n/index.js";
 import type { CommandId, Template } from "../wasm-core/typsidian_core.js";
 import { NewNoteFromTemplate } from "../templates/NewNoteFromTemplate.js";
 import { hintWith, type ShortcutsState } from "../workspace/useShortcuts.js";
@@ -22,8 +23,8 @@ export type CreateKind = "note" | "board";
 
 interface Choice {
   kind: CreateKind;
-  title: string;
-  hint: string;
+  title: MessageKey;
+  hint: MessageKey;
   icon: IconName;
   /**
    * Команда, чьё сочетание создаёт этот вид. Подпись берётся у неё же — раньше
@@ -36,16 +37,16 @@ interface Choice {
 const CHOICES: Choice[] = [
   {
     kind: "note",
-    title: "Заметка Typst",
-    hint: ".typ · компилируется в PDF",
+    title: "tree.create.note",
+    hint: "tree.create.noteHint",
     icon: "file",
     command: "new-file",
     className: "ts-create__icon ts-create__icon--note",
   },
   {
     kind: "board",
-    title: "Доска Excalidraw",
-    hint: ".excalidraw · встроенный",
+    title: "tree.create.board",
+    hint: "tree.create.boardHint",
     icon: "board",
     command: "new-board",
     className: "ts-create__icon ts-create__icon--board",
@@ -81,6 +82,7 @@ export function CreateFileMenu({
   onCreate,
   shortcuts,
 }: CreateFileMenuProps): React.JSX.Element {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -130,8 +132,8 @@ export function CreateFileMenu({
       <button
         type="button"
         className="ts-create__plus"
-        title={hintWith("Создать файл", shortcuts.displayOf("new-file"))}
-        aria-label="Создать файл"
+        title={hintWith(t("tree.create.button"), shortcuts.displayOf("new-file"))}
+        aria-label={t("tree.create.button")}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
@@ -149,7 +151,7 @@ export function CreateFileMenu({
           className="ts-create__menu"
           id={menuId}
           role="menu"
-          aria-label="Тип нового файла"
+          aria-label={t("tree.create.menuLabel")}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
@@ -169,7 +171,9 @@ export function CreateFileMenu({
         >
           <div className="ts-create__head">
             <span className="ts-eyebrow">
-              {folderName === "" ? "Создать в vault" : `Создать в «${folderName}»`}
+              {folderName === ""
+                ? t("tree.create.inVault")
+                : t("tree.create.inFolder", { folder: folderName })}
             </span>
           </div>
 
@@ -189,8 +193,8 @@ export function CreateFileMenu({
                 >
                   <Icon name={choice.icon} size={15} className={choice.className} />
                   <span className="ts-create__text">
-                    <span className="ts-create__title">{choice.title}</span>
-                    <span className="ts-create__hint">{choice.hint}</span>
+                    <span className="ts-create__title">{t(choice.title)}</span>
+                    <span className="ts-create__hint">{t(choice.hint)}</span>
                   </span>
                   <span className="ts-create__key">
                     {shortcuts.displayOf(choice.command)}
@@ -220,10 +224,10 @@ export function CreateFileMenu({
           <div className="ts-create__foot">
             <span>
               <Icon name="enter" size={10} />
-              создать
+              {t("tree.create.footCreate")}
             </span>
-            <span>↑↓ выбор</span>
-            <span className="ts-create__esc">Esc</span>
+            <span>{t("tree.create.footSelect")}</span>
+            <span className="ts-create__esc">Esc</span>{/* i18n-ignore: имя клавиши */}
           </div>
         </div>
       )}

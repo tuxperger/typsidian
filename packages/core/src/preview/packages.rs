@@ -117,12 +117,54 @@ pub enum InstallError {
     TimedOut { url: String },
     /// Архив отклонён целиком, ни одного файла не создано (FR-019, FR-020).
     #[error("архив отклонён: {reason}")]
-    ArchiveRejected { reason: String },
+    ArchiveRejected { reason: ArchiveProblem },
     #[error("папка заметок недоступна на запись")]
     NotWritable,
+    /// Скачанное не удалось записать в папку заметок, хотя она доступна на
+    /// запись (сбой диска, гонка с внешней правкой).
+    #[error("файлы шаблона не удалось записать в папку заметок")]
+    LocalWriteFailed,
     /// Автозагрузка выключена (FR-009). Не отказ сети: приложение и не пыталось.
     #[error("шаблон {spec} не установлен, а автозагрузка выключена")]
     AutoDownloadDisabled { spec: String },
+}
+
+/// Чем архив шаблона не устроил (FR-019, FR-020).
+///
+/// Вид, а не готовый текст (фича 010, FR-002): слова подбирает интерфейс на
+/// своём языке. `Display` — только для журналов, он от языка интерфейса не
+/// зависит (FR-031).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(
+    tag = "problem",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ArchiveProblem {
+    #[error("архив больше поддерживаемого размера")]
+    TooLarge,
+    #[error("архив не разбирается")]
+    Unparsable,
+    #[error("запись архива не имеет пригодного пути")]
+    EntryWithoutPath,
+    #[error("запись архива не читается")]
+    EntryUnreadable,
+    #[error("распакованный шаблон больше поддерживаемого размера")]
+    UnpackedTooLarge,
+    #[error("в архиве нет файлов")]
+    Empty,
+    #[error("в архиве нет манифеста {PACKAGE_MANIFEST}")]
+    NoManifest,
+    #[error("путь записи архива не является текстом")]
+    PathNotText,
+    /// Запись пытается выйти за пределы папки шаблона; `entry` — её путь как
+    /// есть в архиве.
+    #[error("запись «{entry}» ведёт за пределы папки шаблона")]
+    EscapesFolder { entry: String },
+    #[error("запись архива без имени")]
+    EntryWithoutName,
 }
 
 /// Что получилось из попытки установить шаблон — для отчёта пользователю
@@ -146,7 +188,15 @@ pub struct InstallReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FingerprintCheck {
     Matches,
-    Diverged { recorded: String, actual: String },
+    Diverged {
+        recorded: String,
+        actual: String,
+    },
+    /// Одного из записанных файлов больше нет — это тоже расхождение.
+    FileMissing {
+        recorded: String,
+        name: String,
+    },
     Unknown,
 }
 
@@ -209,14 +259,14 @@ pub fn source_url(spec: &PackageSpec, source: &TemplateSource) -> Option<String>
 pub fn unpack(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, InstallError> {
     if archive.len() > ARCHIVE_SIZE_LIMIT {
         return Err(InstallError::ArchiveRejected {
-            reason: "архив больше поддерживаемого размера".to_string(),
+            reason: ArchiveProblem::TooLarge,
         });
     }
 
     let decoder = flate2::read::GzDecoder::new(archive);
     let mut tar = tar::Archive::new(decoder);
     let entries = tar.entries().map_err(|_| InstallError::ArchiveRejected {
-        reason: "архив не разбирается".to_string(),
+        reason: ArchiveProblem::Unparsable,
     })?;
 
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
@@ -224,14 +274,14 @@ pub fn unpack(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, InstallError> {
 
     for entry in entries {
         let mut entry = entry.map_err(|_| InstallError::ArchiveRejected {
-            reason: "архив не разбирается".to_string(),
+            reason: ArchiveProblem::Unparsable,
         })?;
         // Папки сами по себе не переносятся: их создаст запись файлов внутри.
         if entry.header().entry_type().is_dir() {
             continue;
         }
         let raw = entry.path().map_err(|_| InstallError::ArchiveRejected {
-            reason: "запись архива не имеет пригодного пути".to_string(),
+            reason: ArchiveProblem::EntryWithoutPath,
         })?;
         let path = contained_path(&raw)?;
 
@@ -239,13 +289,13 @@ pub fn unpack(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, InstallError> {
         entry
             .read_to_end(&mut bytes)
             .map_err(|_| InstallError::ArchiveRejected {
-                reason: "запись архива не читается".to_string(),
+                reason: ArchiveProblem::EntryUnreadable,
             })?;
 
         total = total.saturating_add(bytes.len());
         if total > ARCHIVE_SIZE_LIMIT {
             return Err(InstallError::ArchiveRejected {
-                reason: "распакованный шаблон больше поддерживаемого размера".to_string(),
+                reason: ArchiveProblem::UnpackedTooLarge,
             });
         }
         files.push((path, bytes));
@@ -253,14 +303,14 @@ pub fn unpack(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, InstallError> {
 
     if files.is_empty() {
         return Err(InstallError::ArchiveRejected {
-            reason: "в архиве нет файлов".to_string(),
+            reason: ArchiveProblem::Empty,
         });
     }
 
     let files = strip_common_wrapper(files);
     if !files.iter().any(|(path, _)| path == PACKAGE_MANIFEST) {
         return Err(InstallError::ArchiveRejected {
-            reason: format!("в архиве нет манифеста {PACKAGE_MANIFEST}"),
+            reason: ArchiveProblem::NoManifest,
         });
     }
 
@@ -281,24 +331,23 @@ fn contained_path(raw: &Path) -> Result<String, InstallError> {
         match component {
             Component::Normal(name) => {
                 let name = name.to_str().ok_or_else(|| InstallError::ArchiveRejected {
-                    reason: "путь записи архива не является текстом".to_string(),
+                    reason: ArchiveProblem::PathNotText,
                 })?;
                 parts.push(name.to_string());
             }
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(InstallError::ArchiveRejected {
-                    reason: format!(
-                        "запись «{}» ведёт за пределы папки шаблона",
-                        raw.display()
-                    ),
+                    reason: ArchiveProblem::EscapesFolder {
+                        entry: raw.display().to_string(),
+                    },
                 });
             }
         }
     }
     if parts.is_empty() {
         return Err(InstallError::ArchiveRejected {
-            reason: "запись архива без имени".to_string(),
+            reason: ArchiveProblem::EntryWithoutName,
         });
     }
     Ok(parts.join("/"))
@@ -407,7 +456,7 @@ pub async fn install<B: VaultBackend>(
     write_file(backend, &root.join(FINGERPRINT_FILE), record.as_bytes()).await?;
 
     let manifest = deferred.ok_or_else(|| InstallError::ArchiveRejected {
-        reason: format!("в архиве нет манифеста {PACKAGE_MANIFEST}"),
+        reason: ArchiveProblem::NoManifest,
     })?;
     write_file(backend, &root.join(PACKAGE_MANIFEST), manifest).await?;
 
@@ -479,9 +528,9 @@ pub async fn verify_installed<B: VaultBackend>(
             Ok(bytes) => files.push((name.clone(), bytes)),
             // Файл исчез — это тоже расхождение, и молчать о нём нельзя.
             Err(_) => {
-                return FingerprintCheck::Diverged {
+                return FingerprintCheck::FileMissing {
                     recorded: record.digest,
-                    actual: format!("файла {name} больше нет"),
+                    name: name.clone(),
                 }
             }
         }
@@ -607,9 +656,7 @@ async fn write_file<B: VaultBackend>(
 fn to_install_error(error: WriteError) -> InstallError {
     match error {
         WriteError::AccessDenied => InstallError::NotWritable,
-        WriteError::Conflict | WriteError::Io => InstallError::SourceUnavailable {
-            url: "локальная запись".to_string(),
-        },
+        WriteError::Conflict | WriteError::Io => InstallError::LocalWriteFailed,
     }
 }
 
@@ -793,7 +840,10 @@ mod tests {
         // FR-019. Отклоняется весь архив, а не отдельная запись.
         for evil in ["../снаружи.typ", "a/../../снаружи.typ", "/etc/passwd"] {
             let error = contained_path(Path::new(evil)).expect_err(evil);
-            assert!(matches!(error, InstallError::ArchiveRejected { .. }), "{evil}");
+            assert!(
+                matches!(error, InstallError::ArchiveRejected { .. }),
+                "{evil}"
+            );
         }
     }
 
@@ -846,7 +896,10 @@ mod tests {
     fn the_fingerprint_file_does_not_hash_itself() {
         let without = vec![("lib.typ".to_string(), b"x".to_vec())];
         let mut with = without.clone();
-        with.push((FINGERPRINT_FILE.to_string(), "что угодно".as_bytes().to_vec()));
+        with.push((
+            FINGERPRINT_FILE.to_string(),
+            "что угодно".as_bytes().to_vec(),
+        ));
         assert_eq!(fingerprint(&without), fingerprint(&with));
     }
 

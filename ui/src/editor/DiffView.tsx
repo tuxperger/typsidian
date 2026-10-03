@@ -1,17 +1,18 @@
 import type { DiffLine } from "../wasm-core/typsidian_core.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 export interface DiffViewProps {
   diff: DiffLine[];
 }
 
-function sideLabel(line: DiffLine): string {
+function sideLabel(t: Translate, line: DiffLine): string {
   switch (line.side) {
     case "Same":
-      return "без изменений";
+      return t("editor.diff.same");
     case "Local":
-      return "ваша версия";
+      return t("editor.diff.local");
     case "External":
-      return "версия на диске";
+      return t("editor.diff.external");
     default: {
       const exhaustive: never = line;
       return exhaustive;
@@ -45,11 +46,12 @@ function sideMarker(line: DiffLine): string {
  * действия.
  */
 export function DiffView({ diff }: DiffViewProps): React.JSX.Element {
+  const { t } = useI18n();
   if (diff.length === 0) {
-    return <p role="status">Отличий нет.</p>;
+    return <p role="status">{t("editor.diff.none")}</p>;
   }
   return (
-    <ol aria-label="Отличия между вашей версией и версией на диске">
+    <ol aria-label={t("editor.diff.label")}>
       {diff.map((line, index) => (
         <li
           // Строки не уникальны и могут повторяться, поэтому ключ — позиция в
@@ -58,7 +60,7 @@ export function DiffView({ diff }: DiffViewProps): React.JSX.Element {
           data-side={line.side}
         >
           <span aria-hidden="true">{sideMarker(line)}</span>
-          <span className="sr-only">{sideLabel(line)}: </span>
+          <span className="sr-only">{sideLabel(t, line)}: </span>
           <code>{line.text === "" ? " " : line.text}</code>
         </li>
       ))}

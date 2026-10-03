@@ -446,7 +446,7 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Шрифты
 
-- [ ] T100 [P] [US4] Тест: шрифт из папки vault попадает в набор и применяется, в
+- [X] T100 [P] [US4] Тест: шрифт из папки vault попадает в набор и применяется, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-027)
 - [ ] T101 [P] [US4] Тест: отсутствующий шрифт называется поимённо, а документ собирается с
@@ -458,7 +458,7 @@ description: "Task list for Note Rendering and Live Preview"
 - [ ] T103 [P] [US4] Тест: шрифт, установленный в системе, но отсутствующий во встроенном
       наборе и в vault, **не** применяется, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-027)
-- [ ] T104 [US4] Реализовать сбор шрифтов из папки vault в
+- [X] T104 [US4] Реализовать сбор шрифтов из папки vault в
       `packages/core/src/preview/fonts.rs` (FR-027)
 - [ ] T105 [US4] Реализовать `FontSet::missing()` и предупреждение о недостающих шрифтах в
       `packages/core/src/preview/fonts.rs` (FR-028)

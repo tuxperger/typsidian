@@ -2,7 +2,8 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import "@excalidraw/excalidraw/index.css";
-import type { BoardSaveState } from "../wasm-core/typsidian_core.js";
+import { useI18n, type Phrase } from "../i18n/index.js";
+import type { BoardSaveView } from "./useBoardDocument.js";
 
 // Принцип VIII конституции: движок — чёрный ящик. Этот файл монтирует его и
 // оформляет **контейнер** — рамку, заголовок панели, индикатор сохранения.
@@ -33,9 +34,9 @@ export interface BoardCanvasProps {
    */
   contentRevision?: number;
   /** Состояние сохранения — показывается пользователю (FR-009). */
-  saveState?: BoardSaveState;
+  saveState?: BoardSaveView;
   /** Причина, по которой доску не удалось прочитать (FR-017). */
-  readError?: string | null;
+  readError?: Phrase | null;
   /** Просмотр без инструментов рисования — клиент без права записи (FR-034). */
   viewModeEnabled?: boolean;
   /** Движок сообщил об изменении рисунка. */
@@ -51,6 +52,7 @@ export function BoardCanvas({
   viewModeEnabled = false,
   onChange,
 }: BoardCanvasProps): React.JSX.Element {
+  const { t, engineLang } = useI18n();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -81,17 +83,17 @@ export function BoardCanvas({
   const initialData = useMemo(() => parseScene(content), [content]);
 
   return (
-    <section className="ts-pane ts-pane--board" aria-label="Доска">
+    <section className="ts-pane ts-pane--board" aria-label={t("boards.label")}>
       <div className="ts-pane__toolbar">
         {name ? (
           <h2 className="ts-pane__title">{name}</h2>
         ) : (
-          <span className="ts-eyebrow">Доска</span>
+          <span className="ts-eyebrow">{t("boards.label")}</span>
         )}
         <span className="ts-spacer" />
         {viewModeEnabled && (
           <span className="ts-eyebrow" role="note">
-            только просмотр
+            {t("boards.viewOnly")}
           </span>
         )}
         <SaveIndicator state={saveState} />
@@ -100,7 +102,7 @@ export function BoardCanvas({
       <div className="ts-board">
         {readError ? (
           <div className="ts-placeholder">
-            <p role="alert">{readError}</p>
+            <p role="alert">{readError(t)}</p>
           </div>
         ) : isMounted && content !== null ? (
           <Suspense fallback={<BoardLoading />}>
@@ -108,6 +110,10 @@ export function BoardCanvas({
               key={contentRevision}
               initialData={initialData}
               viewModeEnabled={viewModeEnabled}
+              // Язык интерфейса самого движка (FR-025). Строка, а не объект:
+              // движок сверяет пропы поверхностно, и новая ссылка на каждый
+              // рендер замкнула бы цикл перерисовки.
+              langCode={engineLang}
               onChange={handleEngineChange}
             />
           </Suspense>
@@ -120,18 +126,19 @@ export function BoardCanvas({
 }
 
 /** FR-009: состояние сохранения видно пользователю всегда, а не только при отказе. */
-function SaveIndicator({ state }: { state: BoardSaveState }): React.JSX.Element {
+function SaveIndicator({ state }: { state: BoardSaveView }): React.JSX.Element {
+  const { t } = useI18n();
   switch (state.state) {
     case "Clean":
-      return <span className="ts-eyebrow">сохранено</span>;
+      return <span className="ts-eyebrow">{t("boards.save.saved")}</span>;
     case "Dirty":
-      return <span className="ts-eyebrow">есть изменения</span>;
+      return <span className="ts-eyebrow">{t("boards.save.dirty")}</span>;
     case "Saving":
-      return <span className="ts-eyebrow">сохраняем…</span>;
+      return <span className="ts-eyebrow">{t("boards.save.saving")}</span>;
     case "Failed":
       return (
         <span className="ts-eyebrow ts-eyebrow--alert" role="alert">
-          не сохранено: {state.reason}
+          {t("boards.save.notSaved", { reason: state.reason(t) })}
         </span>
       );
     default: {
@@ -142,9 +149,10 @@ function SaveIndicator({ state }: { state: BoardSaveState }): React.JSX.Element 
 }
 
 function BoardLoading(): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <div className="ts-placeholder">
-      <p role="status">Готовим полотно…</p>
+      <p role="status">{t("boards.loading")}</p>
     </div>
   );
 }

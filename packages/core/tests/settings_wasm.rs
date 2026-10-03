@@ -400,6 +400,7 @@ fn switching_vault_changes_nothing_but_the_current_vault() {
         current_vault: Some(VaultId::from_raw("a")),
         editor_mode_preference: ModePreference::FullBackend,
         editor_config_path: None,
+        language: Some("en".to_string()),
     };
 
     let after = SettingsChange::current_vault(VaultId::from_raw("b")).apply_to(&before);
@@ -408,6 +409,7 @@ fn switching_vault_changes_nothing_but_the_current_vault() {
     assert_eq!(after.theme, before.theme);
     assert_eq!(after.editor_font_size, before.editor_font_size);
     assert_eq!(after.editor_mode_preference, before.editor_mode_preference);
+    assert_eq!(after.language, before.language);
     assert_eq!(after.known_vaults, before.known_vaults);
     assert!(typsidian_core::settings::validate(&after).is_ok());
 }
@@ -434,7 +436,9 @@ fn switching_to_an_unknown_vault_is_rejected() {
 fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
     // T065, FR-035.
     let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     assert!(controller.mode().is_full_backend());
 
     controller
@@ -454,7 +458,9 @@ fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
 fn user_can_switch_between_full_backend_and_emulation() {
     // T067, FR-027.
     let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     assert!(controller.mode().is_full_backend());
     controller
         .request_mode(ModePreference::SimplifiedEmulation)
@@ -468,7 +474,9 @@ fn unavailable_backend_never_reports_full_backend() {
     let mut controller = EditorModeController::new(FakeBridge::unavailable(
         OutageReason::ExternalProcessesUnavailable,
     ));
-    assert!(controller.request_mode(ModePreference::FullBackend).is_err());
+    assert!(controller
+        .request_mode(ModePreference::FullBackend)
+        .is_err());
     assert!(!controller.mode().is_full_backend());
 }
 
@@ -486,7 +494,9 @@ fn on_web_the_full_backend_is_permanently_unavailable_with_an_honest_reason() {
             reason: OutageReason::ExternalProcessesUnavailable
         }
     );
-    assert!(controller.request_mode(ModePreference::FullBackend).is_err());
+    assert!(controller
+        .request_mode(ModePreference::FullBackend)
+        .is_err());
     assert!(!controller.mode().is_full_backend());
     // Упрощённая эмуляция при этом доступна и работает.
     controller
@@ -595,8 +605,7 @@ fn label_is_shown_instead_of_location_and_need_not_be_unique() {
 // ---------------------------------------------------------------------------
 
 #[wasm_bindgen_test]
-fn reset_binding_returns_the_same_change_as_the_core(
-) {
+fn reset_binding_returns_the_same_change_as_the_core() {
     // FR-037. Биндинг обязан отдавать ровно тот набор, что собирает ядро:
     // если UI когда-нибудь начнёт строить его сам, эти два значения разойдутся,
     // и умолчания появятся во втором месте (принцип I).
@@ -633,6 +642,7 @@ async fn reset_through_apply_returns_values_to_defaults_and_keeps_known_vaults()
                 current_vault: None,
                 editor_mode_preference: None,
                 editor_config_path: None,
+                language: None,
             },
             &ApplyContext::unobstructed(),
         )
@@ -648,10 +658,7 @@ async fn reset_through_apply_returns_values_to_defaults_and_keeps_known_vaults()
 
     let after = SettingsStore::settings(&store);
     assert_eq!(after.theme, Settings::default().theme);
-    assert_eq!(
-        after.editor_font_size,
-        Settings::default().editor_font_size
-    );
+    assert_eq!(after.editor_font_size, Settings::default().editor_font_size);
 }
 
 #[wasm_bindgen_test]
@@ -667,6 +674,7 @@ async fn reset_is_rejected_whole_when_a_conflict_is_unresolved() {
                 current_vault: None,
                 editor_mode_preference: None,
                 editor_config_path: None,
+                language: None,
             },
             &ApplyContext::unobstructed(),
         )
@@ -712,4 +720,76 @@ async fn diagnostics_report_web_target_and_a_permanent_outage() {
         }
     );
     assert!(matches!(report.editor_mode, EditorMode::PlainInput { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Фича 010 — язык интерфейса (T008/T009): общие проверки из common/language_cases.rs
+// ---------------------------------------------------------------------------
+
+mod common;
+use common::language_cases as language;
+
+#[wasm_bindgen_test]
+fn language_round_trips_through_the_file() {
+    language::language_round_trips_through_the_file();
+}
+
+#[wasm_bindgen_test]
+fn unrecognised_tag_survives_writing_another_value() {
+    language::unrecognised_tag_survives_writing_another_value();
+}
+
+#[wasm_bindgen_test]
+fn malformed_tag_in_file_keeps_other_values() {
+    language::malformed_tag_in_file_keeps_other_values();
+}
+
+#[wasm_bindgen_test]
+fn invalid_tag_rejects_the_whole_change() {
+    language::invalid_tag_rejects_the_whole_change();
+}
+
+#[wasm_bindgen_test]
+fn stored_malformed_tag_does_not_block_other_changes() {
+    language::stored_malformed_tag_does_not_block_other_changes();
+}
+
+#[wasm_bindgen_test]
+fn language_goes_to_the_device_even_with_an_open_vault() {
+    language::language_goes_to_the_device_even_with_an_open_vault();
+}
+
+#[wasm_bindgen_test]
+fn language_and_theme_split_between_stores() {
+    language::language_and_theme_split_between_stores();
+}
+
+#[wasm_bindgen_test]
+fn reset_returns_to_the_system_language() {
+    language::reset_returns_to_the_system_language();
+}
+
+#[wasm_bindgen_test]
+fn language_choice_json_shape() {
+    language::language_choice_json_shape();
+}
+
+#[wasm_bindgen_test]
+async fn chosen_language_survives_reopen_and_reset_clears_it() {
+    // FR-015, FR-017 — тот же сценарий, что в settings_native.rs, поверх OPFS.
+    use typsidian_core::settings::apply::LanguageChoice;
+    let mut store = fresh_store().await;
+    let change = SettingsChange::language(LanguageChoice::Tag("en".to_string()));
+    assert_eq!(
+        store.apply(&change, &ApplyContext::unobstructed()).await,
+        ApplyPlan::Applied
+    );
+    let mut reopened = <WebStore as SettingsStore>::open().await.unwrap();
+    assert_eq!(reopened.settings().language.as_deref(), Some("en"));
+
+    reopened
+        .apply(&reset_to_defaults(), &ApplyContext::unobstructed())
+        .await;
+    let again = <WebStore as SettingsStore>::open().await.unwrap();
+    assert_eq!(again.settings().language, None);
 }

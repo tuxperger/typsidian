@@ -9,8 +9,8 @@ import "@typsidian/ui/styles/app.css";
  * же origin: обращений к Google Fonts во время работы не происходит, чего
  * требует FR-042 фичи 004 («ни одного сетевого обращения»).
  *
- * Кириллица в subsets не для полноты, а по необходимости: весь интерфейс
- * русскоязычный.
+ * Кириллица в subsets не для полноты, а по необходимости: русский — один из
+ * поставляемых языков интерфейса (фича 010).
  */
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin", "cyrillic"],
@@ -45,7 +45,9 @@ const sourceSerif = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: "Typsidian",
-  description: "Локальный редактор заметок на Typst",
+  // Метаданные отдаёт сервер до того, как клиент узнает язык, поэтому — на
+  // эталонном английском (фича 010).
+  description: "Local-first note editor for Typst",
 };
 
 export default function RootLayout({
@@ -55,7 +57,9 @@ export default function RootLayout({
 }): React.JSX.Element {
   return (
     <html
-      lang="ru"
+      // Действующий язык выставит клиент (`I18nProvider`, FR-006); до него —
+      // эталонный.
+      lang="en"
       className={`${plexSans.variable} ${plexMono.variable} ${sourceSerif.variable}`}
     >
       <body>{children}</body>

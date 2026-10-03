@@ -1,6 +1,7 @@
 "use client";
 
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { useI18n } from "../i18n/index.js";
 
 // Выбор доски для вставки в открытую заметку (T045, T046, FR-018, SC-007).
 //
@@ -39,6 +40,7 @@ export function InsertBoardDialog({
   onCreateBoard,
   onCancel,
 }: InsertBoardDialogProps): React.JSX.Element | null {
+  const { t } = useI18n();
   // Пока идёт запись снимка, Escape не отменяет: файл уже пишется, и закрытие
   // диалога не отменило бы начатое, а только спрятало бы его исход.
   useDismissOnEscape(isOpen && !isInserting ? onCancel : null);
@@ -50,7 +52,7 @@ export function InsertBoardDialog({
       className="ts-dialog ts-dialog--choice"
       role="dialog"
       aria-modal="true"
-      aria-label="Вставить доску в заметку"
+      aria-label={t("boards.insert.label")}
     >
       {error !== null && <p role="alert">{error}</p>}
 
@@ -59,25 +61,22 @@ export function InsertBoardDialog({
         // отказ, поэтому здесь не `role="alert"`, а объяснение и выход из
         // положения одним действием.
         <>
-          <p>
-            В этом vault ещё нет досок. Создайте доску — после этого её можно
-            будет вставить в заметку.
-          </p>
-          <div role="group" aria-label="Что сделать">
+          <p>{t("boards.insert.none")}</p>
+          <div role="group" aria-label={t("boards.insert.whatNext")}>
             {onCreateBoard && (
               <button type="button" onClick={onCreateBoard}>
-                Создать доску
+                {t("tree.menu.createBoard")}
               </button>
             )}
             <button type="button" onClick={onCancel}>
-              Отмена
+              {t("common.cancel")}
             </button>
           </div>
         </>
       ) : (
         <>
-          <p>Выберите доску — она будет вставлена в это место заметки.</p>
-          <ul aria-label="Доски vault">
+          <p>{t("boards.insert.choose")}</p>
+          <ul aria-label={t("boards.insert.list")}>
             {boards.map((board) => (
               <li key={board.path}>
                 <button
@@ -90,9 +89,9 @@ export function InsertBoardDialog({
               </li>
             ))}
           </ul>
-          <div role="group" aria-label="Что сделать">
+          <div role="group" aria-label={t("boards.insert.whatNext")}>
             <button type="button" onClick={onCancel}>
-              Отмена
+              {t("common.cancel")}
             </button>
           </div>
         </>

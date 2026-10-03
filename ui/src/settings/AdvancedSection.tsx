@@ -4,6 +4,7 @@ import type {
   OutageReason,
   StoreCapabilities,
 } from "../wasm-core/typsidian_core.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 export interface AdvancedSectionProps {
   capabilities: StoreCapabilities | null;
@@ -34,42 +35,34 @@ export function AdvancedSection({
   onResetToDefaults,
   resetMessage = null,
 }: AdvancedSectionProps): React.JSX.Element {
+  const { t } = useI18n();
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
 
   return (
-    <section aria-label="Дополнительно">
-      <h2>Дополнительно</h2>
+    <section aria-label={t("settings.section.advanced")}>
+      <h2>{t("settings.section.advanced")}</h2>
 
       {capabilities && (
         <p>
-          Хранилище настроек: <code>{capabilities.location}</code>{" "}
+          {t("settings.advanced.storage")} <code>{capabilities.location}</code>{" "}
           {capabilities.can_reveal ? (
             <button type="button" onClick={onReveal}>
-              Показать в файловом менеджере
+              {t("settings.advanced.reveal")}
             </button>
           ) : (
-            <span role="note">
-              Открыть это хранилище средствами системы нельзя — оно доступно
-              только самому приложению.
-            </span>
+            <span role="note">{t("settings.advanced.cannotReveal")}</span>
           )}
         </p>
       )}
 
       {capabilities && !capabilities.writable && (
-        <p role="status">
-          Хранилище сейчас недоступно на запись: изменения действуют до конца
-          сессии и не переживут перезапуск.
-        </p>
+        <p role="status">{t("settings.notice.readOnly")}</p>
       )}
 
-      <h3>Сброс к умолчаниям</h3>
+      <h3>{t("settings.advanced.resetTitle")}</h3>
       {isConfirmingReset ? (
-        <div role="group" aria-label="Подтверждение сброса">
-          <p role="alert">
-            Значения вернутся к умолчаниям. Список известных vault и файлы в них
-            не изменятся.
-          </p>
+        <div role="group" aria-label={t("settings.advanced.resetConfirm")}>
+          <p role="alert">{t("settings.advanced.resetWarning")}</p>
           <button
             type="button"
             onClick={() => {
@@ -77,24 +70,24 @@ export function AdvancedSection({
               onResetToDefaults();
             }}
           >
-            Сбросить
+            {t("settings.fontSize.clear")}
           </button>
           <button type="button" onClick={() => setIsConfirmingReset(false)}>
-            Отмена
+            {t("common.cancel")}
           </button>
         </div>
       ) : (
         <button type="button" onClick={() => setIsConfirmingReset(true)}>
-          Сбросить к умолчаниям
+          {t("settings.advanced.resetButton")}
         </button>
       )}
       {resetMessage && <p role="status">{resetMessage}</p>}
 
-      <h3>Диагностика</h3>
+      <h3>{t("settings.advanced.diagnostics")}</h3>
       {diagnostics ? (
         <DiagnosticsView diagnostics={diagnostics} />
       ) : (
-        <p role="status">Хранилище ещё не открыто.</p>
+        <p role="status">{t("settings.advanced.notOpen")}</p>
       )}
     </section>
   );
@@ -110,49 +103,54 @@ function DiagnosticsView({
 }: {
   diagnostics: Diagnostics;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const { app_version, editor_mode, editor_mode_availability, environment, storage } =
     diagnostics;
 
   return (
     <dl>
-      <dt>Версия</dt>
+      <dt>{t("settings.advanced.version")}</dt>
       <dd>{app_version}</dd>
 
-      <dt>Режим редактирования</dt>
-      <dd>{describeMode(editor_mode)}</dd>
+      <dt>{t("settings.mode.label")}</dt>
+      <dd>{describeMode(t, editor_mode)}</dd>
 
-      <dt>Полноценный режим</dt>
+      <dt>{t("settings.mode.full")}</dt>
       <dd>
         {editor_mode_availability.kind === "Available"
-          ? "доступен"
-          : `недоступен — ${describeOutage(editor_mode_availability.reason)}`}
+          ? t("settings.advanced.available")
+          : t("settings.advanced.unavailable", {
+              reason: describeOutage(t, editor_mode_availability.reason),
+            })}
       </dd>
 
-      <dt>Окружение</dt>
+      <dt>{t("settings.advanced.environment")}</dt>
       <dd>
         {environment.target} · {environment.os_family} ·{" "}
         {environment.can_spawn_processes
-          ? "внешние процессы доступны"
-          : "внешние процессы недоступны"}
+          ? t("settings.advanced.processesAvailable")
+          : t("settings.advanced.processesUnavailable")}
       </dd>
 
-      <dt>Хранилище</dt>
+      <dt>{t("settings.advanced.storageShort")}</dt>
       <dd>
         {storage.capabilities.location} ·{" "}
-        {storage.capabilities.writable ? "доступно на запись" : "только чтение"}
+        {storage.capabilities.writable
+          ? t("settings.advanced.writable")
+          : t("settings.advanced.readOnly")}
       </dd>
     </dl>
   );
 }
 
-function describeMode(mode: Diagnostics["editor_mode"]): string {
+function describeMode(t: Translate, mode: Diagnostics["editor_mode"]): string {
   switch (mode.state) {
     case "FullBackend":
-      return "полноценный";
+      return t("settings.advanced.modeFull");
     case "SimplifiedEmulation":
-      return "упрощённая эмуляция";
+      return t("settings.advanced.modeSimplified");
     case "PlainInput":
-      return `обычный ввод — ${describeOutage(mode.reason)}`;
+      return t("settings.advanced.modePlain", { reason: describeOutage(t, mode.reason) });
     default: {
       const exhaustive: never = mode;
       return exhaustive;
@@ -161,16 +159,16 @@ function describeMode(mode: Diagnostics["editor_mode"]): string {
 }
 
 /** Причина отказа называется словами (FR-034), а не кодом варианта. */
-function describeOutage(reason: OutageReason): string {
+function describeOutage(t: Translate, reason: OutageReason): string {
   switch (reason.kind) {
     case "ExternalProcessesUnavailable":
-      return "платформа не запускает внешние процессы";
+      return t("settings.advanced.outage.noProcesses");
     case "BackendNotInstalled":
-      return "подсистема не установлена на этом устройстве";
+      return t("settings.advanced.outage.notInstalled");
     case "BackendStopped":
-      return "процесс перестал отвечать";
+      return t("settings.advanced.outage.stopped");
     case "ConfigMissingOnThisDevice":
-      return "конфига нет на этом устройстве";
+      return t("settings.advanced.outage.configMissing");
     default: {
       const exhaustive: never = reason;
       return exhaustive;

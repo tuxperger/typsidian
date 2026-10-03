@@ -342,7 +342,10 @@ pub async fn write_snapshot<B: VaultBackend>(
     // вызовом, а не внутри `write`: запись в несуществующую папку обязана
     // остаться отказом (001 FR-014).
     if let Some(folder) = snapshot_path.parent() {
-        backend.ensure_folder(folder).await.map_err(to_write_error)?;
+        backend
+            .ensure_folder(folder)
+            .await
+            .map_err(to_write_error)?;
     }
     backend
         .write(snapshot_path, &with_metadata, None)
@@ -394,7 +397,10 @@ fn remove_typsidian_desc(svg: &str) -> String {
     let mut result = String::with_capacity(svg.len());
     let mut rest = svg;
     while let Some(open) = rest.find("<desc") {
-        let Some(close) = rest[open..].find("</desc>").map(|at| open + at + "</desc>".len()) else {
+        let Some(close) = rest[open..]
+            .find("</desc>")
+            .map(|at| open + at + "</desc>".len())
+        else {
             break;
         };
         if rest[open..close].contains(BOARD_ATTRIBUTE) {
@@ -498,8 +504,11 @@ mod tests {
     #[test]
     fn metadata_survives_the_round_trip() {
         let metadata = metadata_of("Проект/Схема.excalidraw");
-        let svg = embed_metadata_in_svg("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", &metadata)
-            .unwrap();
+        let svg = embed_metadata_in_svg(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+            &metadata,
+        )
+        .unwrap();
         assert_eq!(read_metadata_from_svg(&svg).unwrap(), metadata);
     }
 
@@ -519,7 +528,8 @@ mod tests {
     #[test]
     fn a_foreign_description_is_left_alone() {
         let metadata = metadata_of("Схема.excalidraw");
-        let svg = embed_metadata_in_svg("<svg><desc>Подпись автора</desc></svg>", &metadata).unwrap();
+        let svg =
+            embed_metadata_in_svg("<svg><desc>Подпись автора</desc></svg>", &metadata).unwrap();
         assert!(svg.contains("Подпись автора"));
     }
 
@@ -537,10 +547,7 @@ mod tests {
         let svg = format!(
             "<svg><desc {BOARD_ATTRIBUTE}=\"Схема.excalidraw\" {BOARD_HASH_ATTRIBUTE}=\"не хэш\"></desc></svg>"
         );
-        assert_eq!(
-            read_metadata_from_svg(&svg),
-            Err(SnapshotError::NoMetadata)
-        );
+        assert_eq!(read_metadata_from_svg(&svg), Err(SnapshotError::NoMetadata));
     }
 
     #[test]

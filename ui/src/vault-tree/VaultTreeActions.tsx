@@ -7,6 +7,7 @@ import type {
   Template,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import { currentI18n, useI18n, type Translate } from "../i18n/index.js";
 import { fillFromTemplate } from "../templates/NewNoteFromTemplate.js";
 import { buildTree, type TreeFolder, type TreeNode } from "./buildTree.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
@@ -69,9 +70,17 @@ function asDeleteError(cause: unknown): DeleteError | null {
   return null;
 }
 
-const DEFAULT_NEW_NOTE_NAME = "Новая заметка.typ";
+/**
+ * Имя новой заметки по умолчанию — на языке интерфейса в момент создания
+ * (фича 010): это заготовка, которую пользователь тут же может заменить.
+ */
+function defaultNewNoteName(): string {
+  return currentI18n().t("tree.defaultNoteName");
+}
 /** Имя новой доски по умолчанию (фича 002, FR-001). */
-export const DEFAULT_NEW_BOARD_NAME = "Новая доска.excalidraw";
+export function defaultNewBoardName(): string {
+  return currentI18n().t("tree.defaultBoardName");
+}
 
 /**
  * Подтверждение перед удалением (T090, FR-027, FR-029): сначала спрашиваем у
@@ -87,14 +96,10 @@ function makeDefaultConfirmDelete(client: VaultClient) {
   return async (note: Note): Promise<boolean> => {
     const affected = await client.backlinks(note.path);
     if (affected.length === 0) {
-      return window.confirm(
-        `Удалить заметку «${note.name}»? Это действие нельзя отменить из интерфейса.`,
-      );
+      return window.confirm(currentI18n().t("tree.confirm.delete", { name: note.name }));
     }
     const list = affected.map((n) => `  • ${n.path}`).join("\n");
-    return window.confirm(
-      `После удаления «${note.name}» останутся с битой ссылкой:\n${list}\n\nУдалить всё равно?`,
-    );
+    return window.confirm(currentI18n().t("tree.confirm.deleteLinked", { name: note.name, list }));
   };
 }
 
@@ -110,7 +115,7 @@ function makeDefaultConfirmRename(client: VaultClient) {
     if (affected.length === 0) return true;
     const list = affected.map((n) => `  • ${n.path}`).join("\n");
     return window.confirm(
-      `После переименования «${note.path}» → «${nextPath}» эти заметки продолжат ссылаться на старое имя, и их ссылки станут битыми:\n${list}\n\nПереименовать всё равно?`,
+      currentI18n().t("tree.confirm.renameLinked", { from: note.path, to: nextPath, list }),
     );
   };
 }
@@ -132,14 +137,15 @@ const TreeExtrasContext = createContext<{ onInsertLink?: (note: Note) => void }>
 
 /** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
 function copyPathItem(
+  t: Translate,
   path: string,
   notify: (message: string) => void,
 ): ContextMenuItem {
   return {
-    label: "Копировать путь",
+    label: t("tree.menu.copyPath"),
     run: async () => {
       const failure = await copyText(path);
-      notify(failure ?? `Скопировано: ${path}`);
+      notify(failure ?? t("tree.menu.copied", { path }));
     },
   };
 }
@@ -228,7 +234,8 @@ const INITIAL_STATE: ActionsState = {
   renamingPath: null,
   renameDraft: "",
   creatingInFolder: null,
-  createDraft: DEFAULT_NEW_NOTE_NAME,
+  // Заготовка имени ставится в `beginCreate` — на языке интерфейса того момента.
+  createDraft: "",
   createTemplate: null,
   menu: null,
   pendingPath: null,
@@ -361,7 +368,7 @@ export function useVaultTreeActions({
         ...prev,
         creatingInFolder: folderPath,
         createDraft:
-          kind === "board" ? DEFAULT_NEW_BOARD_NAME : DEFAULT_NEW_NOTE_NAME,
+          kind === "board" ? defaultNewBoardName() : defaultNewNoteName(),
         createTemplate: template,
         menu: null,
       }));
@@ -407,7 +414,7 @@ export function useVaultTreeActions({
           ...prev,
           pendingPath: null,
           creatingInFolder: null,
-          createDraft: DEFAULT_NEW_NOTE_NAME,
+          createDraft: defaultNewNoteName(),
           createTemplate: null,
         }));
         await onNotesChanged();
@@ -582,13 +589,14 @@ function NoteRow({
   const isOpen = useContext(OpenPathContext) === note.path.toString();
   const contextMenu = useContextMenu();
   const { onInsertLink } = useContext(TreeExtrasContext);
+  const { t } = useI18n();
 
   if (isRenaming) {
     return (
       <li role="treeitem">
         <InlineTextInput
           value={actions.state.renameDraft}
-          ariaLabel={`Новое имя для заметки ${note.name}`}
+          ariaLabel={t("tree.rename.label", { name: note.name })}
           disabled={isBusy}
           onChange={actions.setRenameDraft}
           onCommit={() => void actions.submitRename(note)}
@@ -605,15 +613,15 @@ function NoteRow({
       onContextMenu={(event) => {
         if (isBusy) return;
         contextMenu.open(event, [
-          { label: "Открыть", run: () => onOpenNote(note) },
+          { label: t("tree.menu.open"), run: () => onOpenNote(note) },
           ...(onInsertLink && !isBoard(note) && !isOpen
-            ? [{ label: "Вставить ссылку в открытую заметку", run: () => onInsertLink(note) }]
+            ? [{ label: t("tree.menu.insertLink"), run: () => onInsertLink(note) }]
             : []),
           { kind: "separator" },
-          copyPathItem(note.path.toString(), contextMenu.notify),
-          { label: "Переименовать", run: () => actions.beginRename(note) },
+          copyPathItem(t, note.path.toString(), contextMenu.notify),
+          { label: t("common.rename"), run: () => actions.beginRename(note) },
           { kind: "separator" },
-          { label: "Удалить…", danger: true, run: () => actions.requestDelete(note) },
+          { label: t("tree.menu.deleteEllipsis"), danger: true, run: () => actions.requestDelete(note) },
         ]);
       }}
     >
@@ -632,14 +640,14 @@ function NoteRow({
             Design Tokens). Признак приходит из ядра вместе с записью, а не
             выводится здесь из состояния редактора. */}
         {note.has_unsaved_edits && (
-          <span className="ts-dot-unsaved" title="есть несохранённые изменения" />
+          <span className="ts-dot-unsaved" title={t("tree.unsaved")} />
         )}
       </button>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={isMenuOpen}
-        aria-label={`Действия с заметкой ${note.name}`}
+        aria-label={t("tree.noteActions", { name: note.name })}
         disabled={isBusy}
         onClick={() =>
           isMenuOpen ? actions.closeMenu() : actions.openMenu({ kind: "note", note })
@@ -656,7 +664,7 @@ function NoteRow({
         >
           <li role="none">
             <button type="button" role="menuitem" onClick={() => actions.beginRename(note)}>
-              Переименовать
+              {t("common.rename")}
             </button>
           </li>
           <li role="none">
@@ -665,7 +673,7 @@ function NoteRow({
               role="menuitem"
               onClick={() => void actions.requestDelete(note)}
             >
-              Удалить
+              {t("common.delete")}
             </button>
           </li>
         </ul>
@@ -697,6 +705,7 @@ function FolderRow({
   const showChildren = expanded || isCreatingHere;
   const isBusy = actions.state.pendingPath !== null;
   const contextMenu = useContextMenu();
+  const { t } = useI18n();
 
   return (
     <li
@@ -706,21 +715,21 @@ function FolderRow({
       onContextMenu={(event) => {
         if (isBusy) return;
         contextMenu.open(event, [
-          { label: "Создать заметку здесь", run: () => actions.beginCreate(folder.path) },
+          { label: t("tree.menu.createNoteHere"), run: () => actions.beginCreate(folder.path) },
           {
-            label: "Создать доску здесь",
+            label: t("tree.menu.createBoardHere"),
             run: () => actions.beginCreate(folder.path, "board"),
           },
           { kind: "separator" },
           ...(actions.onToggleSection
             ? [
                 {
-                  label: isSection ? "Снять пометку раздела" : "Пометить как раздел",
+                  label: isSection ? t("tree.section.unmark") : t("tree.section.mark"),
                   run: () => actions.onToggleSection?.(folder.path, !isSection),
                 },
               ]
             : []),
-          copyPathItem(folder.path, contextMenu.notify),
+          copyPathItem(t, folder.path, contextMenu.notify),
         ]);
       }}
     >
@@ -737,8 +746,8 @@ function FolderRow({
         <Icon name="folder" size={14} className="ts-tree__folder-icon" />
         <span className="ts-tree__name">{folder.name || "/"}</span>
         {isSection && (
-          <span className="ts-tree__section-badge" title="Корень раздела">
-            раздел
+          <span className="ts-tree__section-badge" title={t("tree.section.rootTitle")}>
+            {t("tree.section.badge")}
           </span>
         )}
       </button>
@@ -746,7 +755,7 @@ function FolderRow({
         type="button"
         aria-haspopup="menu"
         aria-expanded={isMenuOpen}
-        aria-label={`Действия с папкой ${folder.name || "корень"}`}
+        aria-label={t("tree.folderActions", { name: folder.name || t("tree.rootFolder") })}
         disabled={isBusy}
         onClick={() =>
           isMenuOpen
@@ -769,7 +778,7 @@ function FolderRow({
               role="menuitem"
               onClick={() => actions.beginCreate(folder.path)}
             >
-              Создать заметку
+              {t("tree.menu.createNote")}
             </button>
           </li>
           {actions.onToggleSection && (
@@ -782,7 +791,7 @@ function FolderRow({
                   actions.closeMenu();
                 }}
               >
-                {isSection ? "Снять пометку раздела" : "Пометить как раздел"}
+                {isSection ? t("tree.section.unmark") : t("tree.section.mark")}
               </button>
             </li>
           )}
@@ -794,7 +803,7 @@ function FolderRow({
             <li role="treeitem">
               <InlineTextInput
                 value={actions.state.createDraft}
-                ariaLabel="Имя новой заметки"
+                ariaLabel={t("tree.create.nameLabel")}
                 disabled={isBusy}
                 onChange={actions.setCreateDraft}
                 onCommit={() => void actions.submitCreate(folder.path)}
@@ -841,6 +850,7 @@ export function VaultTreeActions({
   actions,
   onInsertLink,
 }: VaultTreeActionsProps): React.JSX.Element {
+  const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
   const isCreatingAtRoot = actions.state.creatingInFolder === "";
   const isBusy = actions.state.pendingPath !== null;
@@ -854,9 +864,9 @@ export function VaultTreeActions({
     <TreeExtrasContext.Provider value={extras}>
     <div>
       {notes.length === 0 && !isCreatingAtRoot ? (
-        <p role="status">Vault пуст — создайте первую заметку или доску.</p>
+        <p role="status">{t("tree.emptyNotesOrBoards")}</p>
       ) : (
-        <ul role="tree" aria-label="Дерево заметок" className="ts-tree__root">
+        <ul role="tree" aria-label={t("tree.label")} className="ts-tree__root">
           {/* Заголовок группы из шаблона § Sidebar. `presentation`, потому что
               для дерева это подпись, а не узел: своим `treeitem` он добавил бы
               в обход с клавиатуры строку, которую нельзя открыть. */}
@@ -867,7 +877,7 @@ export function VaultTreeActions({
             <li role="treeitem">
               <InlineTextInput
                 value={actions.state.createDraft}
-                ariaLabel="Имя новой заметки или доски"
+                ariaLabel={t("tree.create.nameOrBoardLabel")}
                 disabled={isBusy}
                 onChange={actions.setCreateDraft}
                 onCommit={() => void actions.submitCreate("")}

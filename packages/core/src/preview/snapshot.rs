@@ -123,10 +123,7 @@ impl DependencySnapshot {
 
     /// Отмечает, что компилятор просил файл, которого в снимке нет.
     pub fn record_missing(&self, id: FileId) {
-        self.missing
-            .lock()
-            .expect("snapshot mutex")
-            .insert(id);
+        self.missing.lock().expect("snapshot mutex").insert(id);
     }
 
     /// Снимает файл с учёта недостающих, не добавляя его содержимого.

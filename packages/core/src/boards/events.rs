@@ -110,7 +110,26 @@ pub enum EmbedState {
     /// Файла снимка нет, доска на месте — снимок восстановим одним действием.
     SnapshotMissing,
     /// Снимок есть, но метаданных в нём нет или они не читаются.
-    Undeterminable { reason: String },
+    Undeterminable {
+        reason: UndeterminableReason,
+    },
+}
+
+/// Почему состояние вставки не определить (фича 010): вид, а не текст — слова
+/// подбирает интерфейс на своём языке.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(rename_all = "camelCase")]
+pub enum UndeterminableReason {
+    /// Файл доски не разбирается.
+    BoardUnparsable,
+    /// Доску не удалось прочитать с диска.
+    BoardUnreadable,
+    /// В снимке нет метаданных доски.
+    SnapshotWithoutMetadata,
+    /// Снимок не удалось прочитать.
+    SnapshotUnreadable,
 }
 
 impl EmbedState {
@@ -123,7 +142,7 @@ impl EmbedState {
         match (board, snapshot) {
             (None, _) => EmbedState::BoardMissing,
             (Some(_), None) => EmbedState::Undeterminable {
-                reason: "в снимке нет метаданных доски".to_string(),
+                reason: UndeterminableReason::SnapshotWithoutMetadata,
             },
             (Some(board), Some(snapshot)) if board == snapshot => EmbedState::UpToDate,
             (Some(_), Some(_)) => EmbedState::Stale,

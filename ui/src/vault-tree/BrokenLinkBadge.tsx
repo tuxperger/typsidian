@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Note } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import { useI18n } from "../i18n/index.js";
 
 export interface BrokenLinkBadgeProps {
   /** Цели ссылок заметки, которых нет в vault (`client.brokenLinks(path)`). */
@@ -18,8 +19,9 @@ export interface BrokenLinkBadgeProps {
 export function BrokenLinkBadge({
   brokenTargets,
 }: BrokenLinkBadgeProps): React.JSX.Element | null {
+  const { t } = useI18n();
   if (brokenTargets.length === 0) return null;
-  const title = `Битые ссылки: ${brokenTargets.join(", ")}`;
+  const title = t("tree.brokenLinks", { targets: brokenTargets.join(", ") });
   return (
     <span role="img" aria-label={title} title={title}>
       ⚠

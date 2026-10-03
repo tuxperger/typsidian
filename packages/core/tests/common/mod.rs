@@ -70,6 +70,23 @@ impl MemoryVault {
         self.files.remove(path);
     }
 
+    /// Содержимое файла, если он есть — для проверок того, что записано.
+    pub fn bytes_of(&self, path: &str) -> Option<Vec<u8>> {
+        self.files.get(Path::new(path)).cloned()
+    }
+
+    /// Все файлы под папкой (`""` — весь vault), по порядку, через `/`.
+    pub fn paths_under(&self, folder: &str) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .files
+            .keys()
+            .filter(|path| path.starts_with(folder))
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        paths.sort();
+        paths
+    }
+
     /// Папка, которая существует, но не читается.
     pub fn with_folder_problem(mut self, folder: &str, reason: FolderProblem) -> Self {
         self.folder_problems.insert(PathBuf::from(folder), reason);
@@ -101,11 +118,7 @@ impl MemoryVault {
     }
 
     pub fn read_count(&self, path: &str) -> u32 {
-        *self
-            .reads
-            .borrow()
-            .get(&PathBuf::from(path))
-            .unwrap_or(&0)
+        *self.reads.borrow().get(&PathBuf::from(path)).unwrap_or(&0)
     }
 }
 
@@ -144,6 +157,26 @@ impl VaultBackend for MemoryVault {
             .collect();
         notes.sort_by(|left, right| left.path.cmp(&right.path));
         notes
+    }
+
+    /// Шрифты среди положенных файлов. Время изменения — хэш
+    /// содержимого: у памяти часов нет, а подмена файла тем же размером
+    /// обязана выглядеть изменением, иначе кэш шрифтов её не заметит.
+    async fn list_fonts(&self) -> Vec<typsidian_core::vault::FontFile> {
+        let mut fonts: Vec<typsidian_core::vault::FontFile> = self
+            .files
+            .iter()
+            .filter(|(path, _)| typsidian_core::vault::is_font_file(path))
+            .map(|(path, bytes)| typsidian_core::vault::FontFile {
+                path: path.clone(),
+                size: bytes.len() as u64,
+                modified_ms: bytes.iter().fold(0i64, |hash, byte| {
+                    hash.wrapping_mul(31).wrapping_add(*byte as i64)
+                }),
+            })
+            .collect();
+        fonts.sort_by(|left, right| left.path.cmp(&right.path));
+        fonts
     }
 
     async fn list_folder(&self, folder: &Path) -> Vec<Note> {
@@ -195,10 +228,7 @@ impl VaultBackend for MemoryVault {
         if let Some(error) = self.failures.get(path) {
             return Err(error.clone());
         }
-        self.files
-            .get(path)
-            .cloned()
-            .ok_or(ReadError::NotFound)
+        self.files.get(path).cloned().ok_or(ReadError::NotFound)
     }
 
     async fn write(
@@ -318,7 +348,10 @@ impl VaultBackend for MemoryVault {
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
 pub mod element_cases;
+pub mod export_cases;
 pub mod install_cases;
+pub mod language_cases;
+pub mod message_cases;
 pub mod package_cases;
 pub mod placement_cases;
 pub mod search_cases;

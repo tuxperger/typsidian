@@ -21,8 +21,8 @@
 fn main() {
     use std::time::Instant;
     use typsidian_core::preview::{compile_note_resolved, CompileOutcome, FontSet, PackageCache};
-    use typsidian_core::vault::native::NativeBackend;
     use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::native::NativeBackend;
 
     /// Столько файлов шаблон отдаёт по одному за проход. Порядок величины
     /// взят у `codly-languages`, где иконок 86.

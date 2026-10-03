@@ -9,6 +9,7 @@ import type {
 import type { VaultClient } from "../vault-client.js";
 import { Icon } from "../icons/Icons.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 // Экран расширенного поиска (макет «Typsidian Утилиты» § Поиск).
 //
@@ -44,11 +45,12 @@ export function SearchOverlay({
   const [linksToCurrent, setLinksToCurrent] = useState(false);
   const [mode, setMode] = useState<"And" | "Or">("And");
   const [results, setResults] = useState<SearchResults | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Phrase | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(0);
 
   useDismissOnEscape(onClose);
+  const { t } = useI18n();
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => inputRef.current?.focus(), []);
@@ -91,7 +93,7 @@ export function SearchOverlay({
           if (mine !== revision.current) return;
           // Ядро называет причину само — своего текста здесь нет: разойтись с
           // ним было бы легче, чем совпасть.
-          setError(reasonOf(cause));
+          setError(() => reasonOf(cause));
           setResults(null);
         } finally {
           if (mine === revision.current) setBusy(false);
@@ -136,7 +138,7 @@ export function SearchOverlay({
 
   return (
     <div className="ts-overlay" onKeyDown={onKeyDown} role="presentation">
-      <section className="ts-search" aria-label="Поиск по vault">
+      <section className="ts-search" aria-label={t("search.title")}>
         {/* Строка запроса: сам запрос, его режимы и счётчик найденного. */}
         <div className="ts-search__query">
           <Icon name="search" size={16} />
@@ -144,16 +146,16 @@ export function SearchOverlay({
             ref={inputRef}
             className="ts-search__input"
             value={text}
-            placeholder="искать по заметкам…"
+            placeholder={t("search.placeholder")}
             onChange={(event) => setText(event.target.value)}
-            aria-label="Строка поиска"
+            aria-label={t("search.inputLabel")}
           />
           <button
             type="button"
             className="ts-chip"
             aria-pressed={regex}
             onClick={() => setRegex((on) => !on)}
-            title="Искать регулярным выражением"
+            title={t("search.regexHint")}
           >
             regex
           </button>
@@ -162,17 +164,17 @@ export function SearchOverlay({
             className="ts-chip"
             aria-pressed={caseSensitive}
             onClick={() => setCaseSensitive((on) => !on)}
-            title="Различать регистр"
+            title={t("search.caseHint")}
           >
             Aa
           </button>
           <span className="ts-search__sep" />
-          <span className="ts-search__count">{countLabel(results, busy)}</span>
+          <span className="ts-search__count">{countLabel(t, results, busy)}</span>
           <button
             type="button"
             className="ts-btn ts-btn--ghost"
             onClick={onClose}
-            aria-label="Закрыть поиск"
+            aria-label={t("search.close")}
           >
             <Icon name="x" size={14} />
           </button>
@@ -182,7 +184,7 @@ export function SearchOverlay({
             есть данные ядра, — ссылки. Тегов и полей заголовка модель vault не
             знает, и рисовать неработающий чип хуже, чем не рисовать. */}
         <div className="ts-search__filters">
-          <span className="ts-eyebrow">фильтры</span>
+          <span className="ts-eyebrow">{t("search.filters")}</span>
           <div className="ts-search__chips">
             <button
               type="button"
@@ -191,25 +193,23 @@ export function SearchOverlay({
               disabled={currentPath === null}
               onClick={() => setLinksToCurrent((on) => !on)}
               title={
-                currentPath === null
-                  ? "Откройте заметку, чтобы искать ссылающиеся на неё"
-                  : "Только заметки, ссылающиеся на открытую"
+                currentPath === null ? t("search.linksToDisabled") : t("search.linksToHint")
               }
             >
               <Icon name="link" size={11} />
-              ссылается на {currentNote?.name ?? "открытую заметку"}
+              {t("search.linksTo", { name: currentNote?.name ?? t("search.openNote") })}
             </button>
           </div>
           <div className="ts-search__mode">
-            <span className="ts-search__mode-label">И / ИЛИ</span>
-            <div className="ts-seg" role="group" aria-label="Как складывать условия">
+            <span className="ts-search__mode-label">{t("search.modeLabel")}</span>
+            <div className="ts-seg" role="group" aria-label={t("search.modeGroup")}>
               <button
                 type="button"
                 className="ts-seg__item"
                 aria-pressed={mode === "And"}
                 onClick={() => setMode("And")}
               >
-                И
+                {t("search.and")}
               </button>
               <button
                 type="button"
@@ -217,7 +217,7 @@ export function SearchOverlay({
                 aria-pressed={mode === "Or"}
                 onClick={() => setMode("Or")}
               >
-                ИЛИ
+                {t("search.or")}
               </button>
             </div>
           </div>
@@ -225,34 +225,32 @@ export function SearchOverlay({
 
         {/* Строка запроса словами — как её поняло ядро. */}
         <div className="ts-search__echo">
-          <span className="ts-search__echo-label">запрос:</span>
-          <span>{echo(text, regex, caseSensitive, linksTo, mode)}</span>
+          <span className="ts-search__echo-label">{t("search.queryLabel")}</span>
+          <span>{echo(t, text, regex, caseSensitive, linksTo, mode)}</span>
         </div>
 
         <div className="ts-search__results">
           {error !== null && (
             <p className="ts-search__error" role="alert">
-              {error}
+              {error(t)}
             </p>
           )}
 
           {error === null && results !== null && rows.length === 0 && !busy && (
-            <p className="ts-search__empty">ничего не найдено</p>
+            <p className="ts-search__empty">{t("search.nothingFound")}</p>
           )}
 
           {error === null && results === null && !busy && (
-            <p className="ts-search__empty">
-              Введите строку или включите фильтр — поиск идёт по всем заметкам vault.
-            </p>
+            <p className="ts-search__empty">{t("search.emptyHint")}</p>
           )}
 
           {results?.groups.map((group) => (
             <div key={group.folder || "/"} className="ts-search__group">
               <div className="ts-search__group-head">
                 <Icon name="folder" size={12} />
-                {group.folder || "корень vault"}
+                {group.folder || t("search.vaultRoot")}
                 <span className="ts-search__group-meta">
-                  {group.hits.length} · {group.matches} совпадений
+                  {group.hits.length} · {t("search.matches", { count: group.matches })}
                 </span>
               </div>
 
@@ -272,8 +270,8 @@ export function SearchOverlay({
                       <Icon name="file" size={12} />
                       <span className="ts-search__hit-name">{hit.name}</span>
                       <span className="ts-search__hit-meta">
-                        {hit.first_line > 0 && `стр. ${hit.first_line} · `}
-                        {hit.matches} совпадений
+                        {hit.first_line > 0 && t("search.line", { line: hit.first_line })}
+                        {t("search.matches", { count: hit.matches })}
                       </span>
                     </div>
                     {hit.lines.length > 0 && (
@@ -308,18 +306,18 @@ export function SearchOverlay({
 
           {results?.truncated && (
             <p className="ts-search__empty">
-              Показаны первые {results.total_notes} заметок — уточните запрос.
+              {t("search.truncated", { count: results.total_notes })}
             </p>
           )}
         </div>
 
         <div className="ts-search__hints">
           <span>
-            <Icon name="enter" size={10} /> открыть
+            <Icon name="enter" size={10} /> {t("search.open")}
           </span>
-          <span>↑↓ выбор</span>
+          <span>{t("search.navigate")}</span>
           <span className="ts-spacer" />
-          <span>Esc закрыть</span>
+          <span>{t("search.escClose")}</span>
         </div>
       </section>
     </div>
@@ -327,14 +325,17 @@ export function SearchOverlay({
 }
 
 /** Счётчик в шапке: «14 совпадений · 6 заметок» из макета. */
-function countLabel(results: SearchResults | null, busy: boolean): string {
-  if (busy) return "ищем…";
+function countLabel(t: Translate, results: SearchResults | null, busy: boolean): string {
+  if (busy) return t("search.busy");
   if (results === null) return "";
-  return `${results.total_matches} совпадений · ${results.total_notes} заметок`;
+  return `${t("search.matches", { count: results.total_matches })} · ${t("search.notes", {
+    count: results.total_notes,
+  })}`;
 }
 
 /** Запрос словами — чтобы было видно, что именно ищется. */
 function echo(
+  t: Translate,
   text: string,
   regex: boolean,
   caseSensitive: boolean,
@@ -343,16 +344,22 @@ function echo(
 ): string {
   const parts: string[] = [];
   if (text.trim()) parts.push(regex ? `/${text}/` : `«${text}»`);
-  if (caseSensitive) parts.push("с учётом регистра");
-  if (linksTo !== null) parts.push(`ссылается на ${linksTo}`);
-  if (parts.length === 0) return "условий нет";
-  return parts.join(mode === "And" ? " И " : " ИЛИ ");
+  if (caseSensitive) parts.push(t("search.echoCase"));
+  if (linksTo !== null) parts.push(t("search.linksTo", { name: linksTo }));
+  if (parts.length === 0) return t("search.echoNone");
+  return parts.join(` ${mode === "And" ? t("search.and") : t("search.or")} `);
 }
 
-/** Текст отказа от ядра; чужие ошибки — как есть. */
-function reasonOf(cause: unknown): string {
+/**
+ * Отказ поиска. Неверный шаблон ядро описывает текстом движка регулярных
+ * выражений — он показывается как есть, под переведённой подводкой (как
+ * сообщения Typst, 010 FR-004). Чужие ошибки — как есть.
+ */
+function reasonOf(cause: unknown): Phrase {
   if (typeof cause === "object" && cause !== null && "message" in cause) {
-    return String((cause as { message: unknown }).message);
+    const detail = String((cause as { message: unknown }).message);
+    const kind = "kind" in cause ? (cause as { kind: unknown }).kind : null;
+    return kind === "BadPattern" ? (t) => t("search.badPattern", { detail }) : () => detail;
   }
-  return String(cause);
+  return () => String(cause);
 }

@@ -1,6 +1,7 @@
 import type {
   ApplyPlan,
   ChangeTarget,
+  RoutedChange,
   Diagnostics,
   Settings,
   SettingsChange,
@@ -39,6 +40,12 @@ export interface DeviceSettingsClient {
   resetChange(): Promise<SettingsChange>;
   /** Куда уходит правка — в устройство или в открытый vault (FR-029). */
   changeTarget(change: SettingsChange, vaultIsOpen: boolean): Promise<ChangeTarget>;
+  /**
+   * Раскладка набора по хранилищам (фича 010, FR-016): язык всегда уходит в
+   * устройство, прочее — туда же, куда `changeTarget`. Записи исполняются по
+   * порядку; каждая пишет ровно в одно хранилище.
+   */
+  routeChange(change: SettingsChange, vaultIsOpen: boolean): Promise<RoutedChange[]>;
   /** Действующие значения: устройство под перекрытием vault (FR-030). */
   resolveWithVault(overrides: VaultOverrides): Promise<Settings>;
   /** Набор, делающий действующие значения умолчаниями устройства (FR-031). */

@@ -10,16 +10,23 @@
 // что набирают в технической заметке, — остальное пишется руками, как и
 // раньше.
 
+import type { Translate } from "../i18n/index.js";
+
 export type SymbolCategory = "struct" | "greek" | "op" | "rel" | "arrow" | "accent";
 
-export const SYMBOL_CATEGORIES: { id: SymbolCategory; name: string }[] = [
-  { id: "struct", name: "Структуры" },
-  { id: "greek", name: "Греческие" },
-  { id: "op", name: "Операторы" },
-  { id: "rel", name: "Отношения" },
-  { id: "arrow", name: "Стрелки" },
-  { id: "accent", name: "Акценты" },
+export const SYMBOL_CATEGORIES: { id: SymbolCategory }[] = [
+  { id: "struct" },
+  { id: "greek" },
+  { id: "op" },
+  { id: "rel" },
+  { id: "arrow" },
+  { id: "accent" },
 ];
+
+/** Название раздела палитры на языке интерфейса. */
+export function symbolCategoryName(t: Translate, id: SymbolCategory): string {
+  return t(`insert.symbols.category.${id}` as const);
+}
 
 export interface MathSymbol {
   category: SymbolCategory;

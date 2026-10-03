@@ -1,3 +1,4 @@
+import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { tauriDeviceSettings } from "@typsidian/ui/settings/device-settings-tauri.js";
 import { lastTauriVault, openTauriVaultById } from "@typsidian/ui/vault-client-tauri.js";
@@ -22,20 +23,22 @@ const device = tauriDeviceSettings(pickDesktopFolder);
  */
 export function DesktopWorkspace(): React.JSX.Element {
   return (
-    <Workspace
-      openVaultFolder={openDesktopVault}
-      // FR-007: последний открытый vault предлагается на экране приветствия.
-      // Путь к нему хранит `settings.json` в каталоге конфигурации ОС — то же
-      // хранилище, что и на Android, и те же команды оболочки.
-      lastVault={lastTauriVault}
-      settings={(client, reopen, preview) => (
-        <SettingsPanel
-          device={device}
-          vaultClient={client}
-          preview={preview}
-          onVaultSwitched={(id) => reopen(() => openTauriVaultById(id))}
-        />
-      )}
-    />
+    <DeviceI18nProvider device={device}>
+      <Workspace
+        openVaultFolder={openDesktopVault}
+        // FR-007: последний открытый vault предлагается на экране приветствия.
+        // Путь к нему хранит `settings.json` в каталоге конфигурации ОС — то же
+        // хранилище, что и на Android, и те же команды оболочки.
+        lastVault={lastTauriVault}
+        settings={(client, reopen, preview) => (
+          <SettingsPanel
+            device={device}
+            vaultClient={client}
+            preview={preview}
+            onVaultSwitched={(id) => reopen(() => openTauriVaultById(id))}
+          />
+        )}
+      />
+    </DeviceI18nProvider>
   );
 }

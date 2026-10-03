@@ -17,8 +17,7 @@ use typsidian_core::preview::{compile_note, CompileOutcome, FontSet, TextRun};
 const MAIN: &str = "заметка.typ";
 
 fn page_runs(source: &str, page: usize) -> Vec<TextRun> {
-    let doc = compile_note(MAIN, source, 1, FontSet::builtin())
-        .expect("заметка обязана собраться");
+    let doc = compile_note(MAIN, source, 1, FontSet::builtin()).expect("заметка обязана собраться");
     assert_eq!(
         doc.outcome,
         CompileOutcome::Succeeded,
@@ -106,10 +105,7 @@ pub fn a_run_inside_a_transformed_group_lands_in_page_coordinates() {
 /// в колонках вторая колонка лежит в кадре отдельной группой, а вторая
 /// страница — вообще другим `RenderedPage`.
 pub fn runs_follow_reading_order_across_columns_and_pages() {
-    let columns = page_runs(
-        "#set page(columns: 2)\nПервая\n#colbreak()\nВторая\n",
-        0,
-    );
+    let columns = page_runs("#set page(columns: 2)\nПервая\n#colbreak()\nВторая\n", 0);
     assert!(
         index_of(&columns, "Первая") < index_of(&columns, "Вторая"),
         "выделение через колонки обязано дать связный текст (SC-011)"

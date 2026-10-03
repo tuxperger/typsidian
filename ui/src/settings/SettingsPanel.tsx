@@ -26,6 +26,7 @@ import type { VaultClient } from "../vault-client.js";
 import type { PreviewClient } from "../preview-client.js";
 import { TemplatesSection } from "./TemplatesSection.js";
 import { useShortcuts } from "../workspace/useShortcuts.js";
+import { useI18n, type MessageKey, type Phrase, type Translate } from "../i18n/index.js";
 
 /**
  * Панель настроек: четыре раздела и **ни одной кнопки «сохранить» или
@@ -120,26 +121,31 @@ export function SettingsPanel({
   // Открытый раздел. «Vault» по умолчанию — первый пункт макета и то, с чего
   // начинается работа: без выбранной папки остальные разделы не о чем.
   const [section, setSection] = useState<SettingsSection>("vault");
-  const [modeMessage, setModeMessage] = useState<string | null>(null);
-  const [resetMessage, setResetMessage] = useState<string | null>(null);
-  const [defaultsMessage, setDefaultsMessage] = useState<string | null>(null);
+  const { t } = useI18n();
+  // Итоги действий — фразами, а не строками: показанное сообщение обязано
+  // перерисоваться на новом языке (фича 010, FR-014).
+  const [modeMessage, setModeMessage] = useState<Phrase | null>(null);
+  const [resetMessage, setResetMessage] = useState<Phrase | null>(null);
+  const [defaultsMessage, setDefaultsMessage] = useState<Phrase | null>(null);
 
   /**
-   * Направляет изменение в то хранилище, которое назвало ядро (фича 006,
-   * FR-029).
+   * Направляет изменение в те хранилища, которые назвало ядро (фича 006,
+   * FR-029; фича 010, FR-016).
    *
    * Ветка здесь — исполнение решения, а не само решение: панель не владеет
    * обоими хранилищами и не имеет права выбирать за ядро, куда пишется правка.
-   * Та же форма, что у `ApplyPlan`: ядро говорит, интерфейс делает.
+   * Набор может распасться на несколько записей (язык всегда в устройство,
+   * тема — в открытый vault), и они исполняются по порядку.
    */
   const route = async (change: SettingsChange): Promise<void> => {
     const vaultIsOpen = vaultSettings.overrides !== null;
-    const target = await device.changeTarget(change, vaultIsOpen);
-    if (target.target === "Device") {
-      await apply(change);
-      return;
+    for (const routed of await device.routeChange(change, vaultIsOpen)) {
+      if (routed.target.target === "Device") {
+        await apply(routed.change);
+      } else {
+        await vaultSettings.applyChange(routed.change);
+      }
     }
-    await vaultSettings.applyChange(change);
   };
 
   /**
@@ -150,10 +156,10 @@ export function SettingsPanel({
     if (!vaultSettings.overrides) return;
     const plan = await makeSettingsDefault(vaultSettings.overrides);
     if (!plan) return;
-    setDefaultsMessage(
+    setDefaultsMessage(() =>
       plan.outcome === "Applied"
-        ? "Текущие значения стали умолчаниями. Папки без своих настроек будут открываться с ними."
-        : describeResetRejection(plan),
+        ? (tr: Translate) => tr("settings.defaults.applied")
+        : (tr: Translate) => describeResetRejection(tr, plan),
     );
   };
 
@@ -165,10 +171,10 @@ export function SettingsPanel({
   const runReset = async (): Promise<void> => {
     const plan = await resetToDefaults();
     if (!plan) return;
-    setResetMessage(
+    setResetMessage(() =>
       plan.outcome === "Applied"
-        ? "Значения вернулись к умолчаниям. Список известных vault не изменился."
-        : describeResetRejection(plan),
+        ? (tr: Translate) => tr("settings.reset.applied")
+        : (tr: Translate) => describeResetRejection(tr, plan),
     );
   };
 
@@ -185,13 +191,14 @@ export function SettingsPanel({
       saveNote:
         saveNote ??
         (async () => {
-          setModeMessage(
-            "Сначала сохраните открытую заметку — смена режима требует этого.",
-          );
+          setModeMessage(() => (tr: Translate) => tr("settings.mode.saveFirst"));
           return false;
         }),
     });
-    if (outcome) setModeMessage(describeApplyOutcome(outcome));
+    if (outcome) {
+      const message = describeApplyOutcome(outcome);
+      setModeMessage(() => message);
+    }
   };
 
   // Показываются и применяются **действующие** значения: устройство как слой
@@ -233,8 +240,12 @@ export function SettingsPanel({
   // перекрытие задано, оно же и есть действующее значение.
   useAppearance(settings);
 
-  if (state.isLoading || !settings) {
-    return <p role="status">Загружаем настройки…</p>;
+  if (state.isLoading) {
+    return <p role="status">{t("settings.loading")}</p>;
+  }
+  if (!settings) {
+    // Снимок не пришёл вовсе — показывать нечего, кроме причины (010 FR-029).
+    return <p role="alert">{t("settings.notice.unreadable")}</p>;
   }
 
   // Подвал меню: версия — из ядра, имя папки — у клиента открытого vault.
@@ -244,12 +255,12 @@ export function SettingsPanel({
   const vaultName = vaultClient?.rootName ?? null;
 
   return (
-    <div className="ts-settings" aria-label="Настройки">
+    <div className="ts-settings" aria-label={t("workspace.settings")}>
       {/* Левое меню разделов (макет «Typsidian Утилиты» § Настройки). Разделы
           переключаются, а не идут стопкой: их четыре, и «Кейбиндинги» в конце
           длинного свитка пользователь просто не найдёт. */}
-      <nav className="ts-settings__nav" aria-label="Разделы настроек">
-        <span className="ts-eyebrow">Настройки</span>
+      <nav className="ts-settings__nav" aria-label={t("settings.sections")}>
+        <span className="ts-eyebrow">{t("workspace.settings")}</span>
         {SECTIONS.map((item) => (
           <button
             key={item.id}
@@ -262,14 +273,16 @@ export function SettingsPanel({
             aria-current={item.id === section ? "page" : undefined}
             onClick={() => setSection(item.id)}
           >
-            {item.title}
+            {t(item.title)}
           </button>
         ))}
         <span className="ts-spacer" />
         <div className="ts-settings__foot">
           typsidian {version}
           <br />
-          {vaultName === null ? "vault не открыт" : `vault: ${vaultName}`}
+          {vaultName === null
+            ? t("settings.vaultNotOpen")
+            : t("settings.vaultName", { name: vaultName })}
         </div>
       </nav>
 
@@ -289,13 +302,14 @@ export function SettingsPanel({
           <AppearanceSection
             settings={settings}
             onChangeTheme={(theme) => void route(changeOf({ theme }))}
+            onChangeLanguage={(language) => void route(changeOf({ language }))}
             onChangeFontSize={(size) =>
               void route(changeOf({ editor_font_size: size }))
             }
             canMakeDefault={vaultSettings.overrides !== null}
             onMakeDefault={() => void runMakeDefault()}
-            defaultsMessage={defaultsMessage}
-            rejectionMessage={describeRejection(state)}
+            defaultsMessage={defaultsMessage === null ? null : defaultsMessage(t)}
+            rejectionMessage={describeRejection(t, state)}
           />
         )}
 
@@ -308,8 +322,8 @@ export function SettingsPanel({
             onSetLabel={vaults.setLabel}
             onForget={vaults.forget}
             errorMessage={
-              vaultSettings.error ??
-              (vaults.error ? describeVaultActionError(vaults.error) : null)
+              vaultSettings.error?.(t) ??
+              (vaults.error ? describeVaultActionError(t, vaults.error) : null)
             }
             assetsPlacement={
               vaultSettings.overrides
@@ -320,17 +334,25 @@ export function SettingsPanel({
             sections={(vaultSettings.overrides?.sections ?? []).map(
               (marked) => marked.path,
             )}
+            exportFolder={
+              vaultSettings.overrides
+                ? (vaultSettings.overrides.export_folder ?? "export")
+                : null
+            }
+            onChangeExportFolder={vaultSettings.setExportFolder}
           />
         )}
 
         {section === "templates" && (
           // Отдельный пункт, как в панели папки desktop/Android (007 FR-016):
           // внизу раздела «Vault» его не находили.
-          <section aria-label="Шаблоны">
+          <section aria-label={t("settings.section.templates")}>
             <div className="ts-settings__head">
-              <h2>Шаблоны</h2>
+              <h2>{t("settings.section.templates")}</h2>
               <span className="ts-settings__meta">
-                {vaultName === null ? "vault не открыт" : `настройки папки · ${vaultName}`}
+                {vaultName === null
+                  ? t("settings.vaultNotOpen")
+                  : t("settings.folderSettings", { name: vaultName })}
               </span>
             </div>
             <TemplatesSection vaultSettings={vaultSettings} preview={preview} />
@@ -356,7 +378,7 @@ export function SettingsPanel({
             {/* FR-029: о вынужденном сохранении заметки и об отказе сменить
                 режим пользователь узнаёт словами, а не по молчаливому
                 бездействию. */}
-            {modeMessage && <p role="status">{modeMessage}</p>}
+            {modeMessage && <p role="status">{modeMessage(t)}</p>}
 
             {/* Сочетания команд приложения — рядом с режимом редактирования, но
                 это разные вещи: выше настраивается, чем обрабатываются клавиши
@@ -365,7 +387,7 @@ export function SettingsPanel({
                 вызовы идут через `vaultSettings`, а не через `route`. */}
             <ShortcutsSection
               bindings={shortcuts.bindings}
-              error={vaultSettings.error}
+              error={vaultSettings.error === null ? null : vaultSettings.error(t)}
               onAssign={(command, shortcut) =>
                 void vaultSettings.setKeybinding(command, shortcut)
               }
@@ -381,7 +403,7 @@ export function SettingsPanel({
             diagnostics={state.diagnostics}
             onReveal={() => void device.reveal().catch(() => {})}
             onResetToDefaults={() => void runReset()}
-            resetMessage={resetMessage}
+            resetMessage={resetMessage === null ? null : resetMessage(t)}
           />
         )}
       </div>
@@ -396,12 +418,12 @@ export function SettingsPanel({
  * остальное не о чем; «Дополнительно» последним, потому что там сброс и
  * диагностика.
  */
-const SECTIONS: { id: SettingsSection; title: string }[] = [
-  { id: "vault", title: "Vault" },
-  { id: "templates", title: "Шаблоны" },
-  { id: "appearance", title: "Внешний вид" },
-  { id: "keybindings", title: "Кейбиндинги" },
-  { id: "advanced", title: "Дополнительно" },
+const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
+  { id: "vault", title: "settings.section.vault" },
+  { id: "templates", title: "settings.section.templates" },
+  { id: "appearance", title: "settings.section.appearance" },
+  { id: "keybindings", title: "settings.section.keybindings" },
+  { id: "advanced", title: "settings.section.advanced" },
 ];
 
 /** Какой раздел показан. */
@@ -416,18 +438,18 @@ export type SettingsSection =
  * Причина отказа берётся из плана, вернувшегося из ядра (FR-016): UI
  * сопоставляет вариантам формулировки, но не решает сам, что допустимо.
  */
-function describeRejection(state: SettingsState): string | null {
+function describeRejection(t: Translate, state: SettingsState): string | null {
   const plan = state.lastPlan;
   if (!plan || plan.outcome !== "Rejected") return null;
   switch (plan.reason.kind) {
     case "ValueOutOfRange":
-      return "Значение вне допустимого диапазона — размер шрифта должен быть от 8 до 32.";
+      return t("settings.reject.valueOutOfRange");
     case "SaveFailed":
-      return "Не удалось сохранить открытую заметку, поэтому режим не изменён. Правки не потеряны.";
+      return t("settings.reject.saveFailed");
     case "UnresolvedConflict":
-      return "Сначала нужно разрешить конфликт по открытой заметке.";
+      return t("settings.reject.unresolvedConflict");
     case "StorageNotWritable":
-      return "Хранилище настроек недоступно на запись: изменение действует до конца сессии.";
+      return t("settings.reject.storageNotWritable");
     default: {
       const exhaustive: never = plan.reason;
       return exhaustive;
@@ -440,19 +462,19 @@ function describeRejection(state: SettingsState): string | null {
  * сбросе важно сказать, что **ни одно** значение не изменилось, — иначе
  * пользователь заподозрит частичное применение.
  */
-function describeResetRejection(plan: ApplyPlan): string {
-  if (plan.outcome !== "Rejected") return "Сброс не выполнен.";
+function describeResetRejection(t: Translate, plan: ApplyPlan): string {
+  if (plan.outcome !== "Rejected") return t("settings.reset.notDone");
   switch (plan.reason.kind) {
     case "UnresolvedConflict":
-      return "Сброс отменён целиком: сначала нужно разрешить конфликт по открытой заметке. Ни одна настройка не изменилась.";
+      return t("settings.reset.unresolvedConflict");
     case "SaveFailed":
-      return "Сброс отменён целиком: не удалось сохранить открытую заметку. Ни одна настройка не изменилась, правки не потеряны.";
+      return t("settings.reset.saveFailed");
     case "StorageNotWritable":
-      return "Хранилище недоступно на запись: сброс действует до конца сессии и не переживёт перезапуск.";
+      return t("settings.reset.storageNotWritable");
     case "ValueOutOfRange":
       // Недостижимо: набор собирает ядро из своих же умолчаний. Ветка
       // существует ради исчерпывающей проверки (принцип IV).
-      return "Сброс отклонён ядром как недопустимый набор значений.";
+      return t("settings.reset.valueOutOfRange");
     default: {
       const exhaustive: never = plan.reason;
       return exhaustive;
@@ -468,26 +490,27 @@ function StorageNoticeBanner({
   notice: StorageNotice;
   onDismiss: () => void;
 }): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <div role="status">
-      <p>{describeNotice(notice)}</p>
+      <p>{describeNotice(t, notice)}</p>
       <button type="button" onClick={onDismiss}>
-        Понятно
+        {t("common.ok")}
       </button>
     </div>
   );
 }
 
-function describeNotice(notice: StorageNotice): string {
+function describeNotice(t: Translate, notice: StorageNotice): string {
   switch (notice.kind) {
     case "unreadable":
       // FR-013: подчёркиваем, что файл пользователя не тронут — иначе
       // сообщение читается как «мы его починили за вас».
-      return "Файл настроек не читается — работаем на значениях по умолчанию. Ваш файл не тронут.";
+      return t("settings.notice.unreadable");
     case "readOnly":
-      return "Каталог настроек недоступен на запись: изменения действуют до конца сессии и не переживут перезапуск.";
+      return t("settings.notice.readOnly");
     case "invalidSetAside":
-      return `Испорченный файл настроек перенесён рядом: ${notice.movedTo ?? "—"}.`;
+      return t("settings.notice.invalidSetAside", { path: notice.movedTo ?? "—" });
     default: {
       const exhaustive: never = notice.kind;
       return exhaustive;

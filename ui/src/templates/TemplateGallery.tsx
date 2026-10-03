@@ -17,6 +17,7 @@ import {
 } from "./useTemplateLibrary.js";
 import { insertTemplate, type InsertionTarget } from "./insertion/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 // Галерея заготовок (T022, T023) — экран «Шаблоны и сниппеты» макета
 // «Typsidian Утилиты».
@@ -73,10 +74,13 @@ export function TemplateGallery({
   onClose,
 }: TemplateGalleryProps): React.JSX.Element {
   useDismissOnEscape(onClose);
+  const { t } = useI18n();
 
   const [filter, setFilter] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Фраза, а не строка: отказ, уже показанный на экране, после смены языка
+  // перерисовывается на новом (010 FR-014).
+  const [notice, setNotice] = useState<Phrase | null>(null);
 
   const templates = useMemo(
     () => library.view?.templates ?? [],
@@ -108,10 +112,12 @@ export function TemplateGallery({
         onClose();
         return;
       }
-      setNotice(
-        result.error.kind === "NoEditor"
-          ? "Вставлять некуда: заметка не открыта."
-          : `Вставить не удалось: ${result.error.reason}.`,
+      const error = result.error;
+      setNotice(() =>
+        error.kind === "NoEditor"
+          ? (tr: Translate) => tr("templates.gallery.noEditor")
+          : (tr: Translate) =>
+              tr("templates.gallery.insertFailed", { reason: error.reason(tr) }),
       );
     },
     [insertion, client, onClose],
@@ -121,18 +127,18 @@ export function TemplateGallery({
 
   return (
     <div className="ts-overlay" role="presentation">
-      <section className="ts-tpl" aria-label="Шаблоны и сниппеты">
+      <section className="ts-tpl" aria-label={t("templates.gallery.title")}>
         <div className="ts-tpl__head">
-          <span className="ts-tpl__title">Шаблоны и сниппеты</span>
-          <span className="ts-tpl__path">vault/templates</span>
+          <span className="ts-tpl__title">{t("templates.gallery.title")}</span>
+          <span className="ts-tpl__path">vault/templates</span>{/* i18n-ignore: путь в vault */}
           <span className="ts-spacer" />
           <div className="ts-tpl__filter">
             <Icon name="search" size={12} />
             <input
               className="ts-tpl__filter-input"
               value={filter}
-              placeholder="фильтр…"
-              aria-label="Фильтр по имени заготовки"
+              placeholder={t("templates.gallery.filter")}
+              aria-label={t("templates.gallery.filterLabel")}
               onChange={(event) => setFilter(event.target.value)}
             />
           </div>
@@ -144,13 +150,13 @@ export function TemplateGallery({
               onClick={onSaveCurrentNote}
             >
               <Icon name="plus" size={12} />
-              Из текущей заметки
+              {t("templates.gallery.fromCurrent")}
             </button>
           )}
           <button
             type="button"
             className="ts-btn ts-btn--icon"
-            aria-label="Закрыть галерею"
+            aria-label={t("templates.gallery.close")}
             onClick={onClose}
           >
             <Icon name="x" size={14} />
@@ -160,14 +166,14 @@ export function TemplateGallery({
         {folderState !== null && <FolderNotice state={folderState} />}
         {notice !== null && (
           <p className="ts-tpl__notice" role="alert">
-            {notice}
+            {notice(t)}
           </p>
         )}
 
         <div className="ts-tpl__body">
-          <div className="ts-tpl__grid" role="listbox" aria-label="Заготовки">
+          <div className="ts-tpl__grid" role="listbox" aria-label={t("templates.gallery.list")}>
             {library.isLoading && (
-              <p className="ts-tpl__empty">Читаем библиотеку…</p>
+              <p className="ts-tpl__empty">{t("templates.gallery.loading")}</p>
             )}
 
             {!library.isLoading && templates.length === 0 && (
@@ -175,9 +181,7 @@ export function TemplateGallery({
             )}
 
             {!library.isLoading && templates.length > 0 && groups.length === 0 && (
-              <p className="ts-tpl__empty">
-                По запросу «{filter}» заготовок нет.
-              </p>
+              <p className="ts-tpl__empty">{t("templates.gallery.noMatch", { filter })}</p>
             )}
 
             {groups.map((group) => (
@@ -211,12 +215,9 @@ export function TemplateGallery({
             ))}
           </div>
 
-          <aside className="ts-tpl__side" aria-label="Выбранная заготовка">
+          <aside className="ts-tpl__side" aria-label={t("templates.gallery.selected")}>
             {selected === null ? (
-              <p className="ts-tpl__empty">
-                Выберите заготовку — её можно развернуть в новую заметку или
-                вставить в текущую позицию курсора.
-              </p>
+              <p className="ts-tpl__empty">{t("templates.gallery.pickHint")}</p>
             ) : (
               <>
                 <div className="ts-eyebrow">{selected.name}</div>
@@ -224,27 +225,25 @@ export function TemplateGallery({
                   <p className="ts-tpl__side-path">{selected.group}</p>
                 )}
 
-                <span className="ts-tpl__side-label">применить</span>
+                <span className="ts-tpl__side-label">{t("templates.gallery.apply")}</span>
                 <button
                   type="button"
                   className="ts-btn ts-btn--accent"
                   disabled={onCreateNote === undefined}
                   onClick={() => onCreateNote?.(selected)}
                 >
-                  Создать заметку по шаблону
+                  {t("templates.gallery.createNote")}
                 </button>
                 <button
                   type="button"
                   className="ts-btn"
                   disabled={insertion === null}
                   title={
-                    insertion === null
-                      ? "Откройте заметку, чтобы вставить заготовку в курсор"
-                      : undefined
+                    insertion === null ? t("templates.gallery.insertDisabled") : undefined
                   }
                   onClick={() => void applyInsert(selected)}
                 >
-                  Вставить в курсор
+                  {t("templates.gallery.insert")}
                 </button>
                 <button
                   type="button"
@@ -255,15 +254,16 @@ export function TemplateGallery({
                     onClose();
                   }}
                 >
-                  Открыть исходник шаблона
+                  {t("templates.gallery.openSource")}
                 </button>
 
                 {/* FR-006: заготовка правится тем же путём, что обычная
                     заметка, — отдельного редактора для неё нет, и кнопка выше
                     открывает её в том же редакторе. */}
                 <p className="ts-tpl__side-hint">
-                  Заготовка — обычная заметка в папке <code>templates/</code>:
-                  она видна в дереве, участвует в поиске и в графе ссылок.
+                  {t("templates.gallery.sideHintBefore")}
+                  <code>templates/</code>
+                  {t("templates.gallery.sideHintAfter")}
                 </p>
               </>
             )}
@@ -271,10 +271,10 @@ export function TemplateGallery({
         </div>
 
         <div className="ts-tpl__foot">
-          <span>{templates.length} заготовок</span>
+          <span>{t("templates.gallery.count", { count: templates.length })}</span>
           <span className="ts-spacer" />
-          <span>двойное нажатие — применить</span>
-          <span>Esc закрыть</span>
+          <span>{t("templates.gallery.doubleClick")}</span>
+          <span>{t("templates.gallery.escClose")}</span>
         </div>
       </section>
     </div>
@@ -298,6 +298,7 @@ function FolderNotice({
 }: {
   state: TemplateFolderState;
 }): React.JSX.Element | null {
+  const { t } = useI18n();
   switch (state.state) {
     case "Present":
       return null;
@@ -308,17 +309,21 @@ function FolderNotice({
     case "Unreadable":
       return (
         <p className="ts-tpl__notice ts-tpl__notice--warn" role="alert">
-          Папку <code>templates/</code> не удалось прочитать:{" "}
-          {describeFolderProblem(state.reason)}. Остальное приложение работает
-          как обычно.
+          {t("templates.folder.unreadableBefore")}
+          <code>templates/</code>
+          {t("templates.folder.unreadableAfter", {
+            reason: describeFolderProblem(t, state.reason),
+          })}
         </p>
       );
     case "NotWritable":
       return (
         <p className="ts-tpl__notice" role="note">
-          Папка <code>templates/</code> доступна только на чтение:{" "}
-          {describeFolderProblem(state.reason)}. Заготовки можно применять, но
-          сохранить новую нельзя.
+          {t("templates.folder.readOnlyBefore")}
+          <code>templates/</code>
+          {t("templates.folder.readOnlyAfter", {
+            reason: describeFolderProblem(t, state.reason),
+          })}
         </p>
       );
     default: {
@@ -334,33 +339,30 @@ function EmptyLibrary({
 }: {
   state: TemplateFolderState | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   if (state?.state === "Unreadable") {
-    return (
-      <p className="ts-tpl__empty">
-        Пока папка не читается, показать заготовки нечем.
-      </p>
-    );
+    return <p className="ts-tpl__empty">{t("templates.empty.unreadable")}</p>;
   }
   return (
     <p className="ts-tpl__empty">
-      Заготовок пока нет. Папка <code>templates/</code> — обычная папка vault:
-      положите в неё заметку любым способом, и она появится здесь. Папка
-      создастся сама при первом сохранении заготовки из приложения.
+      {t("templates.empty.before")}
+      <code>templates/</code>
+      {t("templates.empty.after")}
     </p>
   );
 }
 
 /** Причина недоступности папки словами. */
-export function describeFolderProblem(reason: FolderProblem): string {
+export function describeFolderProblem(t: Translate, reason: FolderProblem): string {
   switch (reason) {
     case "AccessDenied":
-      return "нет прав доступа";
+      return t("templates.folderProblem.accessDenied");
     case "NotADirectory":
-      return "по этому пути лежит файл, а не папка";
+      return t("templates.folderProblem.notADirectory");
     case "VaultReadOnly":
-      return "весь vault открыт только на чтение";
+      return t("templates.folderProblem.vaultReadOnly");
     case "Io":
-      return "отказ чтения с диска";
+      return t("templates.folderProblem.io");
     default: {
       const exhaustive: never = reason;
       return exhaustive;

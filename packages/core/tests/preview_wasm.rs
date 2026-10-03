@@ -135,13 +135,21 @@ fn a_real_note_compiles_into_pages_with_svg() {
     assert_eq!(doc.pages.len(), 1);
     assert!(doc.pages[0].svg.contains("<svg"), "ожидали настоящий SVG");
     assert!(doc.pages[0].width_pt > 0.0 && doc.pages[0].height_pt > 0.0);
-    assert!(doc.diagnostics.iter().all(|d| d.severity != DiagnosticSeverity::Error));
+    assert!(doc
+        .diagnostics
+        .iter()
+        .all(|d| d.severity != DiagnosticSeverity::Error));
 }
 
 #[wasm_bindgen_test]
 fn multi_page_note_yields_one_entry_per_page() {
-    let doc = compile_note(MAIN, "Первая\n\n#pagebreak()\n\nВторая\n", 1, FontSet::builtin())
-        .unwrap();
+    let doc = compile_note(
+        MAIN,
+        "Первая\n\n#pagebreak()\n\nВторая\n",
+        1,
+        FontSet::builtin(),
+    )
+    .unwrap();
 
     assert_eq!(doc.pages.len(), 2);
     assert_ne!(doc.pages[0].digest, doc.pages[1].digest);
@@ -169,6 +177,10 @@ fn a_broken_note_fails_with_a_named_reason_and_a_place() {
         .find(|d| d.severity == DiagnosticSeverity::Error)
         .expect("ошибка обязана быть названа");
     assert!(!error.message.is_empty());
+    assert_eq!(
+        error.app, None,
+        "сообщение Typst показывается как есть (010 FR-004)"
+    );
 
     let place = error.location.as_ref().expect("место обязано быть указано");
     assert!(place.is_open_note);
@@ -186,6 +198,7 @@ mod common;
 use common::MemoryVault;
 // `CompileOutcome`, `DiagnosticSeverity` и `FontSet` уже импортированы выше в
 // этом же файле: секции разделены комментариями, но модуль один.
+use typsidian_core::messages::{AppMessage, FontProblem, ResolveReason};
 use typsidian_core::preview::{compile_note_resolved, PackageCache};
 use typsidian_core::vault::backend::ReadError;
 
@@ -226,10 +239,14 @@ async fn missing_image_is_named_with_its_reason_and_does_not_spin_the_loop() {
     .unwrap();
 
     assert_eq!(doc.outcome, CompileOutcome::Failed);
-    let named = doc
-        .diagnostics
-        .iter()
-        .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("нет.svg"));
+    let named = doc.diagnostics.iter().any(|d| {
+        d.severity == DiagnosticSeverity::Error
+            && d.app
+                == Some(AppMessage::DependencyUnreadable {
+                    path: "нет.svg".to_string(),
+                    reason: ResolveReason::NotFound,
+                })
+    });
     assert!(named);
     assert_eq!(vault.read_count("нет.svg"), 1);
 }
@@ -250,10 +267,13 @@ async fn unreadable_dependency_reports_its_own_reason_not_a_generic_failure() {
     .unwrap();
 
     assert_eq!(doc.outcome, CompileOutcome::Failed);
-    assert!(doc
-        .diagnostics
-        .iter()
-        .any(|d| d.message.contains("битая.svg") && d.message.contains("размер")));
+    assert!(doc.diagnostics.iter().any(|d| {
+        d.app
+            == Some(AppMessage::DependencyUnreadable {
+                path: "битая.svg".to_string(),
+                reason: ResolveReason::TooLarge,
+            })
+    }));
 }
 
 #[wasm_bindgen_test]
@@ -400,4 +420,155 @@ fn runs_follow_reading_order_across_columns_and_pages() {
 #[wasm_bindgen_test]
 fn generated_content_reaches_the_layer() {
     textlayer::generated_content_reaches_the_layer();
+}
+
+// ── Шрифты из папки vault (T100, T102, FR-027…FR-029) ───────────────────
+//
+// Встроенный набор в этих проверках пуст: иначе шрифт нашёлся бы и без vault,
+// и проверка ничего бы не доказывала. В vault кладётся файл Libertinus из
+// `typst-assets` — настоящий шрифт, которому неоткуда взяться, кроме папки.
+
+/// Байты одного начертания Libertinus Serif.
+fn libertinus_bytes() -> Vec<u8> {
+    typst_assets::fonts()
+        .find(|bytes| {
+            typst::text::Font::new(Bytes::new(bytes.to_vec()), 0)
+                .is_some_and(|font| font.info().family == "Libertinus Serif")
+        })
+        .expect("Libertinus в typst-assets")
+        .to_vec()
+}
+
+const LIBERTINUS_NOTE: &str = "#set text(font: \"Libertinus Serif\")\nТекст\n";
+
+fn unknown_font(doc: &typsidian_core::preview::CompiledDocument) -> bool {
+    doc.diagnostics
+        .iter()
+        .any(|d| d.message.to_lowercase().contains("unknown font family"))
+}
+
+#[wasm_bindgen_test]
+async fn font_from_vault_folder_is_available_to_the_note() {
+    let vault = MemoryVault::new().with_file("шрифты/Libertinus.OTF", libertinus_bytes());
+
+    let doc = compile_note_resolved(
+        &vault,
+        &PackageCache::new(),
+        MAIN,
+        LIBERTINUS_NOTE,
+        1,
+        FontSet::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "{:?}",
+        doc.diagnostics
+    );
+    assert!(
+        !unknown_font(&doc),
+        "шрифт из vault обязан найтись: {:?}",
+        doc.diagnostics
+    );
+}
+
+#[wasm_bindgen_test]
+async fn font_outside_vault_is_reported_unknown() {
+    let doc = compile_note_resolved(
+        &MemoryVault::new(),
+        &PackageCache::new(),
+        MAIN,
+        LIBERTINUS_NOTE,
+        1,
+        FontSet::default(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        unknown_font(&doc),
+        "без файла в vault шрифта нет: {:?}",
+        doc.diagnostics
+    );
+}
+
+#[wasm_bindgen_test]
+async fn vault_font_is_read_once_per_change_not_per_compile() {
+    let vault = MemoryVault::new().with_file("Libertinus.otf", libertinus_bytes());
+    let packages = PackageCache::new();
+
+    for revision in 1..=3 {
+        compile_note_resolved(
+            &vault,
+            &packages,
+            MAIN,
+            LIBERTINUS_NOTE,
+            revision,
+            FontSet::default(),
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(vault.read_count("Libertinus.otf"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn broken_vault_font_is_named_and_the_note_still_compiles() {
+    let vault = MemoryVault::new().with_file("шрифты/битый.ttf", "не шрифт");
+
+    let doc = compile_note_resolved(
+        &vault,
+        &PackageCache::new(),
+        MAIN,
+        "Текст\n",
+        1,
+        FontSet::builtin(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "{:?}",
+        doc.diagnostics
+    );
+    let named = doc.diagnostics.iter().any(|d| {
+        d.severity == DiagnosticSeverity::Warning
+            && d.app
+                == Some(AppMessage::VaultFontUnusable {
+                    path: "шрифты/битый.ttf".to_string(),
+                    reason: FontProblem::Invalid,
+                })
+    });
+    assert!(
+        named,
+        "битый шрифт обязан быть назван: {:?}",
+        doc.diagnostics
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Фича 010 — сообщения приложения (T042/T043): общие проверки из common/message_cases.rs
+// ---------------------------------------------------------------------------
+
+use common::message_cases as app_messages;
+
+#[wasm_bindgen_test]
+fn every_variant_has_a_stable_json_shape() {
+    app_messages::every_variant_has_a_stable_json_shape();
+}
+
+#[wasm_bindgen_test]
+fn a_diagnostic_carries_the_message_kind_only_when_the_app_made_it() {
+    app_messages::a_diagnostic_carries_the_message_kind_only_when_the_app_made_it();
+}
+
+#[wasm_bindgen_test]
+fn log_text_names_the_user_values_verbatim() {
+    app_messages::log_text_names_the_user_values_verbatim();
 }

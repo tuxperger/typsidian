@@ -104,9 +104,15 @@ fn every_embed_gets_its_own_snapshot_file() {
     let second = plan_next_to_note(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
     let other_note = plan_next_to_note(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
 
-    assert_ne!(first.embed_id, second.embed_id, "две вставки в одну заметку");
+    assert_ne!(
+        first.embed_id, second.embed_id,
+        "две вставки в одну заметку"
+    );
     assert_ne!(first.snapshot_path, second.snapshot_path);
-    assert_ne!(first.embed_id, other_note.embed_id, "вставки в разные заметки");
+    assert_ne!(
+        first.embed_id, other_note.embed_id,
+        "вставки в разные заметки"
+    );
     assert_ne!(first.snapshot_path, other_note.snapshot_path);
 }
 
@@ -147,7 +153,10 @@ fn snapshot_metadata_survives_a_round_trip() {
     let svg = embed_metadata_in_svg("<svg></svg>", &metadata).unwrap();
 
     let read_back = read_metadata_from_svg(&svg).unwrap();
-    assert_eq!(read_back.board_path, PathBuf::from("Проект/Схема.excalidraw"));
+    assert_eq!(
+        read_back.board_path,
+        PathBuf::from("Проект/Схема.excalidraw")
+    );
     assert_eq!(read_back.board_digest, board_digest);
 }
 
@@ -268,6 +277,10 @@ impl VaultBackend for UntouchableVault {
 
     async fn list_folder(&self, _folder: &Path) -> Vec<Note> {
         unreachable!("гейт профиля не читает дерево")
+    }
+
+    async fn list_fonts(&self) -> Vec<typsidian_core::vault::FontFile> {
+        unreachable!("гейт профиля не собирает документ")
     }
 
     async fn folder_access(&self, _folder: &Path) -> typsidian_core::vault::FolderAccess {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { useI18n } from "../i18n/index.js";
 
 /**
  * Границы, объявленные ядром (`settings::MIN_FONT_SIZE`/`MAX_FONT_SIZE`,
@@ -45,6 +46,7 @@ export function EditorFontSizeField({
   onClear,
   hint,
 }: EditorFontSizeFieldProps): React.JSX.Element {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(size === null ? "" : String(size));
   // Подпись связана с полем по id, а не обёрткой `<label>`: между ними стоят
   // стрелки, и обёртка перехватывала бы нажатия на них.
@@ -76,14 +78,14 @@ export function EditorFontSizeField({
   return (
     <div className="ts-fontsize">
       <label className="ts-fontsize__label" htmlFor={inputId}>
-        Размер шрифта редактора
+        {t("settings.fontSize.label")}
       </label>
 
       <div className="ts-stepper">
         <button
           type="button"
           className="ts-btn ts-stepper__btn"
-          aria-label="Уменьшить размер шрифта"
+          aria-label={t("settings.fontSize.decrease")}
           disabled={size !== null && size <= FONT_SIZE_HINT.min}
           onClick={() => step(-1)}
         >
@@ -97,7 +99,7 @@ export function EditorFontSizeField({
           inputMode="numeric"
           min={FONT_SIZE_HINT.min}
           max={FONT_SIZE_HINT.max}
-          placeholder="по умолчанию"
+          placeholder={t("settings.fontSize.default")}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => commit(Number(draft))}
@@ -112,7 +114,7 @@ export function EditorFontSizeField({
         <button
           type="button"
           className="ts-btn ts-stepper__btn"
-          aria-label="Увеличить размер шрифта"
+          aria-label={t("settings.fontSize.increase")}
           disabled={size !== null && size >= FONT_SIZE_HINT.max}
           onClick={() => step(1)}
         >
@@ -126,13 +128,13 @@ export function EditorFontSizeField({
             disabled={size === null}
             onClick={onClear}
           >
-            Сбросить
+            {t("settings.fontSize.clear")}
           </button>
         )}
       </div>
 
       <p className="ts-fontsize__hint">
-        От {FONT_SIZE_HINT.min} до {FONT_SIZE_HINT.max} пикселей.
+        {t("settings.fontSize.range", { min: FONT_SIZE_HINT.min, max: FONT_SIZE_HINT.max })}
         {hint ? ` ${hint}` : ""}
       </p>
     </div>

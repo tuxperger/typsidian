@@ -334,7 +334,9 @@ async fn label_is_shown_instead_of_location_without_affecting_identity() {
         .set_label(&first, Some("Работа".to_string()))
         .expect("подпись задаётся");
     // Одинаковые подписи допустимы — уникальности подпись не требует.
-    store.set_label(&second, Some("Работа".to_string())).unwrap();
+    store
+        .set_label(&second, Some("Работа".to_string()))
+        .unwrap();
 
     let records = store.records_with_availability().await;
     assert_eq!(records[0].display_name(), "Работа");
@@ -421,7 +423,10 @@ async fn no_service_files_appear_inside_the_vault_folder() {
         .await
         .unwrap();
     store
-        .apply(&SettingsChange::current_vault(id.clone()), &ApplyContext::unobstructed())
+        .apply(
+            &SettingsChange::current_vault(id.clone()),
+            &ApplyContext::unobstructed(),
+        )
         .await;
     store.forget(&id).await.unwrap();
 
@@ -442,7 +447,10 @@ async fn a_moved_folder_is_not_hunted_down_and_becomes_unavailable() {
     fs::create_dir_all(&original).unwrap();
 
     let mut store = store_in(&dir).await;
-    let id = store.add(original.clone(), "notes".to_string()).await.unwrap();
+    let id = store
+        .add(original.clone(), "notes".to_string())
+        .await
+        .unwrap();
     assert!(store.resolve(&id).await.is_resolved());
 
     fs::rename(&original, parent.path().join("notes-moved")).unwrap();
@@ -475,7 +483,12 @@ async fn folder_refs_survive_reopen() {
 
     let reopened = store_in(&dir).await;
     assert!(reopened.resolve(&id).await.is_resolved());
-    assert_eq!(reopened.find_existing(&vault_dir.path().to_path_buf()).await, Some(id));
+    assert_eq!(
+        reopened
+            .find_existing(&vault_dir.path().to_path_buf())
+            .await,
+        Some(id)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +521,10 @@ async fn legacy_last_vault_is_imported_and_its_file_removed() {
         "и текущим vault"
     );
     assert!(
-        store.resolve(&store.settings().known_vaults[0].id).await.is_resolved(),
+        store
+            .resolve(&store.settings().known_vaults[0].id)
+            .await
+            .is_resolved(),
         "импортированная запись разрешается в ту же папку"
     );
     assert!(!legacy.exists(), "исходный файл удалён");
@@ -538,7 +554,10 @@ async fn migration_does_not_run_when_settings_already_know_a_vault() {
         .unwrap();
 
     assert_eq!(store.settings().known_vaults.len(), 1);
-    assert!(legacy.exists(), "чужой файл не трогается, если импорт не нужен");
+    assert!(
+        legacy.exists(),
+        "чужой файл не трогается, если импорт не нужен"
+    );
 }
 
 #[tokio::test]
@@ -607,7 +626,10 @@ async fn switching_vault_does_not_change_appearance_or_mode() {
         .await
         .unwrap();
     store
-        .apply(&SettingsChange::current_vault(first), &ApplyContext::unobstructed())
+        .apply(
+            &SettingsChange::current_vault(first),
+            &ApplyContext::unobstructed(),
+        )
         .await;
     store
         .apply(
@@ -914,7 +936,9 @@ fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
     // T065, FR-035: отсутствие vim-раскладки должно быть однозначно отличимо от
     // штатного режима, поэтому автоматический откат на эмуляцию запрещён.
     let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     assert!(controller.mode().is_full_backend());
 
     // Буфер пользователя живёт у вызывающей стороны: мост им не владеет
@@ -942,7 +966,9 @@ fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
 fn plain_input_is_left_only_by_an_explicit_action() {
     // T066, FR-035: самопроизвольного восстановления не происходит.
     let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     controller
         .bridge_mut()
         .fail_backend(OutageReason::BackendStopped);
@@ -963,7 +989,9 @@ fn user_can_switch_between_full_backend_and_emulation() {
     // T067, FR-027.
     let mut controller = EditorModeController::new(FakeBridge::available());
 
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     assert!(controller.mode().is_full_backend());
 
     controller
@@ -973,7 +1001,11 @@ fn user_can_switch_between_full_backend_and_emulation() {
 
     let events = controller.poll_events();
     assert!(
-        events.iter().filter(|e| matches!(e, SettingsEvent::EditorModeChanged { .. })).count() >= 2,
+        events
+            .iter()
+            .filter(|e| matches!(e, SettingsEvent::EditorModeChanged { .. }))
+            .count()
+            >= 2,
         "каждое переключение наблюдаемо: {events:?}"
     );
 }
@@ -981,9 +1013,8 @@ fn user_can_switch_between_full_backend_and_emulation() {
 #[test]
 fn unavailable_backend_never_reports_full_backend() {
     // T068, FR-034, FR-004: недоступность не выдаётся за работу.
-    let mut controller = EditorModeController::new(FakeBridge::unavailable(
-        OutageReason::BackendNotInstalled,
-    ));
+    let mut controller =
+        EditorModeController::new(FakeBridge::unavailable(OutageReason::BackendNotInstalled));
 
     let result = controller.request_mode(ModePreference::FullBackend);
 
@@ -1053,7 +1084,9 @@ fn deleted_config_is_reported_but_the_mode_keeps_working() {
 
     let mut controller = EditorModeController::new(FakeBridge::available());
     controller.set_config_path(config.clone());
-    controller.request_mode(ModePreference::FullBackend).unwrap();
+    controller
+        .request_mode(ModePreference::FullBackend)
+        .unwrap();
     controller.apply_config(stamp_of_config(&config)).unwrap();
 
     fs::remove_file(&config).unwrap();
@@ -1198,4 +1231,79 @@ async fn store_never_writes_inside_the_vault_directory() {
     assert!(Path::new(store.settings_path())
         .file_name()
         .is_some_and(|name| name == SETTINGS_FILE_NAME));
+}
+
+// ---------------------------------------------------------------------------
+// Фича 010 — язык интерфейса (T008/T009): общие проверки из common/language_cases.rs
+// ---------------------------------------------------------------------------
+
+mod common;
+use common::language_cases as language;
+
+#[test]
+fn language_round_trips_through_the_file() {
+    language::language_round_trips_through_the_file();
+}
+
+#[test]
+fn unrecognised_tag_survives_writing_another_value() {
+    language::unrecognised_tag_survives_writing_another_value();
+}
+
+#[test]
+fn malformed_tag_in_file_keeps_other_values() {
+    language::malformed_tag_in_file_keeps_other_values();
+}
+
+#[test]
+fn invalid_tag_rejects_the_whole_change() {
+    language::invalid_tag_rejects_the_whole_change();
+}
+
+#[test]
+fn stored_malformed_tag_does_not_block_other_changes() {
+    language::stored_malformed_tag_does_not_block_other_changes();
+}
+
+#[test]
+fn language_goes_to_the_device_even_with_an_open_vault() {
+    language::language_goes_to_the_device_even_with_an_open_vault();
+}
+
+#[test]
+fn language_and_theme_split_between_stores() {
+    language::language_and_theme_split_between_stores();
+}
+
+#[test]
+fn reset_returns_to_the_system_language() {
+    language::reset_returns_to_the_system_language();
+}
+
+#[test]
+fn language_choice_json_shape() {
+    language::language_choice_json_shape();
+}
+
+#[tokio::test]
+async fn chosen_language_survives_reopen_and_reset_clears_it() {
+    // FR-015, FR-017: выбор переживает перезапуск; сброс — «как в системе».
+    use typsidian_core::settings::apply::LanguageChoice;
+    let dir = TempDir::new().unwrap();
+    {
+        let mut store = store_in(&dir).await;
+        let change = SettingsChange::language(LanguageChoice::Tag("en".to_string()));
+        assert_eq!(
+            store.apply(&change, &ApplyContext::unobstructed()).await,
+            ApplyPlan::Applied
+        );
+    }
+    let mut reopened = store_in(&dir).await;
+    assert_eq!(reopened.settings().language.as_deref(), Some("en"));
+
+    reopened
+        .apply(&reset_to_defaults(), &ApplyContext::unobstructed())
+        .await;
+    let on_disk = fs::read_to_string(settings_path(&dir)).unwrap();
+    assert!(!on_disk.contains("language"), "{on_disk}");
 }

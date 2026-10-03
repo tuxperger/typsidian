@@ -51,6 +51,18 @@ async fn walk_directory(
     out: &mut Vec<(PathBuf, JsValue)>,
     limit: usize,
 ) -> Result<(), WalkAbort> {
+    walk_directory_matching(dir_handle, prefix, out, limit, is_listed).await
+}
+
+/// Тот же обход с произвольным отбором файлов — шрифтам (FR-027) нужны файлы,
+/// которые в дерево как раз не попадают.
+async fn walk_directory_matching(
+    dir_handle: &JsValue,
+    prefix: PathBuf,
+    out: &mut Vec<(PathBuf, JsValue)>,
+    limit: usize,
+    keep: fn(&Path) -> bool,
+) -> Result<(), WalkAbort> {
     let entries_iter = js_call0(dir_handle, "entries").await?;
     loop {
         let next_result = js_call0(&entries_iter, "next").await?;
@@ -73,8 +85,11 @@ async fn walk_directory(
             .unwrap_or_default();
         let child_path = prefix.join(&name);
         if kind == "directory" {
-            Box::pin(walk_directory(&handle, child_path, out, limit)).await?;
-        } else if kind == "file" && is_listed(&child_path) {
+            Box::pin(walk_directory_matching(
+                &handle, child_path, out, limit, keep,
+            ))
+            .await?;
+        } else if kind == "file" && keep(&child_path) {
             out.push((child_path, handle));
             if out.len() > limit {
                 return Err(WalkAbort::TooManyNotes);
@@ -297,12 +312,7 @@ impl WebBackend {
 /// `None` — записи нет (и создавать не просили) либо метод недоступен: отличать
 /// эти случаи вызывающим сторонам не нужно, для них и то и другое означает «по
 /// этому пути ничего не открыть».
-async fn child_handle(
-    parent: &JsValue,
-    method: &str,
-    name: &str,
-    create: bool,
-) -> Option<JsValue> {
+async fn child_handle(parent: &JsValue, method: &str, name: &str, create: bool) -> Option<JsValue> {
     let handle_fn = Reflect::get(parent, &JsValue::from_str(method)).ok()?;
     let handle_fn: js_sys::Function = handle_fn.dyn_into().ok()?;
     let opts = Object::new();
@@ -348,6 +358,37 @@ impl VaultBackend for WebBackend {
 
     async fn list_folder(&self, folder: &Path) -> Vec<Note> {
         self.index.in_folder(folder)
+    }
+
+    /// Обход по хендлам, как у `pollForChanges`: `getFile()` отдаёт размер и
+    /// время изменения без чтения содержимого. Отказ обхода — пустой список,
+    /// а не ошибка: без доступа к папке сборка всё равно назовёт причину сама.
+    async fn list_fonts(&self) -> Vec<super::FontFile> {
+        let mut found = Vec::new();
+        if walk_directory_matching(
+            &self.root_handle,
+            PathBuf::new(),
+            &mut found,
+            usize::MAX,
+            super::is_font_file,
+        )
+        .await
+        .is_err()
+        {
+            return Vec::new();
+        }
+        let mut fonts = Vec::with_capacity(found.len());
+        for (path, handle) in found {
+            if let Some((size, modified)) = file_meta(&handle).await {
+                fonts.push(super::FontFile {
+                    path,
+                    size,
+                    modified_ms: modified as i64,
+                });
+            }
+        }
+        fonts.sort_by(|left, right| left.path.cmp(&right.path));
+        fonts
     }
 
     /// Папка есть тогда и только тогда, когда на неё выдаётся хендл.
@@ -1048,10 +1089,7 @@ impl WebBackend {
     /// Содержимое доски пересекает границу строкой: ядро его не разбирает
     /// дальше нормализации для хэша, а владеет им движок (research.md §9).
     #[wasm_bindgen(js_name = readBoard)]
-    pub async fn read_board_js(
-        &self,
-        path: &str,
-    ) -> Result<String, crate::boards::ReadBoardError> {
+    pub async fn read_board_js(&self, path: &str) -> Result<String, crate::boards::ReadBoardError> {
         let content = crate::boards::read_board(self, Path::new(path)).await?;
         String::from_utf8(content.as_bytes().to_vec())
             .map_err(|_| crate::boards::ReadBoardError::Unreadable)

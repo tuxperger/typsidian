@@ -66,8 +66,13 @@ pub enum UnavailableReason {
 pub enum ElementAtResult {
     /// Каретка не в элементе схемы (US2 AS5).
     None,
-    Found { element: ParsedElement },
-    Unavailable { id: String, reason: UnavailableReason },
+    Found {
+        element: ParsedElement,
+    },
+    Unavailable {
+        id: String,
+        reason: UnavailableReason,
+    },
 }
 
 /// Элемент, непосредственно содержащий каретку (FR-006, FR-016).
@@ -134,7 +139,9 @@ impl<'a> Located<'a> {
     pub fn label_name(&self) -> Option<String> {
         self.label.as_ref().map(|label| {
             let text = label.get().full_text();
-            text.trim_start_matches('<').trim_end_matches('>').to_string()
+            text.trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_string()
         })
     }
 
@@ -166,14 +173,13 @@ impl<'a> Located<'a> {
     }
 }
 
-fn collect_labels(
-    node: &LinkedNode,
-    own: Option<&std::ops::Range<usize>>,
-    out: &mut Vec<String>,
-) {
+fn collect_labels(node: &LinkedNode, own: Option<&std::ops::Range<usize>>, out: &mut Vec<String>) {
     if node.kind() == SyntaxKind::Label && Some(&node.range()) != own {
         let text = node.get().full_text();
-        let name = text.trim_start_matches('<').trim_end_matches('>').to_string();
+        let name = text
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .to_string();
         if !out.contains(&name) {
             out.push(name);
         }
@@ -192,8 +198,12 @@ pub(crate) fn locate<'a>(
     byte: usize,
 ) -> Option<LocateResult<'a>> {
     let linked = LinkedNode::new(root);
-    let after = linked.leaf_at(byte, Side::After).and_then(|leaf| climb(leaf));
-    let before = linked.leaf_at(byte, Side::Before).and_then(|leaf| climb(leaf));
+    let after = linked
+        .leaf_at(byte, Side::After)
+        .and_then(|leaf| climb(leaf));
+    let before = linked
+        .leaf_at(byte, Side::Before)
+        .and_then(|leaf| climb(leaf));
 
     // По обе стороны каретки — разные элементы (сразу после `)` вложенного):
     // берётся более глубоко вложенный, то есть более короткий.
@@ -266,12 +276,16 @@ fn spec_of(node: &LinkedNode) -> Option<&'static ElementSpec> {
             if callee.kind() != SyntaxKind::MathIdent {
                 return None;
             }
-            found(ElementSyntax::Call, &format!("math.{}", callee.get().full_text()), None)
+            found(
+                ElementSyntax::Call,
+                &format!("math.{}", callee.get().full_text()),
+                None,
+            )
         }
         SyntaxKind::SetRule => {
-            let target = node
-                .children()
-                .find(|child| matches!(child.kind(), SyntaxKind::Ident | SyntaxKind::FieldAccess))?;
+            let target = node.children().find(|child| {
+                matches!(child.kind(), SyntaxKind::Ident | SyntaxKind::FieldAccess)
+            })?;
             found(ElementSyntax::Set, &target.get().full_text(), None)
         }
         SyntaxKind::Heading => found(ElementSyntax::MarkupHeading, "heading", None),
@@ -294,7 +308,9 @@ fn spec_of(node: &LinkedNode) -> Option<&'static ElementSpec> {
 /// `#figure(image("a.png"))`. `None` — там не вызов встроенной функции.
 fn inner_callee(node: &LinkedNode, path: &str, param: &str) -> Option<String> {
     let outer = raw_spec(&key_for(ElementSyntax::Call, path, None))?;
-    let args = node.children().find(|child| child.kind() == SyntaxKind::Args)?;
+    let args = node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Args)?;
     let value = inner_arg(&args, &outer.params, param)?;
     if value.kind() != SyntaxKind::FuncCall {
         return None;
@@ -324,8 +340,15 @@ fn build<'a>(text: &str, spec: &'static ElementSpec, node: LinkedNode<'a>) -> Lo
         .find(|child| matches!(child.kind(), SyntaxKind::Args | SyntaxKind::MathArgs))
     {
         let mut names: Vec<String> = Vec::new();
-        for arg in args.children().filter(|arg| arg.kind() == SyntaxKind::Named) {
-            if let Some(name) = arg.children().next().map(|n| n.get().full_text().to_string()) {
+        for arg in args
+            .children()
+            .filter(|arg| arg.kind() == SyntaxKind::Named)
+        {
+            if let Some(name) = arg
+                .children()
+                .next()
+                .map(|n| n.get().full_text().to_string())
+            {
                 if names.contains(&name) {
                     return Err((spec, UnavailableReason::DuplicateParam { name }));
                 }
@@ -405,7 +428,10 @@ fn build<'a>(text: &str, spec: &'static ElementSpec, node: LinkedNode<'a>) -> Lo
             }
         }
         ElementSyntax::MarkupRaw => {
-            if let Some(lang) = node.children().find(|child| child.kind() == SyntaxKind::RawLang) {
+            if let Some(lang) = node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::RawLang)
+            {
                 let name = lang.get().full_text().to_string();
                 values.push(ByteValue {
                     name: "lang".into(),
@@ -457,7 +483,12 @@ fn inner_arg<'a>(
 ) -> Option<LinkedNode<'a>> {
     for arg in args.children() {
         if arg.kind() == SyntaxKind::Named
-            && arg.children().next().map(|n| n.get().full_text()).as_deref() == Some(name)
+            && arg
+                .children()
+                .next()
+                .map(|n| n.get().full_text())
+                .as_deref()
+                == Some(name)
         {
             return arg.children().last();
         }
@@ -521,8 +552,15 @@ fn read_args(
     let mut seen: Vec<String> = Vec::new();
 
     // Именованные.
-    for arg in args.children().filter(|arg| arg.kind() == SyntaxKind::Named) {
-        let Some(name) = arg.children().next().map(|n| n.get().full_text().to_string()) else {
+    for arg in args
+        .children()
+        .filter(|arg| arg.kind() == SyntaxKind::Named)
+    {
+        let Some(name) = arg
+            .children()
+            .next()
+            .map(|n| n.get().full_text().to_string())
+        else {
             continue;
         };
         if seen.contains(&name) {
@@ -543,7 +581,15 @@ fn read_args(
             continue;
         };
         let range = first.offset()..last.range().end;
-        out.push(value_of(text, param, &parts, range, math, prefix, Some(arg.range())));
+        out.push(value_of(
+            text,
+            param,
+            &parts,
+            range,
+            math,
+            prefix,
+            Some(arg.range()),
+        ));
     }
 
     // Позиционные — по порядку схемы; сколько угодно — последнему,
@@ -580,7 +626,15 @@ fn read_args(
         }
         let group = &groups[index];
         let range = group[0].offset()..group[group.len() - 1].range().end;
-        out.push(value_of(text, slot, group, range.clone(), math, prefix, Some(range)));
+        out.push(value_of(
+            text,
+            slot,
+            group,
+            range.clone(),
+            math,
+            prefix,
+            Some(range),
+        ));
         index += 1;
     }
     if index < groups.len() {

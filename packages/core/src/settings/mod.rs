@@ -84,6 +84,15 @@ pub struct Settings {
     pub editor_mode_preference: ModePreference,
     #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
     pub editor_config_path: Option<PathBuf>,
+    /// Язык интерфейса, выбранный явно (фича 010); `None` — «как в системе».
+    ///
+    /// Строкой, а не перечислением: какие языки поставляются, знает интерфейс,
+    /// и язык из более новой версии обязан пережить запись других значений,
+    /// а не превратиться в умолчание (FR-018). По той же причине значение из
+    /// файла не проверяется при разборе — только новое, в [`apply::plan`].
+    #[serde(deserialize_with = "lenient_language")]
+    #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
+    pub language: Option<String>,
 }
 
 impl Default for Settings {
@@ -95,6 +104,7 @@ impl Default for Settings {
             current_vault: None,
             editor_mode_preference: ModePreference::default(),
             editor_config_path: None,
+            language: None,
         }
     }
 }
@@ -110,6 +120,8 @@ pub enum InvalidSettings {
     CurrentVaultNotKnown,
     #[error("одна и та же папка встречается в списке дважды")]
     DuplicateVaultId,
+    #[error("язык «{value}» не является тегом языка")]
+    LanguageTag { value: String },
 }
 
 /// Допустим ли размер шрифта (FR-016, research.md §11). Общий код обеих
@@ -117,6 +129,34 @@ pub enum InvalidSettings {
 /// же приём, что `is_valid_note_name` в `vault::backend`.
 pub fn is_valid_font_size(value: u8) -> bool {
     (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value)
+}
+
+/// Разбор ключа `language` без права уронить файл (FR-018): не строка — как
+/// «как в системе», остальные значения читаются как обычно.
+fn lenient_language<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(str::to_owned))
+}
+
+/// Похоже ли значение на тег языка BCP 47 (фича 010): основной подтег из 2–8 букв и
+/// подтеги из 1–8 латинских букв или цифр через дефис, не длиннее 35 знаков.
+///
+/// Только синтаксис: поставляется ли такой язык, решает интерфейс.
+pub fn is_valid_language_tag(value: &str) -> bool {
+    if value.is_empty() || value.len() > 35 {
+        return false;
+    }
+    let mut parts = value.split('-');
+    let primary_ok = parts.next().is_some_and(|primary| {
+        (2..=8).contains(&primary.len()) && primary.bytes().all(|b| b.is_ascii_alphabetic())
+    });
+    primary_ok
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
 }
 
 /// Значения, действующие при открытом vault: устройство как слой по умолчанию,
@@ -136,7 +176,9 @@ pub fn resolve(
 ) -> Settings {
     Settings {
         theme: overrides.theme.unwrap_or(device.theme),
-        editor_font_size: overrides.editor_font_size.unwrap_or(device.editor_font_size),
+        editor_font_size: overrides
+            .editor_font_size
+            .unwrap_or(device.editor_font_size),
         editor_mode_preference: overrides
             .editor_mode_preference
             .unwrap_or(device.editor_mode_preference),
@@ -147,6 +189,7 @@ pub fn resolve(
         // Принадлежат устройству и слоями не перекрываются.
         known_vaults: device.known_vaults.clone(),
         current_vault: device.current_vault.clone(),
+        language: device.language.clone(),
     }
 }
 
@@ -215,10 +258,7 @@ mod tests {
             known_vaults: vec![record.clone(), record],
             ..Settings::default()
         };
-        assert_eq!(
-            validate(&settings),
-            Err(InvalidSettings::DuplicateVaultId)
-        );
+        assert_eq!(validate(&settings), Err(InvalidSettings::DuplicateVaultId));
     }
 
     #[test]
@@ -250,6 +290,7 @@ mod tests {
                 "/notes".to_string(),
             )],
             current_vault: Some(VaultId::from_raw("a")),
+            language: Some("en".to_string()),
         };
         let overrides = VaultOverrides {
             theme: Some(Theme::Dark),
@@ -267,6 +308,10 @@ mod tests {
         // FR-028: реестр остаётся свойством устройства при любом перекрытии.
         assert_eq!(effective.known_vaults, device.known_vaults);
         assert_eq!(effective.current_vault, device.current_vault);
+        assert_eq!(
+            effective.language, device.language,
+            "язык только с устройства"
+        );
     }
 
     #[test]
@@ -289,13 +334,16 @@ mod tests {
   "known_vaults": [{ "id": "a", "location": "/work/notes" }],
   "current_vault": "a"
 }"#;
-        let device = format::parse(written_by_previous_version)
-            .expect("файл прежней версии читается новой");
+        let device =
+            format::parse(written_by_previous_version).expect("файл прежней версии читается новой");
 
         assert_eq!(device.theme, Theme::Dark);
         assert_eq!(device.editor_font_size, 20);
         assert_eq!(device.editor_mode_preference, ModePreference::FullBackend);
-        assert_eq!(device.editor_config_path, Some("/home/user/init.lua".into()));
+        assert_eq!(
+            device.editor_config_path,
+            Some("/home/user/init.lua".into())
+        );
         assert_eq!(device.known_vaults.len(), 1);
         assert_eq!(device.current_vault, Some(VaultId::from_raw("a")));
 

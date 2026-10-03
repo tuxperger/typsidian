@@ -187,14 +187,22 @@ async fn the_first_save_creates_the_folder_on_disk() {
     fs::write(dir.path().join("Результаты.typ"), "= Результаты\n").unwrap();
 
     let mut backend = NativeBackend::open(dir.path()).await.expect("vault открыт");
-    let saved = save_as_template(&mut backend, "Раздел диссертации", "= {{заголовок}}\n", false)
-        .await
-        .expect("сохранение проходит");
+    let saved = save_as_template(
+        &mut backend,
+        "Раздел диссертации",
+        "= {{заголовок}}\n",
+        false,
+    )
+    .await
+    .expect("сохранение проходит");
 
     let on_disk = dir.path().join("templates").join("Раздел диссертации.typ");
     assert!(on_disk.is_file(), "обычный файл в обычной папке");
     assert_eq!(fs::read_to_string(&on_disk).unwrap(), "= {{заголовок}}\n");
-    assert_eq!(saved.path, std::path::PathBuf::from("templates/Раздел диссертации.typ"));
+    assert_eq!(
+        saved.path,
+        std::path::PathBuf::from("templates/Раздел диссертации.typ")
+    );
     assert_eq!(folder_state(&backend).await, TemplateFolderState::Present);
 }
 

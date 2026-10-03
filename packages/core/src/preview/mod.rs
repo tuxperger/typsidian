@@ -37,10 +37,10 @@ pub use compile::{
     compile_note, compile_note_resolved, compile_note_with_templates, install_template,
     CompileOutcome, CompiledDocument,
 };
-pub use resolve::{read_dependency, vault_path, ResolveError};
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;
 pub use pages::{render_pages, RenderedPage};
+pub use resolve::{read_dependency, vault_path, ResolveError};
 pub use snapshot::{DependencySnapshot, SnapshotError, MAX_RESOLVE_ITERATIONS};
 pub use textlayer::{text_runs, TextRun};
 pub use world::PreviewWorld;

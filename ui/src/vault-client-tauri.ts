@@ -15,7 +15,12 @@ import type {
   Board,
   BoardEvent,
   BoardWriteProfile,
+  BatchState,
+  BatchStep,
+  BatchView,
   CompiledDocument,
+  ExportCandidate,
+  ExportReport,
   DiffLine,
   EditConflict,
   Embed,
@@ -113,10 +118,10 @@ export async function openTauriVaultById(id: string): Promise<VaultOpenResult> {
   try {
     path = await invoke<string | null>("resolve_known_vault", { id });
   } catch (cause) {
-    return { ok: false, error: { kind: "OpenFailed", message: String(cause) } };
+    return { ok: false, error: { kind: "OpenFailed", detail: String(cause) } };
   }
   // Папки больше нет, а розыск запрещён (FR-023) — та же причина, что на web.
-  if (path === null) return { ok: false, error: { kind: "OpenFailed", message: "NotFound" } };
+  if (path === null) return { ok: false, error: { kind: "FolderNotFound" } };
   return openVaultAt(path);
 }
 
@@ -187,6 +192,26 @@ function tauriPreviewClient(): PreviewClient {
       invoke<InstallReport>("preview_install_template", { spec, overrides }),
     installedTemplates: () =>
       invoke<InstalledTemplate[]>("preview_installed_templates", {}),
+    // Фича 009: экспорт идёт командой в пуле tokio, вне потока окна.
+    exportPdf: (notePath, text, overrides) =>
+      invoke<ExportReport>("export_pdf", { notePath, text, overrides }),
+    exportCandidates: (overrides) =>
+      invoke<ExportCandidate[]>("export_candidates", { overrides }),
+    exportBatch: {
+      start: (paths, stopOnError, overrides) =>
+        invoke<BatchState>("export_batch_start", { paths, stopOnError, overrides }),
+      next: (state) => invoke<BatchStep>("export_batch_next", { state }),
+      record: (state, report, elapsedMs) =>
+        invoke<BatchState>("export_batch_record", {
+          state,
+          report,
+          elapsedMs: Math.round(elapsedMs),
+        }),
+      skip: (state, notePath) =>
+        invoke<BatchState>("export_batch_skip", { state, notePath }),
+      cancel: (state) => invoke<BatchState>("export_batch_cancel", { state }),
+      view: (state) => invoke<BatchView>("export_batch_view", { state }),
+    },
   };
 }
 
@@ -203,11 +228,11 @@ function classifyNativeOpenFailure(cause: unknown): OpenVaultError {
     case "AccessDenied":
       return { kind: "PermissionDenied" };
     case "NotFound":
-      return { kind: "OpenFailed", message: "NotFound" };
+      return { kind: "FolderNotFound" };
     case "NotADirectory":
-      return { kind: "OpenFailed", message: "NotADirectory" };
+      return { kind: "NotADirectory" };
     default:
-      return { kind: "OpenFailed", message: String(cause) };
+      return { kind: "OpenFailed", detail: String(cause) };
   }
 }
 

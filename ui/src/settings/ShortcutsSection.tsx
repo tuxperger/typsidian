@@ -6,6 +6,25 @@ import type {
   ResolvedBinding,
   Shortcut,
 } from "../wasm-core/typsidian_core.js";
+import { useI18n, type MessageKey } from "../i18n/index.js";
+
+/**
+ * Название команды на языке интерфейса. Карта исчерпывающая: команда, которую
+ * ядро добавит без подписи, не соберётся (фича 010, принцип IV).
+ */
+const COMMAND_TITLE: Record<CommandId, MessageKey> = {
+  "command-palette": "palette.label",
+  search: "workspace.search",
+  templates: "workspace.templates",
+  "new-file": "tree.menu.createNote",
+  "new-board": "tree.menu.createBoard",
+  "insert-menu": "editor.insertElementHint",
+  "element-params": "workspace.elementParams",
+  "toggle-graph": "tree.graph.title",
+  "rebuild-preview": "workspace.rebuildPreview",
+  "export-pdf": "workspace.exportPdf",
+  "export-center": "workspace.exportCenter",
+};
 
 /**
  * Сочетания клавиш команд приложения.
@@ -46,6 +65,7 @@ export function ShortcutsSection({
   onClear,
   onReset,
 }: ShortcutsSectionProps): React.JSX.Element {
+  const { t } = useI18n();
   // Команда, которая сейчас ждёт нажатия. `null` — никто не ждёт.
   const [recording, setRecording] = useState<CommandId | null>(null);
 
@@ -85,34 +105,31 @@ export function ShortcutsSection({
   };
 
   return (
-    <section aria-label="Команды Typsidian">
-      {standalone && <h2>Кейбиндинги</h2>}
-      <span className="ts-settings__label">Команды Typsidian</span>
+    <section aria-label={t("settings.shortcuts.label")}>
+      {standalone && <h2>{t("settings.section.keybindings")}</h2>}
+      <span className="ts-settings__label">{t("settings.shortcuts.label")}</span>
 
-      <p>
-        Нажмите «Изменить» и затем само сочетание. Нужен модификатор: ⌘ или Ctrl,
-        либо Alt. Escape, Enter, Tab и стрелки заняты интерфейсом.
-      </p>
+      <p>{t("settings.shortcuts.hint")}</p>
 
       {error !== null && <p role="alert">{error}</p>}
 
       {bindings.length === 0 ? (
-        <p role="status">Читаем настройки папки заметок…</p>
+        <p role="status">{t("settings.shortcuts.loading")}</p>
       ) : (
         <ul className="ts-keys">
           {bindings.map((binding) => (
             <li key={binding.command} className="ts-keys__row">
-              <span className="ts-keys__title">{binding.title}</span>
+              <span className="ts-keys__title">{t(COMMAND_TITLE[binding.command])}</span>
 
               {/* Столбец фиксированной ширины: иначе подпись сочетания
                   прыгала бы по горизонтали от длины названия команды. */}
               <span className="ts-keys__combo">
                 {recording === binding.command ? (
                   <span className="ts-keys__recording" role="status">
-                    нажмите сочетание…
+                    {t("settings.shortcuts.recording")}
                   </span>
                 ) : binding.display === "" ? (
-                  <span className="ts-keys__empty">не назначено</span>
+                  <span className="ts-keys__empty">{t("settings.shortcuts.unassigned")}</span>
                 ) : (
                   <kbd className="ts-keys__kbd">{binding.display}</kbd>
                 )}
@@ -123,7 +140,7 @@ export function ShortcutsSection({
                     рядом, — иначе появление пометки сдвигало бы кнопки. */}
                 {binding.conflicts_with.length > 0 && (
                   <span className="ts-keys__clash" role="note">
-                    занято ещё одной командой
+                    {t("settings.shortcuts.conflict")}
                   </span>
                 )}
               </span>
@@ -142,7 +159,7 @@ export function ShortcutsSection({
                     if (recording === binding.command) capture(binding.command, event);
                   }}
                 >
-                  {recording === binding.command ? "Отмена" : "Изменить"}
+                  {recording === binding.command ? t("common.cancel") : t("settings.shortcuts.change")}
                 </button>
 
                 <button
@@ -151,7 +168,7 @@ export function ShortcutsSection({
                   disabled={binding.shortcut === undefined}
                   onClick={() => onClear(binding.command)}
                 >
-                  Снять
+                  {t("settings.shortcuts.clear")}
                 </button>
 
                 {/* Возврат к умолчанию гаснет там, где возвращать нечего:
@@ -162,7 +179,7 @@ export function ShortcutsSection({
                   disabled={binding.is_default}
                   onClick={() => onReset(binding.command)}
                 >
-                  Умолчание
+                  {t("settings.shortcuts.reset")}
                 </button>
               </span>
             </li>

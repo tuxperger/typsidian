@@ -30,9 +30,33 @@ pub struct SettingsChange {
     pub editor_mode_preference: Option<ModePreference>,
     #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
     pub editor_config_path: Option<PathBuf>,
+    /// Язык интерфейса (фича 010). Принадлежит устройству при любом раскладе
+    /// (FR-016): см. [`route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub language: Option<LanguageChoice>,
+}
+
+/// Выбор языка интерфейса (фича 010, data-model.md «LanguageChoice»).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(rename_all = "camelCase")]
+pub enum LanguageChoice {
+    /// Как в системе: язык определяется интерфейсом по языкам системы.
+    System,
+    /// Явный выбор — тег языка (`"en"`, `"ru"`).
+    Tag(String),
 }
 
 impl SettingsChange {
+    pub fn language(choice: LanguageChoice) -> Self {
+        Self {
+            language: Some(choice),
+            ..Self::default()
+        }
+    }
+
     pub fn theme(theme: Theme) -> Self {
         Self {
             theme: Some(theme),
@@ -97,6 +121,11 @@ impl SettingsChange {
         if let Some(path) = &self.editor_config_path {
             next.editor_config_path = Some(path.clone());
         }
+        match &self.language {
+            Some(LanguageChoice::System) => next.language = None,
+            Some(LanguageChoice::Tag(tag)) => next.language = Some(tag.clone()),
+            None => {}
+        }
         next
     }
 }
@@ -113,6 +142,8 @@ pub fn reset_to_defaults() -> SettingsChange {
         current_vault: None,
         editor_mode_preference: Some(defaults.editor_mode_preference),
         editor_config_path: None,
+        // FR-017: сброс возвращает «как в системе».
+        language: Some(LanguageChoice::System),
     }
 }
 
@@ -138,6 +169,8 @@ pub fn device_defaults_change(effective: &Settings) -> SettingsChange {
         current_vault: None,
         editor_mode_preference: Some(effective.editor_mode_preference),
         editor_config_path: effective.editor_config_path.clone(),
+        // Язык и так живёт только на устройстве — переносить нечего.
+        language: None,
     }
 }
 
@@ -167,6 +200,7 @@ impl From<InvalidSettings> for RejectReason {
             InvalidSettings::CurrentVaultNotKnown | InvalidSettings::DuplicateVaultId => {
                 RejectReason::ValueOutOfRange
             }
+            InvalidSettings::LanguageTag { .. } => RejectReason::ValueOutOfRange,
         }
     }
 }
@@ -226,6 +260,44 @@ pub fn target_for(change: &SettingsChange, vault_is_open: bool) -> ChangeTarget 
     }
 }
 
+/// Часть набора изменений вместе с хранилищем, куда её писать (фича 010).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct RoutedChange {
+    pub target: ChangeTarget,
+    pub change: SettingsChange,
+}
+
+/// Раскладывает набор изменений по хранилищам (фича 010, FR-016).
+///
+/// Язык интерфейса — свойство устройства при любом раскладе: он не переезжает
+/// вместе с папкой заметок. Набор «язык + тема» при открытом vault поэтому
+/// даёт **две** записи — язык в устройство, тему в vault, — и каждая по-прежнему
+/// пишет ровно в одно хранилище (006 FR-029).
+///
+/// Решение здесь, а не в интерфейсе (принцип I): панель исполняет записи по
+/// порядку и сама не знает, какое значение где живёт. Пустой набор даёт пустой
+/// список.
+pub fn route(change: &SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> {
+    let mut rest = change.clone();
+    let language = rest.language.take();
+    let mut routed = Vec::with_capacity(2);
+    if let Some(choice) = language {
+        routed.push(RoutedChange {
+            target: ChangeTarget::Device,
+            change: SettingsChange::language(choice),
+        });
+    }
+    if rest != SettingsChange::default() {
+        routed.push(RoutedChange {
+            target: target_for(&rest, vault_is_open),
+            change: rest,
+        });
+    }
+    routed
+}
+
 /// Контекст, в котором принимается решение. Собирается вызывающей стороной:
 /// ядро настроек не имеет доступа ни к редактору, ни к vault-бэкенду.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -260,6 +332,16 @@ impl ApplyContext {
 /// Затем — предусловия смены режима, и только те, что относятся к режиму:
 /// смена темы при неразрешённом конфликте ничем не мешает и не блокируется.
 pub fn plan(base: &Settings, change: &SettingsChange, context: &ApplyContext) -> ApplyPlan {
+    // Тег проверяется у **нового** значения, а не у кандидата целиком: язык,
+    // вписанный в файл руками или пришедший из более новой версии, не должен
+    // блокировать смену темы (FR-018).
+    if let Some(LanguageChoice::Tag(tag)) = &change.language {
+        if !super::is_valid_language_tag(tag) {
+            return ApplyPlan::Rejected {
+                reason: super::InvalidSettings::LanguageTag { value: tag.clone() }.into(),
+            };
+        }
+    }
     let candidate = change.apply_to(base);
     if let Err(invalid) = super::validate(&candidate) {
         return ApplyPlan::Rejected {
@@ -485,10 +567,8 @@ mod tests {
     #[test]
     fn reset_returns_values_to_defaults_but_keeps_known_vaults() {
         // FR-037, FR-038, SC-011.
-        let record = super::super::VaultRecord::new(
-            VaultId::from_raw("a"),
-            "/work/notes".to_string(),
-        );
+        let record =
+            super::super::VaultRecord::new(VaultId::from_raw("a"), "/work/notes".to_string());
         let current = Settings {
             theme: Theme::Dark,
             editor_font_size: 22,
@@ -496,6 +576,7 @@ mod tests {
             current_vault: Some(VaultId::from_raw("a")),
             editor_mode_preference: ModePreference::FullBackend,
             editor_config_path: Some(PathBuf::from("/home/user/init.lua")),
+            language: Some("en".to_string()),
         };
 
         let change = reset_to_defaults();

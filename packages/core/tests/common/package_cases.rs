@@ -6,9 +6,8 @@
 
 #![allow(dead_code)]
 
-use typsidian_core::preview::resolve::{
-    package_path, package_root, read_dependency, ResolveError,
-};
+use typsidian_core::messages::AppMessage;
+use typsidian_core::preview::resolve::{package_path, package_root, read_dependency, ResolveError};
 use typst::syntax::package::{PackageSpec, PackageVersion};
 use typst::syntax::{FileId, RootedPath, VirtualPath, VirtualRoot};
 
@@ -88,7 +87,13 @@ pub async fn a_missing_template_is_named() {
             spec: "@preview/codly:1.3.0".to_string()
         }
     );
-    assert!(error.describe_owned().contains("@preview/codly:1.3.0"));
+    // Сообщение называет шаблон так, как его написал пользователь (FR-037).
+    assert_eq!(
+        AppMessage::from_resolve(".typsidian/packages/preview/codly/1.3.0/lib.typ", &error),
+        AppMessage::TemplateMissing {
+            spec: "@preview/codly:1.3.0".to_string()
+        }
+    );
 }
 
 /// FR-038: локально лежит **другая** версия — это по-прежнему «нужной нет», а

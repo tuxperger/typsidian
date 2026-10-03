@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../icons/Icons.js";
-import { elementById, type TypstElement } from "./typstElements.js";
+import { elementById, type LocalizedElement } from "./typstElements.js";
+import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { hintWith } from "../workspace/useShortcuts.js";
 
 // Панель вставки — полоса 34px между тулбаром колонки и кодом (макет
 // «Typsidian Вставка» → § Панель вставки).
@@ -49,7 +51,7 @@ const HEADING_MARKS: Record<string, string> = {
 export interface InsertPanelProps {
   /** Подпись действующего сочетания меню — «⌘E», пока его не переназначили. */
   shortcut: string;
-  onInsert: (element: TypstElement) => void;
+  onInsert: (element: LocalizedElement) => void;
   onOpenMenu: () => void;
   /**
    * «Параметры» элемента под кареткой (фича 008, FR-006). `null` — каретка не
@@ -69,6 +71,7 @@ export function InsertPanel({
   paramsShortcut = "",
   onParams,
 }: InsertPanelProps): React.JSX.Element {
+  const { t } = useI18n();
   const [headingsOpen, setHeadingsOpen] = useState(false);
   const headingsRef = useRef<HTMLDivElement | null>(null);
 
@@ -89,12 +92,12 @@ export function InsertPanel({
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [headingsOpen, closeHeadings]);
 
-  const insert = (element: TypstElement | undefined): void => {
+  const insert = (element: LocalizedElement | undefined): void => {
     if (element) onInsert(element);
   };
 
   return (
-    <div className="ts-insertbar" role="toolbar" aria-label="Панель вставки">
+    <div className="ts-insertbar" role="toolbar" aria-label={t("insert.panel.label")}>
       {/* Прокручивается только ряд элементов. Кнопка полного каталога стоит
           вне его: в узкой колонке она уехала бы за край первой, а это
           единственный выход к остальным ста элементам. */}
@@ -105,18 +108,18 @@ export function InsertPanel({
           className="ts-btn"
           aria-haspopup="menu"
           aria-expanded={headingsOpen}
-          title="Заголовок: уровень 1–3"
+          title={t("insert.panel.headingHint")}
           onClick={() => setHeadingsOpen((open) => !open)}
         >
           <Icon name="heading" size={12} />
-          Заголовок
+          {t("insert.panel.heading")}
           <Icon name="chevron" size={10} className="ts-icon--down" />
         </button>
 
         {headingsOpen && (
-          <ul className="ts-insertbar__menu" role="menu" aria-label="Уровень заголовка">
+          <ul className="ts-insertbar__menu" role="menu" aria-label={t("insert.panel.headingLevel")}>
             {HEADINGS.map((id) => {
-              const element = elementById(id);
+              const element = elementById(t, id);
               if (!element) return null;
               return (
                 <li key={id} role="none">
@@ -142,7 +145,7 @@ export function InsertPanel({
       <span className="ts-insertbar__sep" />
 
       {BUTTONS.map((id) => {
-        const element = elementById(id);
+        const element = elementById(t, id);
         if (!element) return null;
         return (
           <button
@@ -169,20 +172,20 @@ export function InsertPanel({
           disabled={!params.available}
           title={
             params.available
-              ? `Параметры элемента под кареткой${paramsShortcut ? ` (${paramsShortcut})` : ""}`
+              ? hintWith(t("insert.panel.paramsHint"), paramsShortcut)
               : params.reason
           }
           onClick={onParams}
         >
           <Icon name="terminal" size={12} />
-          Параметры
+          {t("insert.panel.params")}
         </button>
       )}
 
       {/* Правый край полосы ведёт в полный каталог — панель не притворяется
           заменой меню, а объявляет, где остальное. */}
       <button type="button" className="ts-btn" onClick={onOpenMenu}>
-        Все элементы
+        {t("insert.panel.allElements")}
         {shortcut !== "" && <span className="ts-insertbar__shortcut">{shortcut}</span>}
       </button>
     </div>

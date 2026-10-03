@@ -4,6 +4,7 @@ import type {
   Template,
 } from "../../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../../vault-client.js";
+import type { Phrase } from "../../i18n/index.js";
 
 // Порт вставки заготовки в открытую заметку — граница гейта принципа V
 // (`specs/003-templates-snippets/contracts/insertion-target.md`).
@@ -24,8 +25,8 @@ import type { VaultClient } from "../../vault-client.js";
 export type InsertError =
   /** Редактора сейчас нет: заметка не открыта или панель размонтирована. */
   | { kind: "NoEditor" }
-  /** Заготовка не прочиталась — причину назвало ядро. */
-  | { kind: "TemplateUnreadable"; reason: string };
+  /** Заготовка не прочиталась — причину назвало ядро; слова — при показе. */
+  | { kind: "TemplateUnreadable"; reason: Phrase };
 
 export type InsertResult = { ok: true } | { ok: false; error: InsertError };
 
@@ -100,19 +101,19 @@ export async function insertTemplate(
 }
 
 /** Причина отказа чтения заготовки словами (FR-017). */
-export function describeReadFailure(cause: unknown): string {
+export function describeReadFailure(cause: unknown): Phrase {
   const kind =
     typeof cause === "object" && cause !== null && "kind" in cause
       ? (cause as { kind: unknown }).kind
       : null;
   switch (kind) {
     case "NotFound":
-      return "файл заготовки не найден — возможно, его удалили или переименовали снаружи";
+      return (t) => t("templates.read.notFound");
     case "Unreadable":
-      return "файл заготовки не читается как текст";
+      return (t) => t("templates.read.unreadable");
     case "Io":
-      return "не удалось прочитать файл с диска";
+      return (t) => t("templates.read.io");
     default:
-      return String(cause);
+      return () => String(cause);
   }
 }

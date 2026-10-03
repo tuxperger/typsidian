@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons/Icons.js";
-import { plural } from "../plural.js";
+import { useI18n } from "../i18n/index.js";
 import type { VaultClient } from "../vault-client.js";
 import type { Note, Template } from "../wasm-core/typsidian_core.js";
 import { CreateFileMenu, type CreateKind } from "./CreateFileMenu.js";
@@ -72,6 +72,7 @@ export function Sidebar({
   shortcuts,
   onInsertLink,
 }: SidebarProps): React.JSX.Element {
+  const { t } = useI18n();
   const [filter, setFilter] = useState("");
   const contextMenu = useContextMenu();
 
@@ -126,8 +127,8 @@ export function Sidebar({
           <input
             type="search"
             value={filter}
-            aria-label="Поиск по vault"
-            placeholder="поиск по vault…"
+            aria-label={t("tree.search.label")}
+            placeholder={t("tree.search.placeholder")}
             onChange={(event) => setFilter(event.target.value)}
           />
         </div>
@@ -148,14 +149,14 @@ export function Sidebar({
           не пускают. */}
       <nav
         className="ts-tree"
-        aria-label="Заметки"
+        aria-label={t("tree.navLabel")}
         onContextMenu={(event) => {
           if (actions.state.pendingPath !== null) return;
           contextMenu.open(event, [
-            { label: "Создать заметку", run: () => actions.beginCreate("") },
-            { label: "Создать доску", run: () => actions.beginCreate("", "board") },
+            { label: t("tree.menu.createNote"), run: () => actions.beginCreate("") },
+            { label: t("tree.menu.createBoard"), run: () => actions.beginCreate("", "board") },
             ...(onOpenTemplates
-              ? [{ label: "Заметка из заготовки…", run: onOpenTemplates }]
+              ? [{ label: t("tree.menu.fromTemplate"), run: onOpenTemplates }]
               : []),
           ]);
         }}
@@ -171,15 +172,15 @@ export function Sidebar({
 
       <div className="ts-sidebar__footer">
         <span>
-          {plural(notes.length, "заметка", "заметки", "заметок")} ·{" "}
-          {plural(folderCount, "папка", "папки", "папок")}
+          {t("common.notesCount", { count: notes.length })} ·{" "}
+          {t("tree.foldersCount", { count: folderCount })}
         </span>
         <span className="ts-spacer" />
         <button
           type="button"
           className="ts-btn ts-btn--ghost"
-          title="Граф связей"
-          aria-label="Открыть граф связей"
+          title={t("tree.graph.title")}
+          aria-label={t("tree.graph.open")}
           onClick={onOpenGraph}
         >
           <Icon name="network" />

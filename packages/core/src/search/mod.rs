@@ -317,7 +317,11 @@ fn scan(content: &str, matcher: &Matcher) -> Found {
 
         // Строка до, сама строка, строка после — контекст макета.
         for offset in [-1i64, 0, 1] {
-            let Some(number) = (index as i64 + offset).try_into().ok().filter(|n: &usize| *n < lines.len()) else {
+            let Some(number) = (index as i64 + offset)
+                .try_into()
+                .ok()
+                .filter(|n: &usize| *n < lines.len())
+            else {
                 continue;
             };
             if last_shown.is_some_and(|last| last >= number + 1) {

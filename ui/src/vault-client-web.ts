@@ -1,4 +1,11 @@
 import init, {
+  exportBatchCancel,
+  exportBatchNext,
+  exportBatchRecord,
+  exportBatchSkip,
+  exportBatchStart,
+  exportBatchView,
+  exportCandidates,
   PreviewEngine,
   WebBackend,
   type VaultRecord,
@@ -276,6 +283,24 @@ function webPreviewClient(
     installTemplate: (spec, overrides) =>
       call(() => engine.installTemplate(backend, spec, overrides)),
     installedTemplates: () => call(() => engine.installedTemplates(backend)),
+    // Фича 009. Экспорт собирает документ и пишет файл — через очередь, как
+    // `compile`: сборка держит заимствование `WebBackend`.
+    exportPdf: (notePath, text, overrides) =>
+      call(() => engine.exportPdf(backend, notePath, text, overrides)),
+    exportCandidates: (overrides) =>
+      call(() => exportCandidates(backend, overrides)),
+    // Переходы пакета не трогают vault — вызываются напрямую, мимо очереди:
+    // иначе отмена ждала бы окончания сборки текущей заметки в очереди.
+    exportBatch: {
+      start: async (paths, stopOnError, overrides) =>
+        exportBatchStart(paths, stopOnError, overrides),
+      next: async (state) => exportBatchNext(state),
+      record: async (state, report, elapsedMs) =>
+        exportBatchRecord(state, report, Math.round(elapsedMs)),
+      skip: async (state, notePath) => exportBatchSkip(state, notePath),
+      cancel: async (state) => exportBatchCancel(state),
+      view: async (state) => exportBatchView(state),
+    },
   };
 }
 
@@ -386,7 +411,7 @@ export async function openWebVaultById(id: string): Promise<VaultOpenResult> {
     const resolved = await deviceStoreQueue.run(() => resolveWebVault(store, id));
     // Папки больше нет: та же причина, что показывает список как недоступную
     // запись (FR-023).
-    if (resolved === null) return { ok: false, error: { kind: "OpenFailed", message: "NotFound" } };
+    if (resolved === null) return { ok: false, error: { kind: "FolderNotFound" } };
     handle = resolved.handle;
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };

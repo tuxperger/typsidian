@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n, type Phrase } from "@typsidian/ui/i18n/index.js";
 import "./folder-picker.css";
 
 /**
@@ -68,26 +69,31 @@ function asBrowseError(cause: unknown): BrowseError | null {
   }
 }
 
-/** Текст на каждый отказ — без общего «что-то пошло не так» (FR-008). */
-function describeFailure(cause: unknown): string {
+/**
+ * Текст на каждый отказ — без общего «что-то пошло не так» (FR-008). Фраза, а
+ * не строка: показанный отказ перерисовывается при смене языка (010 FR-014).
+ */
+function describeFailure(cause: unknown): Phrase {
   const error = asBrowseError(cause);
-  if (error === null) return `Не удалось прочитать папку: ${String(cause)}`;
+  if (error === null) return (t) => t("picker.readFailed", { detail: String(cause) });
   switch (error.kind) {
     case "AccessDenied":
       // Самая частая причина здесь — не права на конкретный каталог, а не
       // выданный доступ ко всей общей памяти: его Android даёт только вручную,
       // отдельным экраном настроек (см. `MainActivity.kt`).
-      return "Нет доступа к памяти устройства. Разрешите Typsidian «Доступ ко всем файлам» в настройках Android и откройте обзор заново.";
+      return (t) => t("picker.accessDenied");
     case "NotFound":
-      return "Этой папки больше нет: её переименовали или удалили.";
+      return (t) => t("picker.notFound");
     case "NotADirectory":
-      return "Это файл, а не папка.";
+      return (t) => t("picker.notADirectory");
     case "AlreadyExists":
-      return "Папка с таким именем здесь уже есть.";
+      return (t) => t("picker.alreadyExists");
     case "InvalidName":
-      return "Имя папки не может быть пустым и не может содержать «/».";
-    case "Io":
-      return `Система отказала: ${error.message}`;
+      return (t) => t("picker.invalidName");
+    case "Io": {
+      const detail = error.message;
+      return (t) => t("picker.io", { detail });
+    }
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -112,7 +118,8 @@ export function FolderPicker({
   onCancel,
 }: FolderPickerProps): React.JSX.Element {
   const [listing, setListing] = useState<DirListing | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
+  const [error, setError] = useState<Phrase | null>(null);
   const [busy, setBusy] = useState(true);
   // Имя создаваемой папки; `null` — форма закрыта.
   const [newName, setNewName] = useState<string | null>(null);
@@ -128,7 +135,7 @@ export function FolderPicker({
     } catch (cause) {
       // Список остаётся прежним: уводить пользователя из читаемой папки
       // потому, что соседняя не открылась, незачем.
-      setError(describeFailure(cause));
+      setError(() => describeFailure(cause));
       return false;
     } finally {
       setBusy(false);
@@ -141,7 +148,7 @@ export function FolderPicker({
       try {
         await go(await invoke<string>("browse_root"));
       } catch (cause) {
-        setError(describeFailure(cause));
+        setError(() => describeFailure(cause));
         setBusy(false);
       }
     })();
@@ -157,7 +164,7 @@ export function FolderPicker({
         name: newName,
       });
     } catch (cause) {
-      setError(describeFailure(cause));
+      setError(() => describeFailure(cause));
       setBusy(false);
       return;
     }
@@ -170,11 +177,11 @@ export function FolderPicker({
   const dirs = listing?.dirs ?? [];
 
   return (
-    <div className="ts-picker" role="dialog" aria-modal="true" aria-label="Папка с заметками">
+    <div className="ts-picker" role="dialog" aria-modal="true" aria-label={t("picker.title")}>
       <header className="ts-picker__head">
-        <h2 className="ts-picker__title">Папка с заметками</h2>
+        <h2 className="ts-picker__title">{t("picker.title")}</h2>
         <button type="button" className="ts-btn ts-btn--outline" onClick={onCancel}>
-          Отмена
+          {t("common.cancel")}
         </button>
       </header>
 
@@ -191,7 +198,7 @@ export function FolderPicker({
               onClick={() => void go(parent)}
               disabled={busy}
             >
-              ↑ Наверх
+              {t("picker.up")}
             </button>
           </li>
         )}
@@ -211,12 +218,12 @@ export function FolderPicker({
 
       {listing !== null && dirs.length === 0 && (
         <p className="ts-picker__empty">
-          Вложенных папок здесь нет — эту можно выбрать целиком или создать в ней новую.
+          {t("picker.noSubfolders")}
         </p>
       )}
       {error !== null && (
         <p className="ts-picker__error" role="alert">
-          {error}
+          {error(t)}
         </p>
       )}
 
@@ -229,7 +236,7 @@ export function FolderPicker({
               onClick={() => setNewName("")}
               disabled={listing === null || busy}
             >
-              Создать папку
+              {t("picker.createFolder")}
             </button>
             <button
               type="button"
@@ -239,7 +246,7 @@ export function FolderPicker({
               }}
               disabled={listing === null || busy}
             >
-              Выбрать эту папку
+              {t("picker.chooseThis")}
             </button>
           </>
         ) : (
@@ -254,19 +261,19 @@ export function FolderPicker({
               className="ts-picker__name"
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
-              placeholder="Имя новой папки"
-              aria-label="Имя новой папки"
+              placeholder={t("picker.newName")}
+              aria-label={t("picker.newName")}
               autoFocus
             />
             <button type="submit" className="ts-btn ts-btn--accent" disabled={busy}>
-              Создать
+              {t("picker.create")}
             </button>
             <button
               type="button"
               className="ts-btn ts-btn--outline"
               onClick={() => setNewName(null)}
             >
-              Отмена
+              {t("common.cancel")}
             </button>
           </form>
         )}

@@ -9,6 +9,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import { Icon } from "../icons/Icons.js";
 import { previewKey } from "./useTemplateLibrary.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 // Карточка заготовки (T021, макет «Typsidian Утилиты» § Шаблоны).
 //
@@ -174,23 +175,24 @@ function PreviewNote({
 }: {
   preview: PreviewState;
 }): React.JSX.Element | null {
+  const { t } = useI18n();
   switch (preview.state) {
     case "Rendered":
-      return <span className="ts-tpl-card__note">отрисованный вид</span>;
+      return <span className="ts-tpl-card__note">{t("templates.card.rendered")}</span>;
     case "SourceExcerpt":
       return (
         <span className="ts-tpl-card__note">
-          {describeExcerptReason(preview.reason)}
+          {describeExcerptReason(t, preview.reason)}
         </span>
       );
     case "Unavailable":
       return (
         <span className="ts-tpl-card__note ts-tpl-card__note--warn" role="note">
-          {describeUnavailable(preview.reason)}
+          {describeUnavailable(t, preview.reason)}
         </span>
       );
     case "Pending":
-      return <span className="ts-tpl-card__note">превью строится…</span>;
+      return <span className="ts-tpl-card__note">{t("templates.card.pending")}</span>;
     default: {
       const exhaustive: never = preview;
       return exhaustive;
@@ -205,12 +207,12 @@ function PreviewNote({
  * фрагмент кода сам по себе обычно и не должен компилироваться — это штатный
  * случай (FR-013, SC-005).
  */
-export function describeExcerptReason(reason: ExcerptReason): string {
+export function describeExcerptReason(t: Translate, reason: ExcerptReason): string {
   switch (reason) {
     case "CompilerUnavailable":
-      return "исходный текст: отрисованный вид пока не строится";
+      return t("templates.card.compilerUnavailable");
     case "DoesNotCompile":
-      return "исходный текст: содержимое не собирается отдельным документом";
+      return t("templates.card.doesNotCompile");
     default: {
       const exhaustive: never = reason;
       return exhaustive;
@@ -219,14 +221,14 @@ export function describeExcerptReason(reason: ExcerptReason): string {
 }
 
 /** Почему превью не построено вовсе (FR-017). */
-export function describeUnavailable(reason: PreviewUnavailable): string {
+export function describeUnavailable(t: Translate, reason: PreviewUnavailable): string {
   switch (reason) {
     case "NotFound":
-      return "файла нет — его удалили или переименовали снаружи";
+      return t("templates.card.notFound");
     case "Unreadable":
-      return "файл не читается как текст";
+      return t("templates.card.unreadable");
     case "Io":
-      return "файл не удалось прочитать с диска";
+      return t("templates.card.io");
     default: {
       const exhaustive: never = reason;
       return exhaustive;

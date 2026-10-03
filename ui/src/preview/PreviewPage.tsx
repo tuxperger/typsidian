@@ -2,6 +2,7 @@
 
 import type { RenderedPage } from "../wasm-core/typsidian_core.js";
 import { TextLayer } from "./TextLayer.js";
+import { useI18n } from "../i18n/index.js";
 
 /**
  * Одна страница: картинка плюс текстовый слой поверх неё.
@@ -16,10 +17,11 @@ import { TextLayer } from "./TextLayer.js";
  * ходит (принцип IX).
  */
 export function PreviewPage({ page }: { page: RenderedPage }): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <article
       className="ts-preview__page"
-      aria-label={`Страница ${page.number}`}
+      aria-label={t("preview.page", { number: page.number })}
       style={{ aspectRatio: `${page.width_pt} / ${page.height_pt}` }}
     >
       {/* Картинка декоративна: текста она не несёт (глифы — контуры `<path>`),

@@ -123,7 +123,10 @@ mod tests {
             path,
             Path::new("/home/user/.config/typsidian/settings.json.invalid-42")
         );
-        assert_ne!(path.file_name(), Some(std::ffi::OsStr::new(SETTINGS_FILE_NAME)));
+        assert_ne!(
+            path.file_name(),
+            Some(std::ffi::OsStr::new(SETTINGS_FILE_NAME))
+        );
     }
 
     #[test]

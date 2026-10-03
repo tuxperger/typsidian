@@ -207,13 +207,16 @@ pub async fn read_template<B: VaultBackend>(
     backend: &B,
     path: &Path,
 ) -> Result<String, ReadTemplateError> {
-    let bytes = backend.read_bytes(path).await.map_err(|error| match error {
-        ReadError::NotFound => ReadTemplateError::NotFound,
-        // Файл существует, но применить его нельзя — то же следствие, что у
-        // повреждённой кодировки.
-        ReadError::TooLarge => ReadTemplateError::Unreadable,
-        ReadError::Io => ReadTemplateError::Io,
-    })?;
+    let bytes = backend
+        .read_bytes(path)
+        .await
+        .map_err(|error| match error {
+            ReadError::NotFound => ReadTemplateError::NotFound,
+            // Файл существует, но применить его нельзя — то же следствие, что у
+            // повреждённой кодировки.
+            ReadError::TooLarge => ReadTemplateError::Unreadable,
+            ReadError::Io => ReadTemplateError::Io,
+        })?;
     String::from_utf8(bytes).map_err(|_| ReadTemplateError::Unreadable)
 }
 
@@ -273,7 +276,8 @@ pub async fn save_as_template<B: VaultBackend>(
     // происходить до любых изменений (FR-029, инвариант 6).
     let state = folder_state(backend).await;
     match state {
-        TemplateFolderState::Unreadable { reason } | TemplateFolderState::NotWritable { reason } => {
+        TemplateFolderState::Unreadable { reason }
+        | TemplateFolderState::NotWritable { reason } => {
             return Err(SaveTemplateError::FolderNotWritable { reason })
         }
         TemplateFolderState::Present | TemplateFolderState::Absent => {}

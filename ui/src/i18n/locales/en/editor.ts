@@ -1,0 +1,97 @@
+import { enN, type Entries } from "../define.js";
+
+export const editor = {
+  "editor.label": "Note",
+  "editor.eyebrow": "Editor",
+  "editor.chooseNote": "Choose a note in the tree.",
+  "editor.actions": "Note actions",
+  "editor.insertElementHint": "Insert Typst element",
+  "editor.insertElement": "Insert element",
+  "editor.insertBoard": "Insert board",
+  "editor.saveAsTemplate": "Save as template",
+  "editor.panelHint": "Insert panel — a row of buttons above the text",
+  "editor.panel": "Panel",
+  "editor.contentLabel": (p: { name: string }) => `Contents of note ${p.name}`,
+  "editor.embedsLabel": "Embedded boards",
+  "editor.vimHint": "Editor mode: the web build has no bridge to Neovim",
+  "editor.fieldState": (p: { index: number; count: number }) =>
+    `field ${p.index} of ${p.count} · ⇥ next · esc exit`,
+  "editor.fontSize.label": "Editor font size",
+  "editor.fontSize.decrease": "Decrease editor font",
+  "editor.fontSize.decreaseHint": "Decrease font (Ctrl + wheel)",
+  "editor.fontSize.value": (p: { size: number }) => `Font ${p.size} pixels, reset to default size`,
+  "editor.fontSize.reset": "Reset to default size",
+  "editor.fontSize.increase": "Increase editor font",
+  "editor.fontSize.increaseHint": "Increase font (Ctrl + wheel)",
+  "editor.words": (p: { count: number }) => enN(p.count, "# word", "# words"),
+  "editor.caret": (p: { line: number; column: number }) => `Ln ${p.line}, Col ${p.column}`,
+  "editor.save.saving": "saving…",
+  "editor.save.dirty": "not saved",
+  "editor.save.held": "conflict — saving paused",
+  "editor.save.saved": "saved",
+  "editor.save.conflict": "The note changed on disk — choose which version to keep.",
+  "editor.save.accessDenied": "The vault is not writable — your typing is not lost.",
+  "editor.save.io": "Couldn’t write the note to disk — your typing is not lost.",
+  "editor.save.failed": "Saving failed — your typing is not lost.",
+  "editor.insertBoard.failedWith": (p: { reason: string }) => `Couldn’t insert the board: ${p.reason}.`,
+  "editor.insertBoard.notANote": "A board can only be inserted into a text note.",
+  "editor.insertBoard.notABoard": "Only a board can be inserted.",
+  "editor.insertBoard.notFound": "Board not found — it may have been deleted or renamed outside the app.",
+  "editor.insertBoard.unreadable":
+    "The board file can’t be read: it’s damaged or was created by an incompatible version.",
+  "editor.insertBoard.failed": "Couldn’t insert the board.",
+  "editor.read.notFound": "Note not found — it may have been deleted or renamed outside the app.",
+  "editor.read.tooLarge":
+    "The note is larger than 10 MB — above the supported size, so it can’t be opened. The file on disk is untouched.",
+  "editor.read.io": "Couldn’t read the note from disk.",
+
+  "editor.menu.undo": "Undo",
+  "editor.menu.redo": "Redo",
+  "editor.menu.cut": "Cut",
+  "editor.menu.copy": "Copy",
+  "editor.menu.paste": "Paste",
+  "editor.menu.selectAll": "Select all",
+  "editor.menu.bold": "Bold",
+  "editor.menu.italic": "Italic",
+  "editor.menu.monospace": "Monospace",
+  "editor.menu.math": "Math",
+  "editor.menu.insertElement": "Insert Typst element…",
+  "editor.menu.elementParams": "Element parameters…",
+  "editor.menu.insertBoard": "Insert board…",
+  "editor.menu.saveAsTemplate": "Save as template…",
+
+  "editor.params.unclosed": "Parameters unavailable: the element has an unclosed bracket or quote.",
+  "editor.params.duplicate": (p: { name: string }) =>
+    `Parameters unavailable: parameter ${p.name} is given twice.`,
+  "editor.params.spread":
+    "Parameters unavailable: arguments are spread with “..”, so their values are only known at build time.",
+  "editor.params.unknownPositional":
+    "Parameters unavailable: there are more unnamed values than the element accepts.",
+  "editor.params.mathRows": "Parameters unavailable: the form doesn’t parse matrix rows separated by “;”.",
+  "editor.params.nothingToEdit": "The caret isn’t in an element with parameters — nothing to edit.",
+
+  "editor.diff.same": "unchanged",
+  "editor.diff.local": "your version",
+  "editor.diff.external": "version on disk",
+  "editor.diff.none": "No differences.",
+  "editor.diff.label": "Differences between your version and the version on disk",
+  "editor.conflict.diskChanged": (p: { path: string }) =>
+    `Note “${p.path}” was changed outside the app, and you have unsaved edits. Neither version has been applied yet.`,
+  "editor.conflict.deleted": (p: { path: string }) =>
+    `Note “${p.path}” was deleted outside the app, and you still have unsaved edits. They’re still in memory — you can save them again.`,
+  "editor.conflict.acceptExternal": "Accept external version",
+  "editor.conflict.acceptDeletion": "Accept deletion and discard edits",
+  "editor.conflict.label": (p: { path: string }) => `Edit conflict: ${p.path}`,
+  "editor.conflict.choice": "What to do with your edits",
+  "editor.conflict.keepLocal": "Keep my version",
+  "editor.conflict.showDiff": "Show differences",
+  "editor.conflict.hideDiff": "Hide differences",
+  "editor.conflict.resolve.noPending": "The conflict is already resolved — perhaps in another window.",
+  "editor.conflict.resolve.accessDenied":
+    "No write access to the vault: your version can’t be saved right now. Your edits stay in memory.",
+  "editor.conflict.resolve.io":
+    "Couldn’t write the chosen version to disk. Your edits aren’t lost — try again.",
+
+  "editor.diff.localTitle": "Your version",
+  "editor.diff.externalTitle": "Version on disk",
+} as const satisfies Entries;

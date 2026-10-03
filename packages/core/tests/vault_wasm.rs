@@ -127,7 +127,9 @@ fn conflict_is_raised_only_for_notes_with_unsaved_edits() {
 
     registry.set_buffer(path, "мои правки".to_string());
     assert!(registry.observe_disk_change(path, &known, &external));
-    let conflict = registry.conflict(path).expect("конфликт должен быть поднят");
+    let conflict = registry
+        .conflict(path)
+        .expect("конфликт должен быть поднят");
     assert_eq!(conflict.local_buffer, "мои правки");
     assert_eq!(conflict.status, ConflictStatus::Pending);
 }
@@ -153,7 +155,9 @@ fn repeated_disk_change_refreshes_snapshot_without_second_conflict() {
     let second = stamp("второе внешнее", 300);
     registry.observe_disk_change(path, &first, &second);
 
-    let conflict = registry.conflict(path).expect("конфликт должен остаться один");
+    let conflict = registry
+        .conflict(path)
+        .expect("конфликт должен остаться один");
     assert_eq!(conflict.disk_snapshot, second);
     assert_eq!(conflict.local_buffer, "моя версия");
 }
@@ -167,7 +171,10 @@ fn buffer_is_discarded_only_by_explicit_resolution() {
     registry.set_buffer(path, "моя версия".to_string());
     registry.observe_disk_change(path, &stamp("a", 1), &stamp("b", 2));
 
-    assert!(registry.has_unsaved_edits(path), "показ диалога ничего не отбрасывает");
+    assert!(
+        registry.has_unsaved_edits(path),
+        "показ диалога ничего не отбрасывает"
+    );
 
     assert!(registry.resolve(path, ConflictStatus::ResolvedAcceptExternal));
     assert!(!registry.has_unsaved_edits(path));
@@ -192,7 +199,10 @@ fn external_deletion_with_unsaved_edits_keeps_buffer_for_resave() {
 #[wasm_bindgen_test]
 fn diff_shows_both_sides_under_wasm32() {
     // FR-024, паритет с diff_between_local_buffer_and_disk_shows_both_sides.
-    let diff = line_diff("общая строка\nмоя строка\n", "общая строка\nвнешняя строка\n");
+    let diff = line_diff(
+        "общая строка\nмоя строка\n",
+        "общая строка\nвнешняя строка\n",
+    );
     assert!(diff.contains(&DiffLine::Same {
         text: "общая строка".to_string()
     }));
@@ -214,8 +224,8 @@ fn diff_shows_both_sides_under_wasm32() {
 
 #[wasm_bindgen_test]
 fn link_targets_resolve_identically_to_native() {
-    use typsidian_core::graph::{links_in, resolve_link_target};
     use std::path::PathBuf;
+    use typsidian_core::graph::{links_in, resolve_link_target};
 
     // Соседняя заметка, а не заметка в корне — тот же случай, что и
     // backlinks_resolve_relative_to_the_linking_note.
@@ -234,7 +244,10 @@ fn link_targets_resolve_identically_to_native() {
         Some(PathBuf::from("top.typ"))
     );
     // Выход за пределы vault неотличим от битой ссылки.
-    assert_eq!(resolve_link_target(Path::new("source.typ"), "../outside"), None);
+    assert_eq!(
+        resolve_link_target(Path::new("source.typ"), "../outside"),
+        None
+    );
 
     assert_eq!(
         links_in(
@@ -252,7 +265,9 @@ fn link_targets_resolve_identically_to_native() {
 #[allow(dead_code)]
 async fn _conflict_api_signature_check(backend: &mut typsidian_core::vault::web::WebBackend) {
     use typsidian_core::vault::backend::VaultBackend;
-    backend.begin_edit(Path::new("note.typ"), String::new()).await;
+    backend
+        .begin_edit(Path::new("note.typ"), String::new())
+        .await;
     let _: bool = backend.has_unsaved_edits(Path::new("note.typ"));
     let _ = backend.pending_conflict(Path::new("note.typ"));
     let _ = backend.unresolved_edit_paths();
@@ -434,7 +449,10 @@ async fn read_only_access_denies_create_rename_and_delete_on_web_too() {
 
     // Все четыре попытки записи из перечня FR-036 отклонены, а не только write.
     assert_eq!(
-        backend.write(Path::new("note.typ"), "новое", None).await.err(),
+        backend
+            .write(Path::new("note.typ"), "новое", None)
+            .await
+            .err(),
         Some(WriteError::AccessDenied)
     );
     assert_eq!(
@@ -545,10 +563,9 @@ async fn external_change_is_detected_within_sc004_budget_at_full_scale() {
         "изменено снаружи"
     );
     assert!(
-        backend
-            .poll_events()
-            .iter()
-            .any(|e| matches!(e, VaultEvent::NoteUpdated { path } if path == Path::new("note4242.typ"))),
+        backend.poll_events().iter().any(
+            |e| matches!(e, VaultEvent::NoteUpdated { path } if path == Path::new("note4242.typ"))
+        ),
         "внешнее изменение обязано дойти до UI событием, а не только до индекса"
     );
 

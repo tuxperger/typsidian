@@ -39,7 +39,10 @@ fn main() {
         // что и снимок файла, и обязана входить в измеряемое время.
         std::fs::write(
             folder.join(format!("note-{i:05}.typ")),
-            format!("= Заметка {i}\n\nсм. [[note-{:05}]]\n", (i + 1) % NOTE_COUNT),
+            format!(
+                "= Заметка {i}\n\nсм. [[note-{:05}]]\n",
+                (i + 1) % NOTE_COUNT
+            ),
         )
         .expect("запись заметки");
     }
@@ -58,7 +61,10 @@ fn main() {
         (opened, started.elapsed(), listed)
     });
     let (cold_open, cold_total, cold_count) = cold;
-    assert_eq!(cold_count, NOTE_COUNT, "индекс должен содержать все заметки");
+    assert_eq!(
+        cold_count, NOTE_COUNT,
+        "индекс должен содержать все заметки"
+    );
 
     // Дать фоновой записи кэша завершиться — иначе повторное открытие
     // измеряло бы не быстрый путь, а тот же холодный обход.
@@ -75,7 +81,9 @@ fn main() {
 
     println!("SC-002 холодное открытие ({NOTE_COUNT} заметок): {cold_open:?} (бюджет навигации {NAVIGABLE_BUDGET:?})");
     println!("SC-002 полный обход: {cold_total:?} (бюджет {FULL_SCAN_BUDGET:?})");
-    println!("SC-003 повторное открытие: {warm_open:?} (бюджет {REOPEN_BUDGET:?}), заметок {warm_count}");
+    println!(
+        "SC-003 повторное открытие: {warm_open:?} (бюджет {REOPEN_BUDGET:?}), заметок {warm_count}"
+    );
 
     let mut failures = Vec::new();
     if cold_open > NAVIGABLE_BUDGET {

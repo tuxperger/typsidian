@@ -875,7 +875,10 @@ async fn external_change_to_note_with_unsaved_edits_raises_conflict_instead_of_s
 
     let mut backend = NativeBackend::open(dir.path()).await.unwrap();
     backend
-        .begin_edit(Path::new("note.typ"), "мои несохранённые правки".to_string())
+        .begin_edit(
+            Path::new("note.typ"),
+            "мои несохранённые правки".to_string(),
+        )
         .await;
 
     write_note(dir.path(), "note.typ", "внешнее изменение");
@@ -1324,7 +1327,11 @@ async fn broken_links_are_findable_after_the_operation_completes() {
     // битой ссылки — это и есть «найти заметки с битыми ссылками».
     let dir = TempDir::new().unwrap();
     write_note(dir.path(), "a.typ", "цель");
-    write_note(dir.path(), "b.typ", "ссылка на [[a]] и на [[никогда-не-было]]");
+    write_note(
+        dir.path(),
+        "b.typ",
+        "ссылка на [[a]] и на [[никогда-не-было]]",
+    );
 
     let mut backend = NativeBackend::open(dir.path()).await.unwrap();
 

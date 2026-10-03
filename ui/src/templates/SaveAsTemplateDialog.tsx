@@ -10,6 +10,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { describeFolderProblem } from "./TemplateGallery.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 // «Сохранить заметку как заготовку» (T033, US2).
@@ -42,6 +43,7 @@ export function SaveAsTemplateDialog({
   onSaved,
   onCancel,
 }: SaveAsTemplateDialogProps): React.JSX.Element {
+  const { t } = useI18n();
   const [name, setName] = useState(() => stemOf(suggestedName));
   const [check, setCheck] = useState<NameCheck | null>(null);
   const [failure, setFailure] = useState<SaveTemplateError | null>(null);
@@ -89,21 +91,20 @@ export function SaveAsTemplateDialog({
   };
 
   // `.ts-dialog` рисует затемнение сам (тень на весь вьюпорт), поэтому обёртки
-  // `.ts-overlay` здесь нет — иначе фон затемнялся бы дважды.
   return (
       <div
         className="ts-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Сохранить как заготовку"
+        aria-label={t("templates.save.title")}
       >
         <div className="ts-dialog__head">
-          <span className="ts-eyebrow">Сохранить как заготовку</span>
+          <span className="ts-eyebrow">{t("templates.save.title")}</span>
         </div>
 
         <div className="ts-dialog__body">
           <label className="ts-field">
-            <span className="ts-field__label">Имя заготовки</span>
+            <span className="ts-field__label">{t("templates.save.name")}</span>
             <input
               ref={inputRef}
               className="ts-field__input"
@@ -121,33 +122,33 @@ export function SaveAsTemplateDialog({
           </label>
 
           <p className="ts-dialog__hint">
-            Файл появится в папке <code>templates/</code> — обычной папкой vault.
-            Если её ещё нет, она создастся сама.
+            {t("templates.save.hintBefore")}
+            <code>templates/</code>
+            {t("templates.save.hintAfter")}
           </p>
 
           {invalid !== null && (
             <p className="ts-dialog__error" role="alert">
-              {describeNameProblem(invalid)}
+              {describeNameProblem(t, invalid)}
             </p>
           )}
 
           {taken && (
             <p className="ts-dialog__warn" role="alert">
-              Заготовка с таким именем уже есть. Перезапись заменит её
-              содержимое — отменить это из приложения нельзя.
+              {t("templates.save.taken")}
             </p>
           )}
 
           {failure !== null && (
             <p className="ts-dialog__error" role="alert">
-              {describeSaveError(failure)}
+              {describeSaveError(t, failure)}
             </p>
           )}
         </div>
 
         <div className="ts-dialog__foot">
           <button type="button" className="ts-btn" onClick={onCancel}>
-            Отмена
+            {t("common.cancel")}
           </button>
           <span className="ts-spacer" />
           {taken ? (
@@ -157,7 +158,7 @@ export function SaveAsTemplateDialog({
               disabled={isSaving}
               onClick={() => void save(true)}
             >
-              Перезаписать
+              {t("templates.save.overwrite")}
             </button>
           ) : (
             <button
@@ -166,7 +167,7 @@ export function SaveAsTemplateDialog({
               disabled={isSaving || check?.check !== "Ok"}
               onClick={() => void save(false)}
             >
-              Сохранить
+              {t("common.save")}
             </button>
           )}
         </div>
@@ -181,12 +182,12 @@ function stemOf(name: string): string {
 }
 
 /** Почему имя не годится (FR-029). */
-export function describeNameProblem(reason: NameProblem): string {
+export function describeNameProblem(t: Translate, reason: NameProblem): string {
   switch (reason) {
     case "Empty":
-      return "Имя не может быть пустым.";
+      return t("templates.save.empty");
     case "IllegalCharacters":
-      return "В имени есть символы, недопустимые для файловой системы: разделители пути «/» и «\\».";
+      return t("templates.save.illegal");
     default: {
       const exhaustive: never = reason;
       return exhaustive;
@@ -195,16 +196,18 @@ export function describeNameProblem(reason: NameProblem): string {
 }
 
 /** Почему сохранение отклонено — причина, а не общий отказ (FR-030). */
-export function describeSaveError(error: SaveTemplateError): string {
+export function describeSaveError(t: Translate, error: SaveTemplateError): string {
   switch (error.kind) {
     case "NameTaken":
-      return "Заготовка с таким именем уже есть — подтвердите перезапись.";
+      return t("templates.save.nameTaken");
     case "InvalidName":
-      return describeNameProblem(error.reason);
+      return describeNameProblem(t, error.reason);
     case "FolderNotWritable":
-      return `Папку templates/ нельзя изменить: ${describeFolderProblem(error.reason)}. Исходная заметка не тронута.`;
+      return t("templates.save.folderNotWritable", {
+        reason: describeFolderProblem(t, error.reason),
+      });
     case "Io":
-      return "Записать файл не удалось. Исходная заметка не тронута.";
+      return t("templates.save.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;

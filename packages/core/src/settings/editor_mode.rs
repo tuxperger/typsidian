@@ -111,11 +111,15 @@ pub fn disk_state(applied: Option<&FileStamp>, current: Option<&FileStamp>) -> C
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(tag = "state")]
 pub enum EditorMode {
-    FullBackend { config: EditorConfig },
+    FullBackend {
+        config: EditorConfig,
+    },
     SimplifiedEmulation,
     /// Наступает **сам** при отказе внешнего процесса и покидается **только**
     /// явным действием пользователя (FR-035).
-    PlainInput { reason: OutageReason },
+    PlainInput {
+        reason: OutageReason,
+    },
 }
 
 impl EditorMode {
@@ -471,10 +475,9 @@ impl<B: EditorModeBridge> EditorModeController<B> {
     pub fn mode(&self) -> EditorMode {
         let mode = self.bridge.current_mode();
         match (&mode, self.bridge.availability()) {
-            (
-                EditorMode::FullBackend { .. },
-                BridgeAvailability::Unavailable { reason },
-            ) => EditorMode::PlainInput { reason },
+            (EditorMode::FullBackend { .. }, BridgeAvailability::Unavailable { reason }) => {
+                EditorMode::PlainInput { reason }
+            }
             _ => mode,
         }
     }
@@ -574,9 +577,10 @@ impl<B: EditorModeBridge> EditorModeController<B> {
     fn set_disk_state(&mut self, next: ConfigDiskState) {
         if self.disk_state != next {
             self.disk_state = next;
-            self.events.push(
-                super::events::SettingsEvent::EditorConfigDiskStateChanged { disk_state: next },
-            );
+            self.events
+                .push(super::events::SettingsEvent::EditorConfigDiskStateChanged {
+                    disk_state: next,
+                });
         }
     }
 
@@ -644,7 +648,10 @@ mod tests {
 
         // Время идёт, событий нет, состояние прежнее.
         assert!(bridge.poll_events().is_empty());
-        assert!(matches!(bridge.current_mode(), EditorMode::PlainInput { .. }));
+        assert!(matches!(
+            bridge.current_mode(),
+            EditorMode::PlainInput { .. }
+        ));
 
         bridge.leave_plain_input().unwrap();
         assert_eq!(bridge.current_mode(), EditorMode::SimplifiedEmulation);

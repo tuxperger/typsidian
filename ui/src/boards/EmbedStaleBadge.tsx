@@ -1,6 +1,7 @@
 "use client";
 
-import type { Embed } from "../wasm-core/typsidian_core.js";
+import type { Embed, UndeterminableReason } from "../wasm-core/typsidian_core.js";
+import { useI18n, type MessageKey, type Phrase } from "../i18n/index.js";
 
 // Индикатор актуальности вставки (T057, T058, T059, FR-027, FR-031, FR-032,
 // SC-008).
@@ -19,7 +20,7 @@ export interface EmbedStaleBadgeProps {
   /** Идёт запись снимка по явному действию пользователя. */
   isUpdating?: boolean;
   /** Причина отказа словами; `null` — отказа не было. */
-  error?: string | null;
+  error?: Phrase | null;
   /** Привести снимок в соответствие с доской (FR-028). */
   onUpdate: (embed: Embed) => void;
   /** Восстановить отсутствующий снимок из доски (FR-032). */
@@ -33,6 +34,7 @@ export function EmbedStaleBadge({
   onUpdate,
   onRestore,
 }: EmbedStaleBadgeProps): React.JSX.Element | null {
+  const { t } = useI18n();
   const state = embed.state;
   // Перестроить снимок можно только из известной доски. Адрес доски живёт в
   // метаданных снимка (research.md §5), поэтому там, где метаданных нет, нет и
@@ -48,9 +50,9 @@ export function EmbedStaleBadge({
     case "Stale":
       return (
         <span className="ts-embed ts-embed--stale">
-          <span role="status">Вставка устарела</span>
+          <span role="status">{t("boards.embed.stale")}</span>
           <button type="button" disabled={isUpdating} onClick={() => onUpdate(embed)}>
-            Обновить вставку
+            {t("boards.embed.update")}
           </button>
           {error !== null && <Failure error={error} />}
         </span>
@@ -60,12 +62,13 @@ export function EmbedStaleBadge({
       return (
         <span className="ts-embed ts-embed--stale">
           <span role="status">
-            Снимок отсутствует
-            {source === undefined && ", а доска-источник в нём не записана"}
+            {source === undefined
+              ? t("boards.embed.snapshotMissingNoSource")
+              : t("boards.embed.snapshotMissing")}
           </span>
           {source !== undefined && (
             <button type="button" disabled={isUpdating} onClick={() => onRestore(embed)}>
-              Восстановить снимок
+              {t("boards.embed.restore")}
             </button>
           )}
           {error !== null && <Failure error={error} />}
@@ -77,9 +80,7 @@ export function EmbedStaleBadge({
       // блокировки, ни предложения что-то починить за пользователя.
       return (
         <span className="ts-embed ts-embed--missing">
-          <span role="status">
-            Источник вставки отсутствует: доску удалили или переместили
-          </span>
+          <span role="status">{t("boards.embed.boardMissing")}</span>
           {error !== null && <Failure error={error} />}
         </span>
       );
@@ -87,10 +88,12 @@ export function EmbedStaleBadge({
     case "Undeterminable":
       return (
         <span className="ts-embed ts-embed--unknown">
-          <span role="status">Сравнить не удалось: {state.reason}</span>
+          <span role="status">
+            {t("boards.embed.undeterminable", { reason: t(UNDETERMINABLE[state.reason]) })}
+          </span>
           {source !== undefined && (
             <button type="button" disabled={isUpdating} onClick={() => onUpdate(embed)}>
-              Перестроить снимок
+              {t("boards.embed.rebuild")}
             </button>
           )}
           {error !== null && <Failure error={error} />}
@@ -104,10 +107,18 @@ export function EmbedStaleBadge({
   }
 }
 
-function Failure({ error }: { error: string }): React.JSX.Element {
+const UNDETERMINABLE: Record<UndeterminableReason, MessageKey> = {
+  boardUnparsable: "boards.embed.reason.boardUnparsable",
+  boardUnreadable: "boards.embed.reason.boardUnreadable",
+  snapshotWithoutMetadata: "boards.embed.reason.snapshotWithoutMetadata",
+  snapshotUnreadable: "boards.embed.reason.snapshotUnreadable",
+};
+
+function Failure({ error }: { error: Phrase }): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <span className="ts-eyebrow ts-eyebrow--alert" role="alert">
-      {error}
+      {error(t)}
     </span>
   );
 }

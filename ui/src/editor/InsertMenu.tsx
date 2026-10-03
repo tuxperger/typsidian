@@ -9,19 +9,22 @@ import {
   useState,
 } from "react";
 import { Icon } from "../icons/Icons.js";
-import { plural } from "../plural.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 import {
+  categoryName,
   ELEMENT_CATEGORIES,
+  localizedElements,
   matchesQuery,
   snippetPreview,
-  TYPST_ELEMENTS,
   type ElementCategory,
+  type LocalizedElement,
   type TypstElement,
 } from "./typstElements.js";
 import {
   MATH_SYMBOLS,
   SYMBOL_CATEGORIES,
   SYMBOL_COLUMNS,
+  symbolCategoryName,
   symbolTemplate,
   type MathSymbol,
   type SymbolCategory,
@@ -83,6 +86,7 @@ export function InsertMenu({
   onInsert,
   onClose,
 }: InsertMenuProps): React.JSX.Element {
+  const { t } = useI18n();
   const [mode, setMode] = useState<Mode>("elements");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<ElementCategory | null>(null);
@@ -98,9 +102,11 @@ export function InsertMenu({
 
   const needle = query.trim().toLowerCase();
 
+  // Тексты элементов — на языке интерфейса: по ним и ищут, и их же вставляют.
+  const catalog = useMemo(() => localizedElements(t), [t]);
   const matchedElements = useMemo(
-    () => TYPST_ELEMENTS.filter((element) => matchesQuery(element, needle)),
-    [needle],
+    () => catalog.filter((element) => matchesQuery(element, needle)),
+    [catalog, needle],
   );
   const elements = useMemo(
     () =>
@@ -131,7 +137,7 @@ export function InsertMenu({
   const activeSymbol = symbols[active];
 
   const insertElement = useCallback(
-    (element: TypstElement) => {
+    (element: LocalizedElement) => {
       if (element.opensSymbols === true) {
         setMode("symbols");
         setQuery("");
@@ -251,7 +257,7 @@ export function InsertMenu({
       ref={menuRef}
       className="ts-insert"
       role="dialog"
-      aria-label="Вставка элемента Typst"
+      aria-label={t("insert.menu.label")}
       style={{
         left: position?.left ?? 0,
         top: position?.top ?? 0,
@@ -270,7 +276,7 @@ export function InsertMenu({
           <button
             type="button"
             className="ts-btn ts-btn--icon"
-            aria-label="Назад к списку элементов"
+            aria-label={t("insert.menu.back")}
             onClick={backToElements}
           >
             <Icon name="chevron" size={13} className="ts-icon--flip" />
@@ -292,13 +298,13 @@ export function InsertMenu({
           value={query}
           aria-label={
             mode === "elements"
-              ? "Элемент Typst: заголовок, список, формула"
-              : "Имя символа: sum, alpha, arrow"
+              ? t("insert.menu.elementsInput")
+              : t("insert.menu.symbolsInput")
           }
           placeholder={
             mode === "elements"
-              ? "элемент Typst: заголовок, список, формула…"
-              : "имя символа: sum, alpha, arrow…"
+              ? t("insert.menu.elementsPlaceholder")
+              : t("insert.menu.symbolsPlaceholder")
           }
           onChange={(event) => {
             setQuery(event.target.value);
@@ -311,11 +317,11 @@ export function InsertMenu({
       </div>
 
       <div className="ts-insert__body">
-        <ul className="ts-insert__rail" aria-label="Разделы">
+        <ul className="ts-insert__rail" aria-label={t("insert.menu.sections")}>
           {mode === "elements" ? (
             <>
               <RailItem
-                name="Все"
+                name={t("insert.menu.all")}
                 count={matchedElements.length}
                 selected={category === null}
                 onSelect={() => {
@@ -326,7 +332,7 @@ export function InsertMenu({
               {ELEMENT_CATEGORIES.map((section) => (
                 <RailItem
                   key={section.id}
-                  name={section.name}
+                  name={categoryName(t, section.id)}
                   count={
                     matchedElements.filter((element) => element.category === section.id).length
                   }
@@ -342,7 +348,7 @@ export function InsertMenu({
             SYMBOL_CATEGORIES.map((section) => (
               <RailItem
                 key={section.id}
-                name={section.name}
+                name={symbolCategoryName(t, section.id)}
                 count={MATH_SYMBOLS.filter((symbol) => symbol.category === section.id).length}
                 // При поиске поперёк разделов выделять нечего: показаны все.
                 selected={needle === "" && symbolCategory === section.id}
@@ -359,7 +365,7 @@ export function InsertMenu({
         {mode === "elements" ? (
           <>
             <div className="ts-insert__list" ref={listRef}>
-              <ul id="ts-insert-list" role="listbox" aria-label="Элементы Typst">
+              <ul id="ts-insert-list" role="listbox" aria-label={t("insert.menu.elements")}>
                 {elements.map((element, index) => (
                   <li
                     key={element.id}
@@ -377,14 +383,14 @@ export function InsertMenu({
                     <span className="ts-insert__name">{element.name}</span>
                     <span className="ts-insert__meta">
                       {element.opensSymbols === true
-                        ? plural(MATH_SYMBOLS.length, "символ", "символа", "символов")
+                        ? t("insert.menu.symbolsCount", { count: MATH_SYMBOLS.length })
                         : snippetPreview(element.template)}
                     </span>
                   </li>
                 ))}
                 {elements.length === 0 && (
                   <li className="ts-insert__empty" role="presentation">
-                    ничего не найдено
+                    {t("palette.nothingFound")}
                   </li>
                 )}
               </ul>
@@ -399,18 +405,18 @@ export function InsertMenu({
                       нет, и колонка честно остаётся с одним кодом. */}
                   <ElementPaper element={activeElement} />
                   <p className="ts-insert__summary">{activeElement.summary}</p>
-                  <span className="ts-eyebrow">код</span>
+                  <span className="ts-eyebrow">{t("insert.menu.code")}</span>
                   <pre className="ts-insert__code">
                     <SnippetCode template={activeElement.template} />
                   </pre>
                   <span className="ts-insert__fields">
                     <Icon name="tab" size={11} />
-                    {describeFields(activeElement)}
+                    {describeFields(t, activeElement)}
                   </span>
                 </>
               ) : (
                 <>
-                  <span className="ts-eyebrow">код</span>
+                  <span className="ts-eyebrow">{t("insert.menu.code")}</span>
                   <pre className="ts-insert__code" />
                 </>
               )}
@@ -418,7 +424,7 @@ export function InsertMenu({
           </>
         ) : (
           <div className="ts-insert__grid" ref={listRef}>
-            <ul id="ts-insert-list" role="listbox" aria-label="Символы Typst">
+            <ul id="ts-insert-list" role="listbox" aria-label={t("insert.menu.symbols")}>
               {symbols.map((symbol, index) => (
                 <li
                   key={symbol.name}
@@ -438,7 +444,7 @@ export function InsertMenu({
               ))}
               {symbols.length === 0 && (
                 <li className="ts-insert__empty" role="presentation">
-                  ничего не найдено
+                  {t("palette.nothingFound")}
                 </li>
               )}
             </ul>
@@ -466,7 +472,7 @@ export function InsertMenu({
                 className="ts-btn ts-btn--accent"
                 onClick={() => insertSymbol(activeSymbol)}
               >
-                Вставить
+                {t("insert.menu.insert")}
                 <span className="ts-insert__shortcut">
                   <Icon name="cmd" size={11} />
                   <Icon name="enter" size={11} />
@@ -474,7 +480,7 @@ export function InsertMenu({
               </button>
             </>
           ) : (
-            <span className="ts-insert__chosen-code">символ не выбран</span>
+            <span className="ts-insert__chosen-code">{t("insert.menu.noSymbol")}</span>
           )}
         </div>
       )}
@@ -482,21 +488,21 @@ export function InsertMenu({
       <div className="ts-insert__hints">
         <span>
           <Icon name="updown" size={11} />
-          навигация
+          {t("palette.hintNavigate")}
         </span>
         <span>
           <Icon name="enter" size={11} />
-          вставить
+          {t("insert.menu.hintInsert")}
         </span>
         <span>
           <Icon name="tab" size={11} />
-          поля сниппета
+          {t("insert.menu.hintFields")}
         </span>
         <span className="ts-spacer" />
         <span>
           {mode === "elements"
-            ? "←→ разделы · esc закрыть"
-            : "в текст идёт имя символа, не глиф"}
+            ? t("insert.menu.hintSections")
+            : t("insert.menu.hintSymbolName")}
         </span>
       </div>
     </div>
@@ -511,13 +517,14 @@ export function InsertMenu({
  * очередь к ядру. Образца нет — нет и листа: пустая рамка утверждала бы, что
  * элемент ничего не рисует.
  */
-function ElementPaper({ element }: { element: TypstElement }): React.JSX.Element | null {
+function ElementPaper({ element }: { element: LocalizedElement }): React.JSX.Element | null {
+  const { t } = useI18n();
   const sample = ElementSample({ element });
   if (sample === null) return null;
   return (
     <div className="ts-sample" aria-hidden="true">
       <div className="ts-sample__paper">{sample}</div>
-      <span className="ts-sample__caption-note">образец</span>
+      <span className="ts-sample__caption-note">{t("insert.menu.sample")}</span>
     </div>
   );
 }
@@ -575,10 +582,10 @@ function SnippetCode({ template }: { template: string }): React.JSX.Element {
 }
 
 /** Сколько полей заполнять после вставки. */
-function describeFields(element: TypstElement): string {
+function describeFields(t: Translate, element: LocalizedElement): string {
   const count = parseSnippet(element.template).fields.length;
-  if (count === 0) return "без полей";
-  return `${plural(count, "поле", "поля", "полей")} по ⇥`;
+  if (count === 0) return t("insert.menu.noFields");
+  return t("insert.menu.fields", { count });
 }
 
 /**

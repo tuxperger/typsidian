@@ -9,10 +9,10 @@
 
 use std::path::Path;
 use typsidian_core::boards::placement::AssetsPlacement;
+use typsidian_core::settings::keybindings::{self, CommandId, Shortcut, ShortcutProblem};
+use typsidian_core::vault::events::VaultEvent;
 use typsidian_core::vault::sections::SectionMark;
 use typsidian_core::vault::service_dir;
-use typsidian_core::vault::events::VaultEvent;
-use typsidian_core::settings::keybindings::{self, CommandId, Shortcut, ShortcutProblem};
 use typsidian_core::vault::vault_settings::{
     read_vault_settings, reset_keybinding, service_dir_status, set_keybinding, set_section,
     write_vault_settings, SetKeybindingError, VaultOverrides, VaultSettingsError,
@@ -79,7 +79,10 @@ pub async fn hand_written_keys_survive_a_write() {
     let rewritten = vault.read(Path::new(SETTINGS_PATH)).await.unwrap();
     assert!(rewritten.contains("my_future_option"));
     assert!(rewritten.contains("nested"));
-    assert_eq!(read_vault_settings(&vault).await.unwrap().editor_font_size, Some(19));
+    assert_eq!(
+        read_vault_settings(&vault).await.unwrap().editor_font_size,
+        Some(19)
+    );
 }
 
 /// Испорченный файл не перезаписывается молча (FR-034): он отличим от пустого,
@@ -100,21 +103,32 @@ pub async fn a_broken_file_is_reported_not_overwritten() {
 pub async fn marking_a_section_is_idempotent_and_ordered() {
     let mut vault = MemoryVault::new();
 
-    let after = set_section(&mut vault, Path::new("Работа"), true).await.unwrap();
+    let after = set_section(&mut vault, Path::new("Работа"), true)
+        .await
+        .unwrap();
     assert_eq!(after.sections.len(), 1);
 
     // Повторная пометка — не дубль и не ошибка.
-    let again = set_section(&mut vault, Path::new("Работа"), true).await.unwrap();
+    let again = set_section(&mut vault, Path::new("Работа"), true)
+        .await
+        .unwrap();
     assert_eq!(again.sections.len(), 1);
 
-    let two = set_section(&mut vault, Path::new("Личное"), true).await.unwrap();
+    let two = set_section(&mut vault, Path::new("Личное"), true)
+        .await
+        .unwrap();
     assert_eq!(
-        two.sections.iter().map(|s| s.path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        two.sections
+            .iter()
+            .map(|s| s.path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
         vec!["Личное".to_string(), "Работа".to_string()],
         "порядок детерминирован, иначе каждая пометка переставляла бы строки в файле"
     );
 
-    let removed = set_section(&mut vault, Path::new("Работа"), false).await.unwrap();
+    let removed = set_section(&mut vault, Path::new("Работа"), false)
+        .await
+        .unwrap();
     assert_eq!(removed.sections.len(), 1);
     assert_eq!(removed.sections[0].path, Path::new("Личное"));
 }
@@ -123,8 +137,12 @@ pub async fn marking_a_section_is_idempotent_and_ordered() {
 pub async fn unmarking_moves_no_files() {
     let snapshot = "Работа/assets/Идея/board-47dc7994.svg";
     let mut vault = MemoryVault::new().with_file(snapshot, b"<svg/>".to_vec());
-    set_section(&mut vault, Path::new("Работа"), true).await.unwrap();
-    set_section(&mut vault, Path::new("Работа"), false).await.unwrap();
+    set_section(&mut vault, Path::new("Работа"), true)
+        .await
+        .unwrap();
+    set_section(&mut vault, Path::new("Работа"), false)
+        .await
+        .unwrap();
     assert!(
         vault.read(Path::new(snapshot)).await.is_ok(),
         "файл вставки обязан остаться на месте"
@@ -308,7 +326,10 @@ pub async fn reassigning_replaces_rather_than_appends() {
     let overrides = read_vault_settings(&vault).await.unwrap();
     assert_eq!(overrides.keybindings.len(), 1);
     assert_eq!(
-        overrides.keybindings[0].shortcut.as_ref().map(|s| s.key.as_str()),
+        overrides.keybindings[0]
+            .shortcut
+            .as_ref()
+            .map(|s| s.key.as_str()),
         Some("u")
     );
 }
@@ -349,7 +370,10 @@ pub async fn a_bad_template_source_is_refused_before_writing() {
         ("@preview/codly:1.3", "https://example.org/codly.tar.gz"),
         ("@preview/codly:1.3.0", "ftp://example.org/codly.tar.gz"),
         ("@preview/codly:1.3.0", "https://"),
-        ("@preview/codly:1.3.0", "https://example.org/с пробелом.tar.gz"),
+        (
+            "@preview/codly:1.3.0",
+            "https://example.org/с пробелом.tar.gz",
+        ),
     ] {
         let bad = VaultOverrides {
             template_sources: vec![TemplateSourceEntry {
@@ -372,4 +396,55 @@ pub async fn a_bad_template_source_is_refused_before_writing() {
         good,
         "прежние настройки не тронуты"
     );
+}
+
+/// Фича 009, FR-029: папка экспорта пишется только годной и в нормальной
+/// форме, а отказ не портит прежний файл.
+pub async fn the_export_folder_is_validated_and_normalized() {
+    use typsidian_core::export::ExportFolderProblem;
+
+    let mut vault = MemoryVault::new();
+    let good = VaultOverrides {
+        export_folder: Some(" Выгрузка\\2026/ ".to_string()),
+        ..VaultOverrides::default()
+    };
+    write_vault_settings(&mut vault, &good)
+        .await
+        .expect("годная папка записывается");
+    let stored = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(stored.export_folder.as_deref(), Some("Выгрузка/2026"));
+
+    for (raw, problem) in [
+        ("../вне", ExportFolderProblem::LeavesVault),
+        ("/abs", ExportFolderProblem::Absolute),
+        (".typsidian/pdf", ExportFolderProblem::ServiceFolder),
+        ("  ", ExportFolderProblem::Empty),
+    ] {
+        let bad = VaultOverrides {
+            export_folder: Some(raw.to_string()),
+            ..VaultOverrides::default()
+        };
+        assert_eq!(
+            write_vault_settings(&mut vault, &bad).await,
+            Err(VaultSettingsError::InvalidExportFolder { problem }),
+            "{raw}"
+        );
+    }
+    assert_eq!(
+        read_vault_settings(&vault).await.unwrap(),
+        stored,
+        "прежнее значение в силе"
+    );
+}
+
+/// Испорченная руками папка в файле отбрасывается молча: экспорт идёт в
+/// папку по умолчанию, остальные настройки читаются (как у пометок разделов).
+pub async fn a_bad_export_folder_in_the_file_is_dropped() {
+    let vault = MemoryVault::new().with_file(
+        ".typsidian/vault.json",
+        r#"{"export": {"folder": "../../etc"}, "settings": {"theme": "dark"}}"#,
+    );
+    let read = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(read.export_folder, None);
+    assert!(read.theme.is_some());
 }

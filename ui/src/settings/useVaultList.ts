@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import type { DeviceSettingsClient } from "./device-settings-client.js";
 import { changeOf } from "./useSettings.js";
+import type { Translate } from "../i18n/index.js";
+import type { RejectReason, StoreError } from "../wasm-core/typsidian_core.js";
 
 // Принцип I: ни одна функция здесь не решает, «та ли это папка» и можно ли
 // переключаться. Выбор папки — жест пользователя, который обязан произойти в
@@ -12,22 +14,30 @@ export type VaultActionError =
   | { kind: "PickerCancelled" }
   | { kind: "NotSupported" }
   | { kind: "PermissionDenied" }
-  | { kind: "SwitchBlocked"; message: string }
-  | { kind: "Failed"; message: string };
+  /** Ядро отклонило переключение — вид отказа из плана. */
+  | { kind: "SwitchBlocked"; reason: RejectReason["kind"] }
+  /** Отказ хранилища: известный вид либо техническое описание как есть. */
+  | { kind: "Failed"; store: StoreError["kind"] }
+  | { kind: "Unknown"; detail: string };
 
-export function describeVaultActionError(error: VaultActionError): string | null {
+export function describeVaultActionError(
+  t: Translate,
+  error: VaultActionError,
+): string | null {
   switch (error.kind) {
     case "PickerCancelled":
       // Пользователь передумал — это не сбой.
       return null;
     case "NotSupported":
-      return "Этот браузер не умеет открывать локальные папки (нет File System Access API).";
+      return t("settings.vaults.notSupported");
     case "PermissionDenied":
-      return "Доступ к папке не предоставлен. Попробуйте добавить её заново и разрешите доступ, когда браузер спросит.";
+      return t("settings.vaults.permissionDenied");
     case "SwitchBlocked":
-      return error.message;
+      return describeReject(t, error.reason);
     case "Failed":
-      return `Не удалось выполнить операцию: ${error.message}`;
+      return describeStoreError(t, error.store);
+    case "Unknown":
+      return t("settings.vaults.failed", { detail: error.detail });
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -98,7 +108,7 @@ export function useVaultList(
       try {
         const { plan } = await client.apply(changeOf({ current_vault: id }));
         if (plan.outcome === "Rejected") {
-          setError({ kind: "SwitchBlocked", message: describeReject(plan.reason.kind) });
+          setError({ kind: "SwitchBlocked", reason: plan.reason.kind });
           return;
         }
         await onChanged();
@@ -156,20 +166,43 @@ function classify(cause: unknown): VaultActionError {
   // Отказ хранилища приходит объектом `StoreError` — с командой Tauri так же,
   // как с wasm-bindgen; `String()` превратил бы его в «[object Object]».
   if (typeof cause === "object" && cause !== null && "kind" in cause) {
-    return { kind: "Failed", message: String((cause as { kind: unknown }).kind) };
+    const { kind } = cause;
+    if (kind === "NoConfigDirectory" || kind === "Io" || kind === "RevealUnsupported") {
+      return { kind: "Failed", store: kind };
+    }
+    return { kind: "Unknown", detail: String(kind) };
   }
-  return { kind: "Failed", message: String(cause) };
+  return { kind: "Unknown", detail: String(cause) };
 }
 
-function describeReject(kind: string): string {
+function describeReject(t: Translate, kind: RejectReason["kind"]): string {
   switch (kind) {
     case "UnresolvedConflict":
-      return "Сначала нужно разрешить конфликт по открытой заметке.";
+      return t("settings.reject.unresolvedConflict");
     case "SaveFailed":
-      return "Не удалось сохранить открытую заметку — vault не переключён, правки не потеряны.";
+      return t("settings.vaults.switchSaveFailed");
     case "ValueOutOfRange":
-      return "Эта запись о vault больше не известна приложению.";
-    default:
-      return "Хранилище настроек недоступно на запись.";
+      return t("settings.vaults.unknownRecord");
+    case "StorageNotWritable":
+      return t("settings.mode.storageNotWritable");
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
+  }
+}
+
+function describeStoreError(t: Translate, kind: StoreError["kind"]): string {
+  switch (kind) {
+    case "NoConfigDirectory":
+      return t("settings.store.noConfigDirectory");
+    case "Io":
+      return t("settings.store.io");
+    case "RevealUnsupported":
+      return t("settings.store.revealUnsupported");
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
 }

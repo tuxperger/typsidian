@@ -80,7 +80,9 @@ pub(crate) fn literal_matches(kind: &ParamKind, node: &SyntaxNode) -> bool {
         ParamKind::Choice { options } => match node.kind() {
             SyntaxKind::Str | SyntaxKind::Ident => {
                 let text = node.full_text();
-                options.iter().any(|option| option.as_str() == text.as_str())
+                options
+                    .iter()
+                    .any(|option| option.as_str() == text.as_str())
             }
             _ => false,
         },
@@ -88,13 +90,14 @@ pub(crate) fn literal_matches(kind: &ParamKind, node: &SyntaxNode) -> bool {
         ParamKind::Int => node.kind() == SyntaxKind::Int,
         ParamKind::Float => matches!(node.kind(), SyntaxKind::Float | SyntaxKind::Int),
         ParamKind::Numeric { units } => {
-            node.kind() == SyntaxKind::Numeric && units.iter().any(|unit| {
-                let text = node.full_text();
-                text.ends_with(unit.as_str())
-                    && text[..text.len() - unit.len()]
-                        .chars()
-                        .all(|ch| ch.is_ascii_digit() || ch == '.')
-            })
+            node.kind() == SyntaxKind::Numeric
+                && units.iter().any(|unit| {
+                    let text = node.full_text();
+                    text.ends_with(unit.as_str())
+                        && text[..text.len() - unit.len()]
+                            .chars()
+                            .all(|ch| ch.is_ascii_digit() || ch == '.')
+                })
         }
         ParamKind::String => node.kind() == SyntaxKind::Str,
         ParamKind::Content => node.kind() == SyntaxKind::ContentBlock,

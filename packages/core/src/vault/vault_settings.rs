@@ -79,6 +79,11 @@ pub struct VaultOverrides {
     /// пока только в web-сборке, а до настроек уровня vault добираются все три
     /// оболочки через один и тот же `VaultBackend`.
     pub keybindings: Vec<KeybindingEntry>,
+    /// Папка экспорта в PDF относительно корня vault (фича 009, FR-028).
+    ///
+    /// `None` — умолчание `export`. Хранится в нормальной форме
+    /// [`crate::export::folder::validate_folder`]: части через `/`.
+    pub export_folder: Option<String>,
 }
 
 /// Адрес архива, указанный пользователем для одного шаблона (фича 007, FR-004).
@@ -135,6 +140,11 @@ pub enum VaultSettingsError {
     /// запись, ни остальные.
     #[error("адрес для шаблона «{spec}» задан негодно")]
     InvalidTemplateSource { spec: String },
+    /// Папка экспорта не годится (фича 009, FR-029). Файл не тронут.
+    #[error("{problem}")]
+    InvalidExportFolder {
+        problem: crate::export::folder::ExportFolderProblem,
+    },
 }
 
 /// Читает настройки уровня vault.
@@ -190,6 +200,15 @@ pub async fn write_vault_settings<B: VaultBackend>(
             spec: bad.spec.clone(),
         });
     }
+    // Папка экспорта сохраняется в нормальной форме, чтобы файл не зависел от
+    // разделителя платформы, на которой его записали (009 FR-029).
+    let mut overrides = overrides.clone();
+    if let Some(raw) = overrides.export_folder.take() {
+        let folder = crate::export::folder::validate_folder(&raw)
+            .map_err(|problem| VaultSettingsError::InvalidExportFolder { problem })?;
+        overrides.export_folder = Some(folder);
+    }
+    let overrides = &overrides;
 
     ensure_service_dir(backend).await?;
 
@@ -337,7 +356,8 @@ pub async fn set_keybinding<B: VaultBackend>(
         .map_err(SetKeybindingError::Storage)?;
     // Нормализация здесь, а не у вызывающей стороны: хранимое значение обязано
     // быть каноничным независимо от того, как его собрали.
-    let shortcut = shortcut.map(|value| Shortcut::normalize(value.mod_key, value.shift, value.alt, &value.key));
+    let shortcut = shortcut
+        .map(|value| Shortcut::normalize(value.mod_key, value.shift, value.alt, &value.key));
 
     match overrides
         .keybindings
@@ -368,7 +388,9 @@ pub async fn reset_keybinding<B: VaultBackend>(
 ) -> Result<VaultOverrides, VaultSettingsError> {
     let mut overrides = read_vault_settings(backend).await?;
     let before = overrides.keybindings.len();
-    overrides.keybindings.retain(|entry| entry.command != command);
+    overrides
+        .keybindings
+        .retain(|entry| entry.command != command);
     // Ничего не изменилось — не трогаем файл: лишняя запись на каждый клик это
     // лишний повод его испортить (тот же довод, что в `move_sections`).
     if overrides.keybindings.len() == before {
@@ -455,6 +477,7 @@ const ASSETS_TABLE: &str = "assets";
 const SETTINGS_TABLE: &str = "settings";
 const TEMPLATES_TABLE: &str = "templates";
 const KEYBINDINGS_TABLE: &str = "keybindings";
+const EXPORT_TABLE: &str = "export";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -466,12 +489,20 @@ struct FileShape {
     settings: SettingsTable,
     #[serde(default)]
     templates: TemplatesTable,
+    #[serde(default)]
+    export: ExportTable,
     /// Имя команды → текстовая форма сочетания. `null` — сочетание снято.
     ///
     /// Объект, а не массив: файл читают глазами, и `"search": "Mod+Shift+F"`
     /// понятнее списка записей с двумя полями.
     #[serde(default)]
     keybindings: std::collections::BTreeMap<String, Option<String>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ExportTable {
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -548,6 +579,13 @@ impl FileShape {
                 .filter(|size| crate::settings::is_valid_font_size(*size)),
             editor_mode_preference: self.settings.editor_mode_preference,
             editor_config_path: self.settings.editor_config_path,
+            // Негодная папка отбрасывается молча, как непригодная пометка
+            // раздела: одна испорченная строка не повод объявить файл
+            // нечитаемым. Экспорт тогда идёт в папку по умолчанию.
+            export_folder: self
+                .export
+                .folder
+                .and_then(|raw| crate::export::folder::validate_folder(&raw).ok()),
             auto_download_templates: self.templates.auto_download,
             template_sources: self
                 .templates
@@ -615,9 +653,7 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
                 overrides
                     .sections
                     .iter()
-                    .map(|section| {
-                        Value::from(section.path.to_string_lossy().replace('\\', "/"))
-                    })
+                    .map(|section| Value::from(section.path.to_string_lossy().replace('\\', "/")))
                     .collect(),
             )
         }),
@@ -675,6 +711,13 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         }),
     );
 
+    set_or_remove(
+        &mut document,
+        EXPORT_TABLE,
+        "folder",
+        overrides.export_folder.clone().map(Value::from),
+    );
+
     // Таблица сочетаний переписывается целиком, а не по ключу: запись здесь
     // всегда содержит полный список назначенного, и ключ, которого в нём нет,
     // означает возврат команды к умолчанию. Оставлять его в файле значило бы
@@ -700,9 +743,10 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, ASSETS_TABLE);
     prune_empty_object(&mut document, SETTINGS_TABLE);
     prune_empty_object(&mut document, TEMPLATES_TABLE);
+    prune_empty_object(&mut document, EXPORT_TABLE);
 
-    let mut text = serde_json::to_string_pretty(&Value::Object(document))
-        .unwrap_or_else(|_| "{}".to_string());
+    let mut text =
+        serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
     text.push('\n');
     text
 }
@@ -795,6 +839,8 @@ mod tests {
                 spec: "@preview/codly:1.3.0".to_string(),
                 url: "https://example.org/codly.tar.gz".to_string(),
             }],
+            // Фича 009: папка экспорта — в круговой проверке «записал → прочитал».
+            export_folder: Some("Выгрузка/2026".into()),
             keybindings: vec![
                 KeybindingEntry {
                     command: CommandId::CommandPalette,
@@ -814,7 +860,10 @@ mod tests {
         let parsed = parse(&text).unwrap();
         assert_eq!(parsed.keybindings, sample().keybindings);
         // В файле сочетание лежит словами, а не структурой: его читают глазами.
-        assert!(text.contains("\"command-palette\": \"Mod+Alt+P\""), "{text}");
+        assert!(
+            text.contains("\"command-palette\": \"Mod+Alt+P\""),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1005,5 +1054,4 @@ mod tests {
         let overrides = parse(text).expect("лишний ключ не ошибка");
         assert_eq!(overrides, VaultOverrides::default());
     }
-
 }

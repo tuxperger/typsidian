@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n, type MessageKey } from "../i18n/index.js";
 import type {
   AssetsPlacement,
   VaultRecord,
@@ -7,23 +8,23 @@ import type {
 /** Варианты расположения файлов вставок (фича 006, FR-001). */
 const PLACEMENTS: ReadonlyArray<{
   value: AssetsPlacement;
-  title: string;
-  hint: string;
+  title: MessageKey;
+  hint: MessageKey;
 }> = [
   {
     value: "next-to-note",
-    title: "Рядом с заметкой",
-    hint: "Одна общая папка assets в той же папке, где лежит заметка.",
+    title: "settings.assets.nextToNote",
+    hint: "settings.assets.nextToNoteHint",
   },
   {
     value: "vault-root",
-    title: "В корне vault",
-    hint: "Одна папка assets на весь vault, рядом с заметками ничего не создаётся.",
+    title: "settings.assets.vaultRoot",
+    hint: "settings.assets.vaultRootHint",
   },
   {
     value: "section-root",
-    title: "В корне раздела",
-    hint: "В ближайшей папке-предке, помеченной как раздел. Если помеченных нет — в корне vault.",
+    title: "settings.assets.sectionRoot",
+    hint: "settings.assets.sectionRootHint",
   },
 ];
 
@@ -48,6 +49,18 @@ export interface VaultSectionProps {
   onChangeAssetsPlacement?: (placement: AssetsPlacement) => void | Promise<void>;
   /** Помеченные разделы — показываются, чтобы выбор «в корне раздела» был осмыслен. */
   sections?: string[];
+
+  /**
+   * Папка экспорта в PDF (фича 009, FR-028) — уже с умолчанием: `export`,
+   * если не настроена. `null` — vault не открыт.
+   *
+   * Умолчание подставляет вызывающая сторона, а не этот компонент: «не
+   * настроено» в перекрытиях — `undefined`, а параметр по умолчанию
+   * деструктуризации превращал бы его в `null`, то есть в «vault не открыт».
+   */
+  exportFolder?: string | null;
+  /** Записать папку; `false` — ядро отклонило значение (FR-029). */
+  onChangeExportFolder?: (folder: string | null) => Promise<boolean>;
 }
 
 /**
@@ -74,16 +87,24 @@ export function VaultSection({
   assetsPlacement = null,
   onChangeAssetsPlacement,
   sections = [],
+  exportFolder = null,
+  onChangeExportFolder,
 }: VaultSectionProps): React.JSX.Element {
+  const { t } = useI18n();
+  // `%` в строке каталога — место кода: слова вокруг него расставляет язык.
+  const [assetsBefore = "", assetsAfter = ""] = t("settings.assets.intro").split("%");
   const [labelDraft, setLabelDraft] = useState<{ id: string; value: string } | null>(null);
+  // Черновик поля папки экспорта: пишется по Enter или уходу из поля, а не на
+  // каждое нажатие — промежуточное «Выгру» не должно становиться настройкой.
+  const [folderDraft, setFolderDraft] = useState<string | null>(null);
   const current = knownVaults.find((record) => record.id === currentVaultId) ?? null;
 
   return (
-    <section aria-label="Vault">
-      <h2>Vault</h2>
+    <section aria-label={t("settings.section.vault")}>
+      <h2>{t("settings.section.vault")}</h2>
 
       <p>
-        Текущий vault:{" "}
+        {t("settings.vaults.current")}{" "}
         {current ? (
           // Показывается подпись, если задана, иначе расположение (FR-018).
           // Само расположение остаётся доступным рядом.
@@ -92,17 +113,17 @@ export function VaultSection({
             {current.label && <span> ({current.location})</span>}
           </>
         ) : (
-          <em>не выбран</em>
+          <em>{t("settings.vaults.noneSelected")}</em>
         )}
       </p>
 
       <button type="button" onClick={() => void onAddFolder()}>
-        Добавить папку
+        {t("settings.vaults.add")}
       </button>
 
       {errorMessage && <p role="alert">{errorMessage}</p>}
 
-      <ul aria-label="Известные vault">
+      <ul aria-label={t("settings.vaults.known")}>
         {knownVaults.map((record) => {
           const isCurrent = record.id === currentVaultId;
           const isUnavailable = record.availability === "unavailable";
@@ -114,7 +135,7 @@ export function VaultSection({
               {isUnavailable && (
                 // FR-023: связь с папкой утрачена. Приложение её не
                 // разыскивает — запись добавляется заново.
-                <span role="note"> — недоступен, добавьте папку заново</span>
+                <span role="note">{t("settings.vaults.unavailable")}</span>
               )}
 
               {isEditingLabel ? (
@@ -122,7 +143,7 @@ export function VaultSection({
                   <input
                     type="text"
                     autoFocus
-                    aria-label={`Подпись для ${record.location}`}
+                    aria-label={t("settings.vaults.labelFor", { location: record.location })}
                     value={labelDraft.value}
                     onChange={(event) =>
                       setLabelDraft({ id: record.id, value: event.target.value })
@@ -139,7 +160,7 @@ export function VaultSection({
                     }}
                   />
                   <button type="button" onClick={() => setLabelDraft(null)}>
-                    Отмена
+                    {t("common.cancel")}
                   </button>
                 </>
               ) : (
@@ -147,18 +168,18 @@ export function VaultSection({
                   type="button"
                   onClick={() => setLabelDraft({ id: record.id, value: record.label ?? "" })}
                 >
-                  {record.label ? "Изменить подпись" : "Подписать"}
+                  {record.label ? t("settings.vaults.editLabel") : t("settings.vaults.addLabel")}
                 </button>
               )}
 
               {!isCurrent && !isUnavailable && (
                 <button type="button" onClick={() => void onSwitch(record.id)}>
-                  Переключиться
+                  {t("settings.vaults.switch")}
                 </button>
               )}
 
               <button type="button" onClick={() => void onForget(record.id)}>
-                Убрать из списка
+                {t("settings.vaults.forget")}
               </button>
             </li>
           );
@@ -166,16 +187,16 @@ export function VaultSection({
       </ul>
 
       {knownVaults.length === 0 && (
-        <p role="status">Пока ни одной папки не добавлено.</p>
+        <p role="status">{t("settings.vaults.empty")}</p>
       )}
 
       {assetsPlacement !== null && onChangeAssetsPlacement && (
         <fieldset className="ts-assets-placement">
-          <legend>Файлы вставленных досок</legend>
+          <legend>{t("settings.assets.legend")}</legend>
           <p className="ts-assets-placement__intro">
-            Где создаётся папка <code>assets</code>. Настройка принадлежит этому
-            vault и переезжает вместе с ним. Уже созданные файлы смена варианта
-            не двигает.
+            {assetsBefore}
+            <code>assets</code>
+            {assetsAfter}
           </p>
 
           {PLACEMENTS.map((option) => (
@@ -187,27 +208,63 @@ export function VaultSection({
                 checked={assetsPlacement === option.value}
                 onChange={() => void onChangeAssetsPlacement(option.value)}
               />
-              <span className="ts-assets-placement__title">{option.title}</span>
-              <span className="ts-assets-placement__hint">{option.hint}</span>
+              <span className="ts-assets-placement__title">{t(option.title)}</span>
+              <span className="ts-assets-placement__hint">{t(option.hint)}</span>
             </label>
           ))}
 
           {assetsPlacement === "section-root" && (
             <p role="status" className="ts-assets-placement__sections">
               {sections.length > 0 ? (
-                <>Помеченные разделы: {sections.join(", ")}.</>
+                <>{t("settings.assets.sections", { list: sections.join(", ") })}</>
               ) : (
-                <>
-                  Помеченных разделов пока нет — вставки идут в корень vault.
-                  Пометить папку разделом можно из дерева.
-                </>
+                <>{t("settings.assets.noSections")}</>
               )}
             </p>
           )}
         </fieldset>
       )}
+
+      {exportFolder !== null && onChangeExportFolder && (
+        <fieldset className="ts-assets-placement">
+          <legend>{t("workspace.exportPdf")}</legend>
+          <p className="ts-assets-placement__intro">
+            {t("settings.export.intro")} <code>{t("settings.export.exampleNote")}.typ</code> →{" "}
+            <code>{`${exportFolder}/${t("settings.export.exampleNote")}.pdf`}</code>.{" "}
+            {t("settings.export.owned")}
+          </p>
+          <label className="ts-assets-placement__option">
+            <span className="ts-assets-placement__title">{t("settings.export.folder")}</span>
+            <input
+              type="text"
+              value={folderDraft ?? exportFolder}
+              aria-label={t("settings.export.folder")}
+              spellCheck={false}
+              onChange={(event) => setFolderDraft(event.target.value)}
+              onBlur={() => void commitFolder()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commitFolder();
+                }
+                if (event.key === "Escape") setFolderDraft(null);
+              }}
+            />
+          </label>
+        </fieldset>
+      )}
     </section>
   );
+
+  async function commitFolder(): Promise<void> {
+    if (folderDraft === null || onChangeExportFolder === undefined) return;
+    const value = folderDraft.trim();
+    // Пустое поле и «export» — это умолчание: ключ уходит из файла.
+    const ok = await onChangeExportFolder(value === "" || value === "export" ? null : value);
+    // Отказ показывает раздел сообщением ядра; черновик остаётся в поле,
+    // чтобы его можно было поправить, а не набирать заново.
+    if (ok) setFolderDraft(null);
+  }
 }
 
 /** Подпись, если задана, иначе расположение (FR-018). */

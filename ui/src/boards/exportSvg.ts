@@ -5,6 +5,8 @@
 // разошлось бы между двумя местами, а FR-016 требует одного и того же —
 // отказ становится значением, а не исключением.
 
+import type { Phrase } from "../i18n/index.js";
+
 /**
  * Аргументы экспорта выводятся из сигнатуры самого движка, а не описываются
  * руками. Так обвязка не называет его внутренних типов (принцип VIII: DOM и
@@ -25,7 +27,7 @@ export type BoardScene = Pick<ExportArguments, "elements" | "files" | "appState"
  */
 export type SvgExport =
   | { ok: true; svg: string }
-  | { ok: false; reason: string };
+  | { ok: false; reason: Phrase };
 
 /**
  * Экспортирует сцену в SVG.
@@ -60,7 +62,7 @@ export async function exportBoardToSvg(scene: BoardScene): Promise<SvgExport> {
 export async function exportBoardContentToSvg(content: string): Promise<SvgExport> {
   const scene = parseScene(content);
   if (scene === null) {
-    return { ok: false, reason: "содержимое доски не разбирается" };
+    return { ok: false, reason: (t) => t("boards.export.unparsable") };
   }
   return exportBoardToSvg(scene);
 }
@@ -95,7 +97,8 @@ function parseScene(content: string): BoardScene | null {
  * Причина отказа словами. Пользователю показывается именно она — «не удалось
  * построить превью» без объяснения неотличимо от пустого рисунка.
  */
-function describeExportFailure(cause: unknown): string {
-  if (cause instanceof Error && cause.message !== "") return cause.message;
-  return "движок не смог построить изображение";
+function describeExportFailure(cause: unknown): Phrase {
+  // Сообщение движка — его собственный текст, переводить его нечем.
+  if (cause instanceof Error && cause.message !== "") return () => cause.message;
+  return (t) => t("boards.export.engineFailed");
 }

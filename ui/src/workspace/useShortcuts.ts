@@ -37,7 +37,7 @@ export interface ShortcutsState {
  * работать на умолчаниях, а не молчать. Пустой набор — это ровно «ничего не
  * переназначено», и ядро отвечает на него умолчаниями.
  */
-const NOTHING_OVERRIDDEN: VaultOverrides = {
+export const NOTHING_OVERRIDDEN: VaultOverrides = {
   assets_placement: undefined,
   sections: [],
   theme: undefined,
@@ -47,6 +47,7 @@ const NOTHING_OVERRIDDEN: VaultOverrides = {
   auto_download_templates: undefined,
   template_sources: [],
   keybindings: [],
+  export_folder: undefined,
 };
 
 export function useShortcuts(

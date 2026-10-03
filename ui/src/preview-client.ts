@@ -1,5 +1,10 @@
 import type {
+  BatchState,
+  BatchStep,
+  BatchView,
   CompiledDocument,
+  ExportCandidate,
+  ExportReport,
   InstalledTemplate,
   InstallReport,
   VaultOverrides,
@@ -66,4 +71,43 @@ export interface PreviewClient {
    * Перечень читается из служебного места vault; сети не требует.
    */
   installedTemplates?(): Promise<InstalledTemplate[]>;
+
+  /**
+   * Экспортировать заметку в PDF (фича 009, contracts/frontend-export.md).
+   *
+   * `text` — текст редактора, если заметка открыта: в PDF попадает то, что
+   * пользователь видит сейчас (FR-006). `null` — ядро читает заметку с диска.
+   * Отказ — вариант `ExportReport.outcome`, а не исключение.
+   */
+  exportPdf(
+    notePath: string,
+    text: string | null,
+    overrides: VaultOverrides,
+  ): Promise<ExportReport>;
+
+  /** Строки Центра экспорта: те же записи, что у дерева (FR-010, FR-011). */
+  exportCandidates(overrides: VaultOverrides): Promise<ExportCandidate[]>;
+
+  /**
+   * Переходы пакета — чистые функции ядра (research.md §5). Значение пакета
+   * держит UI, правила очереди считает ядро.
+   */
+  exportBatch: ExportBatchOps;
+}
+
+export interface ExportBatchOps {
+  start(
+    paths: string[],
+    stopOnError: boolean,
+    overrides: VaultOverrides,
+  ): Promise<BatchState>;
+  next(state: BatchState): Promise<BatchStep>;
+  record(
+    state: BatchState,
+    report: ExportReport,
+    elapsedMs: number,
+  ): Promise<BatchState>;
+  skip(state: BatchState, notePath: string): Promise<BatchState>;
+  cancel(state: BatchState): Promise<BatchState>;
+  view(state: BatchState): Promise<BatchView>;
 }

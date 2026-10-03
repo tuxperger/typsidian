@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { exportBoardContentToSvg, type SvgExport } from "./exportSvg.js";
+import { useI18n } from "../i18n/index.js";
 
 // Разрешение конфликта доски (T033, T034, FR-015, FR-016, SC-006).
 //
@@ -51,6 +52,7 @@ export function BoardConflictDialog({
   onAcceptExternal,
   onDismissError,
 }: BoardConflictDialogProps): React.JSX.Element | null {
+  const { t } = useI18n();
   const local = useBoardPreview(boardPath === null ? null : localContent);
   const external = useBoardPreview(boardPath === null ? null : externalContent);
 
@@ -60,21 +62,17 @@ export function BoardConflictDialog({
     <div
       role="alertdialog"
       aria-modal="true"
-      aria-label={`Конфликт доски: ${boardPath}`}
+      aria-label={t("boards.conflict.label", { path: boardPath })}
       className="ts-dialog ts-board-conflict"
     >
-      <p>
-        Доска «{boardPath}» изменена вне приложения, а на полотне есть
-        несохранённые правки. Ни одна из версий пока не применена — в файл не
-        записано ничего.
-      </p>
+      <p>{t("boards.conflict.situation", { path: boardPath })}</p>
 
       {error !== null && (
         <div role="alert">
           <p>{error}</p>
           {onDismissError && (
             <button type="button" onClick={onDismissError}>
-              Понятно
+              {t("common.ok")}
             </button>
           )}
         </div>
@@ -82,23 +80,23 @@ export function BoardConflictDialog({
 
       <div className="ts-board-versions">
         <BoardVersion
-          title="Ваша версия"
-          missing="Буфера с вашими правками уже нет."
+          title={t("editor.diff.localTitle")}
+          missing={t("boards.conflict.noBuffer")}
           preview={local}
         />
         <BoardVersion
-          title="Версия на диске"
-          missing="Внешнюю версию не удалось прочитать с диска."
+          title={t("editor.diff.externalTitle")}
+          missing={t("boards.conflict.noExternal")}
           preview={external}
         />
       </div>
 
-      <div role="group" aria-label="Какую версию оставить">
+      <div role="group" aria-label={t("boards.conflict.choice")}>
         <button type="button" disabled={isResolving} onClick={onKeepLocal}>
-          Оставить свою версию
+          {t("editor.conflict.keepLocal")}
         </button>
         <button type="button" disabled={isResolving} onClick={onAcceptExternal}>
-          Принять версию с диска
+          {t("boards.conflict.acceptExternal")}
         </button>
       </div>
     </div>
@@ -121,6 +119,7 @@ function BoardVersion({
   missing: string;
   preview: Preview | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <figure className="ts-board-version">
       <figcaption className="ts-eyebrow">{title}</figcaption>
@@ -128,18 +127,17 @@ function BoardVersion({
         <p className="ts-board-version__note">{missing}</p>
       ) : preview.status === "building" ? (
         <p className="ts-board-version__note" role="status">
-          Строим превью…
+          {t("boards.conflict.building")}
         </p>
       ) : preview.result.ok ? (
         <img
           className="ts-board-version__image"
           src={svgDataUrl(preview.result.svg)}
-          alt={`Превью: ${title}`}
+          alt={t("boards.conflict.previewAlt", { title })}
         />
       ) : (
         <p className="ts-board-version__note" role="alert">
-          Превью показать не удалось: {preview.result.reason}. Выбрать эту версию
-          всё равно можно.
+          {t("boards.conflict.previewFailed", { reason: preview.result.reason(t) })}
         </p>
       )}
     </figure>

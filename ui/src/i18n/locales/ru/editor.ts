@@ -1,0 +1,97 @@
+import { ruN, type Translation } from "../define.js";
+import type { editor as en } from "../en/editor.js";
+
+export const editor: Translation<typeof en> = {
+  "editor.label": "Заметка",
+  "editor.eyebrow": "Редактор",
+  "editor.chooseNote": "Выберите заметку в дереве.",
+  "editor.actions": "Действия с заметкой",
+  "editor.insertElementHint": "Вставить элемент Typst",
+  "editor.insertElement": "Вставить элемент",
+  "editor.insertBoard": "Вставить доску",
+  "editor.saveAsTemplate": "Сохранить как заготовку",
+  "editor.panelHint": "Панель вставки — строка кнопок над текстом",
+  "editor.panel": "Панель",
+  "editor.contentLabel": (p) => `Содержимое заметки ${p.name}`,
+  "editor.embedsLabel": "Вставленные доски",
+  "editor.vimHint": "Режим редактора: моста к Neovim в web-сборке нет",
+  "editor.fieldState": (p) => `поле ${p.index} из ${p.count} · ⇥ следующее · esc выйти`,
+  "editor.fontSize.label": "Размер шрифта редактора",
+  "editor.fontSize.decrease": "Уменьшить шрифт редактора",
+  "editor.fontSize.decreaseHint": "Уменьшить шрифт (Ctrl + колесо)",
+  "editor.fontSize.value": (p) => `Шрифт ${p.size} пикселей, вернуть размер по умолчанию`,
+  "editor.fontSize.reset": "Вернуть размер по умолчанию",
+  "editor.fontSize.increase": "Увеличить шрифт редактора",
+  "editor.fontSize.increaseHint": "Увеличить шрифт (Ctrl + колесо)",
+  "editor.words": (p) => ruN(p.count, "# слово", "# слова", "# слов"),
+  // Как в макете: обозначения позиции — те же, что в английском.
+  "editor.caret": (p) => `Ln ${p.line}, Col ${p.column}`,
+  "editor.save.saving": "сохранение…",
+  "editor.save.dirty": "не сохранено",
+  "editor.save.held": "конфликт — сохранение приостановлено",
+  "editor.save.saved": "сохранено",
+  "editor.save.conflict": "Заметка изменилась на диске — выберите, какую версию оставить.",
+  "editor.save.accessDenied": "Vault недоступен на запись — набранное не потеряно.",
+  "editor.save.io": "Не удалось записать заметку на диск — набранное не потеряно.",
+  "editor.save.failed": "Сохранить не удалось — набранное не потеряно.",
+  "editor.insertBoard.failedWith": (p) => `Вставить доску не удалось: ${p.reason}.`,
+  "editor.insertBoard.notANote": "Вставлять доску можно только в текстовую заметку.",
+  "editor.insertBoard.notABoard": "Вставить можно только доску.",
+  "editor.insertBoard.notFound": "Доска не найдена — возможно, её удалили или переименовали снаружи.",
+  "editor.insertBoard.unreadable":
+    "Файл доски не читается: он повреждён или создан несовместимой версией.",
+  "editor.insertBoard.failed": "Вставить доску не удалось.",
+  "editor.read.notFound": "Заметка не найдена — возможно, её удалили или переименовали снаружи.",
+  "editor.read.tooLarge":
+    "Заметка больше 10 МБ — это выше поддерживаемого размера, и открыть её нельзя. Файл на диске не тронут.",
+  "editor.read.io": "Не удалось прочитать заметку с диска.",
+
+  "editor.menu.undo": "Отменить",
+  "editor.menu.redo": "Повторить",
+  "editor.menu.cut": "Вырезать",
+  "editor.menu.copy": "Копировать",
+  "editor.menu.paste": "Вставить",
+  "editor.menu.selectAll": "Выделить всё",
+  "editor.menu.bold": "Жирный",
+  "editor.menu.italic": "Курсив",
+  "editor.menu.monospace": "Моноширинный",
+  "editor.menu.math": "Формула",
+  "editor.menu.insertElement": "Вставить элемент Typst…",
+  "editor.menu.elementParams": "Параметры элемента…",
+  "editor.menu.insertBoard": "Вставить доску…",
+  "editor.menu.saveAsTemplate": "Сохранить как заготовку…",
+
+  "editor.params.unclosed": "Параметры недоступны: в элементе незакрытая скобка или кавычка.",
+  "editor.params.duplicate": (p) => `Параметры недоступны: параметр ${p.name} указан дважды.`,
+  "editor.params.spread":
+    "Параметры недоступны: аргументы разворачиваются через «..», их значения известны только при сборке.",
+  "editor.params.unknownPositional":
+    "Параметры недоступны: значений без имени больше, чем принимает элемент.",
+  "editor.params.mathRows": "Параметры недоступны: строки матрицы через «;» форма не разбирает.",
+  "editor.params.nothingToEdit": "Каретка не в элементе с параметрами — править нечего.",
+
+  "editor.diff.same": "без изменений",
+  "editor.diff.local": "ваша версия",
+  "editor.diff.external": "версия на диске",
+  "editor.diff.none": "Отличий нет.",
+  "editor.diff.label": "Отличия между вашей версией и версией на диске",
+  "editor.conflict.diskChanged": (p) =>
+    `Заметка «${p.path}» изменена вне приложения, а у вас есть несохранённые правки. Ни одна из версий пока не применена.`,
+  "editor.conflict.deleted": (p) =>
+    `Заметка «${p.path}» удалена вне приложения, а у вас остались несохранённые правки. Они всё ещё в памяти — их можно сохранить заново.`,
+  "editor.conflict.acceptExternal": "Принять внешнюю версию",
+  "editor.conflict.acceptDeletion": "Принять удаление и отбросить правки",
+  "editor.conflict.label": (p) => `Конфликт редактирования: ${p.path}`,
+  "editor.conflict.choice": "Что сделать с правками",
+  "editor.conflict.keepLocal": "Оставить свою версию",
+  "editor.conflict.showDiff": "Посмотреть отличия",
+  "editor.conflict.hideDiff": "Скрыть отличия",
+  "editor.conflict.resolve.noPending": "Конфликт уже разрешён — возможно, в другом окне.",
+  "editor.conflict.resolve.accessDenied":
+    "Нет прав на запись в vault: сохранить свою версию сейчас нельзя. Правки остаются в памяти.",
+  "editor.conflict.resolve.io":
+    "Не удалось записать выбранную версию на диск. Правки не потеряны — попробуйте ещё раз.",
+
+  "editor.diff.localTitle": "Ваша версия",
+  "editor.diff.externalTitle": "Версия на диске",
+};

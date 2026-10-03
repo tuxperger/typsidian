@@ -1,0 +1,36 @@
+import type { Entries } from "../define.js";
+import { enN } from "../define.js";
+
+export const search = {
+  "search.title": "Search the vault",
+  "search.placeholder": "search notes…",
+  "search.inputLabel": "Search query",
+  "search.regexHint": "Search with a regular expression",
+  "search.caseHint": "Match case",
+  "search.close": "Close search",
+  "search.filters": "filters",
+  "search.linksToDisabled": "Open a note to find the notes linking to it",
+  "search.linksToHint": "Only notes that link to the open one",
+  "search.linksTo": (p: { name: string }) => `links to ${p.name}`,
+  "search.openNote": "the open note",
+  "search.modeLabel": "AND / OR",
+  "search.modeGroup": "How conditions combine",
+  "search.and": "AND",
+  "search.or": "OR",
+  "search.queryLabel": "query:",
+  "search.nothingFound": "nothing found",
+  "search.emptyHint": "Type a query or turn on a filter — search covers every note in the vault.",
+  "search.vaultRoot": "vault root",
+  "search.matches": (p: { count: number }) => enN(p.count, "# match", "# matches"),
+  "search.notes": (p: { count: number }) => enN(p.count, "# note", "# notes"),
+  "search.line": (p: { line: number }) => `line ${p.line} · `,
+  "search.truncated": (p: { count: number }) =>
+    `Showing the first ${p.count} notes — refine the query.`,
+  "search.open": "open",
+  "search.navigate": "↑↓ select",
+  "search.escClose": "Esc to close",
+  "search.busy": "searching…",
+  "search.echoCase": "case-sensitive",
+  "search.echoNone": "no conditions",
+  "search.badPattern": (p: { detail: string }) => `Invalid regular expression: ${p.detail}`,
+} as const satisfies Entries;

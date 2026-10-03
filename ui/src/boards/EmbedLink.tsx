@@ -1,6 +1,7 @@
 "use client";
 
 import type { Embed } from "../wasm-core/typsidian_core.js";
+import { useI18n } from "../i18n/index.js";
 
 // Переход от вставки в тексте к её доске на полотне (T047, FR-025).
 //
@@ -15,12 +16,13 @@ export interface EmbedLinkProps {
 }
 
 export function EmbedLink({ embed, onOpenBoard }: EmbedLinkProps): React.JSX.Element {
+  const { t } = useI18n();
   const boardPath = embed.board_path;
 
   if (boardPath === undefined) {
     return (
       <span className="ts-eyebrow">
-        {embed.id.value}: доска-источник неизвестна
+        {t("boards.embed.unknownSource", { id: embed.id.value })}
       </span>
     );
   }
@@ -32,7 +34,7 @@ export function EmbedLink({ embed, onOpenBoard }: EmbedLinkProps): React.JSX.Ele
       onClick={() => onOpenBoard(boardPath)}
       title={boardPath}
     >
-      Открыть {boardName(boardPath)}
+      {t("boards.embed.open", { name: boardName(boardPath) })}
     </button>
   );
 }

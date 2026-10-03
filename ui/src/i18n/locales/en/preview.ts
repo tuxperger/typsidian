@@ -1,0 +1,27 @@
+import type { Entries } from "../define.js";
+
+export const preview = {
+  "preview.label": "Preview",
+  "preview.pageSize": "A4 · 21×29.7 cm",
+  "preview.building": "building…",
+  "preview.stale": "doesn’t match the text",
+  "preview.zoom.label": "Preview zoom",
+  "preview.zoom.out": "Zoom out",
+  "preview.zoom.outHint": "Zoom out (Ctrl + wheel)",
+  "preview.zoom.value": (p: { percent: number }) => `Zoom ${p.percent}%, reset to 100%`,
+  "preview.zoom.reset": "Reset to 100 %",
+  "preview.zoom.in": "Zoom in",
+  "preview.zoom.inHint": "Zoom in (Ctrl + wheel)",
+  "preview.zoom.inShort": "Zoom in",
+  "preview.zoom.outShort": "Zoom out",
+  "preview.zoom.hundred": "Zoom 100 %",
+  "preview.failedShowingPrevious": "The note didn’t build — showing the previous view",
+  "preview.failedNothingToShow": "Nothing to show: the note has never built yet",
+  "preview.buildFailed": (p: { detail: string }) => `The build didn’t happen: ${p.detail}`,
+  "preview.openNote": "Open a note to see its typeset view.",
+  "preview.buildingLong": "Building…",
+  "preview.warnings": "Warnings",
+  "preview.installing": "Downloading…",
+  "preview.install": "Download template",
+  "preview.page": (p: { number: number }) => `Page ${p.number}`,
+} as const satisfies Entries;

@@ -1,5 +1,6 @@
 "use client";
 
+import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { webDeviceSettings } from "@typsidian/ui/settings/device-settings-web.js";
 import {
@@ -31,28 +32,30 @@ const device = webDeviceSettings();
  */
 export function VaultWorkspace(): React.JSX.Element {
   return (
-    <Workspace
-      openVaultFolder={openWebVault}
-      // FR-007: последний открытый vault предлагается на экране приветствия.
-      // Хендл папки хранит `WebStore` в IndexedDB; разрешение на неё
-      // переспрашивается уже по нажатию — браузер выдаёт его только в
-      // обработчике жеста пользователя.
-      lastVault={lastWebVault}
-      // Клиент открытого vault нужен разделу «Vault»: политика расположения
-      // файлов вставок и помеченные разделы живут внутри vault, а не в
-      // хранилище устройства (фича 006, FR-002).
-      //
-      // `reopen` — вторая половина переключения vault (US2 фичи 004, AS3):
-      // панель меняет текущий vault в настройках, а открывает выбранный
-      // рабочая область, потому что клиентом владеет она.
-      settings={(client, reopen, preview) => (
-        <SettingsPanel
-          device={device}
-          vaultClient={client}
-          preview={preview}
-          onVaultSwitched={(id) => reopen(() => openWebVaultById(id))}
-        />
-      )}
-    />
+    <DeviceI18nProvider device={device}>
+      <Workspace
+        openVaultFolder={openWebVault}
+        // FR-007: последний открытый vault предлагается на экране приветствия.
+        // Хендл папки хранит `WebStore` в IndexedDB; разрешение на неё
+        // переспрашивается уже по нажатию — браузер выдаёт его только в
+        // обработчике жеста пользователя.
+        lastVault={lastWebVault}
+        // Клиент открытого vault нужен разделу «Vault»: политика расположения
+        // файлов вставок и помеченные разделы живут внутри vault, а не в
+        // хранилище устройства (фича 006, FR-002).
+        //
+        // `reopen` — вторая половина переключения vault (US2 фичи 004, AS3):
+        // панель меняет текущий vault в настройках, а открывает выбранный
+        // рабочая область, потому что клиентом владеет она.
+        settings={(client, reopen, preview) => (
+          <SettingsPanel
+            device={device}
+            vaultClient={client}
+            preview={preview}
+            onVaultSwitched={(id) => reopen(() => openWebVaultById(id))}
+          />
+        )}
+      />
+    </DeviceI18nProvider>
   );
 }

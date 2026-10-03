@@ -40,24 +40,29 @@ pub fn render_element(
     let mut errors = Vec::new();
 
     let mut text = match spec.syntax {
-        ElementSyntax::Call | ElementSyntax::Set => {
-            match call_text(&spec, fields, "", true) {
-                Ok(text) => text,
-                Err(mut problems) => {
-                    errors.append(&mut problems);
-                    String::new()
-                }
+        ElementSyntax::Call | ElementSyntax::Set => match call_text(&spec, fields, "", true) {
+            Ok(text) => text,
+            Err(mut problems) => {
+                errors.append(&mut problems);
+                String::new()
             }
-        }
+        },
         ElementSyntax::MarkupHeading => {
-            let level = number_field(&spec, fields, "level", &mut errors).unwrap_or(1).clamp(1, 6);
+            let level = number_field(&spec, fields, "level", &mut errors)
+                .unwrap_or(1)
+                .clamp(1, 6);
             format!("{} {}", "=".repeat(level), pseudo(fields, "@body"))
         }
         ElementSyntax::MarkupRaw => {
             let lang = fields
                 .iter()
                 .find(|field| field.name == "lang")
-                .and_then(|field| field.plain.clone().or_else(|| field.source.clone().map(unquote)))
+                .and_then(|field| {
+                    field
+                        .plain
+                        .clone()
+                        .or_else(|| field.source.clone().map(unquote))
+                })
                 .unwrap_or_default();
             format!("```{lang}\n{}\n```", pseudo(fields, "@body"))
         }
@@ -157,8 +162,11 @@ pub(crate) fn call_text(
     let mut trailing: Option<String> = None;
     let mut multiline = false;
 
-    let positional_params: Vec<&ParamSpec> =
-        spec.params.iter().filter(|param| param.positional).collect();
+    let positional_params: Vec<&ParamSpec> = spec
+        .params
+        .iter()
+        .filter(|param| param.positional)
+        .collect();
     let last_positional = positional_params.last().map(|param| param.name.clone());
 
     for param in &spec.params {
@@ -170,7 +178,10 @@ pub(crate) fn call_text(
                 match field_source(param, field, math) {
                     Ok(source) => source,
                     Err(problem) => {
-                        errors.push(FieldError { name: full, problem });
+                        errors.push(FieldError {
+                            name: full,
+                            problem,
+                        });
                         None
                     }
                 }
@@ -219,7 +230,11 @@ pub(crate) fn call_text(
 
     // Порядок, принятый в Typst: позиционные, именованные, затем ячейки и
     // прочие «сколько угодно значений» — `#table(columns: 3, [A], [B])`.
-    let args: Vec<String> = positional.into_iter().chain(named).chain(variadic).collect();
+    let args: Vec<String> = positional
+        .into_iter()
+        .chain(named)
+        .chain(variadic)
+        .collect();
     let joined = args.join(", ");
     let mut text = head;
     if multiline || joined.chars().count() > INLINE_LIMIT {
@@ -249,7 +264,10 @@ fn inner_source(
     fields: &[FieldValue],
     errors: &mut Vec<FieldError>,
 ) -> Option<String> {
-    let inner = spec.inner.as_ref().filter(|inner| inner.param == param.name)?;
+    let inner = spec
+        .inner
+        .as_ref()
+        .filter(|inner| inner.param == param.name)?;
     let prefix = format!("{}.", inner.param);
     if !fields.iter().any(|field| field.name.starts_with(&prefix)) {
         return None;

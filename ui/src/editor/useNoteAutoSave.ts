@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VaultClient } from "../vault-client.js";
+import type { Phrase } from "../i18n/index.js";
 
 // Принцип I: этот хук не решает, когда запись допустима. Признак «по этой
 // заметке есть неразрешённый конфликт» он спрашивает у ядра
@@ -32,7 +33,7 @@ export type NoteSaveState =
   | { state: "Dirty" }
   | { state: "Saving" }
   | { state: "Held" }
-  | { state: "Failed"; reason: string };
+  | { state: "Failed"; reason: Phrase };
 
 export interface NoteAutoSave {
   state: NoteSaveState;
@@ -183,18 +184,18 @@ export function useNoteAutoSave(
 }
 
 /** Причина отказа записи словами ядра (001 FR-009). */
-function describeWriteFailure(cause: unknown): string {
+function describeWriteFailure(cause: unknown): Phrase {
   if (typeof cause === "object" && cause !== null && "kind" in cause) {
     switch ((cause as { kind: unknown }).kind) {
       case "Conflict":
-        return "Заметка изменилась на диске — выберите, какую версию оставить.";
+        return (t) => t("editor.save.conflict");
       case "AccessDenied":
-        return "Vault недоступен на запись — набранное не потеряно.";
+        return (t) => t("editor.save.accessDenied");
       case "Io":
-        return "Не удалось записать заметку на диск — набранное не потеряно.";
+        return (t) => t("editor.save.io");
       default:
         break;
     }
   }
-  return "Сохранить не удалось — набранное не потеряно.";
+  return (t) => t("editor.save.failed");
 }

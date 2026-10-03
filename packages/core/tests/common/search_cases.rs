@@ -99,7 +99,11 @@ pub async fn the_matched_line_arrives_split_into_segments() {
     assert_eq!(highlighted, vec!["тепловой волны"]);
 
     // Заметки идут в порядке пути, поэтому первой в группе стоит Методология.
-    let whole: String = line.segments.iter().map(|part| part.text.as_str()).collect();
+    let whole: String = line
+        .segments
+        .iter()
+        .map(|part| part.text.as_str())
+        .collect();
     assert_eq!(
         whole, "затухающей тепловой волны (Ångström, 1861).",
         "куски обязаны складываться обратно в исходную строку"

@@ -139,13 +139,22 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
             .map(|path| Value::from(path.to_string_lossy().into_owned())),
     );
 
+    set_or_remove(
+        &mut document,
+        "language",
+        settings
+            .language
+            .as_ref()
+            .map(|tag| Value::from(tag.as_str())),
+    );
+
     write_known_vaults(&mut document, &settings.known_vaults);
     write_folder_refs(&mut document, folder_refs);
 
     // С отступами, а не одной строкой: файл предназначен для чтения глазами
     // (FR-036), и `diff` по нему должен быть построчным.
-    let mut text = serde_json::to_string_pretty(&Value::Object(document))
-        .unwrap_or_else(|_| "{}".to_string());
+    let mut text =
+        serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
     text.push('\n');
     text
 }
@@ -251,6 +260,7 @@ mod tests {
             current_vault: Some(VaultId::from_raw("abc")),
             editor_mode_preference: ModePreference::FullBackend,
             editor_config_path: Some("/home/user/init.lua".into()),
+            language: Some("ru".to_string()),
         };
 
         let text = render("", &settings, &FolderRefs::new());
@@ -387,5 +397,31 @@ mod tests {
         let text = initial_document(&Settings::default());
         assert!(text.contains("править вручную"));
         assert_eq!(parse(&text).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn language_round_trips_and_system_choice_removes_the_key() {
+        // Фича 010: отсутствие ключа — «как в системе».
+        let chosen = Settings {
+            language: Some("en".to_string()),
+            ..Settings::default()
+        };
+        let text = render("", &chosen, &FolderRefs::new());
+        assert_eq!(parse(&text).unwrap().language.as_deref(), Some("en"));
+
+        let cleared = render(&text, &Settings::default(), &FolderRefs::new());
+        assert!(!cleared.contains("language"));
+        assert_eq!(parse(&cleared).unwrap().language, None);
+    }
+
+    #[test]
+    fn a_malformed_language_does_not_break_the_file() {
+        // FR-018: кривое значение не обнуляет остальные настройки.
+        let parsed = parse(r#"{"theme": "dark", "editor_font_size": 20, "language": 42}"#).unwrap();
+        assert_eq!(parsed.language, None);
+        assert_eq!(parsed.editor_font_size, 20);
+        let odd = parse(r#"{"theme": "dark", "language": "not a tag!"}"#).unwrap();
+        assert_eq!(odd.language.as_deref(), Some("not a tag!"));
+        assert_eq!(odd.theme, super::super::Theme::Dark);
     }
 }

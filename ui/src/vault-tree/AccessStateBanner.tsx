@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n/index.js";
 import type { AccessState } from "../wasm-core/typsidian_core.js";
 
 export interface AccessStateBannerProps {
@@ -42,23 +43,17 @@ export function AccessStateBanner({
   settingsLost = false,
   settingsReadOnly = false,
 }: AccessStateBannerProps): React.JSX.Element | null {
+  const { t } = useI18n();
   // Сообщения о настройках уровня vault (фича 006) идут до разбора
   // `accessState`: при `readWrite` тот вернул бы `null`, и об утрате настроек
   // пользователь не узнал бы вовсе.
   const settingsNotice = settingsLost ? (
     <div role="status" aria-live="polite" className="ts-banner ts-banner--warn">
-      <p>
-        Служебная папка этого vault исчезла. Настройки уровня папки и локально
-        сохранённые шаблоны Typst утрачены — заметки, доски и файлы вставок при
-        этом на месте, а кэш пересоберётся сам.
-      </p>
+      <p>{t("tree.access.settingsLost")}</p>
     </div>
   ) : settingsReadOnly ? (
     <div role="status" aria-live="polite" className="ts-banner ts-banner--warn">
-      <p>
-        Vault недоступен на запись, поэтому настройки уровня папки менять некуда:
-        расположение файлов вставок и пометки разделов сохранить не получится.
-      </p>
+      <p>{t("tree.access.settingsReadOnly")}</p>
     </div>
   ) : null;
 
@@ -71,11 +66,7 @@ export function AccessStateBanner({
       return (
         <>
           <div role="status" aria-live="polite">
-            <p>
-              Права на запись в vault отозваны. Заметки открываются и читаются
-              как обычно, но сохранение, создание, переименование и удаление
-              сейчас отклоняются.
-            </p>
+            <p>{t("tree.access.readOnly")}</p>
           </div>
           {settingsNotice}
         </>
@@ -86,20 +77,17 @@ export function AccessStateBanner({
           className="ts-dialog"
           role="alertdialog"
           aria-modal="true"
-          aria-label="Vault недоступен"
+          aria-label={t("tree.access.unavailableTitle")}
         >
           <p>
-            Vault стал недоступен — например, отключён диск или отозван доступ к
-            папке. Это <strong>не</strong> означает, что заметки удалены.
+            {t("tree.access.unavailableLead")}
+            <strong>{t("tree.access.unavailableNot")}</strong>
+            {t("tree.access.unavailableTail")}
           </p>
-          <p>
-            Несохранённые правки открытых заметок остаются в памяти, пока
-            приложение работает: если закрыть его до восстановления доступа, они
-            будут потеряны.
-          </p>
+          <p>{t("tree.access.unsavedKept")}</p>
           {onReopenVault && (
             <button type="button" onClick={onReopenVault}>
-              Открыть vault заново
+              {t("tree.access.reopen")}
             </button>
           )}
         </div>

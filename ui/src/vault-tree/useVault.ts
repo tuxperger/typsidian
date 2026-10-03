@@ -32,7 +32,15 @@ export type OpenVaultError =
   | { kind: "NotSupported" }
   /** FR-038: в папке больше заметок, чем поддерживается. */
   | { kind: "TooManyNotes" }
-  | { kind: "OpenFailed"; message: string };
+  /** Папки больше нет по сохранённому пути. */
+  | { kind: "FolderNotFound" }
+  /** По пути лежит не папка. */
+  | { kind: "NotADirectory" }
+  /**
+   * Неизвестный отказ платформы. `detail` — техническое описание как есть: его
+   * формулирует не приложение, и переводить его нечем (фича 010, FR-002).
+   */
+  | { kind: "OpenFailed"; detail: string };
 
 /**
  * Переводит отказ `showDirectoryPicker`/`fromHandle` в конкретную причину.
@@ -59,15 +67,16 @@ export function classifyOpenFailure(cause: unknown): OpenVaultError {
       case "AccessDenied":
         return { kind: "PermissionDenied" };
       case "NotFound":
+        return { kind: "FolderNotFound" };
       case "NotADirectory":
-        return { kind: "OpenFailed", message: openError.kind };
+        return { kind: "NotADirectory" };
       default: {
         const exhaustive: never = openError;
         return exhaustive;
       }
     }
   }
-  return { kind: "OpenFailed", message: String(cause) };
+  return { kind: "OpenFailed", detail: String(cause) };
 }
 
 /** Сужение `unknown` до `OpenError` без `any` (принцип IV). */

@@ -24,8 +24,12 @@ import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 
-import { DEFAULT_NEW_BOARD_NAME } from "../vault-tree/VaultTreeActions.js";
+import { defaultNewBoardName } from "../vault-tree/VaultTreeActions.js";
 import { Sidebar } from "../vault-tree/Sidebar.js";
+import type { DiagnosticLocation } from "../wasm-core/typsidian_core.js";
+import { ExportCenter } from "../export/ExportCenter.js";
+import { ExportToast } from "../export/ExportToast.js";
+import { useExport } from "../export/useExport.js";
 import type {
   CreateError,
   Note,
@@ -60,6 +64,7 @@ import { useTemplateLibrary } from "../templates/useTemplateLibrary.js";
 import { plainInputTarget } from "../templates/insertion/plainInputTarget.js";
 import type { EditorView } from "@codemirror/view";
 import { ContextMenuProvider, copyText, useContextMenu } from "../menu/ContextMenu.js";
+import { useI18n, type MessageKey } from "../i18n/index.js";
 
 export interface WorkspaceProps {
   /**
@@ -153,6 +158,7 @@ function WorkspaceView({
   preview = null,
 }: WorkspaceProps): React.JSX.Element {
   const contextMenu = useContextMenu();
+  const { t, tEn } = useI18n();
   const [openNote, setOpenNote] = useState<Note | null>(null);
   // Текст открытой заметки из буфера редактора: предпросмотр собирается из
   // него, а не из файла на диске (FR-002).
@@ -182,6 +188,10 @@ function WorkspaceView({
   // «Параметры элемента» из палитры (фича 008, FR-006): редактор ловит смену
   // счётчика и открывает форму для элемента под кареткой.
   const [paramsRequest, setParamsRequest] = useState(0);
+  const [exportOpen, setExportOpen] = useState(false);
+  // Место ошибки, к которому надо перейти, когда нужная заметка откроется в
+  // редакторе (009 FR-008, FR-016).
+  const [reveal, setReveal] = useState<DiagnosticLocation | null>(null);
   // Последнее изменение файла в vault. Передаётся вниз, а не обрабатывается
   // здесь: `pollEvents` осушает очередь ядра, поэтому второй подписчик на
   // события заметки перехватывал бы их у первого (FR-005 фичи 002).
@@ -357,6 +367,20 @@ function WorkspaceView({
   // здесь (принцип I). `openNote` может быть и доской: дерево показывает оба
   // вида одинаковыми записями, различие несёт `FileKind`.
   const isBoardOpen = openNote !== null && isBoard(openNote);
+
+  // Экспорт в PDF (фича 009). Компилятор — тот же, что у предпросмотра: иначе
+  // заметка собиралась бы в одной колонке и не собиралась в файле.
+  const previewClient = state.preview ?? preview;
+  const openNotePath = openNote !== null && !isBoardOpen ? openNote.path.toString() : null;
+  const exporter = useExport(previewClient, vaultSettings.overrides, {
+    path: openNotePath,
+    text: editorText,
+  });
+  const exportNote = exporter.exportNote;
+  const exportCurrent = useCallback(() => {
+    // FR-009: экспортировать можно только открытую заметку Typst.
+    if (openNotePath !== null) void exportNote(openNotePath, editorText);
+  }, [openNotePath, editorText, exportNote]);
   const board = useBoardDocument(
     isBoardOpen ? state.client : null,
     isBoardOpen && openNote ? openNote.path.toString() : null,
@@ -384,6 +408,34 @@ function WorkspaceView({
     },
     [isBoardOpen, board],
   );
+
+  // Переход к месту ошибки экспорта (009 FR-008, FR-016): открыть файл, в
+  // котором ошибка, и поставить курсор на её строку и колонку. Сам переход
+  // случается, когда файл уже в редакторе, — см. эффект ниже.
+  const revealDiagnostic = useCallback(
+    (place: DiagnosticLocation) => {
+      const note = state.notes.find((entry) => entry.path.toString() === place.path);
+      if (note === undefined) return;
+      setExportOpen(false);
+      setView("workspace");
+      if (openNote?.path.toString() !== place.path) openEntry(note);
+      setReveal(place);
+    },
+    [state.notes, openNote, openEntry],
+  );
+
+  useEffect(() => {
+    if (reveal === null || openNote?.path.toString() !== reveal.path) return;
+    const view = getEditorView?.() ?? null;
+    // Текст заметки ещё не пришёл в редактор — дождаться следующего
+    // обновления `editorText`.
+    if (view === null || view.state.doc.lines < reveal.line) return;
+    const line = view.state.doc.line(reveal.line);
+    const position = Math.min(line.to, line.from + Math.max(0, reveal.column - 1));
+    view.dispatch({ selection: { anchor: position }, scrollIntoView: true });
+    view.focus();
+    setReveal(null);
+  }, [reveal, openNote, getEditorView, editorText]);
 
   /**
    * Версия, принятая при разрешении конфликта, — вниз, в редактор (FR-022).
@@ -459,7 +511,7 @@ function WorkspaceView({
   const createBoard = useCallback(async () => {
     if (!state.client) return;
     try {
-      const board = await state.client.createBoard(DEFAULT_NEW_BOARD_NAME);
+      const board = await state.client.createBoard(defaultNewBoardName());
       await openPath(board.path.toString());
       await refresh();
     } catch (cause) {
@@ -558,6 +610,14 @@ function WorkspaceView({
       } else if (shortcuts.matches("rebuild-preview", event)) {
         event.preventDefault();
         setRebuildToken((token) => token + 1);
+      } else if (shortcuts.matches("export-pdf", event)) {
+        // `Mod+P` перехватывается и без открытой заметки: иначе браузер
+        // показал бы диалог печати страницы приложения, а не заметки.
+        event.preventDefault();
+        exportCurrent();
+      } else if (shortcuts.matches("export-center", event)) {
+        event.preventDefault();
+        setExportOpen((open) => !open);
       }
       // Escape здесь больше не разбирается: закрытием наложений занят
       // `useDismissOnEscape`, и закрывает он **верхнее** из открытых. Отдельная
@@ -565,7 +625,7 @@ function WorkspaceView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [shortcuts, toggleView]);
+  }, [shortcuts, toggleView, exportCurrent]);
 
   /**
    * Команды палитры. Только те, что действительно что-то делают: список из
@@ -589,10 +649,16 @@ function WorkspaceView({
   }, [getEditorView, openNote]);
 
   const commands = useMemo<PaletteCommand[]>(() => {
+    // Название на языке интерфейса и по-английски: палитра ищет по обоим
+    // (фича 010, FR-024).
+    const titled = (key: MessageKey): { title: string; titleEn: string } => ({
+      title: t(key),
+      titleEn: tEn(key),
+    });
     const items: PaletteCommand[] = [
       {
         id: "graph",
-        title: view === "graph" ? "Вернуться в Workspace" : "Открыть граф связей",
+        ...titled(view === "graph" ? "workspace.backToWorkspace" : "workspace.openGraph"),
         icon: "network",
         // Подпись берётся у ядра, а не пишется здесь: после переназначения
         // литерал в палитре начал бы врать про клавиши.
@@ -601,27 +667,27 @@ function WorkspaceView({
       },
       {
         id: "search",
-        title: "Расширенный поиск",
+        ...titled("workspace.search"),
         icon: "search",
         meta: shortcuts.displayOf("search"),
         run: () => setSearchOpen(true),
       },
       {
         id: "templates",
-        title: "Шаблоны и сниппеты",
+        ...titled("workspace.templates"),
         icon: "file",
         meta: shortcuts.displayOf("templates"),
         run: () => setTemplatesOpen(true),
       },
       {
         id: "new-board",
-        title: "Создать доску",
+        ...titled("tree.menu.createBoard"),
         icon: "image",
         run: () => void createBoard(),
       },
       {
         id: "rebuild",
-        title: "Пересобрать предпросмотр",
+        ...titled("workspace.rebuildPreview"),
         icon: "refresh",
         meta: shortcuts.displayOf("rebuild-preview"),
         run: () => setRebuildToken((token) => token + 1),
@@ -632,22 +698,54 @@ function WorkspaceView({
     if (view === "workspace" && openNote !== null && !isBoard(openNote)) {
       items.push({
         id: "element-params",
-        title: "Параметры элемента",
+        ...titled("workspace.elementParams"),
         icon: "terminal",
         meta: shortcuts.displayOf("element-params"),
         run: () => setParamsRequest((request) => request + 1),
       });
     }
+    // Фича 009. «Экспорт в PDF» — только при открытой заметке Typst (FR-009);
+    // Центр экспорта доступен всегда, пока есть компилятор.
+    if (previewClient !== null) {
+      if (view === "workspace" && openNotePath !== null) {
+        items.push({
+          id: "export-pdf",
+          ...titled("workspace.exportPdf"),
+          icon: "download",
+          meta: shortcuts.displayOf("export-pdf"),
+          run: exportCurrent,
+        });
+      }
+      items.push({
+        id: "export-center",
+        ...titled("workspace.exportCenter"),
+        icon: "download",
+        meta: shortcuts.displayOf("export-center"),
+        run: () => setExportOpen(true),
+      });
+    }
     if (settings !== undefined) {
       items.push({
         id: "settings",
-        title: "Открыть настройки",
+        ...titled("workspace.openSettings"),
         icon: "terminal",
         run: () => setShowSettings(true),
       });
     }
     return items;
-  }, [view, toggleView, createBoard, settings, shortcuts, openNote]);
+  }, [
+    view,
+    toggleView,
+    createBoard,
+    settings,
+    shortcuts,
+    openNote,
+    previewClient,
+    openNotePath,
+    exportCurrent,
+    t,
+    tEn,
+  ]);
 
   if (!state.client) {
     return (
@@ -655,7 +753,7 @@ function WorkspaceView({
         <h1 className="ts-welcome__mark">
           <span className="ts-wordmark__slash">/</span>typsidian
         </h1>
-        <p>Выберите папку с заметками — она станет vault. Файлы остаются на вашем диске.</p>
+        <p>{t("workspace.welcome")}</p>
         <OpenVault
           isLoading={state.isLoading}
           error={state.error}
@@ -682,27 +780,27 @@ function WorkspaceView({
               ? []
               : [
                   {
-                    label: "Копировать путь заметки",
+                    label: t("workspace.copyNotePath"),
                     run: async () => {
                       const failure = await copyText(path);
-                      contextMenu.notify(failure ?? `Скопировано: ${path}`);
+                      contextMenu.notify(failure ?? t("tree.menu.copied", { path }));
                     },
                   },
                   { kind: "separator" as const },
                 ]),
             {
-              label: panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов",
+              label: panes.sidebarHidden ? t("workspace.showTree") : t("workspace.hideTree"),
               run: panes.toggleSidebar,
             },
             {
-              label: view === "graph" ? "Вернуться в Workspace" : "Открыть граф связей",
+              label: view === "graph" ? t("workspace.backToWorkspace") : t("workspace.openGraph"),
               shortcut: shortcuts.displayOf("toggle-graph"),
               run: toggleView,
             },
             ...(view === "workspace"
               ? [
                   {
-                    label: "Пересобрать предпросмотр",
+                    label: t("workspace.rebuildPreview"),
                     shortcut: shortcuts.displayOf("rebuild-preview"),
                     disabled: compile.isBuilding,
                     run: () => setRebuildToken((token) => token + 1),
@@ -711,17 +809,17 @@ function WorkspaceView({
               : []),
             { kind: "separator" },
             {
-              label: "Палитра команд",
+              label: t("palette.label"),
               shortcut: shortcuts.displayOf("command-palette"),
               run: () => setPaletteOpen(true),
             },
             {
-              label: "Расширенный поиск",
+              label: t("workspace.search"),
               shortcut: shortcuts.displayOf("search"),
               run: () => setSearchOpen(true),
             },
             ...(settings !== undefined
-              ? [{ label: "Настройки", run: () => setShowSettings(true) }]
+              ? [{ label: t("workspace.settings"), run: () => setShowSettings(true) }]
               : []),
           ]);
         }}
@@ -734,9 +832,9 @@ function WorkspaceView({
             type="button"
             className="ts-btn ts-btn--icon"
             aria-pressed={!panes.sidebarHidden}
-            title={panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов"}
+            title={panes.sidebarHidden ? t("workspace.showTree") : t("workspace.hideTree")}
             aria-label={
-              panes.sidebarHidden ? "Показать дерево файлов" : "Скрыть дерево файлов"
+              panes.sidebarHidden ? t("workspace.showTree") : t("workspace.hideTree")
             }
             onClick={panes.toggleSidebar}
           >
@@ -755,24 +853,26 @@ function WorkspaceView({
             <div className="ts-compile">
               {compile.isBuilding ? (
                 <>
-                  <div className="ts-hazard" role="progressbar" aria-label="Идёт сборка">
+                  <div className="ts-hazard" role="progressbar" aria-label={t("workspace.compile.building")}>
                     <div className="ts-hazard__fill" />
                   </div>
-                  <span className="ts-compile__label">компиляция…</span>
+                  <span className="ts-compile__label">{t("workspace.compile.compiling")}</span>
                 </>
               ) : (
                 <>
                   <span className="ts-compile__dot" aria-hidden="true" />
                   <span className="ts-compile__label">
-                    {compile.lastMs === null ? "готово" : `готово · ${compile.lastMs} ms`}
+                    {compile.lastMs === null
+                      ? t("workspace.compile.ready")
+                      : t("workspace.compile.readyIn", { ms: compile.lastMs })}
                   </span>
                 </>
               )}
               <button
                 type="button"
                 className="ts-btn ts-btn--icon"
-                title="Пересобрать"
-                aria-label="Пересобрать предпросмотр"
+                title={t("workspace.rebuild")}
+                aria-label={t("workspace.rebuildPreview")}
                 disabled={compile.isBuilding}
                 onClick={() => setRebuildToken((token) => token + 1)}
               >
@@ -781,13 +881,31 @@ function WorkspaceView({
             </div>
           )}
 
+          {/* Ход пакета экспорта виден и при закрытом Центре (009 FR-025). */}
+          {exporter.batchRunning && exporter.batch !== null && (
+            <button
+              type="button"
+              className="ts-export-pill"
+              title={t("workspace.openExportCenter")}
+              onClick={() => setExportOpen(true)}
+            >
+              <span className="ts-hazard" aria-hidden="true">
+                <span className="ts-hazard__fill" />
+              </span>
+              {t("workspace.exportProgress", {
+                processed: exporter.batch.processed,
+                total: exporter.batch.total,
+              })}
+            </button>
+          )}
+
           <span className="ts-divider" />
 
           <button
             type="button"
             className="ts-btn"
             aria-pressed={view === "graph"}
-            title="Граф связей"
+            title={t("tree.graph.title")}
             onClick={toggleView}
           >
             {view === "workspace" ? (
@@ -795,7 +913,7 @@ function WorkspaceView({
             ) : (
               <Icon name="chevron" size={14} className="ts-icon--flip" />
             )}
-            {view === "workspace" ? "Граф" : "Workspace"}
+            {view === "workspace" ? t("workspace.graph") : t("graph.back")}
           </button>
 
           {/* Кнопка показывает действующее сочетание, а не ⌘K из макета:
@@ -804,8 +922,8 @@ function WorkspaceView({
           <button
             type="button"
             className="ts-btn ts-btn--cmd"
-            title="Палитра команд"
-            aria-label="Открыть палитру команд"
+            title={t("palette.label")}
+            aria-label={t("workspace.openPalette")}
             onClick={() => setPaletteOpen(true)}
           >
             {shortcuts.displayOf("command-palette") || (
@@ -823,7 +941,7 @@ function WorkspaceView({
               aria-pressed={showSettings}
               onClick={() => setShowSettings((shown) => !shown)}
             >
-              {showSettings ? "Закрыть настройки" : "Настройки"}
+              {showSettings ? t("workspace.closeSettings") : t("workspace.settings")}
             </button>
           )}
         </div>
@@ -843,6 +961,14 @@ function WorkspaceView({
         />
         <BulkChangeIndicator active={state.bulkChangeDepth > 0} />
         <ErrorBanner error={operationError} onDismiss={() => setOperationError(null)} />
+        {exporter.last !== null && (
+          <ExportToast
+            result={exporter.last}
+            onDismiss={exporter.dismissLast}
+            onReveal={revealDiagnostic}
+            onOpenCenter={() => setExportOpen(true)}
+          />
+        )}
       </div>
 
       {view === "graph" ? (
@@ -884,7 +1010,7 @@ function WorkspaceView({
                 доска занимает место пары «редактор + предпросмотр», а панель —
                 нет. */}
             <PaneDivider
-              label="Ширина боковой панели"
+              label={t("workspace.sidebarWidth")}
               now={panes.sidebarWidth}
               min={SIDEBAR_MIN_WIDTH}
               max={SIDEBAR_MAX_WIDTH}
@@ -935,7 +1061,7 @@ function WorkspaceView({
                 зависит от размера окна, а доля — нет, и озвучивать пиксели,
                 меняющиеся сами по себе, значило бы врать скринридеру. */}
             <PaneDivider
-              label="Граница редактора и предпросмотра"
+              label={t("workspace.editorPreviewSplit")}
               now={panes.editorShare * 100}
               min={SPLIT_MIN * 100}
               max={SPLIT_MAX * 100}
@@ -957,6 +1083,9 @@ function WorkspaceView({
               // в сеть. Читаются здесь, а не в панели: панель предпросмотра
               // vault-клиентом не владеет.
               vaultOverrides={vaultSettings.overrides}
+              // Фича 009: кнопка «PDF» в тулбаре — только у открытой заметки.
+              onExport={openNotePath === null ? undefined : exportCurrent}
+              exporting={exporter.busy}
             />
           </>
         )}
@@ -985,6 +1114,21 @@ function WorkspaceView({
             setView("workspace");
           }}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {exportOpen && previewClient !== null && (
+        <ExportCenter
+          client={previewClient}
+          overrides={vaultSettings.overrides}
+          exporter={exporter}
+          preselect={openNotePath}
+          onClose={() => setExportOpen(false)}
+          onOpenSettings={() => {
+            setExportOpen(false);
+            setShowSettings(true);
+          }}
+          onReveal={revealDiagnostic}
         />
       )}
 
@@ -1018,7 +1162,7 @@ function WorkspaceView({
         <SaveAsTemplateDialog
           client={state.client}
           content={savingTemplate}
-          suggestedName={openNote?.name ?? "Заготовка"}
+          suggestedName={openNote?.name ?? t("workspace.templateName")}
           onSaved={() => {
             setSavingTemplate(null);
             // Состав библиотеки перечитывается у ядра, а не дописывается здесь:
@@ -1035,14 +1179,14 @@ function WorkspaceView({
         <div className="ts-overlay">
           <div className="ts-sheet">
             <div className="ts-sheet__head">
-              <span className="ts-eyebrow">Настройки</span>
+              <span className="ts-eyebrow">{t("workspace.settings")}</span>
               <span className="ts-spacer" />
               <button
                 type="button"
                 className="ts-btn"
                 onClick={() => setShowSettings(false)}
               >
-                Закрыть
+                {t("common.close")}
               </button>
             </div>
             {/* Без внутренних отступов: панель настроек сама задаёт раскладку
@@ -1081,7 +1225,7 @@ function WorkspaceView({
         error={
           conflicts.state.error === null
             ? null
-            : describeResolveError(conflicts.state.error)
+            : describeResolveError(t, conflicts.state.error)
         }
         onKeepLocal={() => void conflicts.keepLocal()}
         onAcceptExternal={() => void handleAcceptExternalBoard()}

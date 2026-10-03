@@ -2,6 +2,7 @@
 
 import type { Template } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
+import { useI18n } from "../i18n/index.js";
 
 // Выбор заготовки в момент создания заметки (T024, FR-020, FR-022, FR-024).
 //
@@ -40,11 +41,12 @@ export function NewNoteFromTemplate({
   onChoose,
   onOpenGallery,
 }: NewNoteFromTemplateProps): React.JSX.Element {
+  const { t } = useI18n();
   const shown = templates.slice(0, MENU_TEMPLATE_LIMIT);
   const hidden = templates.length - shown.length;
 
   return (
-    <div className="ts-create__sub" role="group" aria-label="Из заготовки">
+    <div className="ts-create__sub" role="group" aria-label={t("templates.menu.fromTemplate")}>
       {shown.map((template) => (
         <button
           key={template.path}
@@ -64,7 +66,7 @@ export function NewNoteFromTemplate({
         className="ts-create__subrow ts-create__subrow--muted"
         onClick={() => onChoose(null)}
       >
-        Пустая заметка
+        {t("templates.menu.blank")}
       </button>
 
       {hidden > 0 && onOpenGallery && (
@@ -74,7 +76,7 @@ export function NewNoteFromTemplate({
           className="ts-create__subrow ts-create__subrow--muted"
           onClick={onOpenGallery}
         >
-          Ещё {hidden} — открыть галерею
+          {t("templates.menu.more", { count: hidden })}
         </button>
       )}
     </div>

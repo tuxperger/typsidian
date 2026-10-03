@@ -13,6 +13,7 @@ import type {
   VaultRecord,
 } from "../wasm-core/typsidian_core.js";
 import type { DeviceSettingsClient } from "./device-settings-client.js";
+import { announceLanguageChoice } from "../i18n/device.js";
 
 // Принцип I конституции: этот хук не переизобретает логику настроек — он только
 // вызывает ядро (contracts/settings-store-trait.md) и разбирает уже готовые
@@ -177,9 +178,21 @@ export function useSettings(client: DeviceSettingsClient): {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const snapshot = await client.snapshot();
-      if (cancelled) return;
-      setState({ ...INITIAL_STATE, ...snapshot, isLoading: false });
+      try {
+        const snapshot = await client.snapshot();
+        if (cancelled) return;
+        setState({ ...INITIAL_STATE, ...snapshot, isLoading: false });
+      } catch {
+        // Хранилище не ответило вовсе (отказ IPC или wasm). Язык остаётся
+        // системным — выбора не прочли, — а панель говорит о недоступности на
+        // нём, а не висит в загрузке (010 FR-029).
+        if (cancelled) return;
+        setState({
+          ...INITIAL_STATE,
+          isLoading: false,
+          notices: [{ kind: "unreadable" }],
+        });
+      }
     })();
     return () => {
       cancelled = true;
@@ -213,6 +226,14 @@ export function useSettings(client: DeviceSettingsClient): {
       window.clearInterval(timer);
     };
   }, [state.isLoading, client]);
+
+  // Язык интерфейса следует за действующим выбором (фича 010, FR-012): после
+  // применения, сброса и правки файла руками — без перезапуска.
+  const languageChoice = state.settings?.language;
+  const settingsLoaded = state.settings !== null;
+  useEffect(() => {
+    if (settingsLoaded) announceLanguageChoice(languageChoice);
+  }, [settingsLoaded, languageChoice]);
 
   const apply = useCallback(
     async (change: SettingsChange): Promise<ApplyPlan | null> => {

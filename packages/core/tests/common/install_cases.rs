@@ -12,10 +12,11 @@
 
 use std::io::Write;
 
+use typsidian_core::messages::AppMessage;
 use typsidian_core::preview::packages::{
     fingerprint, install, installed_templates, recorded_fingerprint, remember_installed,
-    source_url, unpack, verify_installed, FingerprintCheck, InstallError, InstalledTemplate,
-    TemplateSource, FINGERPRINT_FILE,
+    source_url, unpack, verify_installed, ArchiveProblem, FingerprintCheck, InstallError,
+    InstalledTemplate, TemplateSource, FINGERPRINT_FILE,
 };
 use typsidian_core::preview::resolve::{package_root, PACKAGE_MANIFEST};
 use typst::syntax::package::{PackageSpec, PackageVersion};
@@ -58,7 +59,10 @@ const MANIFEST: &[u8] = b"[package]\nname = \"codly\"\n";
 
 /// FR-001, FR-036: обычный архив разбирается, файлы на местах.
 pub fn a_plain_archive_unpacks() {
-    let archive = make_archive(&[("lib.typ", b"#let codly() = {}"), (PACKAGE_MANIFEST, MANIFEST)]);
+    let archive = make_archive(&[
+        ("lib.typ", b"#let codly() = {}"),
+        (PACKAGE_MANIFEST, MANIFEST),
+    ]);
     let files = unpack(&archive).expect("обычный архив разбирается");
 
     let names: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
@@ -84,7 +88,8 @@ fn make_hostile_archive(path: &str, bytes: &[u8]) -> Vec<u8> {
         name[..raw.len()].copy_from_slice(raw);
     }
     header.set_cksum();
-    tar.append(&header, bytes).expect("запись враждебной записи");
+    tar.append(&header, bytes)
+        .expect("запись враждебной записи");
 
     let mut manifest = tar::Header::new_gnu();
     manifest.set_size(MANIFEST.len() as u64);
@@ -105,7 +110,12 @@ pub fn a_path_traversal_rejects_the_whole_archive() {
         let archive = make_hostile_archive(evil, "зло".as_bytes());
         let error = unpack(&archive).expect_err(evil);
         assert!(
-            matches!(error, InstallError::ArchiveRejected { .. }),
+            matches!(
+                error,
+                InstallError::ArchiveRejected {
+                    reason: ArchiveProblem::EscapesFolder { .. }
+                }
+            ),
             "{evil} обязан отклонить архив целиком, а не пропустить запись"
         );
     }
@@ -115,18 +125,23 @@ pub fn a_path_traversal_rejects_the_whole_archive() {
 /// установленным, и разложить его файлы значило бы намусорить впустую.
 pub fn an_archive_without_a_manifest_is_rejected() {
     let archive = make_archive(&[("lib.typ", b"x")]);
-    assert!(matches!(
+    // Причина — вид, а не текст (фича 010): слова подбирает интерфейс.
+    assert_eq!(
         unpack(&archive),
-        Err(InstallError::ArchiveRejected { .. })
-    ));
+        Err(InstallError::ArchiveRejected {
+            reason: ArchiveProblem::NoManifest
+        })
+    );
 }
 
 /// Мусор вместо архива — названная причина, а не паника.
 pub fn garbage_is_not_an_archive() {
-    assert!(matches!(
+    assert_eq!(
         unpack("это не архив".as_bytes()),
-        Err(InstallError::ArchiveRejected { .. })
-    ));
+        Err(InstallError::ArchiveRejected {
+            reason: ArchiveProblem::Unparsable
+        })
+    );
 }
 
 /// Обёртка-папка срезается: иначе `lib.typ` лежал бы глубже, чем его ищет
@@ -153,7 +168,9 @@ pub async fn install_writes_the_manifest_last() {
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
 
-    let digest = install(&mut vault, &codly, &files).await.expect("установка");
+    let digest = install(&mut vault, &codly, &files)
+        .await
+        .expect("установка");
     let root = package_root(&codly);
 
     assert!(vault.read(&root.join("lib.typ")).await.is_ok());
@@ -251,7 +268,9 @@ pub async fn a_changed_template_diverges_from_its_fingerprint() {
         ("lib.typ".to_string(), "исходный".as_bytes().to_vec()),
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
-    let installed = install(&mut vault, &codly, &files).await.expect("установка");
+    let installed = install(&mut vault, &codly, &files)
+        .await
+        .expect("установка");
 
     // Пользователь (или кто-то ещё) поправил файл на диске.
     let tampered = vec![
@@ -297,7 +316,10 @@ pub fn the_request_carries_nothing_but_the_template_name() {
     // `.typ` сюда включать нельзя: она встречается внутри `packages.typst.org`,
     // и проверка ловила бы сам адрес реестра вместо утечки.
     for leak in ["Идея", "Заметк", "vault", "/home/", "notes", "apokryf"] {
-        assert!(!url.contains(leak), "в адресе не должно быть «{leak}»: {url}");
+        assert!(
+            !url.contains(leak),
+            "в адресе не должно быть «{leak}»: {url}"
+        );
     }
     // Адрес состоит ровно из реестра, имени и версии — ничего больше.
     assert_eq!(url, "https://packages.typst.org/preview/codly-1.3.0.tar.gz");
@@ -323,13 +345,19 @@ pub async fn a_neighbouring_version_is_left_alone() {
     let new = spec("codly", (0, 2, 0));
 
     let old_files = vec![
-        ("lib.typ".to_string(), b"\xd1\x81\xd1\x82\xd0\xb0\xd1\x80\xd0\xb0\xd1\x8f".to_vec()),
+        (
+            "lib.typ".to_string(),
+            b"\xd1\x81\xd1\x82\xd0\xb0\xd1\x80\xd0\xb0\xd1\x8f".to_vec(),
+        ),
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
     let old_digest = install(&mut vault, &old, &old_files).await.expect("0.1.0");
 
     let new_files = vec![
-        ("lib.typ".to_string(), b"\xd0\xbd\xd0\xbe\xd0\xb2\xd0\xb0\xd1\x8f".to_vec()),
+        (
+            "lib.typ".to_string(),
+            b"\xd0\xbd\xd0\xbe\xd0\xb2\xd0\xb0\xd1\x8f".to_vec(),
+        ),
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
     install(&mut vault, &new, &new_files).await.expect("0.2.0");
@@ -340,7 +368,10 @@ pub async fn a_neighbouring_version_is_left_alone() {
         "прежняя версия осталась нетронутой"
     );
     assert!(
-        matches!(verify_installed(&vault, &old).await, FingerprintCheck::Matches),
+        matches!(
+            verify_installed(&vault, &old).await,
+            FingerprintCheck::Matches
+        ),
         "и сходится сама с собой"
     );
 }
@@ -353,10 +384,15 @@ pub async fn tampering_is_noticed_without_reinstalling() {
         ("lib.typ".to_string(), b"#let codly() = {}".to_vec()),
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
-    let digest = install(&mut vault, &codly, &files).await.expect("установка");
+    let digest = install(&mut vault, &codly, &files)
+        .await
+        .expect("установка");
 
     assert!(
-        matches!(verify_installed(&vault, &codly).await, FingerprintCheck::Matches),
+        matches!(
+            verify_installed(&vault, &codly).await,
+            FingerprintCheck::Matches
+        ),
         "сразу после установки содержимое сходится"
     );
 
@@ -377,7 +413,10 @@ pub async fn tampering_is_noticed_without_reinstalling() {
 
     // Переустановки не произошло: на диске остался изменённый файл.
     assert_eq!(
-        vault.read_bytes(&root.join("lib.typ")).await.expect("чтение"),
+        vault
+            .read_bytes(&root.join("lib.typ"))
+            .await
+            .expect("чтение"),
         b"#let codly() = panic()".to_vec(),
         "правка пользователя не затёрта"
     );
@@ -397,7 +436,10 @@ pub async fn a_hand_placed_template_cannot_be_verified() {
         .expect("манифест");
 
     assert!(
-        matches!(verify_installed(&vault, &codly).await, FingerprintCheck::Unknown),
+        matches!(
+            verify_installed(&vault, &codly).await,
+            FingerprintCheck::Unknown
+        ),
         "сверять не с чем"
     );
 }
@@ -415,7 +457,9 @@ pub async fn the_registry_lists_installed_templates() {
         ("lib.typ".to_string(), b"#let codly() = {}".to_vec()),
         (PACKAGE_MANIFEST.to_string(), MANIFEST.to_vec()),
     ];
-    let digest = install(&mut vault, &codly, &files).await.expect("установка");
+    let digest = install(&mut vault, &codly, &files)
+        .await
+        .expect("установка");
     remember_installed(
         &mut vault,
         InstalledTemplate {
@@ -473,8 +517,14 @@ fn trap_policy(auto_download: bool) -> TemplatePolicy {
 
 async fn install_demo(vault: &mut MemoryVault) -> String {
     let files = vec![
-        ("lib.typ".to_string(), "#let привет = [Привет]\n".as_bytes().to_vec()),
-        (PACKAGE_MANIFEST.to_string(), DEMO_MANIFEST.as_bytes().to_vec()),
+        (
+            "lib.typ".to_string(),
+            "#let привет = [Привет]\n".as_bytes().to_vec(),
+        ),
+        (
+            PACKAGE_MANIFEST.to_string(),
+            DEMO_MANIFEST.as_bytes().to_vec(),
+        ),
     ];
     install(vault, &spec("demo", (1, 0, 0)), &files)
         .await
@@ -501,6 +551,14 @@ fn messages(document: &CompiledDocument) -> Vec<String> {
         .collect()
 }
 
+/// Есть ли замечание о расхождении отпечатка шаблона `spec` — по виду
+/// сообщения, а не по тексту: текст собирает интерфейс на языке пользователя.
+fn diverged(document: &CompiledDocument, spec: &str) -> bool {
+    document.diagnostics.iter().any(|d| {
+        matches!(&d.app, Some(AppMessage::TemplateFingerprintDiverged { spec: s, .. }) if s == spec)
+    })
+}
+
 fn attempted(document: &CompiledDocument) -> bool {
     messages(document).iter().any(|m| m.contains(TRAP))
 }
@@ -521,7 +579,10 @@ pub async fn an_installed_template_is_not_fetched_again() {
             "проход {round}: {:?}",
             messages(&document)
         );
-        assert!(!attempted(&document), "проход {round}: обращения быть не должно");
+        assert!(
+            !attempted(&document),
+            "проход {round}: обращения быть не должно"
+        );
     }
 }
 
@@ -565,7 +626,10 @@ pub async fn the_fetch_path_sends_nothing_about_the_note() {
     // хвост запроса: адрес назван ровно тем, что задано, без добавок.
     let message = named[0];
     for leak in ["Идеи", "Заметк", "apokryf", "секрет"] {
-        assert!(!message.contains(leak), "«{leak}» ушло бы наружу: {message}");
+        assert!(
+            !message.contains(leak),
+            "«{leak}» ушло бы наружу: {message}"
+        );
     }
 }
 
@@ -573,12 +637,21 @@ pub async fn the_fetch_path_sends_nothing_about_the_note() {
 pub async fn disabled_auto_download_makes_no_attempt() {
     let mut vault = MemoryVault::new();
     let packages = PackageCache::new();
-    let document = compile(&mut vault, &packages, NOTE, NOTE_WITH_DEMO, &trap_policy(false)).await;
+    let document = compile(
+        &mut vault,
+        &packages,
+        NOTE,
+        NOTE_WITH_DEMO,
+        &trap_policy(false),
+    )
+    .await;
 
     assert!(!attempted(&document), "выключено — обращений нет");
     let notes = messages(&document);
     assert!(
-        notes.iter().any(|m| m.contains(DEMO) && m.contains("автозагрузка выключена")),
+        notes
+            .iter()
+            .any(|m| m.contains(DEMO) && m.contains("автозагрузка выключена")),
         "шаблон назван по имени и версии: {notes:?}"
     );
     // FR-010: интерфейсу есть что предложить загрузить явно — спецификация
@@ -590,14 +663,37 @@ pub async fn disabled_auto_download_makes_no_attempt() {
             .any(|d| d.template.as_deref() == Some(DEMO)),
         "замечание несёт шаблон для явной загрузки"
     );
+    // Фича 010: причина уходит в интерфейс видом и параметрами.
+    assert!(
+        document.diagnostics.iter().any(|d| d.app
+            == Some(AppMessage::TemplateInstallFailed {
+                spec: DEMO.to_string(),
+                reason: InstallError::AutoDownloadDisabled {
+                    spec: DEMO.to_string()
+                },
+            })),
+        "{:?}",
+        document.diagnostics
+    );
 }
 
 /// FR-001: включено — попытка есть.
 pub async fn enabled_auto_download_makes_an_attempt() {
     let mut vault = MemoryVault::new();
     let packages = PackageCache::new();
-    let document = compile(&mut vault, &packages, NOTE, NOTE_WITH_DEMO, &trap_policy(true)).await;
-    assert!(attempted(&document), "включено — попытка обязана быть: {:?}", messages(&document));
+    let document = compile(
+        &mut vault,
+        &packages,
+        NOTE,
+        NOTE_WITH_DEMO,
+        &trap_policy(true),
+    )
+    .await;
+    assert!(
+        attempted(&document),
+        "включено — попытка обязана быть: {:?}",
+        messages(&document)
+    );
 }
 
 /// FR-010, US3 AS2: явный запрос работает и при выключенной автозагрузке.
@@ -622,10 +718,20 @@ pub async fn an_explicit_install_ignores_the_switch() {
 pub async fn a_user_url_is_never_replaced_by_the_registry() {
     let mut vault = MemoryVault::new();
     let packages = PackageCache::new();
-    let document = compile(&mut vault, &packages, NOTE, NOTE_WITH_DEMO, &trap_policy(true)).await;
+    let document = compile(
+        &mut vault,
+        &packages,
+        NOTE,
+        NOTE_WITH_DEMO,
+        &trap_policy(true),
+    )
+    .await;
 
     let notes = messages(&document);
-    assert!(notes.iter().any(|m| m.contains(TRAP)), "назван указанный адрес: {notes:?}");
+    assert!(
+        notes.iter().any(|m| m.contains(TRAP)),
+        "назван указанный адрес: {notes:?}"
+    );
     assert!(
         !notes.iter().any(|m| m.contains("packages.typst.org")),
         "реестр вместо указанного адреса не подставлен: {notes:?}"
@@ -652,7 +758,10 @@ pub async fn a_local_namespace_is_only_reported_missing() {
 
     let notes = messages(&document);
     assert_eq!(document.outcome, CompileOutcome::Failed);
-    assert!(notes.iter().any(|m| m.contains("@local/мой:0.1.0")), "шаблон назван: {notes:?}");
+    assert!(
+        notes.iter().any(|m| m.contains("@local/мой:0.1.0")),
+        "шаблон назван: {notes:?}"
+    );
     assert!(
         !notes.iter().any(|m| m.contains("источник")
             || m.contains("загружен")
@@ -674,14 +783,18 @@ pub async fn compiling_reports_a_tampered_template_without_reinstalling() {
         .expect("правка файла");
 
     let packages = PackageCache::new();
-    let document = compile(&mut vault, &packages, NOTE, NOTE_WITH_DEMO, &trap_policy(true)).await;
+    let document = compile(
+        &mut vault,
+        &packages,
+        NOTE,
+        NOTE_WITH_DEMO,
+        &trap_policy(true),
+    )
+    .await;
 
     let notes = messages(&document);
     assert_eq!(document.outcome, CompileOutcome::Succeeded, "{notes:?}");
-    assert!(
-        notes.iter().any(|m| m.contains(DEMO) && m.contains("разошлось")),
-        "расхождение названо: {notes:?}"
-    );
+    assert!(diverged(&document, DEMO), "расхождение названо: {notes:?}");
     assert!(!attempted(&document), "переустановки не было");
     assert_eq!(
         vault.read_bytes(&lib).await.expect("чтение"),
@@ -690,9 +803,16 @@ pub async fn compiling_reports_a_tampered_template_without_reinstalling() {
     );
 
     // Сверка — раз за сеанс: вторая сборка не повторяет замечание.
-    let again = compile(&mut vault, &packages, NOTE, NOTE_WITH_DEMO, &trap_policy(true)).await;
+    let again = compile(
+        &mut vault,
+        &packages,
+        NOTE,
+        NOTE_WITH_DEMO,
+        &trap_policy(true),
+    )
+    .await;
     assert!(
-        !messages(&again).iter().any(|m| m.contains("разошлось")),
+        !diverged(&again, DEMO),
         "замечание не повторяется на каждое нажатие"
     );
 }

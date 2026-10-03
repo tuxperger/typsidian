@@ -49,6 +49,10 @@ pub enum CommandId {
     ToggleGraph,
     /// Пересобрать предпросмотр.
     RebuildPreview,
+    /// Экспорт открытой заметки в PDF (фича 009, FR-005).
+    ExportPdf,
+    /// Центр экспорта (фича 009, FR-014).
+    ExportCenter,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -65,6 +69,8 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::ElementParams,
     CommandId::ToggleGraph,
     CommandId::RebuildPreview,
+    CommandId::ExportPdf,
+    CommandId::ExportCenter,
 ];
 
 impl CommandId {
@@ -80,30 +86,14 @@ impl CommandId {
             Self::ElementParams => "element-params",
             Self::ToggleGraph => "toggle-graph",
             Self::RebuildPreview => "rebuild-preview",
+            Self::ExportPdf => "export-pdf",
+            Self::ExportCenter => "export-center",
         }
     }
 
     /// Разбирает имя из файла. `None` — команды с таким именем нет.
     pub fn parse(text: &str) -> Option<Self> {
         COMMANDS.iter().copied().find(|id| id.as_str() == text)
-    }
-
-    /// Подпись команды для панели настроек.
-    ///
-    /// В ядре по той же причине, что и список: подпись обязана существовать для
-    /// каждой команды, и `match` без ветки не соберётся (принцип IV).
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::CommandPalette => "Палитра команд",
-            Self::Search => "Расширенный поиск",
-            Self::Templates => "Шаблоны и сниппеты",
-            Self::NewFile => "Создать заметку",
-            Self::NewBoard => "Создать доску",
-            Self::InsertMenu => "Вставить элемент Typst",
-            Self::ElementParams => "Параметры элемента",
-            Self::ToggleGraph => "Граф связей",
-            Self::RebuildPreview => "Пересобрать предпросмотр",
-        }
     }
 
     /// Сочетание по умолчанию.
@@ -127,6 +117,12 @@ impl CommandId {
             // перезагрузкой без кэша. Обе сборки обязаны вести себя одинаково
             // (принцип II), поэтому берётся свободное на всех.
             Self::RebuildPreview => (true, false, "b"),
+            // `Mod+P` — жест печати: «в PDF» для редактора документов то же
+            // самое. `Mod+Shift+E` из макета занят параметрами элемента
+            // (фича 008), поэтому Центр экспорта — пара к `Mod+P` с Shift
+            // (009/research.md §9).
+            Self::ExportPdf => (false, false, "p"),
+            Self::ExportCenter => (true, false, "p"),
         };
         Shortcut {
             mod_key: true,
@@ -179,7 +175,15 @@ pub enum ShortcutProblem {
 /// поле ввода: команда, перехватившая их глобально, сломала бы интерфейс
 /// целиком, а не только себя.
 const RESERVED_KEYS: &[&str] = &[
-    "escape", "enter", "tab", "backspace", "delete", " ", "arrowup", "arrowdown", "arrowleft",
+    "escape",
+    "enter",
+    "tab",
+    "backspace",
+    "delete",
+    " ",
+    "arrowup",
+    "arrowdown",
+    "arrowleft",
     "arrowright",
 ];
 
@@ -364,7 +368,6 @@ pub struct KeybindingEntry {
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct ResolvedBinding {
     pub command: CommandId,
-    pub title: String,
     /// `None` — сочетание снято пользователем.
     pub shortcut: Option<Shortcut>,
     /// Подпись сочетания; пустая строка, если оно снято.
@@ -401,9 +404,6 @@ pub fn resolve(entries: &[KeybindingEntry], mac: bool) -> Vec<ResolvedBinding> {
         .iter()
         .map(|(command, shortcut)| ResolvedBinding {
             command: *command,
-            // `String`, а не `&'static str`: типы, уезжающие через `tsify`,
-            // обязаны владеть своими данными.
-            title: command.title().to_string(),
             display: shortcut
                 .as_ref()
                 .map(|value| value.display(mac))
@@ -435,12 +435,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_command_has_a_title_and_a_default() {
-        // Принцип IV: новая команда не может проскочить без подписи и
-        // умолчания — `match` без ветки не соберётся. Тест закрепляет, что
-        // список и сами значения не разошлись.
+    fn every_command_has_a_valid_default() {
+        // Принцип IV: новая команда не может проскочить без умолчания —
+        // `match` без ветки не соберётся. Подпись команды живёт в каталогах
+        // интерфейса (фича 010), и её полноту проверяет `tsc`.
         for &command in COMMANDS {
-            assert!(!command.title().is_empty(), "{command:?} без подписи");
             assert!(
                 command.default_shortcut().problem().is_none(),
                 "{command:?}: умолчание само по себе недопустимо"
@@ -479,7 +478,12 @@ mod tests {
     #[test]
     fn modifier_synonyms_are_accepted_from_a_hand_written_file() {
         let expected = Shortcut::normalize(true, true, false, "f");
-        for text in ["Mod+Shift+F", "Cmd+Shift+f", "ctrl+shift+F", "Control+Shift+F"] {
+        for text in [
+            "Mod+Shift+F",
+            "Cmd+Shift+f",
+            "ctrl+shift+F",
+            "Control+Shift+F",
+        ] {
             assert_eq!(Shortcut::parse(text).as_ref(), Some(&expected), "{text}");
         }
     }
@@ -663,7 +667,10 @@ mod tests {
 
     #[test]
     fn an_unknown_command_name_is_not_a_command() {
-        assert_eq!(CommandId::parse("command-palette"), Some(CommandId::CommandPalette));
+        assert_eq!(
+            CommandId::parse("command-palette"),
+            Some(CommandId::CommandPalette)
+        );
         assert_eq!(CommandId::parse("удалить-всё"), None);
     }
 }

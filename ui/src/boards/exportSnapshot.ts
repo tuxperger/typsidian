@@ -3,6 +3,7 @@
 import type { EmbedPlan } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { exportBoardContentToSvg } from "./exportSvg.js";
+import type { Phrase } from "../i18n/index.js";
 
 // Снимок вставки (T044, FR-019, FR-028).
 //
@@ -15,7 +16,7 @@ import { exportBoardContentToSvg } from "./exportSvg.js";
 // `exportToSvg` в проекте нет. Метаданные в SVG вкладывает ядро
 // (`writeSnapshot`): формат метаданных и хэш содержимого — его правила, не наши.
 
-export type SnapshotResult = { ok: true } | { ok: false; reason: string };
+export type SnapshotResult = { ok: true } | { ok: false; reason: Phrase };
 
 export interface SnapshotRequest {
   client: VaultClient;
@@ -47,7 +48,8 @@ export async function writeBoardSnapshot({
 
   const exported = await exportBoardContentToSvg(boardContent);
   if (!exported.ok) {
-    return { ok: false, reason: `не удалось построить изображение: ${exported.reason}` };
+    const cause = exported.reason;
+    return { ok: false, reason: (t) => t("boards.snapshot.imageFailed", { reason: cause(t) }) };
   }
 
   try {
@@ -64,21 +66,21 @@ export async function writeBoardSnapshot({
 }
 
 /** Причина отказа записи словами. */
-function describeSnapshotFailure(cause: unknown): string {
+function describeSnapshotFailure(cause: unknown): Phrase {
   const kind =
     typeof cause === "object" && cause !== null && "kind" in cause
       ? (cause as { kind: unknown }).kind
       : null;
   switch (kind) {
     case "NotASnapshotPath":
-      return "путь снимка ведёт не в папку вставок заметки";
+      return (t) => t("boards.snapshot.notASnapshotPath");
     case "NotAnSvg":
-      return "движок вернул не SVG";
+      return (t) => t("boards.snapshot.notAnSvg");
     case "VaultNotWritable":
-      return "vault недоступен на запись";
+      return (t) => t("boards.snapshot.vaultNotWritable");
     case "Io":
-      return "не удалось записать файл снимка";
+      return (t) => t("boards.snapshot.io");
     default:
-      return "записать снимок не удалось";
+      return (t) => t("boards.snapshot.failed");
   }
 }

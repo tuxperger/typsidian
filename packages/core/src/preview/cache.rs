@@ -30,6 +30,7 @@ use typst::foundations::Bytes;
 use typst::syntax::package::PackageSpec;
 use typst::syntax::{FileId, VirtualRoot};
 
+use super::fonts::VaultFontCache;
 use super::snapshot::DependencySnapshot;
 
 /// Файлы установленных шаблонов, прочитанные в этом сеансе.
@@ -49,6 +50,10 @@ pub struct PackageCache {
     files: Mutex<HashMap<FileId, Bytes>>,
     /// Шаблоны, чей отпечаток уже сверен в этом сеансе (фича 007, FR-023).
     verified: Mutex<HashSet<PackageSpec>>,
+    /// Шрифты из папки vault (фича 005, FR-027). Здесь, а не отдельным
+    /// параметром сборки: время жизни у них то же — сеанс движка, — а каждый
+    /// вызывающий `compile_*` уже держит этот кэш.
+    vault_fonts: VaultFontCache,
 }
 
 impl PackageCache {
@@ -132,6 +137,11 @@ impl PackageCache {
     pub fn forget_verified(&self, spec: &PackageSpec) {
         let mut verified = self.verified.lock().expect("сверенные шаблоны");
         verified.remove(spec);
+    }
+
+    /// Кэш шрифтов vault того же сеанса.
+    pub fn vault_fonts(&self) -> &VaultFontCache {
+        &self.vault_fonts
     }
 
     /// Сколько файлов шаблонов сейчас удержано. Нужно проверкам и диагностике.

@@ -35,6 +35,14 @@ pub const CACHE_FILE_NAME: &str = "cache.sqlite";
 /// Папка локальных внешних шаблонов Typst.
 pub const PACKAGES_DIR_NAME: &str = "packages";
 
+/// Временные файлы атомарной записи (фича 009, research.md §4). Только
+/// native: в вебе атомарность даёт сам `FileSystemWritableFileStream`.
+///
+/// Внутри служебной папки, а не рядом с целью: служебная папка лежит в корне
+/// vault, то есть на той же файловой системе, и `rename` оттуда атомарен, а
+/// оставшийся после сбоя файл не попадается пользователю на глаза.
+pub const TMP_DIR_NAME: &str = "tmp";
+
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
 /// Существует только ради уборки: при первом открытии vault новой версией файл
@@ -51,6 +59,11 @@ pub fn service_dir() -> PathBuf {
 /// Файл настроек уровня vault относительно корня vault.
 pub fn vault_settings_path() -> PathBuf {
     service_dir().join(VAULT_SETTINGS_FILE_NAME)
+}
+
+/// Папка временных файлов записи относительно корня vault.
+pub fn tmp_dir() -> PathBuf {
+    service_dir().join(TMP_DIR_NAME)
 }
 
 /// Файл кэша индекса относительно корня vault.
@@ -104,7 +117,11 @@ mod tests {
             packages_dir(),
             legacy_cache_path(),
         ] {
-            assert!(path.is_relative(), "{} обязан быть относительным", path.display());
+            assert!(
+                path.is_relative(),
+                "{} обязан быть относительным",
+                path.display()
+            );
         }
     }
 
@@ -117,7 +134,9 @@ mod tests {
         assert!(is_inside_service_dir(Path::new(".typsidian")));
 
         assert!(!is_inside_service_dir(Path::new("Идея.typ")));
-        assert!(!is_inside_service_dir(Path::new("Проекты/.typsidian/x.json")));
+        assert!(!is_inside_service_dir(Path::new(
+            "Проекты/.typsidian/x.json"
+        )));
         // Похожее имя служебной папкой не является.
         assert!(!is_inside_service_dir(Path::new(".typsidian-cache.sqlite")));
     }

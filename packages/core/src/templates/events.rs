@@ -55,9 +55,9 @@ pub fn library_event(event: &VaultEvent) -> Option<TemplateEvent> {
         }
         // Переезд может и вносить заготовку в библиотеку, и выносить из неё —
         // достаточно, чтобы заготовкой был любой из двух путей.
-        VaultEvent::NoteRenamed { from_path, to_path } => {
-            (is_template(from_path) || is_template(to_path)).then_some(TemplateEvent::LibraryChanged)
-        }
+        VaultEvent::NoteRenamed { from_path, to_path } => (is_template(from_path)
+            || is_template(to_path))
+        .then_some(TemplateEvent::LibraryChanged),
         VaultEvent::NoteUpdated { path } => {
             is_template(path).then_some(TemplateEvent::TemplateChanged)
         }

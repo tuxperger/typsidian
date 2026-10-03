@@ -167,7 +167,9 @@ mod tests {
 
     #[test]
     fn the_templates_folder_is_the_one_in_the_vault_root() {
-        assert!(is_inside_templates_folder(Path::new("templates/раздел.typ")));
+        assert!(is_inside_templates_folder(Path::new(
+            "templates/раздел.typ"
+        )));
         assert!(!is_inside_templates_folder(Path::new(
             "курс/templates/лекция.typ"
         )));

@@ -11,7 +11,7 @@
 use super::digest::DigestError;
 use super::snapshot::{read_snapshot_metadata, EmbedId, SnapshotError};
 use super::store::read_board;
-use super::{EmbedState, ReadBoardError};
+use super::{EmbedState, ReadBoardError, UndeterminableReason};
 use crate::vault::backend::VaultBackend;
 use crate::vault::{classify, FileKind, ASSETS_FOLDER_NAME, SNAPSHOT_FOLDER_SUFFIX};
 use serde::{Deserialize, Serialize};
@@ -126,21 +126,19 @@ pub async fn embed_state<B: VaultBackend>(
     match read_snapshot_metadata(backend, snapshot_path).await {
         Ok(metadata) => match read_board(backend, &metadata.board_path).await {
             Ok(content) => match content.digest() {
-                Ok(current) => {
-                    EmbedState::compare(Some(&current), Some(&metadata.board_digest))
-                }
+                Ok(current) => EmbedState::compare(Some(&current), Some(&metadata.board_digest)),
                 Err(DigestError::Unreadable) => EmbedState::Undeterminable {
-                    reason: "файл доски не разбирается".to_string(),
+                    reason: UndeterminableReason::BoardUnparsable,
                 },
             },
             // FR-031: доска удалена или перемещена. Заметка при этом остаётся
             // читаемой и редактируемой — состояние вставки на неё не влияет.
             Err(ReadBoardError::NotFound) => EmbedState::BoardMissing,
             Err(ReadBoardError::Unreadable) => EmbedState::Undeterminable {
-                reason: "файл доски не разбирается".to_string(),
+                reason: UndeterminableReason::BoardUnparsable,
             },
             Err(ReadBoardError::Io) => EmbedState::Undeterminable {
-                reason: "доску не удалось прочитать с диска".to_string(),
+                reason: UndeterminableReason::BoardUnreadable,
             },
         },
         // FR-032: снимка нет. Если про доску известно и она на месте — снимок
@@ -155,10 +153,10 @@ pub async fn embed_state<B: VaultBackend>(
             None => EmbedState::SnapshotMissing,
         },
         Err(SnapshotError::NoMetadata) => EmbedState::Undeterminable {
-            reason: "в снимке нет метаданных доски".to_string(),
+            reason: UndeterminableReason::SnapshotWithoutMetadata,
         },
         Err(SnapshotError::Unreadable) => EmbedState::Undeterminable {
-            reason: "снимок не удалось прочитать".to_string(),
+            reason: UndeterminableReason::SnapshotUnreadable,
         },
     }
 }
@@ -362,7 +360,10 @@ mod tests {
             found[0].snapshot_path,
             PathBuf::from("Идея.assets/board-1f4c9a2b.svg")
         );
-        assert_eq!(&text[found[0].range.start..found[0].range.end], "#image(\"Идея.assets/board-1f4c9a2b.svg\")");
+        assert_eq!(
+            &text[found[0].range.start..found[0].range.end],
+            "#image(\"Идея.assets/board-1f4c9a2b.svg\")"
+        );
     }
 
     #[test]

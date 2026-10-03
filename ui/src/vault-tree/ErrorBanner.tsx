@@ -3,6 +3,7 @@ import type {
   DeleteError,
   RenameError,
 } from "../wasm-core/typsidian_core.js";
+import { useI18n, type Translate } from "../i18n/index.js";
 
 /**
  * Ошибка одной из операций управления заметками (create/rename/delete),
@@ -27,26 +28,19 @@ export interface ErrorBannerProps {
 
 // FR-013: имя отклоняется до касания диска (backend.rs::is_valid_note_name) —
 // текст объясняет пользователю, чего именно избегать, а не просто "неверное имя".
-const INVALID_NAME_MESSAGE =
-  "Такое имя нельзя использовать: оно не должно быть пустым и не может содержать «/», «\\» или нулевой символ.";
-const NAME_CONFLICT_MESSAGE =
-  "Заметка с таким именем уже существует в этой папке.";
-// FR-036: права на запись отозваны либо vault стал недоступен. Причина
-// называется прямо — «не удалось» скрыло бы то, что диск исправен, а операция
-// запрещена состоянием доступа, и пользователю нечего «проверять».
-const ACCESS_DENIED_MESSAGE =
-  "Сейчас в этот vault нельзя писать: права на запись отозваны или папка стала недоступна. Чтение продолжает работать.";
+// FR-036: при отозванных правах причина называется прямо — «не удалось» скрыло
+// бы то, что диск исправен, а операция запрещена состоянием доступа.
 
-function describeCreateError(error: CreateError): string {
+function describeCreateError(t: Translate, error: CreateError): string {
   switch (error.kind) {
     case "NameConflict":
-      return NAME_CONFLICT_MESSAGE;
+      return t("errors.nameConflict");
     case "InvalidName":
-      return INVALID_NAME_MESSAGE;
+      return t("errors.invalidName");
     case "AccessDenied":
-      return ACCESS_DENIED_MESSAGE;
+      return t("errors.accessDenied");
     case "Io":
-      return "Не удалось создать файл на диске — проверьте свободное место и права доступа к vault.";
+      return t("errors.create.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -54,18 +48,18 @@ function describeCreateError(error: CreateError): string {
   }
 }
 
-function describeRenameError(error: RenameError): string {
+function describeRenameError(t: Translate, error: RenameError): string {
   switch (error.kind) {
     case "NameConflict":
-      return NAME_CONFLICT_MESSAGE;
+      return t("errors.nameConflict");
     case "InvalidName":
-      return INVALID_NAME_MESSAGE;
+      return t("errors.invalidName");
     case "NotFound":
-      return "Не удалось переименовать: заметка не найдена — возможно, её уже переименовали или удалили в другом месте.";
+      return t("errors.rename.notFound");
     case "AccessDenied":
-      return ACCESS_DENIED_MESSAGE;
+      return t("errors.accessDenied");
     case "Io":
-      return "Не удалось переименовать файл на диске — проверьте права доступа к vault.";
+      return t("errors.rename.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -73,14 +67,14 @@ function describeRenameError(error: RenameError): string {
   }
 }
 
-function describeDeleteError(error: DeleteError): string {
+function describeDeleteError(t: Translate, error: DeleteError): string {
   switch (error.kind) {
     case "NotFound":
-      return "Не удалось удалить: заметка уже не найдена — возможно, её удалили в другом месте.";
+      return t("errors.delete.notFound");
     case "AccessDenied":
-      return ACCESS_DENIED_MESSAGE;
+      return t("errors.accessDenied");
     case "Io":
-      return "Не удалось удалить файл на диске — проверьте права доступа к vault.";
+      return t("errors.delete.io");
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -88,14 +82,14 @@ function describeDeleteError(error: DeleteError): string {
   }
 }
 
-function describeVaultOperationError(error: VaultOperationError): string {
+function describeVaultOperationError(t: Translate, error: VaultOperationError): string {
   switch (error.operation) {
     case "create":
-      return describeCreateError(error.error);
+      return describeCreateError(t, error.error);
     case "rename":
-      return describeRenameError(error.error);
+      return describeRenameError(t, error.error);
     case "delete":
-      return describeDeleteError(error.error);
+      return describeDeleteError(t, error.error);
     default: {
       const exhaustive: never = error;
       return exhaustive;
@@ -114,13 +108,14 @@ export function ErrorBanner({
   error,
   onDismiss,
 }: ErrorBannerProps): React.JSX.Element | null {
+  const { t } = useI18n();
   if (!error) return null;
   return (
     <div role="alert">
-      <p>{describeVaultOperationError(error)}</p>
+      <p>{describeVaultOperationError(t, error)}</p>
       {onDismiss && (
         <button type="button" onClick={onDismiss}>
-          Закрыть
+          {t("common.close")}
         </button>
       )}
     </div>

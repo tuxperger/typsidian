@@ -31,7 +31,22 @@ use typsidian_core::boards::{
     self, Board, BoardEvent, CreateBoardError, Embed, EmbedError, EmbedPlan, EmbedRef,
     ReadBoardError, SnapshotWriteError, WriteBoardError,
 };
+use typsidian_core::export;
 use typsidian_core::preview::{self, CompiledDocument, SnapshotError};
+use typsidian_core::settings::apply::{
+    self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, RoutedChange, SettingsChange,
+};
+use typsidian_core::settings::diagnostics::{self, Diagnostics};
+use typsidian_core::settings::editor_mode::{EditorModeBridge, NullBridge};
+use typsidian_core::settings::events::SettingsEvent;
+use typsidian_core::settings::folder_ref::{FolderRegistry, Resolved};
+use typsidian_core::settings::keybindings::{
+    self as keybindings_core, CommandId, ResolvedBinding, Shortcut,
+};
+use typsidian_core::settings::native::NativeStore;
+use typsidian_core::settings::store::{SettingsStore, StorageState, StoreCapabilities, StoreError};
+use typsidian_core::settings::vaults::{VaultId, VaultRecord};
+use typsidian_core::settings::Settings;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::templates::{
     self, NameCheck, PreviewState, ReadTemplateError, SaveTemplateError, TemplateLibraryView,
@@ -41,25 +56,9 @@ use typsidian_core::vault::backend::{
     WriteError,
 };
 use typsidian_core::vault::conflict::{DiffLine, EditConflict};
+use typsidian_core::vault::events::VaultEvent;
 use typsidian_core::vault::index::Note;
 use typsidian_core::vault::native::NativeBackend;
-use typsidian_core::vault::events::VaultEvent;
-use typsidian_core::settings::apply::{
-    self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, SettingsChange,
-};
-use typsidian_core::settings::diagnostics::{self, Diagnostics};
-use typsidian_core::settings::editor_mode::{EditorModeBridge, NullBridge};
-use typsidian_core::settings::events::SettingsEvent;
-use typsidian_core::settings::vaults::{VaultId, VaultRecord};
-use typsidian_core::settings::Settings;
-use typsidian_core::settings::folder_ref::{FolderRegistry, Resolved};
-use typsidian_core::settings::keybindings::{
-    self as keybindings_core, CommandId, ResolvedBinding, Shortcut,
-};
-use typsidian_core::settings::native::NativeStore;
-use typsidian_core::settings::store::{
-    SettingsStore, StorageState, StoreCapabilities, StoreError,
-};
 use typsidian_core::vault::vault_settings::{
     self, SetKeybindingError, VaultOverrides, VaultSettingsError,
 };
@@ -646,6 +645,13 @@ fn settings_change_target(change: SettingsChange, vault_is_open: bool) -> Change
     settings_apply::target_for(&change, vault_is_open)
 }
 
+/// Раскладка набора по хранилищам (фича 010, FR-016): язык — всегда в
+/// устройство. Интерфейс исполняет записи по порядку.
+#[tauri::command]
+fn settings_route_change(change: SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> {
+    settings_apply::route(&change, vault_is_open)
+}
+
 /// Действующие значения: устройство под перекрытием vault (FR-030).
 #[tauri::command]
 async fn resolve_device_settings(
@@ -670,8 +676,7 @@ async fn device_defaults_change(
 ) -> Answer<SettingsChange, StoreError> {
     let mut guard = device.0.lock().await;
     let store = device_store(&app, &mut guard).await?;
-    let effective =
-        typsidian_core::settings::resolve(SettingsStore::settings(store), &overrides);
+    let effective = typsidian_core::settings::resolve(SettingsStore::settings(store), &overrides);
     Ok(settings_apply::device_defaults_change(&effective))
 }
 
@@ -798,7 +803,9 @@ async fn delete(state: State<'_, Vault>, path: String) -> Answer<(), Failure<Del
 
 #[tauri::command]
 async fn backlinks(state: State<'_, Vault>, path: String) -> Answer<Vec<Note>, Failure<()>> {
-    with_vault!(state, |backend| Ok(backend.backlinks(Path::new(&path)).await))
+    with_vault!(state, |backend| Ok(backend
+        .backlinks(Path::new(&path))
+        .await))
 }
 
 #[tauri::command]
@@ -880,8 +887,9 @@ async fn pending_conflict(
     state: State<'_, Vault>,
     path: String,
 ) -> Answer<Option<EditConflict>, Failure<()>> {
-    with_vault!(state, |backend| Ok(backend
-        .pending_conflict(Path::new(&path))))
+    with_vault!(state, |backend| Ok(
+        backend.pending_conflict(Path::new(&path))
+    ))
 }
 
 #[tauri::command]
@@ -931,9 +939,12 @@ async fn create_board(
     state: State<'_, Vault>,
     path: String,
 ) -> Answer<Board, Failure<CreateBoardError>> {
-    with_vault!(state, |backend| boards::create_board(backend, Path::new(&path))
-        .await
-        .map_err(Failure::Core))
+    with_vault!(state, |backend| boards::create_board(
+        backend,
+        Path::new(&path)
+    )
+    .await
+    .map_err(Failure::Core))
 }
 
 #[tauri::command]
@@ -1007,16 +1018,8 @@ fn embeds_in_text(note_path: String, note_text: String) -> Vec<EmbedRef> {
 }
 
 #[tauri::command]
-fn embeds_changed(
-    note_path: String,
-    note_text: String,
-    changed: String,
-) -> Option<BoardEvent> {
-    boards::embeds_changed(
-        Path::new(&note_path),
-        &note_text,
-        Path::new(&changed),
-    )
+fn embeds_changed(note_path: String, note_text: String, changed: String) -> Option<BoardEvent> {
+    boards::embeds_changed(Path::new(&note_path), &note_text, Path::new(&changed))
 }
 
 /// Настройки vault приходят целиком, а не разобранными на политику и список
@@ -1282,9 +1285,89 @@ async fn preview_install_template(
 async fn preview_installed_templates(
     state: State<'_, Vault>,
 ) -> Answer<Vec<preview::packages::InstalledTemplate>, Failure<()>> {
-    with_vault!(state, |backend| Ok(
-        preview::packages::installed_templates(backend).await
-    ))
+    with_vault!(state, |backend| Ok(preview::packages::installed_templates(
+        backend
+    )
+    .await))
+}
+
+// ── Экспорт в PDF (фича 009) ────────────────────────────────────────────────
+
+/// Экспортирует заметку в PDF (contracts/core-export-api.md).
+///
+/// Тот же движок, что у предпросмотра: шрифты и кэш шаблонов общие, иначе
+/// заметка собиралась бы в одном месте и не собиралась в другом. Команда
+/// асинхронная и идёт в пуле tokio, а не в потоке окна: пакет не блокирует
+/// интерфейс (принцип X).
+#[tauri::command]
+async fn export_pdf(
+    state: State<'_, Vault>,
+    engine: State<'_, Preview>,
+    note_path: String,
+    text: Option<String>,
+    overrides: VaultOverrides,
+) -> Answer<export::ExportReport, Failure<()>> {
+    with_vault!(state, |backend| Ok(export::export_note_pdf(
+        backend,
+        &engine.packages,
+        &note_path,
+        text.as_deref(),
+        engine.fonts.clone(),
+        &overrides,
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn export_candidates(
+    state: State<'_, Vault>,
+    overrides: VaultOverrides,
+) -> Answer<Vec<export::ExportCandidate>, Failure<()>> {
+    with_vault!(state, |backend| Ok(export::batch::candidates_of(
+        backend, &overrides
+    )
+    .await))
+}
+
+// Переходы пакета — чистые функции ядра без состояния в оболочке
+// (research.md §5): значение пакета держит окно.
+
+#[tauri::command]
+fn export_batch_start(
+    paths: Vec<String>,
+    stop_on_error: bool,
+    overrides: VaultOverrides,
+) -> export::BatchState {
+    export::batch::start(paths, stop_on_error, &overrides)
+}
+
+#[tauri::command]
+fn export_batch_next(state: export::BatchState) -> export::BatchStep {
+    export::batch::step(state)
+}
+
+#[tauri::command]
+fn export_batch_record(
+    state: export::BatchState,
+    report: export::ExportReport,
+    elapsed_ms: u32,
+) -> export::BatchState {
+    export::batch::record(state, report, elapsed_ms)
+}
+
+#[tauri::command]
+fn export_batch_skip(state: export::BatchState, note_path: String) -> export::BatchState {
+    export::batch::skip(state, &note_path)
+}
+
+#[tauri::command]
+fn export_batch_cancel(state: export::BatchState) -> export::BatchState {
+    export::batch::cancel(state)
+}
+
+#[tauri::command]
+fn export_batch_view(state: export::BatchState) -> export::BatchView {
+    export::batch::view(state)
 }
 
 #[tauri::command]
@@ -1435,6 +1518,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             apply_device_settings,
             settings_reset_change,
             settings_change_target,
+            settings_route_change,
             resolve_device_settings,
             device_defaults_change,
             reveal_device_settings,
@@ -1493,5 +1577,13 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             preview_compile_with_templates,
             preview_install_template,
             preview_installed_templates,
+            export_pdf,
+            export_candidates,
+            export_batch_start,
+            export_batch_next,
+            export_batch_record,
+            export_batch_skip,
+            export_batch_cancel,
+            export_batch_view,
         ])
 }

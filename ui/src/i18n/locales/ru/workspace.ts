@@ -1,0 +1,32 @@
+import type { Translation } from "../define.js";
+import type { workspace as en } from "../en/workspace.js";
+
+export const workspace: Translation<typeof en> = {
+  "workspace.backToWorkspace": "Вернуться в Workspace",
+  "workspace.openGraph": "Открыть граф связей",
+  "workspace.search": "Расширенный поиск",
+  "workspace.templates": "Шаблоны и сниппеты",
+  "workspace.rebuildPreview": "Пересобрать предпросмотр",
+  "workspace.rebuild": "Пересобрать",
+  "workspace.elementParams": "Параметры элемента",
+  "workspace.exportPdf": "Экспорт в PDF",
+  "workspace.exportCenter": "Центр экспорта",
+  "workspace.openExportCenter": "Открыть Центр экспорта",
+  "workspace.openSettings": "Открыть настройки",
+  "workspace.settings": "Настройки",
+  "workspace.closeSettings": "Закрыть настройки",
+  "workspace.welcome": "Выберите папку с заметками — она станет vault. Файлы остаются на вашем диске.",
+  "workspace.copyNotePath": "Копировать путь заметки",
+  "workspace.showTree": "Показать дерево файлов",
+  "workspace.hideTree": "Скрыть дерево файлов",
+  "workspace.compile.building": "Идёт сборка",
+  "workspace.compile.compiling": "компиляция…",
+  "workspace.compile.ready": "готово",
+  "workspace.compile.readyIn": (p) => `готово · ${p.ms} ms`,
+  "workspace.exportProgress": (p) => `экспорт ${p.processed}/${p.total}`,
+  "workspace.graph": "Граф",
+  "workspace.openPalette": "Открыть палитру команд",
+  "workspace.sidebarWidth": "Ширина боковой панели",
+  "workspace.editorPreviewSplit": "Граница редактора и предпросмотра",
+  "workspace.templateName": "Заготовка",
+};

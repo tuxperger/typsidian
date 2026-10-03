@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { tauriDeviceSettings } from "@typsidian/ui/settings/device-settings-tauri.js";
 import { lastTauriVault, openTauriVaultById } from "@typsidian/ui/vault-client-tauri.js";
@@ -48,7 +49,7 @@ export function MobileWorkspace(): React.JSX.Element {
   }, []);
 
   return (
-    <>
+    <DeviceI18nProvider device={device}>
       <Workspace
         openVaultFolder={openVaultFolder}
         // То же предложение продолжить с последним vault, что на рабочем столе
@@ -66,6 +67,6 @@ export function MobileWorkspace(): React.JSX.Element {
       {picker.isOpen && (
         <FolderPicker startAt={startAt} onChoose={picker.choose} onCancel={picker.cancel} />
       )}
-    </>
+    </DeviceI18nProvider>
   );
 }

@@ -64,7 +64,10 @@ pub fn normalize(path: &Path) -> Option<PathBuf> {
 ///
 /// `None` — помеченных предков нет; вызывающая сторона обязана взять корень
 /// vault, и это не ошибка (FR-006).
-pub fn nearest_section<'a>(sections: &'a [SectionMark], note_path: &Path) -> Option<&'a SectionMark> {
+pub fn nearest_section<'a>(
+    sections: &'a [SectionMark],
+    note_path: &Path,
+) -> Option<&'a SectionMark> {
     let folder = note_path.parent().unwrap_or(Path::new(""));
     sections
         .iter()

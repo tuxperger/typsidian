@@ -86,10 +86,7 @@ pub fn resolve_link_target(source: &Path, raw: &str) -> Option<PathBuf> {
 
     let mut target = PathBuf::from(&rest);
     if target.extension().and_then(|e| e.to_str()) != Some(NOTE_EXTENSION) {
-        let file_name = format!(
-            "{}.{NOTE_EXTENSION}",
-            target.file_name()?.to_string_lossy()
-        );
+        let file_name = format!("{}.{NOTE_EXTENSION}", target.file_name()?.to_string_lossy());
         target.set_file_name(file_name);
     }
 
@@ -176,7 +173,10 @@ mod tests {
 
     #[test]
     fn link_escaping_vault_root_is_dropped() {
-        assert_eq!(resolve_link_target(Path::new("source.typ"), "../outside"), None);
+        assert_eq!(
+            resolve_link_target(Path::new("source.typ"), "../outside"),
+            None
+        );
         assert_eq!(resolve_link_target(Path::new("source.typ"), "   "), None);
     }
 

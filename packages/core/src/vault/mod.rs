@@ -116,6 +116,44 @@ pub fn classify(path: &Path) -> FileKind {
     }
 }
 
+/// Расширения файлов шрифтов, которые сборка берёт из vault (фича 005, FR-027).
+///
+/// Ровно то, что умеет разобрать `typst::text::Font`: TrueType/OpenType и их
+/// коллекции. WOFF сюда не входит — Typst его не читает, и найденный, но
+/// неразбираемый файл был бы обещанием, которое сборка не выполнит.
+pub const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc", "otc"];
+
+/// Файл шрифта пользователя в vault (FR-027).
+///
+/// Служебное место сюда не попадает: шрифт внутри `.typsidian/` — это файл
+/// приложения, а не пользователя. Регистр расширения не важен — `Times.TTF`
+/// такой же шрифт, как `times.ttf`.
+pub fn is_font_file(path: &Path) -> bool {
+    classify(path) == FileKind::Other
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                FONT_EXTENSIONS
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+}
+
+/// Шрифт, найденный в vault, с дешёвым отпечатком `{size, modified}`.
+///
+/// Отпечаток — не хэш содержимого, и это намеренно: шрифты весят мегабайты, а
+/// список спрашивается на каждую сборку. Отпечаток говорит только «файл мог
+/// измениться — перечитай», и для этого размера и времени изменения хватает.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontFile {
+    /// Путь относительно корня vault.
+    pub path: PathBuf,
+    pub size: u64,
+    /// Время изменения в миллисекундах; `0`, если платформа его не дала.
+    pub modified_ms: i64,
+}
+
 /// Прежнее правило: любой файл внутри папки `*.assets` (фича 002).
 fn in_legacy_snapshot_folder(path: &Path) -> bool {
     path.parent().is_some_and(|parent| {

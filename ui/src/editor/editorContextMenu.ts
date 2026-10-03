@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
 import { copyText, readText, type ContextMenuItem } from "../menu/ContextMenu.js";
+import { currentI18n } from "../i18n/index.js";
 
 /**
  * Пункты контекстного меню редактора.
@@ -56,6 +57,9 @@ export function editorMenuItems(
   view: EditorView,
   actions: EditorMenuActions,
 ): ContextMenuItem[] {
+  // Меню собирается в момент открытия, а не при рендере, — язык берётся тот,
+  // что действует сейчас.
+  const { t } = currentI18n();
   const { from, to, empty } = view.state.selection.main;
   const selected = view.state.sliceDoc(from, to);
 
@@ -77,7 +81,7 @@ export function editorMenuItems(
 
   return [
     {
-      label: "Отменить",
+      label: t("editor.menu.undo"),
       shortcut: key("Z"),
       disabled: undoDepth(view.state) === 0,
       run: () => {
@@ -86,7 +90,7 @@ export function editorMenuItems(
       },
     },
     {
-      label: "Повторить",
+      label: t("editor.menu.redo"),
       shortcut: key("Z", true),
       disabled: redoDepth(view.state) === 0,
       run: () => {
@@ -96,7 +100,7 @@ export function editorMenuItems(
     },
     { kind: "separator" },
     {
-      label: "Вырезать",
+      label: t("editor.menu.cut"),
       shortcut: key("X"),
       disabled: empty,
       run: async () => {
@@ -113,7 +117,7 @@ export function editorMenuItems(
       },
     },
     {
-      label: "Копировать",
+      label: t("editor.menu.copy"),
       shortcut: key("C"),
       disabled: empty,
       run: async () => {
@@ -123,7 +127,7 @@ export function editorMenuItems(
       },
     },
     {
-      label: "Вставить",
+      label: t("editor.menu.paste"),
       shortcut: key("V"),
       run: async () => {
         const result = await readText();
@@ -140,7 +144,7 @@ export function editorMenuItems(
       },
     },
     {
-      label: "Выделить всё",
+      label: t("editor.menu.selectAll"),
       shortcut: key("A"),
       run: () => {
         view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
@@ -148,26 +152,26 @@ export function editorMenuItems(
       },
     },
     { kind: "separator" },
-    { label: "Жирный", disabled: empty, run: wrap("*") },
-    { label: "Курсив", disabled: empty, run: wrap("_") },
-    { label: "Моноширинный", disabled: empty, run: wrap("`") },
-    { label: "Формула", disabled: empty, run: wrap("$") },
+    { label: t("editor.menu.bold"), disabled: empty, run: wrap("*") },
+    { label: t("editor.menu.italic"), disabled: empty, run: wrap("_") },
+    { label: t("editor.menu.monospace"), disabled: empty, run: wrap("`") },
+    { label: t("editor.menu.math"), disabled: empty, run: wrap("$") },
     { kind: "separator" },
     {
-      label: "Вставить элемент Typst…",
+      label: t("editor.menu.insertElement"),
       shortcut: actions.insertShortcut,
       run: actions.openInsertMenu,
     },
     {
-      label: "Параметры элемента…",
+      label: t("editor.menu.elementParams"),
       shortcut: actions.paramsShortcut,
       run: actions.openParams,
     },
-    { label: "Вставить доску…", run: actions.chooseBoard },
+    { label: t("editor.menu.insertBoard"), run: actions.chooseBoard },
     ...(actions.saveAsTemplate
       ? [
           { kind: "separator" as const },
-          { label: "Сохранить как заготовку…", run: actions.saveAsTemplate },
+          { label: t("editor.menu.saveAsTemplate"), run: actions.saveAsTemplate },
         ]
       : []),
   ];

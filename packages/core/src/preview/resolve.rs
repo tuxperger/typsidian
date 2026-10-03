@@ -33,41 +33,9 @@ pub enum ResolveError {
     /// Отдельный вариант, а не `OutsideVault`: «шаблон не установлен» и
     /// «ссылка наружу» — разные факты и разные слова, а FR-037 запрещает общий
     /// отказ.
-    PackageMissing { spec: String },
-}
-
-impl ResolveError {
-    /// Причина словами — для диагностики, которую увидит пользователь.
-    ///
-    /// Общее «не удалось собрать» запрещено (FR-021), поэтому имя файла
-    /// подставляет вызывающая сторона, а здесь — только причина.
-    pub fn describe(&self) -> &'static str {
-        match self {
-            ResolveError::NotFound => "файл не найден",
-            ResolveError::Unreadable => "файл не читается",
-            ResolveError::AccessDenied => "нет прав на чтение",
-            ResolveError::OutsideVault => "файл вне папки vault",
-            ResolveError::TooLarge => "файл больше поддерживаемого размера",
-            // Имя шаблона несёт сама причина, поэтому здесь оно не
-            // подставляется — см. `describe_owned`.
-            ResolveError::PackageMissing { .. } => "шаблон не установлен",
-        }
-    }
-
-    /// Причина словами **вместе с именем шаблона**, когда оно у причины есть.
-    ///
-    /// Существует потому, что контракт фичи 005 — «имя файла подставляет
-    /// вызывающая сторона, здесь только причина» — к шаблонам неприменим:
-    /// вызывающая сторона знает путь внутри пакета, а пользователь написал в
-    /// заметке спецификацию пакета, и совпасть они не обязаны (FR-037).
-    pub fn describe_owned(&self) -> String {
-        match self {
-            ResolveError::PackageMissing { spec } => {
-                format!("шаблон {spec} не установлен в папке заметок")
-            }
-            other => other.describe().to_string(),
-        }
-    }
+    PackageMissing {
+        spec: String,
+    },
 }
 
 impl From<ReadError> for ResolveError {

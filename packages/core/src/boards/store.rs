@@ -12,9 +12,7 @@
 use super::digest::DigestError;
 use super::{Board, BoardContent, ReadBoardError, WriteBoardError};
 use crate::stamp::FileStamp;
-use crate::vault::backend::{
-    valid_note_name, CreateError, ReadError, VaultBackend, WriteError,
-};
+use crate::vault::backend::{valid_note_name, CreateError, ReadError, VaultBackend, WriteError};
 use crate::vault::{classify, FileKind};
 use std::path::Path;
 
@@ -48,13 +46,10 @@ pub enum BoardWriteProfile {
 /// Пишется ровно то, что написал бы сам движок: своих полей приложение в файл
 /// доски не добавляет (research.md §2). Пустая доска — штатный объект, её можно
 /// вставить в заметку (US2 AS3).
-pub const EMPTY_BOARD: &str =
-    r#"{"type":"excalidraw","version":2,"source":"typsidian","elements":[],"appState":{},"files":{}}"#;
+pub const EMPTY_BOARD: &str = r#"{"type":"excalidraw","version":2,"source":"typsidian","elements":[],"appState":{},"files":{}}"#;
 
 /// Почему доска не создана.
-#[derive(
-    Debug, Clone, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(tag = "kind")]
@@ -158,8 +153,7 @@ pub async fn write_board<B: VaultBackend>(
         return Err(WriteBoardError::Conflicted);
     }
 
-    let text = String::from_utf8(content.as_bytes().to_vec())
-        .map_err(|_| WriteBoardError::Io)?;
+    let text = String::from_utf8(content.as_bytes().to_vec()).map_err(|_| WriteBoardError::Io)?;
 
     backend
         .write(path, &text, expected)

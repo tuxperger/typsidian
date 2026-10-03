@@ -1,6 +1,8 @@
 pub mod boards;
 pub mod elements;
+pub mod export;
 pub mod graph;
+pub mod messages;
 pub mod preview;
 pub mod search;
 pub mod settings;

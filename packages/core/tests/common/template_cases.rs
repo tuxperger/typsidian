@@ -50,8 +50,8 @@ pub async fn a_missing_folder_is_not_an_error() {
 
 /// FR-004: нечитаемая папка — отдельное состояние с названной причиной.
 pub async fn an_unreadable_folder_does_not_collapse_into_absent() {
-    let vault = vault_with_templates()
-        .with_folder_problem("templates", FolderProblem::AccessDenied);
+    let vault =
+        vault_with_templates().with_folder_problem("templates", FolderProblem::AccessDenied);
 
     let state = folder_state(&vault).await;
     assert_eq!(
@@ -94,7 +94,10 @@ pub async fn any_note_inside_the_folder_is_a_template() {
         .iter()
         .map(|template| template.name.as_str())
         .collect();
-    assert_eq!(names, vec!["Раздел диссертации.typ", "Выключная формула.typ"]);
+    assert_eq!(
+        names,
+        vec!["Раздел диссертации.typ", "Выключная формула.typ"]
+    );
 
     let groups: Vec<Option<&str>> = view
         .templates
@@ -194,7 +197,12 @@ pub async fn the_excerpt_stops_at_a_line_boundary() {
 /// все его заготовки, тогда как сломан конвейер превью.
 pub async fn the_excerpt_source_never_claims_the_content_is_broken() {
     let source = ExcerptOnlySource;
-    for content in [RAZDEL, "", "#table(columns: 3,", "совершенно валидный текст"] {
+    for content in [
+        RAZDEL,
+        "",
+        "#table(columns: 3,",
+        "совершенно валидный текст",
+    ] {
         match source.preview(content) {
             PreviewState::SourceExcerpt { reason, .. } => assert_eq!(
                 reason,
@@ -246,7 +254,10 @@ pub async fn the_cache_is_keyed_by_content_not_by_path() {
 
     let first = preview_of(&vault, &source, &mut cache, &template).await;
     let second = preview_of(&vault, &source, &mut cache, &template).await;
-    assert_eq!(first, second, "попадание и промах дают одинаковый результат");
+    assert_eq!(
+        first, second,
+        "попадание и промах дают одинаковый результат"
+    );
     assert_eq!(source.calls.get(), 1, "второй раз порт не вызывается");
 
     // Переименование: путь другой, содержимое то же — пересчёта нет.
@@ -264,7 +275,11 @@ pub async fn the_cache_is_keyed_by_content_not_by_path() {
     let edited = MemoryVault::new().with_file("templates/раздел.typ", "= другое\n");
     let changed = library(&edited).await.templates.remove(0);
     preview_of(&edited, &source, &mut cache, &changed).await;
-    assert_eq!(source.calls.get(), 2, "изменение содержимого вызывает пересчёт");
+    assert_eq!(
+        source.calls.get(),
+        2,
+        "изменение содержимого вызывает пересчёт"
+    );
 }
 
 /// FR-017, запрет 2 из data-model.md: нечитаемый файл даёт `Unavailable`, а не
@@ -313,7 +328,9 @@ pub async fn applying_a_template_leaves_its_file_untouched() {
         "файл заготовки не изменён"
     );
     assert_eq!(
-        vault.stamp_of("Глава 4.typ").map(|stamp| stamp.content_hash),
+        vault
+            .stamp_of("Глава 4.typ")
+            .map(|stamp| stamp.content_hash),
         before.map(|stamp| stamp.content_hash),
         "новая заметка получила ровно содержимое заготовки (FR-021)"
     );
@@ -589,8 +606,8 @@ pub async fn templates_take_part_in_the_link_graph() {
             "= Результаты\nПо шаблону [[/templates/Раздел]]\n",
         );
 
-    let to_note = VaultBackend::backlinks(&vault, std::path::Path::new("Диссертация/Результаты.typ"))
-        .await;
+    let to_note =
+        VaultBackend::backlinks(&vault, std::path::Path::new("Диссертация/Результаты.typ")).await;
     assert_eq!(
         to_note
             .iter()

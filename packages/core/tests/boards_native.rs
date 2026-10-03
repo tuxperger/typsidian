@@ -85,7 +85,9 @@ use typsidian_core::vault::native::NativeBackend;
 use typsidian_core::vault::{classify, FileKind};
 
 async fn open_vault(dir: &TempDir) -> NativeBackend {
-    NativeBackend::open(dir.path()).await.expect("открытие vault")
+    NativeBackend::open(dir.path())
+        .await
+        .expect("открытие vault")
 }
 
 #[tokio::test]
@@ -397,9 +399,15 @@ fn every_embed_gets_its_own_snapshot_file() {
     let second = plan_next_to_note(Path::new(NOTE), &text, Path::new(BOARD_FILE)).unwrap();
     let other_note = plan_next_to_note(Path::new("Другая.typ"), "", Path::new(BOARD_FILE)).unwrap();
 
-    assert_ne!(first.embed_id, second.embed_id, "две вставки в одну заметку");
+    assert_ne!(
+        first.embed_id, second.embed_id,
+        "две вставки в одну заметку"
+    );
     assert_ne!(first.snapshot_path, second.snapshot_path);
-    assert_ne!(first.embed_id, other_note.embed_id, "вставки в разные заметки");
+    assert_ne!(
+        first.embed_id, other_note.embed_id,
+        "вставки в разные заметки"
+    );
     assert_ne!(first.snapshot_path, other_note.snapshot_path);
 }
 
@@ -443,7 +451,10 @@ fn snapshot_metadata_survives_a_round_trip() {
     let svg = typsidian_core::boards::embed_metadata_in_svg("<svg></svg>", &metadata).unwrap();
 
     let read_back = read_metadata_from_svg(&svg).unwrap();
-    assert_eq!(read_back.board_path, PathBuf::from("Проект/Схема.excalidraw"));
+    assert_eq!(
+        read_back.board_path,
+        PathBuf::from("Проект/Схема.excalidraw")
+    );
     assert_eq!(read_back.board_digest, board_digest);
 }
 
@@ -460,7 +471,9 @@ async fn a_snapshot_is_written_next_to_its_note_and_read_back() {
     // T039 на файлах: путь из research.md §4 плюс метаданные внутри файла.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
 
     let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
@@ -473,7 +486,9 @@ async fn a_snapshot_is_written_next_to_its_note_and_read_back() {
     // недостижим ни на одном таргете.
     assert!(dir.path().join(&plan.snapshot_path).exists());
     assert_eq!(
-        read_snapshot_metadata(&backend, &plan.snapshot_path).await.unwrap(),
+        read_snapshot_metadata(&backend, &plan.snapshot_path)
+            .await
+            .unwrap(),
         metadata
     );
 
@@ -488,7 +503,9 @@ async fn removing_the_call_from_the_note_touches_neither_the_board_nor_the_snaps
     // T040, FR-024, инвариант 4 data-model.md.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
 
     let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
@@ -497,7 +514,10 @@ async fn removing_the_call_from_the_note_touches_neither_the_board_nor_the_snaps
         .await
         .unwrap();
     let with_embed = format!("Текст\n{}\n", embed_markup(&plan));
-    backend.write(Path::new(NOTE), &with_embed, None).await.unwrap();
+    backend
+        .write(Path::new(NOTE), &with_embed, None)
+        .await
+        .unwrap();
 
     let board_before = fs::read_to_string(dir.path().join(BOARD_FILE)).unwrap();
     let snapshot_before = fs::read_to_string(dir.path().join(&plan.snapshot_path)).unwrap();
@@ -542,10 +562,7 @@ async fn embed_board(
     board_content: &str,
 ) -> (String, PathBuf) {
     let plan = plan_next_to_note(Path::new(note), "", Path::new(board)).unwrap();
-    let metadata = snapshot_metadata(
-        Path::new(board),
-        &digest(board_content.as_bytes()).unwrap(),
-    );
+    let metadata = snapshot_metadata(Path::new(board), &digest(board_content.as_bytes()).unwrap());
     write_snapshot(backend, &plan.snapshot_path, "<svg></svg>", &metadata)
         .await
         .unwrap();
@@ -559,11 +576,18 @@ async fn a_changed_board_makes_the_embed_stale() {
     // T049, FR-026, SC-008.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let board_at_embed_time =
-        String::from_utf8(read_board(&backend, Path::new(BOARD_FILE)).await.unwrap().as_bytes().to_vec())
-            .unwrap();
+    let board_at_embed_time = String::from_utf8(
+        read_board(&backend, Path::new(BOARD_FILE))
+            .await
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .unwrap();
 
     let (_, snapshot) = embed_board(&mut backend, NOTE, BOARD_FILE, &board_at_embed_time).await;
     assert_eq!(
@@ -622,12 +646,18 @@ async fn a_snapshot_without_metadata_is_undeterminable_not_up_to_date() {
     // T051, SC-008, spec.md Edge Cases: снимок заменён сторонним инструментом.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
     let plan = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
 
     fs::create_dir_all(dir.path().join(plan.snapshot_path.parent().unwrap())).unwrap();
-    fs::write(dir.path().join(&plan.snapshot_path), "<svg><desc>чужая подпись</desc></svg>").unwrap();
+    fs::write(
+        dir.path().join(&plan.snapshot_path),
+        "<svg><desc>чужая подпись</desc></svg>",
+    )
+    .unwrap();
 
     assert!(
         matches!(
@@ -656,11 +686,18 @@ async fn a_missing_board_and_a_missing_snapshot_stay_different_states() {
     // их в одно состояние нельзя.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let board_content =
-        String::from_utf8(read_board(&backend, Path::new(BOARD_FILE)).await.unwrap().as_bytes().to_vec())
-            .unwrap();
+    let board_content = String::from_utf8(
+        read_board(&backend, Path::new(BOARD_FILE))
+            .await
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .unwrap();
     let (_, snapshot) = embed_board(&mut backend, NOTE, BOARD_FILE, &board_content).await;
 
     // Снимок на месте, доску удалили снаружи.
@@ -691,26 +728,44 @@ async fn updating_one_embed_leaves_the_other_snapshot_alone() {
     // T053, FR-029, инвариант 3 data-model.md.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let board_content =
-        String::from_utf8(read_board(&backend, Path::new(BOARD_FILE)).await.unwrap().as_bytes().to_vec())
-            .unwrap();
+    let board_content = String::from_utf8(
+        read_board(&backend, Path::new(BOARD_FILE))
+            .await
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .unwrap();
 
     // Две вставки одной доски в одну заметку.
     let first = plan_next_to_note(Path::new(NOTE), "", Path::new(BOARD_FILE)).unwrap();
     let text_with_first = embed_markup(&first);
-    let second = plan_next_to_note(Path::new(NOTE), &text_with_first, Path::new(BOARD_FILE)).unwrap();
+    let second =
+        plan_next_to_note(Path::new(NOTE), &text_with_first, Path::new(BOARD_FILE)).unwrap();
     let metadata = snapshot_metadata(
         Path::new(BOARD_FILE),
         &digest(board_content.as_bytes()).unwrap(),
     );
-    write_snapshot(&mut backend, &first.snapshot_path, "<svg>первая</svg>", &metadata)
-        .await
-        .unwrap();
-    write_snapshot(&mut backend, &second.snapshot_path, "<svg>вторая</svg>", &metadata)
-        .await
-        .unwrap();
+    write_snapshot(
+        &mut backend,
+        &first.snapshot_path,
+        "<svg>первая</svg>",
+        &metadata,
+    )
+    .await
+    .unwrap();
+    write_snapshot(
+        &mut backend,
+        &second.snapshot_path,
+        "<svg>вторая</svg>",
+        &metadata,
+    )
+    .await
+    .unwrap();
     let second_before = fs::read_to_string(dir.path().join(&second.snapshot_path)).unwrap();
 
     // Обновляется только первая вставка.
@@ -742,16 +797,27 @@ async fn no_state_transition_rewrites_a_snapshot_by_itself() {
     // действием пользователя.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let board_content =
-        String::from_utf8(read_board(&backend, Path::new(BOARD_FILE)).await.unwrap().as_bytes().to_vec())
-            .unwrap();
+    let board_content = String::from_utf8(
+        read_board(&backend, Path::new(BOARD_FILE))
+            .await
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .unwrap();
     let (text, snapshot) = embed_board(&mut backend, NOTE, BOARD_FILE, &board_content).await;
     let snapshot_before = fs::read_to_string(dir.path().join(&snapshot)).unwrap();
 
     // Проводим вставку через все переходы состояния, какие достижимы снаружи.
-    fs::write(dir.path().join(BOARD_FILE), r#"{"elements":[{"id":"новый"}]}"#).unwrap();
+    fs::write(
+        dir.path().join(BOARD_FILE),
+        r#"{"elements":[{"id":"новый"}]}"#,
+    )
+    .unwrap();
     let stale = embed_state(&backend, &snapshot, None).await;
     fs::remove_file(dir.path().join(BOARD_FILE)).unwrap();
     let missing = embed_state(&backend, &snapshot, None).await;
@@ -772,11 +838,18 @@ async fn a_changed_board_announces_the_notes_that_embed_it() {
     // T056: событие возникает и при изменении доски, а не только текста заметки.
     let dir = TempDir::new().unwrap();
     let mut backend = open_vault(&dir).await;
-    create_board(&mut backend, Path::new(BOARD_FILE)).await.unwrap();
+    create_board(&mut backend, Path::new(BOARD_FILE))
+        .await
+        .unwrap();
     backend.create(Path::new(NOTE)).await.unwrap();
-    let board_content =
-        String::from_utf8(read_board(&backend, Path::new(BOARD_FILE)).await.unwrap().as_bytes().to_vec())
-            .unwrap();
+    let board_content = String::from_utf8(
+        read_board(&backend, Path::new(BOARD_FILE))
+            .await
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .unwrap();
     let (text, _) = embed_board(&mut backend, NOTE, BOARD_FILE, &board_content).await;
 
     assert_eq!(

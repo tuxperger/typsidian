@@ -1,0 +1,32 @@
+import type { Entries } from "../define.js";
+
+export const workspace = {
+  "workspace.backToWorkspace": "Back to Workspace",
+  "workspace.openGraph": "Open link graph",
+  "workspace.search": "Advanced search",
+  "workspace.templates": "Templates and snippets",
+  "workspace.rebuildPreview": "Rebuild preview",
+  "workspace.rebuild": "Rebuild",
+  "workspace.elementParams": "Element parameters",
+  "workspace.exportPdf": "Export to PDF",
+  "workspace.exportCenter": "Export center",
+  "workspace.openExportCenter": "Open export center",
+  "workspace.openSettings": "Open settings",
+  "workspace.settings": "Settings",
+  "workspace.closeSettings": "Close settings",
+  "workspace.welcome": "Choose a folder with your notes — it becomes the vault. Files stay on your disk.",
+  "workspace.copyNotePath": "Copy note path",
+  "workspace.showTree": "Show file tree",
+  "workspace.hideTree": "Hide file tree",
+  "workspace.compile.building": "Building",
+  "workspace.compile.compiling": "compiling…",
+  "workspace.compile.ready": "ready",
+  "workspace.compile.readyIn": (p: { ms: number }) => `ready · ${p.ms} ms`,
+  "workspace.exportProgress": (p: { processed: number; total: number }) =>
+    `export ${p.processed}/${p.total}`,
+  "workspace.graph": "Graph",
+  "workspace.openPalette": "Open command palette",
+  "workspace.sidebarWidth": "Sidebar width",
+  "workspace.editorPreviewSplit": "Editor and preview divider",
+  "workspace.templateName": "Template",
+} as const satisfies Entries;

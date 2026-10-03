@@ -51,6 +51,10 @@ export function webDeviceSettings(): DeviceSettingsClient {
       await deviceStore();
       return WebStore.changeTarget(change, vaultIsOpen);
     },
+    async routeChange(change, vaultIsOpen) {
+      await deviceStore();
+      return WebStore.routeChange(change, vaultIsOpen);
+    },
     async resolveWithVault(overrides) {
       const store = await deviceStore();
       return queue.run(async () => store.resolveWithVault(overrides));

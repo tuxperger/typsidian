@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { currentI18n } from "../i18n/index.js";
 
 /**
  * Собственное контекстное меню приложения — по правому клику в дереве файлов,
@@ -298,7 +299,7 @@ export async function copyText(text: string): Promise<string | null> {
     await navigator.clipboard.writeText(text);
     return null;
   } catch {
-    return "Скопировать не удалось: среда не дала доступа к буферу обмена. Используйте Ctrl+C.";
+    return currentI18n().t("common.clipboard.copyFailed");
   }
 }
 
@@ -309,7 +310,7 @@ export async function readText(): Promise<{ text: string } | { error: string }> 
     return { text: await navigator.clipboard.readText() };
   } catch {
     return {
-      error: "Вставить из меню не удалось: среда не дала прочитать буфер обмена. Используйте Ctrl+V.",
+      error: currentI18n().t("common.clipboard.pasteFailed"),
     };
   }
 }
