@@ -99,6 +99,43 @@ async fn walk_directory_matching(
     Ok(())
 }
 
+/// Конфликтные копии Syncthing (фича 011, FR-024) — тот же обход, но со
+/// служебным местом: копия `vault.json` означает спор о хранителе. Правило
+/// каталогов то же, что у `native::walk_conflict_copies` (принцип II).
+async fn walk_conflict_copies(
+    dir_handle: &JsValue,
+    prefix: PathBuf,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), WalkAbort> {
+    let entries_iter = js_call0(dir_handle, "entries").await?;
+    loop {
+        let next_result = js_call0(&entries_iter, "next").await?;
+        let done = Reflect::get(&next_result, &JsValue::from_str("done"))?
+            .as_bool()
+            .unwrap_or(true);
+        if done {
+            break;
+        }
+        let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+        let name = Reflect::get(&value, &JsValue::from_str("0"))?
+            .as_string()
+            .unwrap_or_default();
+        let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
+        let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
+            .as_string()
+            .unwrap_or_default();
+        let child_path = prefix.join(&name);
+        if kind == "directory" {
+            if !is_excluded(&name) || name == super::service_dir::SERVICE_DIR_NAME {
+                Box::pin(walk_conflict_copies(&handle, child_path, out)).await?;
+            }
+        } else if kind == "file" && crate::sync::conflict_copy::is_conflict_copy(&name) {
+            out.push(child_path);
+        }
+    }
+    Ok(())
+}
+
 /// Почему обход не дошёл до конца. `Js` — реальный отказ доступа (папка
 /// пропала, разрешение отозвано), `TooManyNotes` — предел FR-038; смешивать их
 /// нельзя: первое означает `Unavailable`, второе — отказ открыть исправную
@@ -363,6 +400,18 @@ impl VaultBackend for WebBackend {
     /// Обход по хендлам, как у `pollForChanges`: `getFile()` отдаёт размер и
     /// время изменения без чтения содержимого. Отказ обхода — пустой список,
     /// а не ошибка: без доступа к папке сборка всё равно назовёт причину сама.
+    async fn list_conflict_copies(&self) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        if walk_conflict_copies(&self.root_handle, PathBuf::new(), &mut found)
+            .await
+            .is_err()
+        {
+            return Vec::new();
+        }
+        found.sort();
+        found
+    }
+
     async fn list_fonts(&self) -> Vec<super::FontFile> {
         let mut found = Vec::new();
         if walk_directory_matching(

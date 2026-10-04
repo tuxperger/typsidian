@@ -35,6 +35,15 @@ pub struct SettingsChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub language: Option<LanguageChoice>,
+    /// Тождество устройства (фича 011). Как и язык — только устройству.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub device: Option<crate::sync::DeviceIdentity>,
+    /// Значения синхронизации устройства для одного vault (фича 011):
+    /// заменяют прежнюю запись этого vault целиком.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub vault_sync: Option<crate::sync::DeviceVaultSyncEntry>,
 }
 
 /// Выбор языка интерфейса (фича 010, data-model.md «LanguageChoice»).
@@ -126,6 +135,16 @@ impl SettingsChange {
             Some(LanguageChoice::Tag(tag)) => next.language = Some(tag.clone()),
             None => {}
         }
+        if let Some(device) = &self.device {
+            next.device = Some(device.clone());
+        }
+        if let Some(entry) = &self.vault_sync {
+            next.vault_sync
+                .retain(|existing| existing.vault != entry.vault);
+            if entry.value != crate::sync::DeviceVaultSync::default() {
+                next.vault_sync.push(entry.clone());
+            }
+        }
         next
     }
 }
@@ -144,6 +163,9 @@ pub fn reset_to_defaults() -> SettingsChange {
         editor_config_path: None,
         // FR-017: сброс возвращает «как в системе».
         language: Some(LanguageChoice::System),
+        // Тождество устройства и значения синхронизации — не настройки
+        // внешнего вида: сброс их не трогает (фича 011).
+        ..SettingsChange::default()
     }
 }
 
@@ -171,6 +193,7 @@ pub fn device_defaults_change(effective: &Settings) -> SettingsChange {
         editor_config_path: effective.editor_config_path.clone(),
         // Язык и так живёт только на устройстве — переносить нечего.
         language: None,
+        ..SettingsChange::default()
     }
 }
 
@@ -282,11 +305,20 @@ pub struct RoutedChange {
 pub fn route(change: &SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> {
     let mut rest = change.clone();
     let language = rest.language.take();
+    // Тождество и значения синхронизации устройства (фича 011) — тоже только
+    // устройству, по той же причине, что язык.
+    let device = rest.device.take();
+    let vault_sync = rest.vault_sync.take();
     let mut routed = Vec::with_capacity(2);
-    if let Some(choice) = language {
+    if language.is_some() || device.is_some() || vault_sync.is_some() {
         routed.push(RoutedChange {
             target: ChangeTarget::Device,
-            change: SettingsChange::language(choice),
+            change: SettingsChange {
+                language,
+                device,
+                vault_sync,
+                ..SettingsChange::default()
+            },
         });
     }
     if rest != SettingsChange::default() {
@@ -577,6 +609,7 @@ mod tests {
             editor_mode_preference: ModePreference::FullBackend,
             editor_config_path: Some(PathBuf::from("/home/user/init.lua")),
             language: Some("en".to_string()),
+            ..Settings::default()
         };
 
         let change = reset_to_defaults();

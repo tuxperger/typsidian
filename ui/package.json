@@ -12,13 +12,15 @@
     "build": "tsc && rm -rf dist/wasm-core && cp -R src/wasm-core dist/wasm-core && rm -rf dist/styles && cp -R src/styles dist/styles"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.9.0",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.4",
     "@codemirror/view": "^6.43.11",
     "@excalidraw/excalidraw": "0.18.1",
     "@lezer/highlight": "^1.2.3",
+    "@tauri-apps/api": "^2.9.0",
+    "buffer": "6.0.3",
+    "isomorphic-git": "1.42.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

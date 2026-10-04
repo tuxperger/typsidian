@@ -78,10 +78,22 @@ reqwest = { version = "0.12", default-features = false }
 # zlib, по той же причине, что и `default-features = false` выше.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = { version = "0.4", default-features = false }
+# Трёхстороннее слияние текста (фича 011, research §11): diff3 поверх Myers.
+# Чистый Rust, собирается под оба таргета.
+similar = "2"
+# Идентификатор устройства для модели хранителя истории (фича 011, research §4).
+# Версия 0.2 уже приезжает транзитивно; под wasm32 ей нужен `js` (ниже).
+getrandom = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Движок git на native (фича 011, research §1, §2). Без встроенных `https`/`ssh`:
+# они потянули бы системный OpenSSL и libssh2. HTTPS даёт свой транспорт на
+# `reqwest` (feature `blocking` ниже), SSH — системный клиент `ssh`.
+# `vendored-libgit2` собирает libgit2 из исходников через `cc` — проверено
+# зондом до реализации (libgit2 1.9.7, без cmake).
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 # TLS только под native: в браузере им занимается сам `fetch`.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
 notify = "6"
 notify-debouncer-full = "0.3"
 # Каталог конфигурации по правилам платформы (research.md §1): путь показывается
@@ -99,6 +111,7 @@ jwalk = "0.8"
 trash = "3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
@@ -128,6 +141,8 @@ web-sys = { version = "0.3", features = [
     "IdbTransactionMode",
     "IdbVersionChangeEvent",
     "DomException",
+    # Секреты синхронизации в IndexedDB (фича 011, research §10).
+    "DomStringList",
     "Event",
     "EventTarget",
 ] }

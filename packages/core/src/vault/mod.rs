@@ -105,6 +105,16 @@ pub fn classify(path: &Path) -> FileKind {
     if service_dir::is_inside_service_dir(path) {
         return FileKind::Service;
     }
+    // Конфликтная копия Syncthing — не заметка, а спор о заметке (фича 011,
+    // FR-024): в дерево, поиск и граф она не попадает ни на одном таргете,
+    // потому что правило здесь одно для обоих обходов и для вотчера.
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(crate::sync::conflict_copy::is_conflict_copy)
+    {
+        return FileKind::Other;
+    }
     if in_legacy_snapshot_folder(path) || is_snapshot_in_assets_folder(path) {
         return FileKind::Snapshot;
     }

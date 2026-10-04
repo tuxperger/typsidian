@@ -93,6 +93,61 @@ pub struct Settings {
     #[serde(deserialize_with = "lenient_language")]
     #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
     pub language: Option<String>,
+    /// Тождество устройства (фича 011, research §4). Принадлежит устройству
+    /// при любом раскладе: окажись оно в vault, все устройства стали бы одним.
+    /// `None` — ещё не выдано; выдаёт [`crate::sync::device`] при первом
+    /// обращении к синхронизации.
+    #[serde(default, deserialize_with = "lenient_device")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub device: Option<crate::sync::DeviceIdentity>,
+    /// Значения синхронизации, принадлежащие устройству, — по одному на vault
+    /// (фича 011, data-model «DeviceVaultSync»): автор снимков, посредник для
+    /// браузера, адрес Syncthing.
+    #[serde(default, deserialize_with = "lenient_vault_sync")]
+    pub vault_sync: Vec<crate::sync::DeviceVaultSyncEntry>,
+}
+
+impl Settings {
+    /// Значения синхронизации устройства для vault; умолчания, если их нет.
+    pub fn vault_sync_for(&self, vault: &VaultId) -> crate::sync::DeviceVaultSync {
+        self.vault_sync
+            .iter()
+            .find(|entry| &entry.vault == vault)
+            .map(|entry| entry.value.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// Тождество с негодным идентификатором — как если бы его не было: выдать
+/// новое лучше, чем узнавать себя по чужому мусору.
+fn lenient_device<'de, D>(deserializer: D) -> Result<Option<crate::sync::DeviceIdentity>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value::<crate::sync::DeviceIdentity>(value)
+        .ok()
+        .filter(|device| crate::sync::DeviceIdentity::is_valid_id(&device.id)))
+}
+
+/// Испорченная запись синхронизации отбрасывается, а не роняет файл
+/// настроек (FR-013 фичи 004).
+fn lenient_vault_sync<'de, D>(
+    deserializer: D,
+) -> Result<Vec<crate::sync::DeviceVaultSyncEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 impl Default for Settings {
@@ -105,6 +160,8 @@ impl Default for Settings {
             editor_mode_preference: ModePreference::default(),
             editor_config_path: None,
             language: None,
+            device: None,
+            vault_sync: Vec::new(),
         }
     }
 }
@@ -190,6 +247,8 @@ pub fn resolve(
         known_vaults: device.known_vaults.clone(),
         current_vault: device.current_vault.clone(),
         language: device.language.clone(),
+        device: device.device.clone(),
+        vault_sync: device.vault_sync.clone(),
     }
 }
 
@@ -291,6 +350,7 @@ mod tests {
             )],
             current_vault: Some(VaultId::from_raw("a")),
             language: Some("en".to_string()),
+            ..Settings::default()
         };
         let overrides = VaultOverrides {
             theme: Some(Theme::Dark),

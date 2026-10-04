@@ -81,6 +81,21 @@ pub fn legacy_cache_path() -> PathBuf {
     PathBuf::from(LEGACY_CACHE_FILE_NAME)
 }
 
+/// Производные пути служебного места — то, что восстановимо и принадлежит
+/// устройству (фича 011, research §5, §6): кэш индекса вместе с файлами журнала
+/// SQLite и временные файлы атомарной записи.
+///
+/// Строки в форме правил исключения, относительно корня vault, через `/`: их
+/// читают правила истории и Syncthing, а не файловая система. Настройки vault и
+/// локальные шаблоны сюда не входят намеренно — они общие для устройств и
+/// обязаны доставляться вместе с заметками.
+pub fn derived_paths() -> Vec<String> {
+    vec![
+        format!("{SERVICE_DIR_NAME}/{CACHE_FILE_NAME}*"),
+        format!("{SERVICE_DIR_NAME}/{TMP_DIR_NAME}"),
+    ]
+}
+
 /// Лежит ли путь внутри служебного места.
 ///
 /// Сравнивается **первый компонент**, а не любой: служебное место у vault одно
@@ -97,6 +112,15 @@ pub fn is_inside_service_dir(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derived_paths_cover_caches_but_not_settings() {
+        let derived = derived_paths();
+        assert_eq!(derived, [".typsidian/cache.sqlite*", ".typsidian/tmp"]);
+        assert!(!derived
+            .iter()
+            .any(|path| path.contains(VAULT_SETTINGS_FILE_NAME)));
+    }
 
     #[test]
     fn layout_matches_the_contract() {

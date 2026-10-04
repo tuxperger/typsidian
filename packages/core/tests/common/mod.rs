@@ -25,7 +25,9 @@ use typsidian_core::vault::{AccessState, FolderAccess, FolderProblem};
 /// отвечает `NotFound` — ровно так же, как настоящий бэкенд.
 pub struct MemoryVault {
     root: PathBuf,
-    files: HashMap<PathBuf, Vec<u8>>,
+    /// Общая с двойником движка git карта файлов (фича 011): движок читает
+    /// «рабочие файлы» из той же памяти, в которую пишет сессия.
+    files: std::rc::Rc<std::cell::RefCell<HashMap<PathBuf, Vec<u8>>>>,
     /// Пути, на которых чтение обязано отказать с этой причиной. Нужны, чтобы
     /// проверить, что причина доходит до пользователя названной (FR-021).
     failures: HashMap<PathBuf, ReadError>,
@@ -47,7 +49,7 @@ impl MemoryVault {
     pub fn new() -> Self {
         Self {
             root: PathBuf::from("/vault"),
-            files: HashMap::new(),
+            files: Default::default(),
             failures: HashMap::new(),
             reads: std::cell::RefCell::new(HashMap::new()),
             access_state: AccessState::ReadWrite,
@@ -56,8 +58,10 @@ impl MemoryVault {
         }
     }
 
-    pub fn with_file(mut self, path: &str, bytes: impl Into<Vec<u8>>) -> Self {
-        self.files.insert(PathBuf::from(path), bytes.into());
+    pub fn with_file(self, path: &str, bytes: impl Into<Vec<u8>>) -> Self {
+        self.files
+            .borrow_mut()
+            .insert(PathBuf::from(path), bytes.into());
         self
     }
 
@@ -67,18 +71,19 @@ impl MemoryVault {
     /// установленных шаблонов обязан терять запись, если файла больше нет
     /// (фича 007, US5).
     pub fn remove(&mut self, path: &Path) {
-        self.files.remove(path);
+        self.files.borrow_mut().remove(path);
     }
 
     /// Содержимое файла, если он есть — для проверок того, что записано.
     pub fn bytes_of(&self, path: &str) -> Option<Vec<u8>> {
-        self.files.get(Path::new(path)).cloned()
+        self.files.borrow().get(Path::new(path)).cloned()
     }
 
     /// Все файлы под папкой (`""` — весь vault), по порядку, через `/`.
     pub fn paths_under(&self, folder: &str) -> Vec<String> {
         let mut paths: Vec<String> = self
             .files
+            .borrow()
             .keys()
             .filter(|path| path.starts_with(folder))
             .map(|path| path.to_string_lossy().replace('\\', "/"))
@@ -97,6 +102,7 @@ impl MemoryVault {
     /// «файл после операции не тронут» (003 SC-008, инвариант 1).
     pub fn stamp_of(&self, path: &str) -> Option<typsidian_core::stamp::FileStamp> {
         self.files
+            .borrow()
             .get(&PathBuf::from(path))
             .map(|bytes| typsidian_core::stamp::FileStamp::from_content(0, bytes))
     }
@@ -115,6 +121,11 @@ impl MemoryVault {
     pub fn without_service_dir(mut self) -> Self {
         self.service_dir_existed = false;
         self
+    }
+
+    /// Карта файлов для двойника движка git (фича 011).
+    pub fn files_handle(&self) -> std::rc::Rc<std::cell::RefCell<HashMap<PathBuf, Vec<u8>>>> {
+        self.files.clone()
     }
 
     pub fn read_count(&self, path: &str) -> u32 {
@@ -147,6 +158,7 @@ impl VaultBackend for MemoryVault {
     async fn list(&self) -> Vec<Note> {
         let mut notes: Vec<Note> = self
             .files
+            .borrow()
             .iter()
             .map(|(path, bytes)| {
                 Note::new(
@@ -165,6 +177,7 @@ impl VaultBackend for MemoryVault {
     async fn list_fonts(&self) -> Vec<typsidian_core::vault::FontFile> {
         let mut fonts: Vec<typsidian_core::vault::FontFile> = self
             .files
+            .borrow()
             .iter()
             .filter(|(path, _)| typsidian_core::vault::is_font_file(path))
             .map(|(path, bytes)| typsidian_core::vault::FontFile {
@@ -177,6 +190,22 @@ impl VaultBackend for MemoryVault {
             .collect();
         fonts.sort_by(|left, right| left.path.cmp(&right.path));
         fonts
+    }
+
+    async fn list_conflict_copies(&self) -> Vec<PathBuf> {
+        let mut copies: Vec<PathBuf> = self
+            .files
+            .borrow()
+            .keys()
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(typsidian_core::sync::conflict_copy::is_conflict_copy)
+            })
+            .cloned()
+            .collect();
+        copies.sort();
+        copies
     }
 
     async fn list_folder(&self, folder: &Path) -> Vec<Note> {
@@ -200,6 +229,7 @@ impl VaultBackend for MemoryVault {
         }
         let exists = self
             .files
+            .borrow()
             .keys()
             .any(|path| path.starts_with(folder) && path != folder);
         if !exists {
@@ -228,7 +258,11 @@ impl VaultBackend for MemoryVault {
         if let Some(error) = self.failures.get(path) {
             return Err(error.clone());
         }
-        self.files.get(path).cloned().ok_or(ReadError::NotFound)
+        self.files
+            .borrow()
+            .get(path)
+            .cloned()
+            .ok_or(ReadError::NotFound)
     }
 
     async fn write(
@@ -243,6 +277,7 @@ impl VaultBackend for MemoryVault {
             return Err(WriteError::AccessDenied);
         }
         self.files
+            .borrow_mut()
             .insert(path.to_path_buf(), content.as_bytes().to_vec());
         Ok(())
     }
@@ -251,7 +286,9 @@ impl VaultBackend for MemoryVault {
         if self.access_state != AccessState::ReadWrite {
             return Err(WriteError::AccessDenied);
         }
-        self.files.insert(path.to_path_buf(), bytes.to_vec());
+        self.files
+            .borrow_mut()
+            .insert(path.to_path_buf(), bytes.to_vec());
         Ok(())
     }
 
@@ -259,7 +296,9 @@ impl VaultBackend for MemoryVault {
         if self.access_state != AccessState::ReadWrite {
             return Err(CreateError::AccessDenied);
         }
-        self.files.insert(path.to_path_buf(), Vec::new());
+        self.files
+            .borrow_mut()
+            .insert(path.to_path_buf(), Vec::new());
         Ok(())
     }
 
@@ -275,7 +314,7 @@ impl VaultBackend for MemoryVault {
     }
 
     async fn delete(&mut self, path: &Path) -> Result<(), DeleteError> {
-        self.files.remove(path);
+        self.files.borrow_mut().remove(path);
         Ok(())
     }
 
@@ -355,6 +394,7 @@ pub mod message_cases;
 pub mod package_cases;
 pub mod placement_cases;
 pub mod search_cases;
+pub mod sync_cases;
 pub mod template_cases;
 pub mod textlayer_cases;
 pub mod vault_settings_cases;

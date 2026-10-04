@@ -401,6 +401,7 @@ fn switching_vault_changes_nothing_but_the_current_vault() {
         editor_mode_preference: ModePreference::FullBackend,
         editor_config_path: None,
         language: Some("en".to_string()),
+        ..Settings::default()
     };
 
     let after = SettingsChange::current_vault(VaultId::from_raw("b")).apply_to(&before);
@@ -643,6 +644,7 @@ async fn reset_through_apply_returns_values_to_defaults_and_keeps_known_vaults()
                 editor_mode_preference: None,
                 editor_config_path: None,
                 language: None,
+                ..SettingsChange::default()
             },
             &ApplyContext::unobstructed(),
         )
@@ -675,6 +677,7 @@ async fn reset_is_rejected_whole_when_a_conflict_is_unresolved() {
                 editor_mode_preference: None,
                 editor_config_path: None,
                 language: None,
+                ..SettingsChange::default()
             },
             &ApplyContext::unobstructed(),
         )

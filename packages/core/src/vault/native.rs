@@ -303,6 +303,39 @@ fn probe_access_state(root: &Path) -> AccessState {
     }
 }
 
+/// Конфликтные копии Syncthing (фича 011, FR-024). Обходит и служебное место,
+/// но не каталог истории и не прочие скрытые каталоги: там копий, о которых
+/// стоит говорить пользователю, не бывает.
+fn walk_conflict_copies(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if !is_excluded(&name) || name == super::service_dir::SERVICE_DIR_NAME {
+                    stack.push(entry.path());
+                }
+            } else if file_type.is_file() && crate::sync::conflict_copy::is_conflict_copy(&name) {
+                if let Ok(relative) = entry.path().strip_prefix(root) {
+                    found.push(relative.to_path_buf());
+                }
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
 /// Рекурсивный обход vault (FR-002/FR-003), исключающий скрытые/служебные
 /// каталоги (FR-004); символические ссылки не раскрываются (Assumptions).
 ///
@@ -1091,6 +1124,10 @@ impl VaultBackend for NativeBackend {
 
     async fn list_fonts(&self) -> Vec<crate::vault::FontFile> {
         walk_fonts(&self.root_path)
+    }
+
+    async fn list_conflict_copies(&self) -> Vec<PathBuf> {
+        walk_conflict_copies(&self.root_path)
     }
 
     /// Тот же приём, что у [`probe_access_state`], только про вложенную папку:

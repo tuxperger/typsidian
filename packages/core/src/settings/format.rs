@@ -148,6 +148,22 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
             .map(|tag| Value::from(tag.as_str())),
     );
 
+    set_or_remove(
+        &mut document,
+        "device",
+        settings
+            .device
+            .as_ref()
+            .and_then(|device| serde_json::to_value(device).ok()),
+    );
+    set_or_remove(
+        &mut document,
+        "vault_sync",
+        (!settings.vault_sync.is_empty())
+            .then(|| serde_json::to_value(&settings.vault_sync).ok())
+            .flatten(),
+    );
+
     write_known_vaults(&mut document, &settings.known_vaults);
     write_folder_refs(&mut document, folder_refs);
 
@@ -261,6 +277,7 @@ mod tests {
             editor_mode_preference: ModePreference::FullBackend,
             editor_config_path: Some("/home/user/init.lua".into()),
             language: Some("ru".to_string()),
+            ..Settings::default()
         };
 
         let text = render("", &settings, &FolderRefs::new());

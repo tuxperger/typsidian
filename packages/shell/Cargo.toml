@@ -23,6 +23,14 @@ serde = { version = "1", features = ["derive"] }
 # тысячей записей читается заметное время, и делать это синхронной командой
 # значило бы держать поток окна.
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "fs"] }
+# Файл секретов синхронизации на Android (фича 011, research §10).
+serde_json = "1"
+
+# Хранилище секретов ОС для токенов и ключа Syncthing (фича 011, research §10):
+# Secret Service на Linux, Keychain на macOS, Credential Manager на Windows.
+# На Android его нет — там приватный файл приложения (`sync.rs`).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust", "apple-native", "windows-native"] }
 
 [dev-dependencies]
 # Тестам последнего vault нужен каталог настроек, не трогающий настоящий

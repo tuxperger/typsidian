@@ -1,0 +1,166 @@
+//! wasm-bindgen-test — только wasm32 (принцип II). Парный — `sync_native.rs`:
+//! политика синхронизации платформенно нейтральна, и расхождение между
+//! таргетами является дефектом.
+#![cfg(target_arch = "wasm32")]
+
+mod common;
+
+use common::sync_cases as cases;
+use wasm_bindgen_test::*;
+
+wasm_bindgen_test_configure!(run_in_browser);
+
+#[wasm_bindgen_test]
+async fn enabling_history_writes_rules_and_the_first_snapshot() {
+    cases::enabling_history_writes_rules_and_the_first_snapshot().await;
+}
+
+#[wasm_bindgen_test]
+async fn syncthing_rules_come_first_and_can_be_declined() {
+    cases::syncthing_rules_come_first_and_can_be_declined().await;
+}
+
+#[wasm_bindgen_test]
+async fn existing_history_is_not_enabled_twice() {
+    cases::existing_history_is_not_enabled_twice().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_snapshot_of_selected_files_leaves_the_rest_pending() {
+    cases::a_snapshot_of_selected_files_leaves_the_rest_pending().await;
+}
+
+#[wasm_bindgen_test]
+async fn an_empty_message_lists_the_changed_notes() {
+    cases::an_empty_message_lists_the_changed_notes().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_snapshot_needs_saved_notes_and_an_author() {
+    cases::a_snapshot_needs_saved_notes_and_an_author().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_rename_is_one_change_and_both_names_go_into_the_snapshot() {
+    cases::a_rename_is_one_change_and_both_names_go_into_the_snapshot().await;
+}
+
+#[wasm_bindgen_test]
+async fn local_history_works_without_network() {
+    cases::local_history_works_without_network().await;
+}
+
+#[wasm_bindgen_test]
+async fn file_history_follows_renames_and_restore_does_not_snapshot() {
+    cases::file_history_follows_renames_and_restore_does_not_snapshot().await;
+}
+
+#[wasm_bindgen_test]
+async fn diff_shows_both_sides_and_binary_files_by_size() {
+    cases::diff_shows_both_sides_and_binary_files_by_size().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_deleted_note_is_restored_in_place() {
+    cases::a_deleted_note_is_restored_in_place().await;
+}
+
+#[wasm_bindgen_test]
+async fn the_token_never_lands_in_the_vault() {
+    cases::the_token_never_lands_in_the_vault().await;
+}
+
+#[wasm_bindgen_test]
+async fn offline_exchange_fails_and_keeps_local_snapshots() {
+    cases::offline_exchange_fails_and_keeps_local_snapshots().await;
+}
+
+#[wasm_bindgen_test]
+async fn push_and_fast_forward_pull_between_devices() {
+    cases::push_and_fast_forward_pull_between_devices().await;
+}
+
+#[wasm_bindgen_test]
+async fn disjoint_edits_merge_without_asking() {
+    cases::disjoint_edits_merge_without_asking().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_conflict_blocks_snapshots_and_abort_restores_files() {
+    cases::a_conflict_blocks_snapshots_and_abort_restores_files().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_resolved_conflict_completes_the_pull() {
+    cases::a_resolved_conflict_completes_the_pull().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_push_behind_the_server_is_rejected_not_forced() {
+    cases::a_push_behind_the_server_is_rejected_not_forced().await;
+}
+
+#[wasm_bindgen_test]
+async fn disconnecting_keeps_history_and_files() {
+    cases::disconnecting_keeps_history_and_files().await;
+}
+
+#[wasm_bindgen_test]
+async fn syncthing_copies_merge_against_the_last_snapshot() {
+    cases::syncthing_copies_merge_against_the_last_snapshot().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_copy_can_be_taken_or_kept_as_a_separate_file() {
+    cases::a_copy_can_be_taken_or_kept_as_a_separate_file().await;
+}
+
+#[wasm_bindgen_test]
+async fn conflict_copies_never_become_notes() {
+    cases::conflict_copies_never_become_notes().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_non_keeper_needs_explicit_confirmation() {
+    cases::a_non_keeper_needs_explicit_confirmation().await;
+}
+
+#[wasm_bindgen_test]
+async fn appointing_the_keeper_is_visible_and_a_settings_copy_is_a_dispute() {
+    cases::appointing_the_keeper_is_visible_and_a_settings_copy_is_a_dispute().await;
+}
+
+#[wasm_bindgen_test]
+async fn missing_syncthing_rules_are_reported_with_history() {
+    cases::missing_syncthing_rules_are_reported_with_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn the_keeper_snapshots_after_the_pause() {
+    cases::the_keeper_snapshots_after_the_pause().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_non_keeper_never_snapshots_automatically() {
+    cases::a_non_keeper_never_snapshots_automatically().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_non_keeper_reads_history_from_the_mirror() {
+    cases::a_non_keeper_reads_history_from_the_mirror().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_lost_history_is_reported_as_lost() {
+    cases::a_lost_history_is_reported_as_lost().await;
+}
+
+#[wasm_bindgen_test]
+async fn shells_reject_what_they_cannot_do() {
+    cases::shells_reject_what_they_cannot_do().await;
+}
+
+#[wasm_bindgen_test]
+async fn settings_survive_in_vault_json_next_to_other_keys() {
+    cases::settings_survive_in_vault_json_next_to_other_keys().await;
+}

@@ -7,5 +7,6 @@ pub mod preview;
 pub mod search;
 pub mod settings;
 pub mod stamp;
+pub mod sync;
 pub mod templates;
 pub mod vault;

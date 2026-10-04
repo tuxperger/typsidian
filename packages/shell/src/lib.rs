@@ -24,6 +24,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod sync;
+
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
@@ -1501,7 +1503,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
     // инициализации, и менять окружение можно только пока процесс однопоточный.
     disable_dmabuf_renderer_on_nvidia();
 
-    tauri::Builder::default()
+    sync::manage(tauri::Builder::default())
         .manage(Vault::default())
         .manage(Device::default())
         .manage(TemplatePreviews::default())
@@ -1585,5 +1587,37 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             export_batch_skip,
             export_batch_cancel,
             export_batch_view,
+            sync::sync_open,
+            sync::sync_capabilities,
+            sync::sync_overview,
+            sync::sync_poll_events,
+            sync::sync_note_change,
+            sync::sync_cancel,
+            sync::sync_ignore_reports,
+            sync::sync_apply_ignore,
+            sync::sync_decline_stignore,
+            sync::sync_enable_history,
+            sync::sync_changes,
+            sync::sync_snapshot,
+            sync::sync_history,
+            sync::sync_diff,
+            sync::sync_file_at,
+            sync::sync_restore,
+            sync::sync_connect_remote,
+            sync::sync_disconnect_remote,
+            sync::sync_push,
+            sync::sync_pull,
+            sync::sync_abort_pull,
+            sync::sync_conflicts,
+            sync::sync_resolve,
+            sync::sync_set_keeper,
+            sync::sync_clear_keeper,
+            sync::sync_update_settings,
+            sync::sync_refresh_mirror,
+            sync::sync_syncthing_discover,
+            sync::sync_syncthing_connect,
+            sync::sync_syncthing_disconnect,
+            sync::sync_tick,
+            sync::sync_clone_vault,
         ])
 }

@@ -19,5 +19,6 @@
 | 008 | [Element Parameters](008-element-parameters/spec.md) | — | implement 57/58 | — | — |
 | 009 | [PDF Export](009-pdf-export/spec.md) | — | done | — | — |
 | 010 | [Мультиязычный интерфейс](010-ui-localization/spec.md) | — | implement 56/58 | — | — |
+| 011 | [Синхронизация vault — история версий и доставка между устройствами](011-vault-sync/spec.md) | P2 | tasks 0/70 | — | История версий и удалённый репозиторий (как синхронизация с GitHub в typst.app) плюс совместная работа с Syncthing: файлы между устройствами доставляет Syncthing, историю и резервную копию ведёт git, конфликты разрешаются в приложении. |
 
 Активная фича: `.specify/scripts/typsidian/feature.sh`.
