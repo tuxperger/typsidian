@@ -66,7 +66,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     inherit pnpm;
     pnpmWorkspaces = workspaces;
     fetcherVersion = 4;
-    hash = "sha256-BNCNNGIkSkYpnDvcR7Q+nK8iZKLyKF53cxb039H0L4M=";
+    hash = "sha256-6S6kXIdXPBIq/mixu4hBn36rWLn/mUa9A1wc/Ui0wWQ=";
   };
 
   nativeBuildInputs = [

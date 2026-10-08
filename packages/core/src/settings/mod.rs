@@ -82,6 +82,9 @@ pub struct Settings {
     pub known_vaults: Vec<VaultRecord>,
     pub current_vault: Option<VaultId>,
     pub editor_mode_preference: ModePreference,
+    /// `None` не пишется вовсе: команды Tauri отдали бы его как `null`, а UI
+    /// ждёт `undefined`, как из wasm (тот же приём у `language`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
     pub editor_config_path: Option<PathBuf>,
     /// Язык интерфейса, выбранный явно (фича 010); `None` — «как в системе».
@@ -90,7 +93,14 @@ pub struct Settings {
     /// и язык из более новой версии обязан пережить запись других значений,
     /// а не превратиться в умолчание (FR-018). По той же причине значение из
     /// файла не проверяется при разборе — только новое, в [`apply::plan`].
-    #[serde(deserialize_with = "lenient_language")]
+    ///
+    /// `None` не сериализуется: через команды Tauri он пришёл бы в UI как
+    /// `null` мимо проверки `=== undefined`, и разбор языка уронил бы первый
+    /// же рендер окна на desktop и Android.
+    #[serde(
+        deserialize_with = "lenient_language",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
     pub language: Option<String>,
     /// Тождество устройства (фича 011, research §4). Принадлежит устройству
@@ -299,6 +309,17 @@ mod tests {
         );
         assert_eq!(settings.editor_config_path, None);
         assert!(validate(&settings).is_ok());
+    }
+
+    #[test]
+    fn absent_optional_strings_are_not_serialized_as_null() {
+        // Команды Tauri отдают JSON: `null` прошёл бы в UI мимо `=== undefined`.
+        let json = serde_json::to_value(Settings::default()).unwrap();
+        assert!(json.get("language").is_none());
+        assert!(json.get("editor_config_path").is_none());
+
+        let back: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(back, Settings::default());
     }
 
     #[test]
