@@ -54,6 +54,10 @@ export interface SidebarProps {
   shortcuts: ShortcutsState;
   /** Вставить ссылку на заметку в открытую — пункт контекстного меню дерева. */
   onInsertLink?: ((note: Note) => void) | undefined;
+  /** История файла из контекстного меню (фича 011, FR-009). */
+  onFileHistory?: ((note: Note) => void) | undefined;
+  /** Пути с неразрешённым конфликтом — дерево помечает их значком (фича 011). */
+  conflictPaths?: ReadonlySet<string> | undefined;
 }
 
 export function Sidebar({
@@ -71,6 +75,8 @@ export function Sidebar({
   createFromTemplate = null,
   shortcuts,
   onInsertLink,
+  onFileHistory,
+  conflictPaths,
 }: SidebarProps): React.JSX.Element {
   const { t } = useI18n();
   const [filter, setFilter] = useState("");
@@ -167,6 +173,8 @@ export function Sidebar({
           actions={actions}
           onOpenNote={onOpenNote}
           onInsertLink={onInsertLink}
+          onFileHistory={onFileHistory}
+          conflictPaths={conflictPaths}
         />
       </nav>
 

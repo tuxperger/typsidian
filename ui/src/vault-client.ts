@@ -114,6 +114,20 @@ export interface VaultClient {
    */
   hasUnresolvedEdits(): boolean;
 
+  /**
+   * Дописывает на диск всё, что ещё лежит в буферах редакторов, и отвечает,
+   * удалось ли (фича 011, FR-006): снимок истории делается только с того, что
+   * пользователь видит. `false` — что-то осталось несохранённым (отказ записи,
+   * неразрешённый конфликт), и снимок делать нельзя.
+   *
+   * Буферы держат редакторы, а не клиент, поэтому они объявляют здесь свой
+   * способ дописать — см. `registerFlusher`.
+   */
+  flushAll(): Promise<boolean>;
+
+  /** Редактор объявляет, как дописать свой буфер. Возвращает отмену. */
+  registerFlusher(flush: () => Promise<void>): () => void;
+
   // ── Поток внешних изменений (001 FR-016) ────────────────────────────
 
   /**
@@ -315,4 +329,29 @@ export interface VaultClient {
 
   /** Возвращает команду к умолчанию ядра. */
   resetKeybinding(command: CommandId): Promise<VaultOverrides>;
+}
+
+/**
+ * Общая часть `flushAll`/`registerFlusher` для обеих реализаций клиента:
+ * список редакторов и порядок «дописать всё → спросить ядро, осталось ли
+ * несохранённое». Вопрос к ядру у реализаций свой, поэтому приходит аргументом.
+ */
+export function createFlushRegistry(
+  unresolvedEditPaths: () => Promise<string[]>,
+): Pick<VaultClient, "flushAll" | "registerFlusher"> {
+  const flushers = new Set<() => Promise<void>>();
+  return {
+    registerFlusher(flush) {
+      flushers.add(flush);
+      return () => {
+        flushers.delete(flush);
+      };
+    },
+    async flushAll() {
+      // Отказ одного редактора не мешает дописать остальные: итог всё равно
+      // определяет ядро — по тому, что осталось несохранённым.
+      await Promise.allSettled([...flushers].map((flush) => flush()));
+      return (await unresolvedEditPaths()).length === 0;
+    },
+  };
 }

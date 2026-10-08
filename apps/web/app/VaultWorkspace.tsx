@@ -4,6 +4,7 @@ import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { webDeviceSettings } from "@typsidian/ui/settings/device-settings-web.js";
 import {
+  cloneWebVault,
   lastWebVault,
   openWebVault,
   openWebVaultById,
@@ -47,11 +48,14 @@ export function VaultWorkspace(): React.JSX.Element {
         // `reopen` — вторая половина переключения vault (US2 фичи 004, AS3):
         // панель меняет текущий vault в настройках, а открывает выбранный
         // рабочая область, потому что клиентом владеет она.
-        settings={(client, reopen, preview) => (
+        cloneVault={cloneWebVault}
+        settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}
             vaultClient={client}
             preview={preview}
+            sync={extras.sync}
+            onCloneVault={extras.onCloneVault}
             onVaultSwitched={(id) => reopen(() => openWebVaultById(id))}
           />
         )}

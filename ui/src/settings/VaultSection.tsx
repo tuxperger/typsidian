@@ -36,6 +36,8 @@ export interface VaultSectionProps {
   onSwitch: (id: string) => void | Promise<void>;
   onSetLabel: (id: string, label: string | null) => void | Promise<void>;
   onForget: (id: string) => void | Promise<void>;
+  /** Создать vault из удалённого репозитория (011 FR-013); `null` — оболочка жеста не даёт. */
+  onCloneVault?: (() => void) | null;
   /** Причина отказа последней операции — показывается, но не придумывается. */
   errorMessage?: string | null;
 
@@ -89,6 +91,7 @@ export function VaultSection({
   sections = [],
   exportFolder = null,
   onChangeExportFolder,
+  onCloneVault = null,
 }: VaultSectionProps): React.JSX.Element {
   const { t } = useI18n();
   // `%` в строке каталога — место кода: слова вокруг него расставляет язык.
@@ -120,6 +123,11 @@ export function VaultSection({
       <button type="button" onClick={() => void onAddFolder()}>
         {t("settings.vaults.add")}
       </button>
+      {onCloneVault !== null && (
+        <button type="button" onClick={onCloneVault}>
+          {t("sync.command.clone")}
+        </button>
+      )}
 
       {errorMessage && <p role="alert">{errorMessage}</p>}
 

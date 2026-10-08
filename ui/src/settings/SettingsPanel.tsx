@@ -21,6 +21,8 @@ import {
 } from "./useSettings.js";
 import { describeVaultActionError, useVaultList, type ConfirmSwitch } from "./useVaultList.js";
 import { VaultSection } from "./VaultSection.js";
+import { SyncSettingsSection } from "../sync/SyncSettingsSection.js";
+import type { SyncControl } from "../sync/useSync.js";
 import { useVaultSettings } from "./useVaultSettings.js";
 import type { VaultClient } from "../vault-client.js";
 import type { PreviewClient } from "../preview-client.js";
@@ -90,6 +92,13 @@ export interface SettingsPanelProps {
    * разделе «Vault». `null` — сборка ещё не готова, перечня нет.
    */
   preview?: PreviewClient | null;
+  /**
+   * Синхронизация открытого vault (фича 011): её раздел настроек. `null` —
+   * vault не открыт или оболочка синхронизацию не дала.
+   */
+  sync?: SyncControl | null;
+  /** Жест «создать vault из удалённого репозитория» (011 FR-013). */
+  onCloneVault?: (() => void) | null;
 }
 
 export function SettingsPanel({
@@ -100,6 +109,8 @@ export function SettingsPanel({
   vaultClient = null,
   onVaultSwitched,
   preview = null,
+  sync = null,
+  onCloneVault = null,
 }: SettingsPanelProps): React.JSX.Element {
   const {
     state,
@@ -340,7 +351,19 @@ export function SettingsPanel({
                 : null
             }
             onChangeExportFolder={vaultSettings.setExportFolder}
+            onCloneVault={onCloneVault}
           />
+        )}
+
+        {section === "sync" && (
+          <section aria-label={t("sync.settings.title")}>
+            <h2>{t("sync.settings.title")}</h2>
+            {sync === null ? (
+              <p role="status">{t("settings.vaultNotOpen")}</p>
+            ) : (
+              <SyncSettingsSection sync={sync} />
+            )}
+          </section>
         )}
 
         {section === "templates" && (
@@ -421,6 +444,7 @@ export function SettingsPanel({
 const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
   { id: "vault", title: "settings.section.vault" },
   { id: "templates", title: "settings.section.templates" },
+  { id: "sync", title: "sync.panel.title" },
   { id: "appearance", title: "settings.section.appearance" },
   { id: "keybindings", title: "settings.section.keybindings" },
   { id: "advanced", title: "settings.section.advanced" },
@@ -430,6 +454,7 @@ const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
 export type SettingsSection =
   | "vault"
   | "templates"
+  | "sync"
   | "appearance"
   | "keybindings"
   | "advanced";

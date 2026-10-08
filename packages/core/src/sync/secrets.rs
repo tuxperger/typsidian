@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 pub enum SecretKind {
     RemoteUser,
     RemoteToken,
+    /// Адрес удалённого репозитория, подтверждённый на этом устройстве.
+    /// Не секрет сам по себе, но лежит рядом с токеном по делу: токен выдаётся
+    /// только этому адресу (T068).
+    RemoteOrigin,
     SyncthingApiKey,
 }
 
@@ -23,6 +27,7 @@ impl SecretKind {
         match self {
             SecretKind::RemoteUser => "remote-user",
             SecretKind::RemoteToken => "remote-token",
+            SecretKind::RemoteOrigin => "remote-origin",
             SecretKind::SyncthingApiKey => "syncthing-api-key",
         }
     }

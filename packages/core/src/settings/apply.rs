@@ -141,8 +141,12 @@ impl SettingsChange {
         if let Some(entry) = &self.vault_sync {
             next.vault_sync
                 .retain(|existing| existing.vault != entry.vault);
-            if entry.value != crate::sync::DeviceVaultSync::default() {
-                next.vault_sync.push(entry.clone());
+            let value = entry.value.clone().normalized();
+            if value != crate::sync::DeviceVaultSync::default() {
+                next.vault_sync.push(crate::sync::DeviceVaultSyncEntry {
+                    vault: entry.vault.clone(),
+                    value,
+                });
             }
         }
         next

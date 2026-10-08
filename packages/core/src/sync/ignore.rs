@@ -201,9 +201,13 @@ struct Parts<'a> {
     after: Vec<&'a str>,
 }
 
-/// Делит файл на строки до блока, сам блок и строки после. Незакрытый блок
-/// (маркер начала без конца) считается блоком до конца файла: его правила —
-/// наши, и вторая копия рядом с ним была бы тем самым дублем.
+/// Делит файл на строки до блока, сам блок и строки после.
+///
+/// Незакрытый блок (маркер начала без конца — файл правили руками или он
+/// пришёл таким из репозитория) тянется только по строкам, которые писало
+/// приложение: его правила — наши, и вторая копия рядом была бы дублем, но
+/// строки пользователя ниже блоком не становятся и при замене не пропадают
+/// (T068).
 fn split(file: IgnoreFile, text: &str) -> Parts<'_> {
     let begin = file.begin_marker();
     let end = file.end_marker();
@@ -215,11 +219,26 @@ fn split(file: IgnoreFile, text: &str) -> Parts<'_> {
             after: Vec::new(),
         };
     };
-    let stop = lines[start..]
+    let Some(stop) = lines[start..]
         .iter()
         .position(|line| line.trim() == end)
         .map(|offset| start + offset)
-        .unwrap_or(lines.len() - 1);
+    else {
+        let own = render_block(file);
+        let mut stop = start + 1;
+        while lines
+            .get(stop)
+            .map(|line| line.trim())
+            .is_some_and(|line| line.is_empty() || own.lines().any(|ours| ours == line))
+        {
+            stop += 1;
+        }
+        return Parts {
+            before: trim_blank_edges(lines[..start].to_vec()),
+            block: lines[start + 1..stop].to_vec(),
+            after: trim_blank_edges(lines[stop..].to_vec()),
+        };
+    };
     Parts {
         before: trim_blank_edges(lines[..start].to_vec()),
         block: lines[start + 1..stop].to_vec(),
@@ -289,6 +308,27 @@ mod tests {
         let report = report(IgnoreFile::StIgnore, Some(".git/\n"));
         assert!(!report.missing.contains(&"/.git".to_string()));
         assert_eq!(report.user_lines, 1);
+    }
+
+    #[test]
+    fn an_unclosed_block_neither_panics_nor_swallows_user_lines() {
+        for file in [IgnoreFile::StIgnore, IgnoreFile::GitIgnore] {
+            // Маркер начала последней строкой — раньше здесь была паника.
+            let lone = format!("мои-правила\n{}", file.begin_marker());
+            assert!(apply(file, Some(&lone)).contains("мои-правила"));
+
+            // Строки пользователя после незакрытого блока остаются.
+            let rules = file.required_rules();
+            let torn = format!("{}\n{}\nмоё-ниже\nещё-моё\n", file.begin_marker(), rules[0]);
+            let fixed = apply(file, Some(&torn));
+            assert!(
+                fixed.contains("моё-ниже") && fixed.contains("ещё-моё"),
+                "{fixed}"
+            );
+            assert_eq!(fixed.matches(&file.begin_marker()).count(), 1);
+            assert_eq!(fixed.matches(rules[0].as_str()).count(), 1);
+            assert_eq!(apply(file, Some(&fixed)), fixed);
+        }
     }
 
     #[test]

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { tauriDeviceSettings } from "@typsidian/ui/settings/device-settings-tauri.js";
-import { lastTauriVault, openTauriVaultById } from "@typsidian/ui/vault-client-tauri.js";
+import {
+  lastTauriVault,
+  openTauriVaultById,
+  openVaultAt,
+} from "@typsidian/ui/vault-client-tauri.js";
+import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { lastMobileFolder, openMobileVault } from "./openMobileVault.js";
@@ -33,6 +38,9 @@ export function MobileWorkspace(): React.JSX.Element {
   // через тот же обзор, что и открытие vault. `picker.pick` стабилен, поэтому
   // клиент один на всё время жизни окна.
   const device = useMemo(() => tauriDeviceSettings(picker.pick), [picker.pick]);
+  // Создание vault из удалённого репозитория (фича 011): пустую папку выбирает
+  // тот же обзор, что и папку vault.
+  const cloner = useMemo(() => tauriVaultCloner(picker.pick, openVaultAt), [picker.pick]);
 
   // Откуда начать обзор: последний открытый vault (FR-007). Спрашивается на
   // монтировании, а не при открытии обзора, — чтобы список был готов к первому
@@ -55,11 +63,14 @@ export function MobileWorkspace(): React.JSX.Element {
         // То же предложение продолжить с последним vault, что на рабочем столе
         // и на web, и из того же хранилища настроек устройства (FR-007).
         lastVault={lastTauriVault}
-        settings={(client, reopen, preview) => (
+        cloneVault={cloner}
+        settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}
             vaultClient={client}
             preview={preview}
+            sync={extras.sync}
+            onCloneVault={extras.onCloneVault}
             onVaultSwitched={(id) => reopen(() => openTauriVaultById(id))}
           />
         )}

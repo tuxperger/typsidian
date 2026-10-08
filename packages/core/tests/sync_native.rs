@@ -160,3 +160,13 @@ async fn shells_reject_what_they_cannot_do() {
 async fn settings_survive_in_vault_json_next_to_other_keys() {
     cases::settings_survive_in_vault_json_next_to_other_keys().await;
 }
+
+#[tokio::test]
+async fn a_remote_address_changed_elsewhere_gets_neither_snapshots_nor_the_token() {
+    cases::a_remote_address_changed_elsewhere_gets_neither_snapshots_nor_the_token().await;
+}
+
+#[tokio::test]
+async fn pulled_paths_that_alias_the_history_folder_are_refused() {
+    cases::pulled_paths_that_alias_the_history_folder_are_refused().await;
+}

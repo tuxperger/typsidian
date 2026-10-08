@@ -21,7 +21,7 @@ use typsidian_core::sync::secrets::MemorySecretStore;
 use typsidian_core::sync::session::{self, ConflictSource, Credentials, Resolution};
 use typsidian_core::sync::settings::{self as sync_settings, Keeper, VaultSyncSettings};
 use typsidian_core::sync::{
-    Author, ChangeKind, Content, DeviceIdentity, DeviceVaultSync, HistoryState, Revision,
+    Author, Change, ChangeKind, Content, DeviceIdentity, DeviceVaultSync, HistoryState, Revision,
     ShellCapabilities, SyncContext, SyncError, SyncSession,
 };
 use typsidian_core::vault::backend::VaultBackend;
@@ -209,6 +209,7 @@ async fn clone_of(remote: &Rc<RefCell<FakeRepo>>) -> Fixture {
         &fixture.ctx().capabilities,
         REMOTE,
         Credentials::default(),
+        None,
         &CancelToken::new(),
     )
     .await
@@ -489,6 +490,30 @@ pub async fn a_deleted_note_is_restored_in_place() {
         .clone();
     f.vault.remove(Path::new("Папка/a.typ"));
     f.snap("удаление").await;
+
+    // История vault называет удалённый файл и снимок, где он ещё был: по ним
+    // интерфейс и предлагает восстановление (FR-011).
+    let deletion = f
+        .session
+        .history(&f.vault, None, None, 1)
+        .await
+        .unwrap()
+        .snapshots
+        .remove(0);
+    let changes = f
+        .session
+        .snapshot_changes(&f.vault, &deletion.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        changes,
+        vec![Change {
+            path: "Папка/a.typ".to_string(),
+            change: ChangeKind::Deleted,
+        }]
+    );
+    assert_eq!(deletion.parents.first(), Some(&id));
+
     f.session
         .restore(&mut f.vault, "Папка/a.typ", &id)
         .await
@@ -972,6 +997,19 @@ pub async fn a_non_keeper_reads_history_from_the_mirror() {
         Some(FakeGitEngine::bare().with_remote(remote.clone())),
         "vault-1",
     );
+    // Адрес пришёл вместе с настройками vault, и на этом устройстве его ещё
+    // никто не подтверждал — обмена нет, пока не подтвердят (T068).
+    let ctx = other.ctx();
+    assert_eq!(
+        other
+            .session
+            .refresh_mirror(&other.vault, &other.secrets, &ctx)
+            .await,
+        Err(SyncError::RemoteChanged {
+            url: REMOTE.to_string()
+        })
+    );
+    other.connect().await;
     let ctx = other.ctx();
     other
         .session
@@ -1081,4 +1119,78 @@ pub async fn settings_survive_in_vault_json_next_to_other_keys() {
     assert!(text.contains("vault-root"));
     assert_eq!(sync_settings::read(&f.vault).await, patched);
     let _ = VaultSyncSettings::default();
+}
+
+// ── T068: адрес из общих настроек не доверяется без подтверждения ──────────
+
+pub async fn a_remote_address_changed_elsewhere_gets_neither_snapshots_nor_the_token() {
+    let remote = FakeGitEngine::new_remote();
+    let mut f = fixture(&[("a.typ", "= A\n")], Some(remote));
+    f.enable().await;
+    f.connect().await;
+    f.snap("адрес").await;
+    f.push().await.unwrap();
+
+    // Настройки vault доставляются вместе с ним: адрес в них мог поменять
+    // соавтор репозитория или другой участник папки Syncthing.
+    let mut settings = sync_settings::read(&f.vault).await;
+    settings.remote_url = Some("https://evil.example/steal.git".to_string());
+    settings.auto_push = true;
+    settings.auto_pull_on_open = true;
+    sync_settings::write(&mut f.vault, &settings).await.unwrap();
+
+    let changed = Err(SyncError::RemoteChanged {
+        url: "https://evil.example/steal.git".to_string(),
+    });
+    assert_eq!(f.push().await, changed);
+    assert_eq!(f.pull().await.map(|_| ()), changed);
+
+    // Автоматика по такту тоже никуда не идёт — отказ уходит в индикатор.
+    let ctx = f.ctx();
+    let outcome = f
+        .session
+        .tick(&mut f.vault, &f.secrets, &ctx, "Снимок")
+        .await;
+    assert!(!outcome.pulled && !outcome.pushed);
+
+    // Подтверждение на этом устройстве возвращает обмен — уже новому адресу и
+    // с теми данными доступа, что ввели для него.
+    f.session
+        .connect_remote(
+            &mut f.vault,
+            &f.secrets,
+            &ctx,
+            REMOTE,
+            Credentials {
+                user: None,
+                token: Some("t0ken".into()),
+            },
+        )
+        .await
+        .unwrap();
+    f.snap("после подтверждения").await;
+    f.push().await.unwrap();
+}
+
+pub async fn pulled_paths_that_alias_the_history_folder_are_refused() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("a.typ", "= A\n")], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    a.snap("адрес").await;
+    a.push().await.unwrap();
+    let mut b = clone_of(&remote).await;
+
+    // Файл, который Windows прочтёт как `.git/config`.
+    a.put(".git./config", "[core]\n\tfsmonitor = calc.exe\n")
+        .await;
+    a.put("b.typ", "= B\n").await;
+    a.snap("ловушка").await;
+    a.push().await.unwrap();
+
+    let error = b.pull().await.unwrap_err();
+    assert!(matches!(error, SyncError::Io { .. }), "{error:?}");
+    // Получение откатилось целиком: ни ловушки, ни соседних файлов.
+    assert_eq!(b.text(".git./config"), None);
+    assert_eq!(b.text("b.typ"), None);
 }

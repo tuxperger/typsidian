@@ -65,6 +65,18 @@ import { plainInputTarget } from "../templates/insertion/plainInputTarget.js";
 import type { EditorView } from "@codemirror/view";
 import { ContextMenuProvider, copyText, useContextMenu } from "../menu/ContextMenu.js";
 import { useI18n, type MessageKey } from "../i18n/index.js";
+import { FileHistory } from "../sync/FileHistory.js";
+import { RemoteDialog } from "../sync/RemoteDialog.js";
+import { SyncIndicator } from "../sync/SyncIndicator.js";
+import { KeeperConfirmDialog, SyncPanel } from "../sync/SyncPanel.js";
+import {
+  asSyncError,
+  type CloneRequest,
+  type RemoteCapabilities,
+  type VaultCloner,
+} from "../sync/sync-client.js";
+import { useSync, type SyncControl } from "../sync/useSync.js";
+import type { SyncError } from "../wasm-core/typsidian_core.js";
 
 export interface WorkspaceProps {
   /**
@@ -112,6 +124,13 @@ export interface WorkspaceProps {
      * готова, и раздел шаблонов показывает только настройки.
      */
     preview: PreviewClient | null,
+    /**
+     * Синхронизация открытого vault (фича 011) — раздел её настроек живёт в
+     * панели настроек; и жест «создать vault из удалённого репозитория» для
+     * раздела vault. `null` — недоступно: vault не открыт или оболочка жеста
+     * не даёт.
+     */
+    extras: { sync: SyncControl | null; onCloneVault: (() => void) | null },
   ) => React.ReactNode;
   /**
    * Компилятор предпросмотра (фича 005). Приходит извне по той же причине, что
@@ -121,6 +140,12 @@ export interface WorkspaceProps {
    * есть.
    */
   preview?: PreviewClient | null;
+  /**
+   * Жест «создать vault из удалённого репозитория» (фича 011, FR-013).
+   * Платформенный по той же причине, что и `openVaultFolder`: пустую папку
+   * выбирает оболочка. Не передан — действие не предлагается.
+   */
+  cloneVault?: VaultCloner;
 }
 
 /**
@@ -156,6 +181,7 @@ function WorkspaceView({
   lastVault,
   settings,
   preview = null,
+  cloneVault,
 }: WorkspaceProps): React.JSX.Element {
   const contextMenu = useContextMenu();
   const { t, tEn } = useI18n();
@@ -216,7 +242,13 @@ function WorkspaceView({
   // Клиент появляется позже этого колбэка, поэтому берётся из ref: сам колбэк
   // обязан быть стабильным — он уезжает в подписку на события.
   const clientRef = useRef<VaultClient | null>(null);
+  // Синхронизация (фича 011) появляется позже этого колбэка — по той же
+  // причине берётся из ref.
+  const syncRef = useRef<SyncControl | null>(null);
   const noticeEvent = useCallback((event: VaultEvent) => {
+    // Любое изменение файлов — повод перечитать сводку синхронизации и начать
+    // отсчёт паузы автоснимка заново; что из этого следует, решает ядро.
+    syncRef.current?.noticeVaultChange();
     void (async () => {
       const effect = await clientRef.current?.templateEvent(event);
       // Оба варианта — повод перечитать состав: у `TemplateChanged` меняется
@@ -384,6 +416,131 @@ function WorkspaceView({
   const board = useBoardDocument(
     isBoardOpen ? state.client : null,
     isBoardOpen && openNote ? openNote.path.toString() : null,
+  );
+
+  // ── Синхронизация (фича 011) ─────────────────────────────────────────────
+  //
+  // Хук живёт здесь, а не в панели: индикатор виден и при закрытой панели, а
+  // автоматика обязана идти, пока vault открыт.
+  const [syncPanel, setSyncPanel] = useState<{ focus: "conflicts" | null } | null>(null);
+  const [fileHistoryPath, setFileHistoryPath] = useState<string | null>(null);
+  const sync = useSync(state.sync, state.client, t("sync.autoPrefix"), {
+    // Файлы переписаны получением или откатом: открытая заметка обновляется
+    // тем же путём, что и при внешнем изменении (001), дерево перечитывается.
+    onFilesChanged: (paths) => {
+      for (const path of paths) fileChanged(path);
+      void refresh();
+    },
+  });
+  syncRef.current = sync;
+
+  // Буфер редактора изменился — для автоснимка это изменение vault, хотя до
+  // диска оно дойдёт через автосохранение чуть позже.
+  const handleContentChange = useCallback((text: string) => {
+    setEditorText(text);
+    syncRef.current?.noticeVaultChange();
+  }, []);
+
+  // Доска держит свой буфер дебаунса: снимок истории обязан его дождаться
+  // (FR-006), как и буфера заметки (тот объявляет `NoteEditor`).
+  const flushBoard = board.flush;
+  useEffect(() => {
+    if (state.client === null || !isBoardOpen) return;
+    return state.client.registerFlusher(flushBoard);
+  }, [state.client, isBoardOpen, flushBoard]);
+
+  // Пути с неразрешённым конфликтом — для значка в дереве. Список приходит
+  // из ядра; перечитывается, когда меняется счётчик конфликтов сводки.
+  const conflictCount = sync?.overview?.conflicts ?? 0;
+  const syncClient = sync?.client ?? null;
+  const syncRevision = sync?.revision ?? 0;
+  const syncOverview = sync?.overview ?? null;
+  const [conflictPaths, setConflictPaths] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (syncClient === null || conflictCount === 0) {
+      setConflictPaths((current) => (current.size === 0 ? current : new Set()));
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await syncClient.conflicts();
+        if (!cancelled) setConflictPaths(new Set(list.map((conflict) => conflict.path)));
+      } catch {
+        // Значок — подсказка; сам список конфликтов покажет панель.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [syncClient, conflictCount, syncRevision]);
+
+  const openFileHistory = useCallback((path: string) => setFileHistoryPath(path), []);
+  const syncSnapshot = sync?.snapshot;
+  const syncPush = sync?.push;
+  const syncPull = sync?.pull;
+
+  // Возврат версии открытой заметки — правкой редактора, чтобы её отменял
+  // обычный `Ctrl+Z` (FR-011). Для файла, не открытого в редакторе, версию
+  // записывает ядро.
+  const applyHistoryToEditor = useMemo(() => {
+    if (fileHistoryPath === null || openNotePath !== fileHistoryPath || getEditorView === null) {
+      return undefined;
+    }
+    return (text: string) => {
+      const view = getEditorView();
+      if (view === null) return;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        userEvent: "input",
+      });
+      view.focus();
+    };
+  }, [fileHistoryPath, openNotePath, getEditorView]);
+
+  // Создание vault из удалённого репозитория (FR-013). Диалог один и на экране
+  // приветствия, и поверх открытого vault.
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneBusy, setCloneBusy] = useState(false);
+  const [cloneError, setCloneError] = useState<SyncError | null>(null);
+  const [cloneCapabilities, setCloneCapabilities] = useState<RemoteCapabilities | null>(null);
+  const openClone = useMemo(
+    () =>
+      cloneVault === undefined
+        ? null
+        : () => {
+            setCloneError(null);
+            // Что оболочка умеет, отвечает ядро; до ответа диалог не показывается —
+            // иначе подсказки под полями мигнули бы не теми словами.
+            void cloneVault.capabilities().then((capabilities) => {
+              setCloneCapabilities(capabilities);
+              setCloneOpen(true);
+            });
+          },
+    [cloneVault],
+  );
+  const submitClone = useCallback(
+    async (request: CloneRequest) => {
+      if (cloneVault === undefined) return;
+      setCloneBusy(true);
+      setCloneError(null);
+      try {
+        const opened = await cloneVault.run(request);
+        // Выбор папки закрыли — диалог остаётся: адрес уже введён.
+        if (!opened.ok && opened.error.kind === "PickerCancelled") return;
+        setCloneOpen(false);
+        setOpenNote(null);
+        setEditorText("");
+        setShowSettings(false);
+        await openVaultWith(async () => opened);
+      } catch (cause) {
+        const failure = asSyncError(cause);
+        setCloneError(failure.kind === "Cancelled" ? null : failure);
+      } finally {
+        setCloneBusy(false);
+      }
+    },
+    [cloneVault, openVaultWith],
   );
 
   // FR-037: предупреждение перед закрытием окна с неразрешёнными правками.
@@ -618,6 +775,24 @@ function WorkspaceView({
       } else if (shortcuts.matches("export-center", event)) {
         event.preventDefault();
         setExportOpen((open) => !open);
+      } else if (syncClient !== null && shortcuts.matches("sync-open-panel", event)) {
+        event.preventDefault();
+        setSyncPanel((open) => (open === null ? { focus: null } : null));
+      } else if (syncClient !== null && shortcuts.matches("sync-snapshot", event)) {
+        event.preventDefault();
+        void syncSnapshot?.(null, "");
+      } else if (syncClient !== null && shortcuts.matches("sync-file-history", event)) {
+        event.preventDefault();
+        if (openNotePath !== null) setFileHistoryPath(openNotePath);
+      } else if (syncClient !== null && shortcuts.matches("sync-push", event)) {
+        event.preventDefault();
+        void syncPush?.();
+      } else if (syncClient !== null && shortcuts.matches("sync-pull", event)) {
+        event.preventDefault();
+        void syncPull?.();
+      } else if (syncClient !== null && shortcuts.matches("sync-resolve-conflicts", event)) {
+        event.preventDefault();
+        setSyncPanel({ focus: "conflicts" });
       }
       // Escape здесь больше не разбирается: закрытием наложений занят
       // `useDismissOnEscape`, и закрывает он **верхнее** из открытых. Отдельная
@@ -625,7 +800,16 @@ function WorkspaceView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [shortcuts, toggleView, exportCurrent]);
+  }, [
+    shortcuts,
+    toggleView,
+    exportCurrent,
+    syncClient,
+    syncSnapshot,
+    syncPush,
+    syncPull,
+    openNotePath,
+  ]);
 
   /**
    * Команды палитры. Только те, что действительно что-то делают: список из
@@ -724,6 +908,73 @@ function WorkspaceView({
         run: () => setExportOpen(true),
       });
     }
+    // Фича 011. Команды синхронизации — пока vault открыт с ней. Обмен и
+    // история заметки предлагаются только там, где они возможны: мёртвая
+    // строка в палитре хуже её отсутствия; почему действие недоступно,
+    // объясняет панель (FR-036).
+    if (syncClient !== null) {
+      const history = syncOverview?.history.kind ?? null;
+      items.push({
+        id: "sync-open-panel",
+        ...titled("sync.command.openPanel"),
+        icon: "refresh",
+        meta: shortcuts.displayOf("sync-open-panel"),
+        run: () => setSyncPanel({ focus: null }),
+      });
+      if (history === "Local") {
+        items.push({
+          id: "sync-snapshot",
+          ...titled("sync.command.snapshot"),
+          icon: "check",
+          meta: shortcuts.displayOf("sync-snapshot"),
+          run: () => void syncSnapshot?.(null, ""),
+        });
+      }
+      if ((history === "Local" || history === "Mirror") && openNotePath !== null) {
+        items.push({
+          id: "sync-file-history",
+          ...titled("sync.command.fileHistory"),
+          icon: "list",
+          meta: shortcuts.displayOf("sync-file-history"),
+          run: () => setFileHistoryPath(openNotePath),
+        });
+      }
+      if (history === "Local" && syncOverview?.remote !== undefined) {
+        items.push(
+          {
+            id: "sync-push",
+            ...titled("sync.command.push"),
+            icon: "download",
+            meta: shortcuts.displayOf("sync-push"),
+            run: () => void syncPush?.(),
+          },
+          {
+            id: "sync-pull",
+            ...titled("sync.command.pull"),
+            icon: "download",
+            meta: shortcuts.displayOf("sync-pull"),
+            run: () => void syncPull?.(),
+          },
+        );
+      }
+      if ((syncOverview?.conflicts ?? 0) > 0) {
+        items.push({
+          id: "sync-resolve-conflicts",
+          ...titled("sync.command.resolveConflicts"),
+          icon: "refresh",
+          meta: shortcuts.displayOf("sync-resolve-conflicts"),
+          run: () => setSyncPanel({ focus: "conflicts" }),
+        });
+      }
+    }
+    if (openClone !== null) {
+      items.push({
+        id: "sync-clone",
+        ...titled("sync.command.clone"),
+        icon: "download",
+        run: openClone,
+      });
+    }
     if (settings !== undefined) {
       items.push({
         id: "settings",
@@ -743,9 +994,29 @@ function WorkspaceView({
     previewClient,
     openNotePath,
     exportCurrent,
+    syncClient,
+    syncOverview,
+    syncSnapshot,
+    syncPush,
+    syncPull,
+    openClone,
     t,
     tEn,
   ]);
+
+  const cloneDialog = cloneOpen && cloneVault !== undefined && cloneCapabilities !== null && (
+    <RemoteDialog
+      mode="clone"
+      capabilities={cloneCapabilities}
+      busy={cloneBusy}
+      error={cloneError}
+      onSubmit={(request) => void submitClone(request)}
+      onCancel={() => {
+        if (cloneBusy) cloneVault.cancel();
+        else setCloneOpen(false);
+      }}
+    />
+  );
 
   if (!state.client) {
     return (
@@ -760,7 +1031,9 @@ function WorkspaceView({
           onOpen={openVault}
           last={offered}
           {...(offered ? { onOpenLast: () => void openVaultWith(offered.open) } : {})}
+          onClone={openClone ?? undefined}
         />
+        {cloneDialog}
       </main>
     );
   }
@@ -899,6 +1172,19 @@ function WorkspaceView({
             </button>
           )}
 
+          {/* Индикатор синхронизации (011 FR-035): в шапке, а не в статус-баре
+              редактора — того нет при открытой доске и в графе, а состояние
+              обмена должно быть видно всегда. */}
+          {sync !== null && (
+            <SyncIndicator
+              sync={sync}
+              panelOpen={syncPanel !== null}
+              onOpenPanel={() =>
+                setSyncPanel((open) => (open === null ? { focus: null } : null))
+              }
+            />
+          )}
+
           <span className="ts-divider" />
 
           <button
@@ -1004,6 +1290,12 @@ function WorkspaceView({
               createFromTemplate={createFromTemplate}
               shortcuts={shortcuts}
               onInsertLink={insertLink}
+              onFileHistory={
+                syncOverview?.history.kind === "Local" || syncOverview?.history.kind === "Mirror"
+                  ? (note) => openFileHistory(note.path.toString())
+                  : undefined
+              }
+              conflictPaths={conflictPaths}
             />
 
             {/* Граница панели и остального окна. Стоит и при открытой доске:
@@ -1049,7 +1341,7 @@ function WorkspaceView({
               acceptedExternal={acceptedExternal}
               onOpenBoard={openBoard}
               onCreateBoard={() => void createBoard()}
-              onContentChange={setEditorText}
+              onContentChange={handleContentChange}
               onEditorReady={editorReady}
               onSaveAsTemplate={setSavingTemplate}
               fontSize={editorFontSize}
@@ -1197,11 +1489,35 @@ function WorkspaceView({
                 state.client ?? null,
                 (opener) => void reopenVault(opener),
                 state.preview ?? preview ?? null,
+                { sync, onCloneVault: openClone },
               )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Синхронизация (фича 011). Панель не модальна: она сбоку, и работа с
+          заметкой под ней продолжается (FR-019). */}
+      {sync !== null && syncPanel !== null && (
+        <SyncPanel
+          sync={sync}
+          focus={syncPanel.focus}
+          onOpenFileHistory={openFileHistory}
+          onClose={() => setSyncPanel(null)}
+        />
+      )}
+      {sync !== null && fileHistoryPath !== null && (
+        <FileHistory
+          sync={sync}
+          path={fileHistoryPath}
+          applyToEditor={applyHistoryToEditor}
+          onClose={() => setFileHistoryPath(null)}
+        />
+      )}
+      {sync !== null && sync.keeperConfirmation !== null && (
+        <KeeperConfirmDialog request={sync.keeperConfirmation} />
+      )}
+      {cloneDialog}
 
       {/* Один конфликт — один диалог: доска получает свой, заметка свой, и
           одновременно они не показываются. */}

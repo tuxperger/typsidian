@@ -21,6 +21,7 @@ import { templates } from "./ru/templates.js";
 import { search } from "./ru/search.js";
 import { graph } from "./ru/graph.js";
 import { shell } from "./ru/shell.js";
+import { sync } from "./ru/sync.js";
 
 export const ru: Catalog = {
   ...common,
@@ -40,4 +41,5 @@ export const ru: Catalog = {
   ...search,
   ...graph,
   ...shell,
+  ...sync,
 };

@@ -53,6 +53,18 @@ pub enum CommandId {
     ExportPdf,
     /// Центр экспорта (фича 009, FR-014).
     ExportCenter,
+    /// Панель «Синхронизация» (фича 011, FR-035).
+    SyncOpenPanel,
+    /// Сделать снимок (фича 011, FR-005).
+    SyncSnapshot,
+    /// История открытой заметки (фича 011, FR-009).
+    SyncFileHistory,
+    /// Отправить снимки в удалённый репозиторий (фича 011, FR-015).
+    SyncPush,
+    /// Получить снимки из удалённого репозитория (фича 011, FR-015).
+    SyncPull,
+    /// Список конфликтов (фича 011, FR-016, FR-024).
+    SyncResolveConflicts,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -71,6 +83,12 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::RebuildPreview,
     CommandId::ExportPdf,
     CommandId::ExportCenter,
+    CommandId::SyncOpenPanel,
+    CommandId::SyncSnapshot,
+    CommandId::SyncFileHistory,
+    CommandId::SyncPush,
+    CommandId::SyncPull,
+    CommandId::SyncResolveConflicts,
 ];
 
 impl CommandId {
@@ -88,6 +106,12 @@ impl CommandId {
             Self::RebuildPreview => "rebuild-preview",
             Self::ExportPdf => "export-pdf",
             Self::ExportCenter => "export-center",
+            Self::SyncOpenPanel => "sync-open-panel",
+            Self::SyncSnapshot => "sync-snapshot",
+            Self::SyncFileHistory => "sync-file-history",
+            Self::SyncPush => "sync-push",
+            Self::SyncPull => "sync-pull",
+            Self::SyncResolveConflicts => "sync-resolve-conflicts",
         }
     }
 
@@ -123,6 +147,15 @@ impl CommandId {
             // (009/research.md §9).
             Self::ExportPdf => (false, false, "p"),
             Self::ExportCenter => (true, false, "p"),
+            // Синхронизация (фича 011) — вся на `Mod+Alt`: буквы без Alt заняты
+            // выше, а с Shift — браузером. `l` для получения не берётся:
+            // `Ctrl+Alt+L` на Linux блокирует экран.
+            Self::SyncOpenPanel => (false, true, "s"),
+            Self::SyncSnapshot => (false, true, "c"),
+            Self::SyncFileHistory => (false, true, "h"),
+            Self::SyncPush => (false, true, "u"),
+            Self::SyncPull => (false, true, "g"),
+            Self::SyncResolveConflicts => (false, true, "m"),
         };
         Shortcut {
             mod_key: true,

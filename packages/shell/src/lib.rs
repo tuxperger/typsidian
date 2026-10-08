@@ -445,7 +445,7 @@ pub struct LastVaultView {
 pub async fn remember_opened_vault(
     store: &mut NativeStore,
     path: PathBuf,
-) -> Result<(), StoreError> {
+) -> Result<VaultId, StoreError> {
     let location = path.to_string_lossy().into_owned();
     // Вторая запись о той же папке не появится: сведение к существующей делает
     // реестр ядра по канонизированному пути (FR-020).
@@ -456,11 +456,11 @@ pub async fn remember_opened_vault(
     // режима редактора и здесь не срабатывают.
     store
         .apply(
-            &SettingsChange::current_vault(id),
+            &SettingsChange::current_vault(id.clone()),
             &ApplyContext::unobstructed(),
         )
         .await;
-    Ok(())
+    Ok(id)
 }
 
 /// Последний открытый vault, если он ещё на месте.
@@ -518,13 +518,14 @@ async fn device_store<'a>(
     Ok(guard.as_mut().expect("хранилище только что открыто"))
 }
 
-/// Запоминает открытую папку как последний vault.
+/// Запоминает открытую папку как последний vault. Возвращает идентификатор
+/// записи: по нему окно открывает сессию синхронизации (фича 011).
 #[tauri::command]
 async fn remember_vault(
     app: AppHandle,
     device: State<'_, Device>,
     path: String,
-) -> Answer<(), StoreError> {
+) -> Answer<VaultId, StoreError> {
     let mut guard = device.0.lock().await;
     let store = device_store(&app, &mut guard).await?;
     remember_opened_vault(store, PathBuf::from(path)).await
@@ -1601,6 +1602,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             sync::sync_snapshot,
             sync::sync_history,
             sync::sync_diff,
+            sync::sync_snapshot_changes,
             sync::sync_file_at,
             sync::sync_restore,
             sync::sync_connect_remote,

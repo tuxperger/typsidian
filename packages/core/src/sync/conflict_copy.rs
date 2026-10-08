@@ -31,8 +31,11 @@ pub fn parse(file_name: &str) -> Option<ConflictCopyName> {
     let at = file_name.rfind(MARKER)?;
     let stem = &file_name[..at];
     let rest = &file_name[at + MARKER.len()..];
-    // `ГГГГММДД-ЧЧММСС-XXXXXXX` — 23 знака, дальше расширение или конец.
-    if rest.len() < 23 {
+    // `ГГГГММДД-ЧЧММСС-XXXXXXX` — 23 знака ASCII, дальше расширение или конец.
+    // Проверка на ASCII — до срезов: имя файла приходит с диска любым, и срез
+    // посреди многобайтного знака («…sync-conflict-копия…») уронил бы обход
+    // всего vault (T068).
+    if rest.len() < 23 || !rest.as_bytes()[..23].is_ascii() {
         return None;
     }
     let (fixed, extension) = rest.split_at(23);
@@ -96,6 +99,9 @@ mod tests {
 
     #[test]
     fn ordinary_names_are_not_copies() {
+        // Не-ASCII после маркера — не копия и не повод падать.
+        assert_eq!(parse("a.sync-conflict-яяяяяяяяяяяя.typ"), None);
+        assert_eq!(parse("Заметка.sync-conflict-копия-старая-версия.typ"), None);
         for name in [
             "note.typ",
             "sync-conflict.typ",

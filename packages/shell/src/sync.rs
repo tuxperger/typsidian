@@ -81,6 +81,22 @@ fn capabilities() -> ShellCapabilities {
     ShellCapabilities::current(cfg!(target_os = "android"))
 }
 
+/// Идентификатор vault приходит из окна и идёт в имя каталога зеркала и в имя
+/// записи секрета — поэтому только в том виде, в каком его выдаёт реестр
+/// ядра (`VaultId::mint`): шестнадцатеричная строка без разделителей (T068).
+fn require_vault_id(vault_id: &str) -> Result<(), SyncFailure> {
+    let well_formed =
+        (1..=64).contains(&vault_id.len()) && vault_id.bytes().all(|b| b.is_ascii_hexdigit());
+    if well_formed {
+        Ok(())
+    } else {
+        Err(SyncError::Io {
+            message: "неизвестный vault".to_string(),
+        }
+        .into())
+    }
+}
+
 fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -336,6 +352,7 @@ pub async fn sync_open(
     cancel: State<'_, SyncCancel>,
     vault_id: String,
 ) -> Answer<()> {
+    require_vault_id(&vault_id)?;
     let root = {
         let guard = vault.0.lock().await;
         guard
@@ -535,6 +552,19 @@ pub async fn sync_diff(
 }
 
 #[tauri::command]
+pub async fn sync_snapshot_changes(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    snapshot: String,
+) -> Answer<Vec<Change>> {
+    let vault_guard = vault.0.lock().await;
+    let backend = vault_guard.as_ref().ok_or_else(not_open)?;
+    let sync_guard = sync_state.0.lock().await;
+    let open = sync_guard.as_ref().ok_or_else(not_open)?;
+    Ok(open.session.snapshot_changes(backend, &snapshot).await?)
+}
+
+#[tauri::command]
 pub async fn sync_file_at(
     vault: State<'_, Vault>,
     sync_state: State<'_, SyncState>,
@@ -713,17 +743,18 @@ pub async fn sync_refresh_mirror(
 }
 
 /// Параметры локального Syncthing, найденные в его конфигурации (FR-022a).
-/// Ключ возвращается окну один раз — для подтверждения подключения
-/// пользователем; сохраняется он только через [`sync_syncthing_connect`].
+///
+/// Только адрес. Ключ API окну не отдаётся: он даёт полный доступ к Syncthing,
+/// а окно показывает содержимое заметок и внешних шаблонов (T068). При
+/// подтверждении [`sync_syncthing_connect`] перечитывает ключ сам.
 #[derive(Debug, serde::Serialize)]
 pub struct DiscoveredSyncthing {
     endpoint: SyncthingEndpoint,
-    api_key: String,
 }
 
 #[tauri::command]
 pub fn sync_syncthing_discover() -> Option<DiscoveredSyncthing> {
-    syncthing::discover().map(|(endpoint, api_key)| DiscoveredSyncthing { endpoint, api_key })
+    syncthing::discover().map(|(endpoint, _)| DiscoveredSyncthing { endpoint })
 }
 
 #[tauri::command]
@@ -734,8 +765,19 @@ pub async fn sync_syncthing_connect(
     sync_state: State<'_, SyncState>,
     secrets: State<'_, Secrets>,
     endpoint: SyncthingEndpoint,
-    api_key: String,
+    api_key: Option<String>,
 ) -> Answer<()> {
+    // Без ключа — подключение к найденному Syncthing: ключ берётся из его же
+    // конфигурации, и только если адрес в ней тот, что подтвердил пользователь.
+    let api_key = match api_key {
+        Some(key) => key,
+        None => syncthing::discover()
+            .filter(|(found, _)| found.address == endpoint.address && found.tls == endpoint.tls)
+            .map(|(_, key)| key)
+            .ok_or_else(|| SyncError::Io {
+                message: "ключ Syncthing не найден".to_string(),
+            })?,
+    };
     with_sync!(app, device, vault, sync_state, |_backend, session, ctx| Ok(
         session
             .syncthing_connect(&secrets.0, &ctx, endpoint, &api_key)
@@ -775,7 +817,17 @@ pub async fn sync_tick(
         guard.as_ref().ok_or_else(not_open)?.vault.clone()
     };
     let ctx = context(&app, &device, &vault_id).await?;
-    if let Some(endpoint) = ctx.device_sync.syncthing.clone() {
+    if let Some(mut endpoint) = ctx.device_sync.syncthing.clone() {
+        // Первое обращение к Syncthing по TLS закрепляет его сертификат; ключ API
+        // уходит только после этого (research §8).
+        if endpoint.tls && endpoint.cert_fingerprint.is_none() {
+            if let Some(fingerprint) = syncthing::pin(&endpoint).await {
+                endpoint.cert_fingerprint = Some(fingerprint.clone());
+                if let Some(open) = sync_state.0.lock().await.as_mut() {
+                    open.session.syncthing_pinned(&ctx, fingerprint);
+                }
+            }
+        }
         let (root, detected) = {
             let guard = vault.0.lock().await;
             let backend = guard.as_ref().ok_or_else(not_open)?;
@@ -811,17 +863,25 @@ pub async fn sync_tick(
 #[tauri::command]
 pub async fn sync_clone_vault(
     secrets: State<'_, Secrets>,
+    cancel: State<'_, SyncCancel>,
     path: String,
     vault_id: String,
     url: String,
     credentials: Credentials,
 ) -> Answer<()> {
+    require_vault_id(&vault_id)?;
     let target = PathBuf::from(&path);
     let is_empty = std::fs::read_dir(&target)
         .map(|mut entries| entries.next().is_none())
         .unwrap_or(true);
     if !is_empty {
         return Err(SyncError::TargetNotEmpty.into());
+    }
+    // Сессии ещё нет — токен отмены кладётся в то же место, откуда его берёт
+    // `sync_cancel`: клонирование отменяется той же командой (принцип X).
+    let token = CancelToken::new();
+    if let Ok(mut slot) = cancel.0.lock() {
+        *slot = Some(token.clone());
     }
     Ok(sync_session::clone_vault(
         &NativeGitEngine::open(target),
@@ -830,7 +890,8 @@ pub async fn sync_clone_vault(
         &capabilities(),
         &url,
         credentials,
-        &CancelToken::new(),
+        None,
+        &token,
     )
     .await?)
 }

@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { VaultClient } from "./vault-client.js";
+import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
+import type { SyncClient } from "./sync/sync-client.js";
+import { openTauriSync } from "./sync/sync-client-tauri.js";
 // Из нейтрального модуля, а не из `vault-client-web.js`: тот импортирует
 // `WebBackend` значением и втянул бы WASM в сборку оболочки.
 import { basename } from "./paths.js";
@@ -95,14 +97,21 @@ export async function openVaultAt(path: string): Promise<VaultOpenResult> {
   //
   // Отказ хранилища настроек открытие не отменяет: vault уже открыт и работает,
   // а не запомнилась только точка входа следующего запуска.
+  //
+  // Идентификатор записи нужен синхронизации (фича 011): под ним лежат
+  // значения устройства и секреты этого vault. Не запомнился vault — нет и
+  // сессии синхронизации; сам vault при этом работает (FR-038).
+  let sync: SyncClient | undefined;
   try {
-    await invoke<void>("remember_vault", { path });
+    const vaultId = await invoke<string>("remember_vault", { path });
+    sync = await openTauriSync(vaultId);
   } catch {
     // Молча: сказать об этом пользователю нечего — действия от него не требуется.
   }
   return {
     ok: true,
     client: tauriVaultClient(profile, basename(root)),
+    ...(sync === undefined ? {} : { sync }),
     // Предпросмотр приходит вместе с клиентом, как и на web: движок живёт в
     // оболочке всё время работы окна, и отдельного создания ему не нужно.
     preview: tauriPreviewClient(),
@@ -299,6 +308,7 @@ export function tauriVaultClient(
       return external ?? undefined;
     },
     unresolvedEditPaths: refreshUnresolved,
+    ...createFlushRegistry(refreshUnresolved),
     hasUnresolvedEdits: () => unresolved,
 
     subscribe: (onEvents) => {

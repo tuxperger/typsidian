@@ -12,6 +12,11 @@ export interface OpenVaultProps {
   last?: LastVault | null;
   /** Открыть последний vault. Обязателен, если `last` не `null`. */
   onOpenLast?: () => void;
+  /**
+   * Создать vault из удалённого репозитория (фича 011, FR-013). Не передан —
+   * оболочка этого жеста не даёт, и кнопки нет.
+   */
+  onClone?: (() => void) | undefined;
 }
 
 /**
@@ -60,6 +65,7 @@ export function OpenVault({
   onOpen,
   last = null,
   onOpenLast,
+  onClone,
 }: OpenVaultProps): React.JSX.Element {
   const { t } = useI18n();
   const message = error ? describeOpenVaultError(t, error) : null;
@@ -77,6 +83,11 @@ export function OpenVault({
             ? t("tree.open.chooseAnother")
             : t("tree.open.open")}
       </button>
+      {onClone && (
+        <button type="button" onClick={onClone} disabled={isLoading}>
+          {t("sync.command.clone")}
+        </button>
+      )}
       {message && <p role="alert">{message}</p>}
     </div>
   );

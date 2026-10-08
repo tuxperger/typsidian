@@ -133,7 +133,13 @@ const OpenPathContext = createContext<string | null>(null);
  * ссылку на заметку в открытую заметку. Контекст по той же причине, что
  * `OpenPathContext`: строки лежат на два уровня глубже, чем пропы дерева.
  */
-const TreeExtrasContext = createContext<{ onInsertLink?: (note: Note) => void }>({});
+const TreeExtrasContext = createContext<{
+  onInsertLink?: (note: Note) => void;
+  /** История файла (фича 011, FR-009). */
+  onFileHistory?: (note: Note) => void;
+  /** Пути с неразрешённым конфликтом получения или Syncthing (фича 011). */
+  conflictPaths?: ReadonlySet<string>;
+}>({});
 
 /** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
 function copyPathItem(
@@ -207,6 +213,8 @@ export interface VaultTreeActionsProps {
    * меню. Не передан — открытой текстовой заметки нет, и пункт не показывается.
    */
   onInsertLink?: ((note: Note) => void) | undefined;
+  onFileHistory?: ((note: Note) => void) | undefined;
+  conflictPaths?: ReadonlySet<string> | undefined;
 }
 
 type MenuTarget =
@@ -588,8 +596,9 @@ function NoteRow({
   const isBusy = actions.state.pendingPath !== null;
   const isOpen = useContext(OpenPathContext) === note.path.toString();
   const contextMenu = useContextMenu();
-  const { onInsertLink } = useContext(TreeExtrasContext);
+  const { onInsertLink, onFileHistory, conflictPaths } = useContext(TreeExtrasContext);
   const { t } = useI18n();
+  const hasConflict = conflictPaths?.has(note.path.toString()) ?? false;
 
   if (isRenaming) {
     return (
@@ -617,6 +626,9 @@ function NoteRow({
           ...(onInsertLink && !isBoard(note) && !isOpen
             ? [{ label: t("tree.menu.insertLink"), run: () => onInsertLink(note) }]
             : []),
+          ...(onFileHistory
+            ? [{ label: t("sync.tree.fileHistory"), run: () => onFileHistory(note) }]
+            : []),
           { kind: "separator" },
           copyPathItem(t, note.path.toString(), contextMenu.notify),
           { label: t("common.rename"), run: () => actions.beginRename(note) },
@@ -641,6 +653,13 @@ function NoteRow({
             выводится здесь из состояния редактора. */}
         {note.has_unsaved_edits && (
           <span className="ts-dot-unsaved" title={t("tree.unsaved")} />
+        )}
+        {/* Конфликт получения или копия Syncthing (фича 011): факт приходит
+            из ядра списком конфликтов, а не выводится здесь из имён файлов. */}
+        {hasConflict && (
+          <span className="ts-tree__conflict" title={t("sync.tree.conflict")}>
+            <span className="sr-only">{t("sync.tree.conflict")}</span>!
+          </span>
         )}
       </button>
       <button
@@ -849,14 +868,20 @@ export function VaultTreeActions({
   openPath = null,
   actions,
   onInsertLink,
+  onFileHistory,
+  conflictPaths,
 }: VaultTreeActionsProps): React.JSX.Element {
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
   const isCreatingAtRoot = actions.state.creatingInFolder === "";
   const isBusy = actions.state.pendingPath !== null;
   const extras = useMemo(
-    () => (onInsertLink ? { onInsertLink } : {}),
-    [onInsertLink],
+    () => ({
+      ...(onInsertLink ? { onInsertLink } : {}),
+      ...(onFileHistory ? { onFileHistory } : {}),
+      ...(conflictPaths ? { conflictPaths } : {}),
+    }),
+    [onInsertLink, onFileHistory, conflictPaths],
   );
 
   return (

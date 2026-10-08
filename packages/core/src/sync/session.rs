@@ -451,7 +451,18 @@ impl<E: GitEngine> SyncSession<E> {
         ctx: &SyncContext,
         file: IgnoreFile,
     ) -> Result<(), SyncError> {
-        let current = read_text(backend, file.path()).await;
+        // «Не прочитался» — не «файла нет»: по второму файл создаётся заново, и
+        // правила пользователя в нечитаемом файле (не UTF-8, нет прав) пропали
+        // бы (T068).
+        let current = match backend.read(Path::new(file.path())).await {
+            Ok(text) => Some(text),
+            Err(ReadError::NotFound) => None,
+            Err(ReadError::Io | ReadError::TooLarge) => {
+                return Err(SyncError::Io {
+                    message: format!("файл правил не читается: {}", file.path()),
+                })
+            }
+        };
         let next = ignore::apply(file, current.as_deref());
         if current.as_deref() != Some(next.as_str()) {
             write_file(backend, file.path(), Some(next.as_bytes())).await?;
@@ -756,7 +767,13 @@ impl<E: GitEngine> SyncSession<E> {
         revision: &Revision,
     ) -> Result<Option<Vec<u8>>, SyncError> {
         let (engine, _) = match revision {
-            Revision::Working => return Ok(read_bytes(backend, path).await),
+            // Путь приходит из окна: рабочий файл читается только внутри vault.
+            Revision::Working => {
+                let path = safe_path(path).ok_or(SyncError::Io {
+                    message: "недопустимый путь".to_string(),
+                })?;
+                return Ok(read_bytes(backend, &path).await);
+            }
             _ => self.reading_engine(backend).await?,
         };
         let rev = match revision {
@@ -805,6 +822,29 @@ impl<E: GitEngine> SyncSession<E> {
         ))
     }
 
+    /// Что изменил снимок относительно предыдущего (FR-009, FR-011): по этому
+    /// списку в истории vault находят удалённый файл, чтобы вернуть его.
+    pub async fn snapshot_changes<B: VaultBackend>(
+        &self,
+        backend: &B,
+        snapshot: &str,
+    ) -> Result<Vec<Change>, SyncError> {
+        let (engine, _) = self.reading_engine(backend).await?;
+        let entry = engine
+            .log(Some(snapshot), 0, 1)
+            .await?
+            .entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| SyncError::Io {
+                message: "снимок не найден".to_string(),
+            })?;
+        let raw = engine
+            .tree_diff(entry.parents.first().map(String::as_str), &entry.id)
+            .await?;
+        Ok(pair_renames(raw, |_, _| async { false }).await)
+    }
+
     /// Возвращает файл к версии из снимка или восстанавливает удалённый
     /// (FR-011). Это обычная запись файла: истории она не меняет.
     pub async fn restore<B: VaultBackend>(
@@ -850,6 +890,12 @@ impl<E: GitEngine> SyncSession<E> {
         let store_err = |_| SyncError::Io {
             message: "хранилище секретов недоступно".to_string(),
         };
+        // Подключение — и есть подтверждение адреса на этом устройстве: дальше
+        // обмен и токен идут только ему (см. `remote_spec`).
+        secrets
+            .set(&self.vault_id, SecretKind::RemoteOrigin, &parsed.url)
+            .await
+            .map_err(store_err)?;
         if parsed.scheme != remote_url::Scheme::Ssh {
             match &user {
                 Some(user) => secrets
@@ -901,7 +947,11 @@ impl<E: GitEngine> SyncSession<E> {
         if matches!(self.engine.probe().await?, RepoProbe::Local) {
             self.engine.set_remote_url(None).await?;
         }
-        for kind in [SecretKind::RemoteUser, SecretKind::RemoteToken] {
+        for kind in [
+            SecretKind::RemoteUser,
+            SecretKind::RemoteToken,
+            SecretKind::RemoteOrigin,
+        ] {
             let _ = secrets.delete(&self.vault_id, kind).await;
         }
         self.fetched_at = None;
@@ -925,13 +975,30 @@ impl<E: GitEngine> SyncSession<E> {
         }
     }
 
-    async fn remote_spec<B: VaultBackend>(
+    /// Куда идёт обмен. Адрес лежит в настройках vault — файле, который
+    /// доставляется вместе с vault (историей, Syncthing) и доступен на запись
+    /// всем, с кем vault общий. Поэтому обмен идёт только с адресом,
+    /// подтверждённым на этом устройстве подключением: иначе правка чужими
+    /// руками увела бы токен и заметки на чужой сервер (T068).
+    async fn remote_spec<B: VaultBackend, S: SecretStore>(
         &self,
         backend: &B,
+        secrets: &S,
         ctx: &SyncContext,
     ) -> Result<RemoteSpec, SyncError> {
         let settings = sync_settings::read(backend).await;
         let url = settings.remote_url.clone().ok_or(SyncError::NoRemote)?;
+        let confirmed = secrets
+            .get(&self.vault_id, SecretKind::RemoteOrigin)
+            .await
+            .ok()
+            .flatten();
+        if confirmed.as_deref() != Some(url.as_str()) {
+            return Err(SyncError::RemoteChanged { url });
+        }
+        // Схема обязана быть доступной этой оболочке и при обмене, а не только
+        // при подключении.
+        parse_remote(&url, ctx)?;
         let head_branch = self.engine.head().await.ok().and_then(|head| head.branch);
         Ok(RemoteSpec {
             url,
@@ -958,7 +1025,7 @@ impl<E: GitEngine> SyncSession<E> {
         secrets: &S,
         ctx: &SyncContext,
     ) -> Result<Option<String>, SyncError> {
-        let spec = self.remote_spec(backend, ctx).await?;
+        let spec = self.remote_spec(backend, secrets, ctx).await?;
         let auth = self.auth(secrets).await;
         let cancel = self.fresh_cancel();
         let result = self
@@ -980,7 +1047,7 @@ impl<E: GitEngine> SyncSession<E> {
     ) -> Result<RemoteStatus, SyncError> {
         self.require_local().await?;
         self.gate_write(backend, ctx, confirm_not_keeper).await?;
-        let spec = self.remote_spec(backend, ctx).await?;
+        let spec = self.remote_spec(backend, secrets, ctx).await?;
         let auth = self.auth(secrets).await;
         let cancel = self.fresh_cancel();
         self.progress(Operation::Push, 0, 1);
@@ -1062,15 +1129,30 @@ impl<E: GitEngine> SyncSession<E> {
                 });
             };
             pending.incoming.insert(path.clone());
-            let ours = read_bytes(backend, &path).await;
-            let base_bytes = match &base {
-                Some(base) => self.engine.read_blob(base, &path).await?,
-                None => None,
-            };
-            let theirs_bytes = if change.status == RawStatus::Deleted {
-                None
-            } else {
-                self.engine.read_blob(&theirs, &path).await?
+            // Три версии файла. Любой отказ чтения прерывает получение с
+            // откатом уже записанного: «не прочиталось» нельзя принять за
+            // «файла нет» — тогда нечитаемый локальный файл (слишком большой,
+            // без прав, каталог на месте файла) был бы молча перезаписан.
+            let versions = async {
+                let ours = read_local(backend, &path).await?;
+                let base_bytes = match &base {
+                    Some(base) => self.engine.read_blob(base, &path).await?,
+                    None => None,
+                };
+                let theirs_bytes = if change.status == RawStatus::Deleted {
+                    None
+                } else {
+                    self.engine.read_blob(&theirs, &path).await?
+                };
+                Ok::<_, SyncError>((ours, base_bytes, theirs_bytes))
+            }
+            .await;
+            let (ours, base_bytes, theirs_bytes) = match versions {
+                Ok(versions) => versions,
+                Err(error) => {
+                    self.rollback(backend, &pending).await;
+                    return Err(error);
+                }
             };
             let decision = decide_file(&base_bytes, &ours, &theirs_bytes);
             match decision {
@@ -1235,7 +1317,10 @@ impl<E: GitEngine> SyncSession<E> {
             .and_then(|name| name.to_str())
             .and_then(conflict_copy::parse)
             .ok_or(SyncError::ConflictNotFound)?;
-        let original = to_slash(&Path::new(&copy).with_file_name(&name.original));
+        // Имя исходного файла выведено из имени копии, то есть из чужих данных:
+        // `..sync-conflict-…` дало бы `..`, а `.git.sync-conflict-…` — `.git`.
+        let original = safe_path(&to_slash(&Path::new(&copy).with_file_name(&name.original)))
+            .ok_or(SyncError::ConflictNotFound)?;
         let copy_bytes = read_bytes(backend, &copy)
             .await
             .ok_or(SyncError::ConflictNotFound)?;
@@ -1356,7 +1441,7 @@ impl<E: GitEngine> SyncSession<E> {
         secrets: &S,
         ctx: &SyncContext,
     ) -> Result<(), SyncError> {
-        let spec = self.remote_spec(backend, ctx).await?;
+        let spec = self.remote_spec(backend, secrets, ctx).await?;
         let auth = self.auth(secrets).await;
         let cancel = self.fresh_cancel();
         let mirror = self.mirror.as_ref().ok_or(SyncError::NoHistory)?;
@@ -1406,6 +1491,18 @@ impl<E: GitEngine> SyncSession<E> {
         self.syncthing = None;
         self.events.push(SyncEvent::OverviewChanged);
         Ok(())
+    }
+
+    /// Закрепляет сертификат подключённого Syncthing при первом обращении
+    /// (research §8). Отпечаток добывает оболочка — сеть есть только у неё.
+    pub fn syncthing_pinned(&mut self, ctx: &SyncContext, fingerprint: String) {
+        self.update_device(ctx, |device| {
+            if let Some(endpoint) = device.syncthing.as_mut() {
+                if endpoint.tls && endpoint.cert_fingerprint.is_none() {
+                    endpoint.cert_fingerprint = Some(fingerprint);
+                }
+            }
+        });
     }
 
     pub async fn syncthing_disconnect<S: SecretStore>(&mut self, secrets: &S, ctx: &SyncContext) {
@@ -1478,6 +1575,14 @@ impl<E: GitEngine> SyncSession<E> {
                 .await
                 .map(|changes| !changes.is_empty())
                 .unwrap_or(false);
+        // Изменения, о которых оболочка не сообщала (были уже при открытии,
+        // пришли мимо вотчера): пауза отсчитывается с такта, который их увидел,
+        // — иначе «тихо с» сдвигалось бы на каждом такте и снимок не наступал.
+        if !has_changes {
+            self.last_change_at = None;
+        } else if self.last_change_at.is_none() {
+            self.last_change_at = Some(ctx.now);
+        }
         let facts = SnapshotFacts {
             enabled: settings.auto_snapshot,
             has_history: local,
@@ -1556,6 +1661,7 @@ pub async fn clone_vault<E: GitEngine, S: SecretStore>(
     capabilities: &super::ShellCapabilities,
     url: &str,
     credentials: Credentials,
+    cors_proxy: Option<&str>,
     cancel: &CancelToken,
 ) -> Result<(), SyncError> {
     let ctx = SyncContext {
@@ -1565,6 +1671,9 @@ pub async fn clone_vault<E: GitEngine, S: SecretStore>(
         capabilities: *capabilities,
     };
     let parsed = parse_remote(url, &ctx)?;
+    if cors_proxy.is_some_and(|proxy| !remote_url::is_proxy(proxy)) {
+        return Err(SyncError::InvalidRemoteUrl);
+    }
     let auth = Auth {
         user: credentials.user.or(parsed.user.clone()),
         token: credentials.token.or(parsed.secret.clone()),
@@ -1575,12 +1684,16 @@ pub async fn clone_vault<E: GitEngine, S: SecretStore>(
     let spec = RemoteSpec {
         url: parsed.url.clone(),
         branch: DEFAULT_BRANCH.to_string(),
-        cors_proxy: None,
+        cors_proxy: cors_proxy.map(str::to_string),
     };
     engine.clone_into(&spec, &auth, false, cancel).await?;
     let store_err = |_| SyncError::Io {
         message: "хранилище секретов недоступно".to_string(),
     };
+    secrets
+        .set(vault_id, SecretKind::RemoteOrigin, &parsed.url)
+        .await
+        .map_err(store_err)?;
     if let Some(user) = &auth.user {
         secrets
             .set(vault_id, SecretKind::RemoteUser, user)
@@ -1841,8 +1954,10 @@ fn short(oid: &str) -> &str {
     &oid[..oid.len().min(7)]
 }
 
-/// Путь, пришедший извне (с сервера, из идентификатора конфликта), годится
-/// для записи в vault: относительный, без `..`, не внутрь `.git` (T068).
+/// Путь, пришедший извне (с сервера, из идентификатора конфликта, из имени
+/// конфликтной копии), годится для записи в vault: относительный, без `..`,
+/// не внутрь `.git` — включая имена, которые файловая система Windows или
+/// macOS считает тем же `.git` (T068).
 pub fn safe_path(path: &str) -> Option<String> {
     if path.is_empty() || path.contains('\0') || path.contains('\\') {
         return None;
@@ -1856,10 +1971,39 @@ pub fn safe_path(path: &str) -> Option<String> {
             _ => return None,
         }
     }
-    if parts.is_empty() || parts.iter().any(|part| part.eq_ignore_ascii_case(".git")) {
+    if parts.is_empty() || parts.iter().any(|part| names_git_dir(part)) {
         return None;
     }
     Some(parts.join("/"))
+}
+
+/// Называет ли компонент пути каталог истории — прямо или так, как его
+/// прочтёт файловая система: NTFS отбрасывает хвостовые точки и пробелы,
+/// знает короткое имя `GIT~1` и потоки `имя:поток`; HFS+ и APFS игнорируют
+/// невидимые знаки внутри имени. Запись в такой путь — это запись в
+/// `.git/config`, то есть исполнение чужой команды обычным git.
+fn names_git_dir(part: &str) -> bool {
+    // Поток NTFS (`.git::$INDEX_ALLOCATION`) — тот же каталог; двоеточие в
+    // обычном имени заметки на остальных системах законно, поэтому смотрим
+    // только на имя до него.
+    let visible: String = part
+        .split(':')
+        .next()
+        .unwrap_or(part)
+        .chars()
+        .filter(|c| {
+            !matches!(*c,
+                '\u{200C}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{206A}'..='\u{206F}'
+                | '\u{FEFF}')
+        })
+        .collect();
+    let name = visible.trim_end_matches(['.', ' ']).to_ascii_lowercase();
+    name == ".git"
+        || name
+            .strip_prefix("git~")
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn to_slash(path: &Path) -> String {
@@ -1868,6 +2012,22 @@ fn to_slash(path: &Path) -> String {
 
 async fn read_text<B: VaultBackend>(backend: &B, path: &str) -> Option<String> {
     backend.read(Path::new(path)).await.ok()
+}
+
+/// Локальный файл перед тем, как его менять: `Ok(None)` — файла нет, отказ —
+/// файл есть, но не прочитан. Различать обязательно: по «нет» файл
+/// перезаписывается без вопросов (T068).
+async fn read_local<B: VaultBackend>(
+    backend: &B,
+    path: &str,
+) -> Result<Option<Vec<u8>>, SyncError> {
+    match backend.read_bytes(Path::new(path)).await {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(ReadError::NotFound) => Ok(None),
+        Err(ReadError::Io | ReadError::TooLarge) => Err(SyncError::Io {
+            message: format!("локальный файл не читается: {path}"),
+        }),
+    }
 }
 
 async fn read_bytes<B: VaultBackend>(backend: &B, path: &str) -> Option<Vec<u8>> {
@@ -1887,6 +2047,12 @@ async fn write_file<B: VaultBackend>(
         message: format!("{message}: {path}"),
     };
     let target = Path::new(path);
+    // Строка пути проверена `safe_path`, но путь на диске может вести за
+    // корень через символическую ссылку-каталог (пришла клонированием, от
+    // Syncthing, заведена руками). Писать и удалять сквозь неё нельзя (T068).
+    if backend.crosses_symlink(target).await {
+        return Err(io("путь проходит через символическую ссылку"));
+    }
     match bytes {
         Some(bytes) => {
             let mut folder = PathBuf::new();
@@ -1953,10 +2119,20 @@ mod tests {
             ".git/config",
             "a/.GIT/x",
             "a\\b",
+            // Тот же каталог истории глазами NTFS и HFS+ (T068).
+            ".git./config",
+            ".git /config",
+            "GIT~1/config",
+            ".git::$INDEX_ALLOCATION/config",
+            ".g\u{200c}it/config",
         ] {
             assert!(safe_path(bad).is_none(), "{bad}");
         }
         assert_eq!(safe_path("./a/b.typ").as_deref(), Some("a/b.typ"));
+        // Похожее, но законное: служебное место, двоеточие в имени заметки.
+        for good in [".gitignore", ".github/x", "git~x/a", "Заметка: тема.typ"] {
+            assert_eq!(safe_path(good).as_deref(), Some(good), "{good}");
+        }
     }
 
     #[test]

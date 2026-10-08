@@ -130,13 +130,29 @@ struct HttpStream {
 
 fn host_of(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
-    let authority = rest.split('/').next()?;
-    let host = authority.rsplit('@').next()?;
-    Some(host.split(':').next()?.to_ascii_lowercase())
+    // Хост кончается там же, где его закончит HTTP-клиент: на `/`, `?` или
+    // `#`. Разбор строже клиентского — иначе чужой адрес сошёл бы за свой.
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let hostport = authority.rsplit('@').next()?;
+    remote_url::host_of_hostport(hostport)
 }
 
 fn client() -> std::io::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
+        // Перенаправление — только на тот же хост и не с https на http: иначе
+        // заголовок с токеном или сам пакет ушли бы открытым каналом (T068).
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let same_origin = attempt.previous().last().is_some_and(|from| {
+                from.host_str() == attempt.url().host_str()
+                    && from.port_or_known_default() == attempt.url().port_or_known_default()
+                    && (from.scheme() != "https" || attempt.url().scheme() == "https")
+            });
+            if same_origin && attempt.previous().len() < 5 {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .connect_timeout(Duration::from_secs(10))
         // Предел всей передачи: большой первый клон медленного канала —
         // единственный случай, когда он может понадобиться целиком.

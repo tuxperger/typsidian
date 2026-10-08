@@ -27,6 +27,21 @@ pub struct WebSyncSession {
     engine: JsGitEngine,
 }
 
+/// Отмена операции сессии; живёт отдельно от неё — см. [`WebSyncSession::cancel_handle`].
+#[wasm_bindgen]
+pub struct SyncCancelHandle {
+    token: CancelToken,
+    engine: JsGitEngine,
+}
+
+#[wasm_bindgen]
+impl SyncCancelHandle {
+    pub fn cancel(&self) {
+        self.token.cancel();
+        self.engine.abort();
+    }
+}
+
 fn js_error(error: SyncError) -> JsValue {
     serde_wasm_bindgen::to_value(&error).unwrap_or_else(|_| JsValue::from_str(&error.to_string()))
 }
@@ -62,9 +77,15 @@ impl WebSyncSession {
         self.inner.poll_events()
     }
 
-    pub fn cancel(&mut self) {
-        self.inner.cancel();
-        self.engine.abort();
+    /// Ручка отмены текущей операции (принцип X). Отдельный объект, а не метод
+    /// сессии: пока операция идёт, сессия заимствована, и вызов её метода из
+    /// обработчика кнопки упал бы на границе wasm-bindgen.
+    #[wasm_bindgen(js_name = cancelHandle)]
+    pub fn cancel_handle(&self) -> SyncCancelHandle {
+        SyncCancelHandle {
+            token: self.inner.cancel_token(),
+            engine: self.engine.clone(),
+        }
     }
 
     #[wasm_bindgen(js_name = noteChange)]
@@ -166,6 +187,18 @@ impl WebSyncSession {
     ) -> Result<FileDiff, JsValue> {
         self.inner
             .diff(backend, &path, &from, &to)
+            .await
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = snapshotChanges)]
+    pub async fn snapshot_changes(
+        &self,
+        backend: &WebBackend,
+        snapshot: String,
+    ) -> Result<Vec<Change>, JsValue> {
+        self.inner
+            .snapshot_changes(backend, &snapshot)
             .await
             .map_err(js_error)
     }
@@ -333,6 +366,7 @@ pub async fn clone_vault(
     vault_id: String,
     url: String,
     credentials: Credentials,
+    cors_proxy: Option<String>,
 ) -> Result<(), JsValue> {
     session::clone_vault(
         &JsGitEngine::new(engine),
@@ -341,6 +375,7 @@ pub async fn clone_vault(
         &ShellCapabilities::current(false),
         &url,
         credentials,
+        cors_proxy.as_deref(),
         &CancelToken::new(),
     )
     .await

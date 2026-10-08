@@ -28,6 +28,7 @@ import { templates } from "./en/templates.js";
 import { search } from "./en/search.js";
 import { graph } from "./en/graph.js";
 import { shell } from "./en/shell.js";
+import { sync } from "./en/sync.js";
 
 export const en = {
   ...common,
@@ -47,6 +48,7 @@ export const en = {
   ...search,
   ...graph,
   ...shell,
+  ...sync,
 } as const;
 
 /** Набор переводов одного языка: те же ключи и те же параметры, что у эталона. */

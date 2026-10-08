@@ -190,3 +190,8 @@ harness = false
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+# Сводка и список изменений истории на 5 000 заметок (фича 011, SC-002).
+[[bench]]
+name = "sync_status"
+harness = false

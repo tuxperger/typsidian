@@ -1130,6 +1130,23 @@ impl VaultBackend for NativeBackend {
         walk_conflict_copies(&self.root_path)
     }
 
+    async fn crosses_symlink(&self, path: &Path) -> bool {
+        let mut current = self.root_path.clone();
+        let Some(parent) = path.parent() else {
+            return false;
+        };
+        for component in parent.components() {
+            current.push(component);
+            match std::fs::symlink_metadata(&current) {
+                Ok(metadata) if metadata.file_type().is_symlink() => return true,
+                Ok(_) => {}
+                // Дальше пути ещё нет — ссылок на нём быть не может.
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
     /// Тот же приём, что у [`probe_access_state`], только про вложенную папку:
     /// дешёвые `metadata`/`read_dir` без файлов-пробников.
     async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {

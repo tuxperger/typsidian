@@ -10,9 +10,11 @@ import init, {
   WebBackend,
   type VaultRecord,
 } from "./wasm-core/typsidian_core.js";
-import type { VaultClient } from "./vault-client.js";
+import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
-import { createWasmCallQueue } from "./wasm-call-queue.js";
+import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
+import type { SyncClient, VaultCloner } from "./sync/sync-client.js";
+import { webSyncClient, webVaultCloner } from "./sync/sync-client-web.js";
 import { deviceStore, deviceStoreQueue } from "./settings/deviceStore.js";
 import { changeOf } from "./settings/useSettings.js";
 import {
@@ -55,9 +57,12 @@ function ensureWasmInitialized(): Promise<unknown> {
 export function webClients(
   backend: WebBackend,
   engine: PreviewEngine,
-): { vault: VaultClient; preview: PreviewClient } {
+): { vault: VaultClient; preview: PreviewClient; queue: WasmCallQueue } {
   const queue = createWasmCallQueue();
   return {
+    // Очередь отдаётся наружу ради синхронизации (фича 011): её сессия тоже
+    // заимствует backend и обязана стоять в той же очереди.
+    queue,
     vault: webVaultClient(backend, queue),
     // Снимок несохранённых правок предпросмотру обновлять не нужно: сборка
     // ничего в vault не пишет, поэтому здесь обычный `run`, а не обёртка
@@ -106,6 +111,8 @@ export function webVaultClient(
   const callInternal = <T>(op: () => T | Promise<T>): Promise<T> =>
     queue.runInternal(withSnapshotRefresh(op));
 
+  const flushRegistry = createFlushRegistry(() => call(() => backend.unresolvedEditPaths()));
+
   return {
     // Геттер ядра, а не имя из `showDirectoryPicker`: корень знает бэкенд.
     rootName: basename(backend.rootPath()),
@@ -140,6 +147,7 @@ export function webVaultClient(
     resolveConflictAcceptExternal: (path) =>
       call(() => backend.resolveConflictAcceptExternal(path)),
     unresolvedEditPaths: () => call(() => backend.unresolvedEditPaths()),
+    ...flushRegistry,
 
     hasUnresolvedEdits: () => {
       // Ядро свободно — спрашиваем его: ответ всегда точен.
@@ -321,24 +329,49 @@ export async function openWebVault(): Promise<VaultOpenResult> {
     if (!picker) return { ok: false, error: { kind: "NotSupported" } };
 
     const handle = await picker();
-    const opened = await openWebVaultFromHandle(handle);
-    // FR-007: открытый vault становится последним. После успеха, а не до:
-    // папка, которую не удалось открыть, последней не становится.
-    if (opened.ok) await rememberWebVault(handle);
-    return opened;
+    return await openWebVaultFromHandle(handle, null);
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };
   }
 }
 
-/** Открыть vault по уже полученному хендлу папки. */
+/**
+ * Открыть vault по уже полученному хендлу папки.
+ *
+ * `knownId` — идентификатор записи, если vault открывают из списка известных;
+ * `null` — папку только что выбрали, и запись заводится здесь.
+ */
 async function openWebVaultFromHandle(
   handle: FileSystemDirectoryHandle,
+  knownId: string | null,
 ): Promise<VaultOpenResult> {
   const backend = await WebBackend.fromHandle(handle.name, handle);
-  const { vault, preview } = webClients(backend, new PreviewEngine());
-  return { ok: true, client: vault, preview };
+  const { vault, preview, queue } = webClients(backend, new PreviewEngine());
+  // FR-007: открытый vault становится последним. После успеха, а не до:
+  // папка, которую не удалось открыть, последней не становится.
+  const vaultId = knownId ?? (await rememberWebVault(handle));
+  // Синхронизации нужен идентификатор записи: под ним лежат значения
+  // устройства и секреты этого vault (фича 011). Не запомнился vault или не
+  // собралась сессия — vault работает без неё (FR-038).
+  let sync: SyncClient | undefined;
+  if (vaultId !== null) {
+    try {
+      sync = await webSyncClient(backend, queue, handle, vaultId);
+    } catch {
+      sync = undefined;
+    }
+  }
+  return { ok: true, client: vault, preview, ...(sync === undefined ? {} : { sync }) };
 }
+
+/** Жест «создать vault из удалённого репозитория» (фича 011, FR-013). */
+export const cloneWebVault: VaultCloner = webVaultCloner(ensureWasmInitialized, async (handle, vaultId) => {
+  try {
+    return await openWebVaultFromHandle(handle, vaultId);
+  } catch (cause) {
+    return { ok: false, error: classifyOpenFailure(cause) };
+  }
+});
 
 /**
  * Запоминает папку как последний открытый vault (FR-007).
@@ -351,15 +384,17 @@ async function openWebVaultFromHandle(
  * Отказ хранилища открытие не отменяет и пользователю не показывается: vault
  * уже открыт и работает, не запомнилась только точка входа следующего запуска.
  */
-async function rememberWebVault(handle: FileSystemDirectoryHandle): Promise<void> {
+async function rememberWebVault(handle: FileSystemDirectoryHandle): Promise<string | null> {
   try {
     const store = await deviceStore();
-    await deviceStoreQueue.run(async () => {
+    return await deviceStoreQueue.run(async () => {
       const id = await store.addVault(handle, handle.name);
       await store.apply(changeOf({ current_vault: id }));
+      return id;
     });
   } catch {
     // Молча: действия от пользователя это не требует.
+    return null;
   }
 }
 
@@ -389,7 +424,7 @@ export async function lastWebVault(): Promise<LastVault | null> {
         // Молчаливое открытие возможно, только пока разрешение действует:
         // браузер выдаёт его заново лишь в обработчике жеста.
         readyToOpen: resolved.access === "granted",
-        open: () => openRememberedWebVault(resolved.handle),
+        open: () => openRememberedWebVault(resolved.handle, id),
       };
     });
   } catch {
@@ -416,7 +451,7 @@ export async function openWebVaultById(id: string): Promise<VaultOpenResult> {
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };
   }
-  return openRememberedWebVault(handle);
+  return openRememberedWebVault(handle, id);
 }
 
 /** Ссылка на папку записи и состояние доступа к ней — ответ `resolveVault`. */
@@ -456,12 +491,13 @@ async function resolveWebVault(
  */
 async function openRememberedWebVault(
   handle: FileSystemDirectoryHandle,
+  id: string,
 ): Promise<VaultOpenResult> {
   try {
     await ensureWasmInitialized();
     const permission = await requestFolderPermission(handle);
     if (permission !== "granted") return { ok: false, error: { kind: "PermissionDenied" } };
-    return await openWebVaultFromHandle(handle);
+    return await openWebVaultFromHandle(handle, id);
   } catch (cause) {
     return { ok: false, error: classifyOpenFailure(cause) };
   }

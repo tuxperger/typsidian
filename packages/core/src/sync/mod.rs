@@ -232,6 +232,11 @@ pub enum SyncError {
     UnsupportedScheme { scheme: String },
     #[error("адрес удалённого репозитория негоден")]
     InvalidRemoteUrl,
+    /// Адрес в настройках vault — не тот, что подтверждён на этом устройстве.
+    /// Настройки vault доставляются вместе с ним и доступны на запись всем, с
+    /// кем он общий; обмен и токен — только подтверждённому адресу (T068).
+    #[error("адрес удалённого репозитория изменён не на этом устройстве")]
+    RemoteChanged { url: String },
     #[error("удалённый репозиторий не подключён")]
     NoRemote,
     #[error("снимки делает другое устройство")]
@@ -339,6 +344,19 @@ pub struct DeviceVaultSync {
     pub stignore_declined: bool,
     /// История была при прошлом открытии (Edge Cases: «история удалена»).
     pub last_seen_history: bool,
+}
+
+impl DeviceVaultSync {
+    /// Значения в допустимом виде: посредник, который посредником быть не
+    /// может (не `https` и не адрес этого устройства, либо с вписанными
+    /// учётными данными), не сохраняется — см. [`settings::remote_url::is_proxy`].
+    pub fn normalized(mut self) -> Self {
+        self.cors_proxy = self
+            .cors_proxy
+            .map(|proxy| proxy.trim().to_string())
+            .filter(|proxy| settings::remote_url::is_proxy(proxy));
+        self
+    }
 }
 
 /// Запись `DeviceVaultSync` для одного vault в настройках устройства.

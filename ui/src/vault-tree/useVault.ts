@@ -6,6 +6,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import type { PreviewClient } from "../preview-client.js";
+import type { SyncClient } from "../sync/sync-client.js";
 import { bulkChangeReducer } from "./BulkChangeIndicator.js";
 import { useVaultEvents, type VaultEventHandlers } from "./useVaultEvents.js";
 
@@ -104,6 +105,12 @@ export type VaultOpenResult =
        * делить с ним очередь вызовов ядра.
        */
       preview?: PreviewClient;
+      /**
+       * Синхронизация открытого vault (фича 011). Нет — оболочка не смогла
+       * узнать идентификатор vault в хранилище устройства, и панель
+       * синхронизации не показывается; сам vault при этом работает (FR-038).
+       */
+      sync?: SyncClient;
     }
   | { ok: false; error: OpenVaultError };
 
@@ -155,6 +162,8 @@ export interface VaultState {
   client: VaultClient | null;
   /** Компилятор предпросмотра открытого vault; `null` — оболочка его не даёт. */
   preview: PreviewClient | null;
+  /** Синхронизация открытого vault (фича 011); `null` — оболочка её не дала. */
+  sync: SyncClient | null;
   notes: Note[];
   accessState: AccessState | null;
   isLoading: boolean;
@@ -197,6 +206,7 @@ export function useVault(
   const [state, setState] = useState<VaultState>({
     client: null,
     preview: null,
+    sync: null,
     notes: [],
     accessState: null,
     isLoading: false,
@@ -231,13 +241,14 @@ export function useVault(
       setState((prev) => ({ ...prev, isLoading: false, error: opened.error }));
       return;
     }
-    const { client, preview = null } = opened;
+    const { client, preview = null, sync = null } = opened;
     clientRef.current = client;
     const notes = await client.list();
     const accessState = await client.accessState();
     setState({
       client,
       preview,
+      sync,
       notes,
       accessState,
       isLoading: false,

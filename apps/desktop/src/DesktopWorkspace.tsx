@@ -1,7 +1,12 @@
 import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
 import { tauriDeviceSettings } from "@typsidian/ui/settings/device-settings-tauri.js";
-import { lastTauriVault, openTauriVaultById } from "@typsidian/ui/vault-client-tauri.js";
+import {
+  lastTauriVault,
+  openTauriVaultById,
+  openVaultAt,
+} from "@typsidian/ui/vault-client-tauri.js";
+import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { openDesktopVault, pickDesktopFolder } from "./openDesktopVault.js";
 
@@ -11,6 +16,12 @@ import { openDesktopVault, pickDesktopFolder } from "./openDesktopVault.js";
  * эффектами, и новый на каждый рендер перезапускал бы их.
  */
 const device = tauriDeviceSettings(pickDesktopFolder);
+
+/**
+ * Создание vault из удалённого репозитория (фича 011): пустую папку выбирает
+ * тот же диалог ОС, что и папку vault.
+ */
+const cloner = tauriVaultCloner(pickDesktopFolder, openVaultAt);
 
 /**
  * Оболочка рабочего стола (001 T112).
@@ -30,11 +41,14 @@ export function DesktopWorkspace(): React.JSX.Element {
         // Путь к нему хранит `settings.json` в каталоге конфигурации ОС — то же
         // хранилище, что и на Android, и те же команды оболочки.
         lastVault={lastTauriVault}
-        settings={(client, reopen, preview) => (
+        cloneVault={cloner}
+        settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}
             vaultClient={client}
             preview={preview}
+            sync={extras.sync}
+            onCloneVault={extras.onCloneVault}
             onVaultSwitched={(id) => reopen(() => openTauriVaultById(id))}
           />
         )}

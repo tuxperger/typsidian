@@ -24,6 +24,12 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   "rebuild-preview": "workspace.rebuildPreview",
   "export-pdf": "workspace.exportPdf",
   "export-center": "workspace.exportCenter",
+  "sync-open-panel": "sync.command.openPanel",
+  "sync-snapshot": "sync.command.snapshot",
+  "sync-file-history": "sync.command.fileHistory",
+  "sync-push": "sync.command.push",
+  "sync-pull": "sync.command.pull",
+  "sync-resolve-conflicts": "sync.command.resolveConflicts",
 };
 
 /**

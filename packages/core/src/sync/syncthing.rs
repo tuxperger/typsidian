@@ -24,6 +24,13 @@ pub struct SyncthingEndpoint {
     /// `host:port`, только адрес этого устройства.
     pub address: String,
     pub tls: bool,
+    /// Отпечаток сертификата GUI, закреплённый при первом обращении (research
+    /// §8): сертификат самоподписанный, проверить его нечем, и без закрепления
+    /// ключ API ушёл бы любому процессу, занявшему этот порт. `None` — ещё
+    /// не закреплён либо адрес без TLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub cert_fingerprint: Option<String>,
 }
 
 impl SyncthingEndpoint {
@@ -35,13 +42,11 @@ impl SyncthingEndpoint {
     /// Адрес на этом устройстве. Чужие адреса не принимаются: ключ API даёт
     /// полный доступ к Syncthing, и отправлять его в сеть приложение не будет.
     pub fn is_loopback(&self) -> bool {
-        let host = self
-            .address
-            .rsplit_once(':')
-            .map(|(host, _)| host)
-            .unwrap_or(&self.address);
-        let host = host.trim_start_matches('[').trim_end_matches(']');
-        super::settings::remote_url::is_loopback(host) || host == "0.0.0.0"
+        // Адрес — строго `хост:порт`: всё, что разборщик HTTP-клиента мог бы
+        // прочесть иначе (`127.0.0.1:80@чужой:8384`), адресом не считается.
+        super::settings::remote_url::host_of_hostport(&self.address).is_some_and(|host| {
+            super::settings::remote_url::is_loopback(&host) || host == "0.0.0.0"
+        })
     }
 }
 
@@ -59,6 +64,9 @@ pub enum LinkState {
     UnavailableInShell,
     /// Syncthing отвечает, но этой папки в нём нет.
     FolderNotShared,
+    /// Сертификат по этому адресу не тот, что был закреплён: ключ API туда не
+    /// отправляется, пока пользователь не подключит Syncthing заново.
+    CertificateChanged,
     Connected,
 }
 
@@ -146,7 +154,14 @@ pub fn parse_gui_config(xml: &str) -> Option<(SyncthingEndpoint, String)> {
     }
     // `0.0.0.0` в конфиге означает «слушать везде», а обращаться надо к себе.
     let address = address.replace("0.0.0.0", "127.0.0.1");
-    Some((SyncthingEndpoint { address, tls }, apikey))
+    Some((
+        SyncthingEndpoint {
+            address,
+            tls,
+            cert_fingerprint: None,
+        },
+        apikey,
+    ))
 }
 
 fn element_text(xml: &str, name: &str) -> Option<String> {
@@ -285,7 +300,7 @@ pub fn devices(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{discover, query};
+pub use native::{discover, pin, query};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -346,8 +361,51 @@ mod native {
         }
     }
 
-    /// Состояние папки vault. Короткие тайм-ауты: Syncthing на этом же
-    /// устройстве либо отвечает сразу, либо не запущен (принцип VII).
+    /// Клиент для локального Syncthing. Короткие тайм-ауты: он на этом же
+    /// устройстве и либо отвечает сразу, либо не запущен (принцип VII).
+    ///
+    /// Сертификат GUI самоподписанный (Android, `tls="true"`), проверить его по
+    /// цепочке нельзя — вместо этого он сверяется с закреплённым отпечатком
+    /// (см. [`peer_fingerprint`]), и только для адреса этого устройства.
+    fn client(endpoint: &SyncthingEndpoint) -> Option<reqwest::Client> {
+        let mut builder = reqwest::Client::builder()
+            // Перенаправление увело бы запрос с ключом API на другой адрес.
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(5));
+        if endpoint.tls {
+            builder = builder.danger_accept_invalid_certs(true).tls_info(true);
+        }
+        builder.build().ok()
+    }
+
+    /// Отпечаток сертификата, который предъявляет адрес. Запрос идёт **без
+    /// ключа API** — на точку `noauth`, которая отвечает всем: узнать, тот ли
+    /// это Syncthing, нужно до того, как ему что-то доверить.
+    async fn peer_fingerprint(
+        client: &reqwest::Client,
+        endpoint: &SyncthingEndpoint,
+    ) -> Option<String> {
+        let response = client
+            .get(format!("{}/rest/noauth/health", endpoint.base_url()))
+            .send()
+            .await
+            .ok()?;
+        let info = response.extensions().get::<reqwest::tls::TlsInfo>()?;
+        let certificate = info.peer_certificate()?;
+        Some(blake3::hash(certificate).to_hex().to_string())
+    }
+
+    /// Отпечаток для закрепления при первом обращении (TOFU). `None` — адрес
+    /// без TLS (закреплять нечего) или Syncthing сейчас не отвечает.
+    pub async fn pin(endpoint: &SyncthingEndpoint) -> Option<String> {
+        if !endpoint.tls || !endpoint.is_loopback() {
+            return None;
+        }
+        peer_fingerprint(&client(endpoint)?, endpoint).await
+    }
+
+    /// Состояние папки vault.
     pub async fn query(
         endpoint: &SyncthingEndpoint,
         api_key: &str,
@@ -357,17 +415,24 @@ mod native {
         if !endpoint.is_loopback() {
             return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
         }
-        // Самоподписанный сертификат GUI Syncthing (Android, `tls="true"`)
-        // принимается только для адреса этого устройства — см. `is_loopback`.
-        let client = match reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(5))
-            .danger_accept_invalid_certs(true)
-            .build()
-        {
-            Ok(client) => client,
-            Err(_) => return SyncthingFolder::unlinked(detected, LinkState::Unreachable),
+        let Some(client) = client(endpoint) else {
+            return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
         };
+        if endpoint.tls {
+            // Ключ API уходит только тому, кто предъявил закреплённый сертификат.
+            // Без закрепления (ещё не было первого обращения) — не уходит вовсе:
+            // закрепляет вызывающая сторона через [`pin`].
+            let Some(pinned) = endpoint.cert_fingerprint.as_deref() else {
+                return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
+            };
+            match peer_fingerprint(&client, endpoint).await {
+                Some(actual) if actual == pinned => {}
+                Some(_) => {
+                    return SyncthingFolder::unlinked(detected, LinkState::CertificateChanged)
+                }
+                None => return SyncthingFolder::unlinked(detected, LinkState::Unreachable),
+            }
+        }
         let result: Result<SyncthingFolder, LinkState> = async {
             let status = get(&client, endpoint, api_key, "/rest/system/status").await?;
             let my_id = status
@@ -492,10 +557,34 @@ mod tests {
     }
 
     #[test]
+    fn lookalike_addresses_are_not_this_device() {
+        for address in [
+            "127.evil.com:8384",
+            "127.0.0.1:80@evil.com:8384",
+            "localhost.evil.com:8384",
+            "127.0.0.1:8384/../x",
+        ] {
+            let endpoint = SyncthingEndpoint {
+                address: address.into(),
+                tls: false,
+                cert_fingerprint: None,
+            };
+            assert!(!endpoint.is_loopback(), "{address}");
+        }
+        let local = SyncthingEndpoint {
+            address: "[::1]:8384".into(),
+            tls: true,
+            cert_fingerprint: None,
+        };
+        assert!(local.is_loopback());
+    }
+
+    #[test]
     fn foreign_endpoints_are_not_loopback() {
         let endpoint = SyncthingEndpoint {
             address: "192.168.1.5:8384".into(),
             tls: false,
+            cert_fingerprint: None,
         };
         assert!(!endpoint.is_loopback());
     }

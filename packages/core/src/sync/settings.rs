@@ -80,13 +80,13 @@ impl VaultSyncSettings {
         self.auto_pull_interval_secs = self
             .auto_pull_interval_secs
             .map(|secs| secs.max(MIN_PULL_INTERVAL_SECS));
-        if self
+        // Адрес — только в каноническом виде: файл могли править руками или
+        // чужими, и сырой адрес с учётными данными или двусмысленным хостом
+        // дальше не идёт (T068).
+        self.remote_url = self
             .remote_url
-            .as_deref()
-            .is_some_and(|url| remote_url::normalize(url).is_err())
-        {
-            self.remote_url = None;
-        }
+            .and_then(|url| remote_url::normalize(&url).ok())
+            .map(|parsed| parsed.url);
         self
     }
 }
@@ -266,19 +266,18 @@ pub mod remote_url {
                     secret: None,
                 });
             }
+            // Знаки, по которым разные разборщики адресов расходятся в том, где
+            // кончается хост (`http://evil#@127.0.0.1/`): здесь адрес был бы
+            // «этим устройством», а HTTP-клиент ушёл бы на чужой сервер (T068).
+            if rest.contains(['#', '?', '\\']) {
+                return Err(UrlProblem::Malformed);
+            }
             let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
             let (userinfo, hostport) = match authority.rsplit_once('@') {
                 Some((info, host)) => (Some(info), host),
                 None => (None, authority),
             };
-            if hostport.is_empty() {
-                return Err(UrlProblem::Malformed);
-            }
-            let host = hostport
-                .split(':')
-                .next()
-                .unwrap_or(hostport)
-                .to_ascii_lowercase();
+            let host = host_of_hostport(hostport).ok_or(UrlProblem::Malformed)?;
             let (user, secret) = match userinfo {
                 Some(info) => match info.split_once(':') {
                     Some((user, secret)) => (
@@ -328,14 +327,16 @@ pub mod remote_url {
         }
         // scp-подобная форма `user@host:path`.
         if let Some((authority, path)) = raw.split_once(':') {
-            if path.is_empty() || authority.contains('/') {
+            // `@` в пути — это вставленный без схемы `user:токен@host/…`: принять
+            // его за scp-форму значило бы записать токен в адрес (T068).
+            if path.is_empty() || authority.contains('/') || path.contains('@') {
                 return Err(UrlProblem::Malformed);
             }
             let (user, host) = match authority.rsplit_once('@') {
                 Some((user, host)) => (Some(user.to_string()), host.to_string()),
                 None => (None, authority.to_string()),
             };
-            if host.is_empty() {
+            if host_of_hostport(&host).as_deref() != Some(host.to_ascii_lowercase().as_str()) {
                 return Err(UrlProblem::Malformed);
             }
             // Относительный путь scp — от домашнего каталога на сервере.
@@ -375,8 +376,54 @@ pub mod remote_url {
             || host.starts_with("git.")
     }
 
+    /// Годится ли адрес посредником обмена из браузера (FR-037): `https://…`
+    /// либо `http://` на этом устройстве, без учётных данных. Через
+    /// посредника идут токен и заметки, поэтому открытый `http` в сеть и
+    /// адрес с вписанным паролем посредником не становятся.
+    pub fn is_proxy(raw: &str) -> bool {
+        matches!(
+            normalize(raw),
+            Ok(RemoteUrl {
+                scheme: Scheme::Https | Scheme::HttpLoopback,
+                user: None,
+                secret: None,
+                ..
+            })
+        )
+    }
+
+    /// Хост из `хост[:порт]` в нижнем регистре; `None` — это не хост: в имени
+    /// допустимы только буквы, цифры, точка и дефис (или адрес IPv6 в скобках),
+    /// порт — число. Строгость намеренная: всё прочее (`@`, `/`, `#`) — способ
+    /// выдать чужой адрес за свой.
+    pub fn host_of_hostport(hostport: &str) -> Option<String> {
+        let port_ok = |port: &str| port.parse::<u16>().is_ok();
+        if let Some(rest) = hostport.strip_prefix('[') {
+            let (address, tail) = rest.split_once(']')?;
+            address.parse::<std::net::Ipv6Addr>().ok()?;
+            let tail_ok = tail.is_empty() || tail.strip_prefix(':').is_some_and(port_ok);
+            return tail_ok.then(|| format!("[{}]", address.to_ascii_lowercase()));
+        }
+        let (host, port) = match hostport.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (hostport, None),
+        };
+        let name_ok = !host.is_empty()
+            && !host.starts_with('-')
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+        (name_ok && port.is_none_or(port_ok)).then(|| host.to_ascii_lowercase())
+    }
+
+    /// Адрес этого устройства: `localhost` или loopback-адрес IP. Не «всё, что
+    /// начинается с 127.» — `127.evil.com` — чужой сервер (T068).
     pub fn is_loopback(host: &str) -> bool {
-        matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]") || host.starts_with("127.")
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
     }
 
     /// Имя пользователя по умолчанию для токена (research §2): хостинги
@@ -409,6 +456,57 @@ mod tests {
         assert_eq!(parsed.url, "ssh://git@github.com/me/notes.git");
         let home = normalize("me@box:notes.git").unwrap();
         assert_eq!(home.url, "ssh://me@box/~/notes.git");
+    }
+
+    #[test]
+    fn a_proxy_is_https_or_local_and_carries_no_credentials() {
+        use super::remote_url::is_proxy;
+        assert!(is_proxy("https://proxy.example.org"));
+        assert!(is_proxy("http://127.0.0.1:9999/git"));
+        assert!(!is_proxy("http://proxy.example.org"));
+        assert!(!is_proxy("https://user:secret@proxy.example.org"));
+        assert!(!is_proxy("ssh://proxy.example.org/x"));
+        assert!(!is_proxy("не адрес"));
+    }
+
+    #[test]
+    fn lookalike_hosts_are_not_this_device() {
+        use super::remote_url::is_loopback;
+        assert!(is_loopback("127.0.0.1") && is_loopback("127.8.8.8") && is_loopback("::1"));
+        assert!(is_loopback("[::1]") && is_loopback("LocalHost"));
+        for host in [
+            "127.evil.com",
+            "localhost.evil.com",
+            "0.0.0.0",
+            "127.0.0.1.evil.com",
+        ] {
+            assert!(!is_loopback(host), "{host}");
+        }
+        // Открытый http — только этому устройству, как бы адрес ни выглядел.
+        for url in [
+            "http://127.evil.com/r.git",
+            "http://evil.com#@127.0.0.1/r.git",
+            "http://evil.com?@127.0.0.1/r.git",
+            "http://127.0.0.1:80@evil.com:8384/r.git",
+        ] {
+            assert!(normalize(url).is_err(), "{url}");
+        }
+        assert_eq!(
+            normalize("http://[::1]:8080/r.git").unwrap().scheme,
+            Scheme::HttpLoopback
+        );
+        // Вставленный без схемы адрес с токеном — не scp-форма.
+        assert!(normalize("user:ghp_secret@github.com/me/notes.git").is_err());
+        // Адрес из файла настроек приводится к каноническому, без учётных данных.
+        let settings = VaultSyncSettings {
+            remote_url: Some("https://user:secret@Example.com/me/notes.git".into()),
+            ..VaultSyncSettings::default()
+        }
+        .normalized();
+        assert_eq!(
+            settings.remote_url.as_deref(),
+            Some("https://Example.com/me/notes.git")
+        );
     }
 
     #[test]
