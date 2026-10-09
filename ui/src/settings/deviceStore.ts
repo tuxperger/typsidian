@@ -1,5 +1,6 @@
-import init, { WebStore } from "../wasm-core/typsidian_core.js";
+import { WebStore } from "../wasm-core/typsidian_core.js";
 import { createWasmCallQueue, type WasmCallQueue } from "../wasm-call-queue.js";
+import { ensureWasmInitialized } from "../wasm-init.js";
 
 /**
  * Единственный экземпляр хранилища настроек устройства в браузере.
@@ -27,9 +28,9 @@ export const deviceStoreQueue: WasmCallQueue = createWasmCallQueue();
 export function deviceStore(): Promise<WebStore> {
   if (opening === null) {
     opening = (async () => {
-      // Повторный `init()` из других модулей безвреден: wasm-bindgen отдаёт
-      // уже инициализированный модуль, а не создаёт второй.
-      await init();
+      // Только общий `ensureWasmInitialized`: прямой `init()` параллельно с
+      // чужим создаёт второй экземпляр модуля (см. `wasm-init.ts`).
+      await ensureWasmInitialized();
       return WebStore.create();
     })();
   }

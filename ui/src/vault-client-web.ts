@@ -1,4 +1,4 @@
-import init, {
+import {
   exportBatchCancel,
   exportBatchNext,
   exportBatchRecord,
@@ -13,6 +13,7 @@ import init, {
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
+import { ensureWasmInitialized } from "./wasm-init.js";
 import type { SyncClient, VaultCloner } from "./sync/sync-client.js";
 import { webSyncClient, webVaultCloner } from "./sync/sync-client-web.js";
 import { deviceStore, deviceStoreQueue } from "./settings/deviceStore.js";
@@ -39,13 +40,6 @@ import { basename } from "./paths.js";
  * плюс запас на сам обход.
  */
 export const VAULT_POLL_INTERVAL_MS = 1000;
-
-let wasmInitPromise: Promise<unknown> | null = null;
-
-function ensureWasmInitialized(): Promise<unknown> {
-  if (!wasmInitPromise) wasmInitPromise = init();
-  return wasmInitPromise;
-}
 
 /**
  * Оборачивает готовый `WebBackend` в оба интерфейса сразу.
