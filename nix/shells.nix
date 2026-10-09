@@ -28,6 +28,14 @@ let
     pkgs.sqlite
     pkgs.git
 
+    # ── Отладка и навигация по коду ───────────────────────────────────────
+    # `rust-lldb` из тулчейна — только обёртка с форматтерами типов Rust:
+    # самого lldb она не несёт и без него не запускается.
+    pkgs.lldb
+    # Языковой сервер TypeScript; `rust-analyzer` приходит с тулчейном. Сам
+    # компилятор сервер берёт из `node_modules` проекта.
+    pkgs.typescript-language-server
+
     # ── Сборка Tauri-оболочек (001 T111) ──────────────────────────────────
     pkgs.cargo-tauri
     pkgs.pkg-config

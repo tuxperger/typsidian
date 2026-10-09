@@ -75,3 +75,20 @@ Next.js), рабочий стол и Android (`apps/desktop`, `apps/mobile`, Tau
 .specify/scripts/typsidian/gates.sh [fast|core|ui|all]
 scripts/check-i18n.sh [FILE...]                             # хардкод интерфейса
 ```
+
+## Проверка в работающем приложении
+
+Типы и тесты ядра не ловят ошибок времени выполнения в интерфейсе. Правку `ui/` стоит
+открыть в браузере до того, как называть её готовой:
+
+```bash
+nix develop -c pnpm dev                                     # web на :3000, в фоне
+nix develop -c node scripts/dev/browser.mjs http://localhost:3000 \
+    [сценарий.mjs] --opfs-vault --shot /путь/снимок.png     # консоль, исключения, снимок
+```
+
+`scripts/dev/browser.mjs` — headless chromium из dev-оболочки без зависимостей; описание
+методов сценария — в начале файла, образец — `scripts/dev/scenarios/rules-editor.mjs`.
+`--opfs-vault` подменяет системный выбор папки хранилищем браузера. Оболочку рабочего
+стола так открыть нельзя (`tauri-driver` в nixpkgs проекта нет). Отладчик ядра —
+`rust-lldb` (пакетно: `rust-lldb -b -o '…' -- бинарь`).
