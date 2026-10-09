@@ -17,7 +17,7 @@ use git2::{
     Repository, RepositoryState, ResetType, Signature, Sort, Time,
 };
 
-use super::transport_http::{self, TransportContext};
+use super::transport_http::{self, TransportContext, NETWORK_IDLE_LIMIT};
 use super::*;
 use crate::sync::Author;
 
@@ -26,6 +26,8 @@ use crate::sync::Author;
 pub struct NativeGitEngine {
     root: PathBuf,
     bare: bool,
+    /// Предел простоя сетевого обмена — см. [`NETWORK_IDLE_LIMIT`].
+    idle_limit: std::time::Duration,
 }
 
 impl NativeGitEngine {
@@ -35,6 +37,7 @@ impl NativeGitEngine {
         Self {
             root: root.into(),
             bare: false,
+            idle_limit: NETWORK_IDLE_LIMIT,
         }
     }
 
@@ -44,7 +47,15 @@ impl NativeGitEngine {
         Self {
             root: path.into(),
             bare: true,
+            idle_limit: NETWORK_IDLE_LIMIT,
         }
+    }
+
+    /// Другой предел простоя сети. Умолчание выбрано под живого человека за
+    /// экраном; тесту «сервер молчит» ждать двадцать секунд незачем.
+    pub fn with_idle_limit(mut self, idle_limit: std::time::Duration) -> Self {
+        self.idle_limit = idle_limit;
+        self
     }
 
     fn repo(&self) -> Result<Repository, EngineError> {
@@ -160,11 +171,13 @@ fn current_branch(repo: &Repository) -> Option<String> {
 async fn network<T: Send + 'static>(
     auth: &Auth,
     cancel: &CancelToken,
+    idle_limit: std::time::Duration,
     operation: impl FnOnce() -> Result<T, git2::Error> + Send + 'static,
 ) -> Result<T, EngineError> {
     let context = TransportContext {
         auth: auth.clone(),
         cancel: cancel.clone(),
+        idle_limit,
     };
     let cancel = cancel.clone();
     tokio::task::spawn_blocking(move || transport_http::with_context(context, operation))
@@ -475,7 +488,7 @@ impl GitEngine for NativeGitEngine {
         let url = remote.url.clone();
         let branch = remote.branch.clone();
         let token = cancel.clone();
-        network(auth, cancel, move || {
+        network(auth, cancel, self.idle_limit, move || {
             let repo = if bare {
                 Repository::open_bare(&root)?
             } else {
@@ -520,7 +533,7 @@ impl GitEngine for NativeGitEngine {
         let token = cancel.clone();
         let rejected = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
         let rejected_inner = rejected.clone();
-        network(auth, cancel, move || {
+        network(auth, cancel, self.idle_limit, move || {
             let repo = Repository::open(&root)?;
             let head = repo
                 .head()?
@@ -570,7 +583,7 @@ impl GitEngine for NativeGitEngine {
         let url = remote.url.clone();
         let branch = remote.branch.clone();
         let token = cancel.clone();
-        network(auth, cancel, move || {
+        network(auth, cancel, self.idle_limit, move || {
             let mut options = FetchOptions::new();
             options.remote_callbacks(callbacks(token));
             let mut builder = git2::build::RepoBuilder::new();

@@ -518,17 +518,39 @@ async fn device_store<'a>(
     Ok(guard.as_mut().expect("хранилище только что открыто"))
 }
 
-/// Запоминает открытую папку как последний vault. Возвращает идентификатор
-/// записи: по нему окно открывает сессию синхронизации (фича 011).
+/// Что окно узнаёт, запомнив открытый vault.
+#[derive(Debug, serde::Serialize)]
+struct RememberedVault {
+    /// Идентификатор записи: по нему окно открывает сессию синхронизации
+    /// (фича 011).
+    id: VaultId,
+    /// Что сказать о служебном месте (006 FR-024, FR-025): настройки уровня
+    /// vault утрачены либо vault открыт только на чтение.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notice: Option<VaultEvent>,
+}
+
+/// Запоминает открытую папку как последний vault.
+///
+/// Здесь же решается, было ли в этой папке что терять: «открывали раньше»
+/// значит «запись о ней уже была», а это видно только в момент, когда её
+/// пытаются добавить, — после него ответ всегда «да».
 #[tauri::command]
 async fn remember_vault(
     app: AppHandle,
     device: State<'_, Device>,
+    vault: State<'_, Vault>,
     path: String,
-) -> Answer<VaultId, StoreError> {
+) -> Answer<RememberedVault, StoreError> {
     let mut guard = device.0.lock().await;
     let store = device_store(&app, &mut guard).await?;
-    remember_opened_vault(store, PathBuf::from(path)).await
+    let known_before = SettingsStore::settings(store).known_vaults.len();
+    let id = remember_opened_vault(store, PathBuf::from(path)).await?;
+    let was_known = SettingsStore::settings(store).known_vaults.len() == known_before;
+    let notice = vault.0.lock().await.as_ref().and_then(|backend| {
+        typsidian_core::vault::vault_settings::service_dir_status(backend, was_known)
+    });
+    Ok(RememberedVault { id, notice })
 }
 
 /// Последний открытый vault, если он ещё на месте.
@@ -598,6 +620,15 @@ async fn device_settings(
     let mut guard = device.0.lock().await;
     let store = device_store(&app, &mut guard).await?;
     Ok(snapshot_of(store).await)
+}
+
+/// Журнал приложения целиком (004 FR-040). Отдельной командой, а не полем
+/// снимка: журнал — до двух мегабайт текста, а снимок запрашивается постоянно.
+#[tauri::command]
+async fn device_journal(app: AppHandle, device: State<'_, Device>) -> Answer<String, StoreError> {
+    let mut guard = device.0.lock().await;
+    let store = device_store(&app, &mut guard).await?;
+    Ok(store.journal_text())
 }
 
 /// События хранилища с прошлого вызова (FR-013). Pull, как и на web: наблюдатель
@@ -1562,6 +1593,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             last_vault,
             device_settings,
             device_settings_events,
+            device_journal,
             apply_device_settings,
             settings_reset_change,
             settings_change_target,
@@ -1658,6 +1690,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             sync::sync_disconnect_remote,
             sync::sync_push,
             sync::sync_pull,
+            sync::sync_restore_history,
             sync::sync_abort_pull,
             sync::sync_conflicts,
             sync::sync_resolve,

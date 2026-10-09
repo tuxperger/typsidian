@@ -13,6 +13,7 @@ use super::editor_mode::{BridgeAvailability, EditorMode, OutageReason};
 use super::events::SettingsEvent;
 use super::folder_ref::{FolderRegistry, Resolved};
 use super::format::{self, FolderRefs};
+use super::logging::{Journal, LogEvent, LOG_FILE_NAME, LOG_PREVIOUS_FILE_NAME};
 use super::store::{
     SettingsStore, StorageState, StoreCapabilities, StoreError, SETTINGS_FILE_NAME,
 };
@@ -62,6 +63,11 @@ async fn opfs_root() -> Result<JsValue, JsValue> {
 
 /// Хендл файла настроек в OPFS. `create` — создавать ли его, если нет.
 async fn settings_file_handle(root: &JsValue, create: bool) -> Result<JsValue, JsValue> {
+    opfs_file_handle(root, SETTINGS_FILE_NAME, create).await
+}
+
+/// Хендл файла в корне OPFS по имени — настройки и журнал лежат рядом.
+async fn opfs_file_handle(root: &JsValue, name: &str, create: bool) -> Result<JsValue, JsValue> {
     let options = Object::new();
     Reflect::set(
         &options,
@@ -70,12 +76,16 @@ async fn settings_file_handle(root: &JsValue, create: bool) -> Result<JsValue, J
     )?;
     let function: js_sys::Function =
         Reflect::get(root, &JsValue::from_str("getFileHandle"))?.dyn_into()?;
-    let promise = function.call2(
-        root,
-        &JsValue::from_str(SETTINGS_FILE_NAME),
-        &options.into(),
-    )?;
+    let promise = function.call2(root, &JsValue::from_str(name), &options.into())?;
     JsFuture::from(js_sys::Promise::from(promise)).await
+}
+
+/// Текст файла журнала; пусто — файла ещё нет.
+async fn read_journal_file(root: &JsValue, name: &str) -> String {
+    match opfs_file_handle(root, name, false).await {
+        Ok(file) => read_text(&file).await.unwrap_or_default(),
+        Err(_) => String::new(),
+    }
 }
 
 async fn read_text(file_handle: &JsValue) -> Result<String, JsValue> {
@@ -205,7 +215,8 @@ pub struct WebStore {
     raw: String,
     pending_invalid: bool,
     events: VecDeque<SettingsEvent>,
-    /// Последний дешёвый снимок файла — предфильтр сверки (research.md §3).
+    /// Журнал приложения; файлы — в OPFS рядом с настройками (FR-040).
+    journal: Journal,
     meta: Option<(f64, f64)>,
 }
 
@@ -358,8 +369,16 @@ impl SettingsStore for WebStore {
             raw,
             pending_invalid,
             events: VecDeque::new(),
+            journal: Journal::default(),
             meta,
         };
+        store.journal = Journal::resume(
+            read_journal_file(&store.root, LOG_FILE_NAME).await,
+            read_journal_file(&store.root, LOG_PREVIOUS_FILE_NAME).await,
+        );
+        if store.state == StorageState::Loaded {
+            store.journal.record(now_millis(), LogEvent::SettingsLoaded);
+        }
         if store.state == StorageState::DefaultsAfterUnreadable {
             store.events.push_back(SettingsEvent::StorageUnreadable);
         }
@@ -391,12 +410,14 @@ impl SettingsStore for WebStore {
         }
 
         self.settings = change.apply_to(&self.settings);
+        self.journal.record_change(now_millis(), change);
         if self.persist().await.is_err() {
             // Квота исчерпана или доступ к OPFS отозван — паритет с native:
             // значение действует до конца сессии (FR-014), а не отвергается.
             self.state = StorageState::ReadOnlyForSession;
             self.events.push_back(SettingsEvent::StorageBecameReadOnly);
         }
+        self.flush_journal().await;
         ApplyPlan::Applied
     }
 
@@ -420,7 +441,38 @@ impl SettingsStore for WebStore {
         if let Some(event) = self.reread().await {
             self.events.push_back(event);
         }
+        let now = now_millis();
+        for event in &self.events {
+            self.journal.record_event(now, event);
+        }
+        self.flush_journal().await;
         self.events.drain(..).collect()
+    }
+
+    fn journal_text(&self) -> String {
+        self.journal.text()
+    }
+}
+
+impl WebStore {
+    /// Записывает журнал в OPFS, если в нём есть новое. Отказ записи ничего не
+    /// отменяет и никуда не сообщается — как и в `NativeStore`.
+    async fn flush_journal(&mut self) {
+        if self.state == StorageState::ReadOnlyForSession {
+            return;
+        }
+        let Some((current, previous)) = self.journal.take_unsaved() else {
+            return;
+        };
+        let files = [
+            (LOG_FILE_NAME, current.to_owned()),
+            (LOG_PREVIOUS_FILE_NAME, previous.to_owned()),
+        ];
+        for (name, text) in files {
+            if let Ok(file) = opfs_file_handle(&self.root, name, true).await {
+                let _ = write_text(&file, &text).await;
+            }
+        }
     }
 }
 
@@ -468,7 +520,9 @@ impl FolderRegistry for WebStore {
             &mut self.settings.known_vaults,
             VaultRecord::new(id.clone(), location),
         );
+        self.journal.record(now_millis(), LogEvent::VaultAdded);
         self.persist().await?;
+        self.flush_journal().await;
         Ok(id)
     }
 
@@ -499,7 +553,10 @@ impl FolderRegistry for WebStore {
         if self.settings.current_vault.as_ref() == Some(id) {
             self.settings.current_vault = None;
         }
-        self.persist().await
+        self.journal.record(now_millis(), LogEvent::VaultForgotten);
+        let saved = self.persist().await;
+        self.flush_journal().await;
+        saved
     }
 }
 
@@ -754,6 +811,12 @@ impl WebStore {
     /// полноценный режим недоступен постоянно и по одной причине — платформа не
     /// порождает внешние процессы (research.md §7). Принимать его от UI значило
     /// бы позволить интерфейсу назвать состояние, которого нет.
+    /// Журнал приложения целиком (FR-040).
+    #[wasm_bindgen(js_name = journalText)]
+    pub fn journal_text_js(&self) -> String {
+        SettingsStore::journal_text(self)
+    }
+
     #[wasm_bindgen(js_name = diagnostics)]
     pub fn diagnostics_js(&self) -> Diagnostics {
         diagnostics::collect(

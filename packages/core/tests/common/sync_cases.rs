@@ -20,7 +20,7 @@ use typsidian_core::sync::ignore::{
     IgnoreSaveRequest, LineEnding,
 };
 use typsidian_core::sync::keeper::KeeperState;
-use typsidian_core::sync::secrets::MemorySecretStore;
+use typsidian_core::sync::secrets::{MemorySecretStore, SecretKind, SecretStore};
 use typsidian_core::sync::session::{self, ConflictSource, Credentials, Resolution};
 use typsidian_core::sync::settings::{self as sync_settings, Keeper, VaultSyncSettings};
 use typsidian_core::sync::{
@@ -1507,4 +1507,151 @@ pub async fn ignore_editor_waits_for_an_unfinished_pull() {
     let text = stignore.text.clone();
     let outcome = b.save_rules(save_request(&stignore, &text)).await;
     assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+}
+
+/// 011 T073: файл больше предела размера заметки не обрывает получение — его
+/// версии читаются без этого предела и сливаются как у любого другого файла.
+pub async fn a_file_over_the_note_size_limit_is_pulled_like_any_other() {
+    use typsidian_core::vault::backend::ReadError;
+
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(
+        &[("n.typ", BASE), ("архив.bin", "первая версия архива")],
+        Some(remote.clone()),
+    );
+    a.enable().await;
+    a.connect().await;
+    a.push().await.unwrap();
+    let mut b = clone_of(&remote).await;
+    // У получателя архив «слишком велик» для чтения как заметки.
+    let vault = std::mem::replace(&mut b.vault, MemoryVault::new());
+    b.vault = vault.with_failure("архив.bin", ReadError::TooLarge);
+
+    a.put("n.typ", &BASE.replace("Второй абзац.", "Второй — A."))
+        .await;
+    a.put("архив.bin", "вторая версия архива").await;
+    a.snap("A").await;
+    a.push().await.unwrap();
+
+    let outcome = b.pull().await.expect("получение не должно отказать");
+    assert_eq!(outcome.conflicts, 0);
+    assert_eq!(
+        b.vault.bytes_of("архив.bin").unwrap(),
+        "вторая версия архива".as_bytes()
+    );
+    assert!(b.text("n.typ").unwrap().contains("Второй — A."));
+}
+
+/// 011 T079: утраченная локальная история возвращается из удалённого
+/// репозитория — без потери файлов vault и без молчаливой перезаписи.
+pub async fn a_lost_history_is_restored_from_the_remote() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("n.typ", BASE), ("b.typ", "= B\n")], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    a.put("n.typ", &BASE.replace("Второй абзац.", "Второй — A."))
+        .await;
+    a.snap("A").await;
+    a.push().await.unwrap();
+    let snapshots = a.history_len(None).await;
+
+    // То же устройство после утраты служебного каталога истории: файлы на
+    // месте, истории нет, адрес записан.
+    let mut lost = fixture(
+        &[
+            ("n.typ", &BASE.replace("Второй абзац.", "Второй — A.")),
+            ("b.typ", "= B\n"),
+        ],
+        Some(remote.clone()),
+    );
+    let mut settings = sync_settings::read(&lost.vault).await;
+    settings.remote_url = Some(REMOTE.to_string());
+    sync_settings::write(&mut lost.vault, &settings)
+        .await
+        .unwrap();
+
+    // Адрес из настроек vault ещё не подтверждён на этом устройстве — обмена с
+    // ним нет, и пустая история после отказа не остаётся.
+    let ctx = lost.ctx();
+    assert!(matches!(
+        lost.session
+            .restore_history(&mut lost.vault, &lost.secrets, &ctx, false)
+            .await,
+        Err(SyncError::RemoteChanged { .. })
+    ));
+    assert!(lost
+        .session
+        .history(&lost.vault, None, None, 10)
+        .await
+        .is_err());
+    lost.secrets
+        .set("vault-1", SecretKind::RemoteOrigin, REMOTE)
+        .await
+        .unwrap();
+
+    let ctx = lost.ctx();
+    let outcome = lost
+        .session
+        .restore_history(&mut lost.vault, &lost.secrets, &ctx, false)
+        .await
+        .expect("история обязана вернуться");
+
+    // Файлы совпали с удалённой версией: история вернулась целиком, ничего
+    // не тронуто и спорить не о чем.
+    assert_eq!(outcome.conflicts, 0);
+    assert_eq!(lost.history_len(None).await, snapshots);
+    assert!(lost.text("n.typ").unwrap().contains("Второй — A."));
+    assert!(lost.session.changes(&lost.vault).await.unwrap().is_empty());
+
+    // Файл, который успели поправить после утраты, молча не перезаписывается:
+    // расхождение становится конфликтом, как при обычном получении.
+    let mut diverged = fixture(
+        &[
+            ("n.typ", &BASE.replace("Второй абзац.", "Второй — A.")),
+            ("b.typ", "= B, правка после утраты\n"),
+        ],
+        Some(remote.clone()),
+    );
+    let mut settings = sync_settings::read(&diverged.vault).await;
+    settings.remote_url = Some(REMOTE.to_string());
+    sync_settings::write(&mut diverged.vault, &settings)
+        .await
+        .unwrap();
+    diverged
+        .secrets
+        .set("vault-1", SecretKind::RemoteOrigin, REMOTE)
+        .await
+        .unwrap();
+    let ctx = diverged.ctx();
+    let outcome = diverged
+        .session
+        .restore_history(&mut diverged.vault, &diverged.secrets, &ctx, false)
+        .await
+        .unwrap();
+    assert_eq!(outcome.conflicts, 1);
+    assert_eq!(
+        diverged.text("b.typ").unwrap(),
+        "= B, правка после утраты\n"
+    );
+
+    // Повторно вернуть нечего: история уже есть.
+    let ctx = lost.ctx();
+    assert_eq!(
+        lost.session
+            .restore_history(&mut lost.vault, &lost.secrets, &ctx, false)
+            .await
+            .unwrap_err(),
+        SyncError::HistoryExists
+    );
+
+    // Без записанного адреса возвращать неоткуда.
+    let mut bare = fixture(&[("n.typ", BASE)], None);
+    let ctx = bare.ctx();
+    assert_eq!(
+        bare.session
+            .restore_history(&mut bare.vault, &bare.secrets, &ctx, false)
+            .await
+            .unwrap_err(),
+        SyncError::NoRemote
+    );
 }

@@ -173,6 +173,103 @@ impl LogRotation {
     }
 }
 
+/// Имена файлов журнала — рядом с файлом настроек устройства, на web в OPFS.
+pub const LOG_FILE_NAME: &str = "typsidian.log";
+pub const LOG_PREVIOUS_FILE_NAME: &str = "typsidian.previous.log";
+
+/// Журнал приложения: что в нём сейчас и что из этого ещё не записано.
+///
+/// Чистая часть — какие события в него попадают и как они ротируются. Записью
+/// файлов занимается хранилище настроек: у native и web она разная, а правила
+/// обязаны быть одни (принцип I).
+#[derive(Debug, Default)]
+pub struct Journal {
+    rotation: LogRotation,
+    unsaved: bool,
+}
+
+impl Journal {
+    /// Журнал, продолжающий прежние файлы. Содержимое не разбирается: это
+    /// текст, который дописывается и показывается.
+    pub fn resume(current: String, previous: String) -> Self {
+        Self {
+            rotation: LogRotation { current, previous },
+            unsaved: false,
+        }
+    }
+
+    pub fn record(&mut self, utc_millis: i64, event: LogEvent) {
+        self.rotation.append(&LogEntry::new(utc_millis, event));
+        self.unsaved = true;
+    }
+
+    /// Событие хранилища настроек — в журнал, если оно того стоит. Внешняя
+    /// правка значений и смена состояния файла конфига редактора сюда не
+    /// идут: первое приходит на каждое сохранение соседним окном, второе —
+    /// на каждую правку конфига в чужом редакторе.
+    pub fn record_event(&mut self, utc_millis: i64, event: &super::events::SettingsEvent) {
+        use super::events::SettingsEvent;
+        let logged = match event {
+            SettingsEvent::StorageUnreadable => LogEvent::SettingsUnreadable,
+            SettingsEvent::StorageRecovered { .. } => LogEvent::SettingsLoaded,
+            SettingsEvent::StorageBecameReadOnly => LogEvent::StorageBecameReadOnly,
+            SettingsEvent::InvalidFileSetAside { .. } => LogEvent::InvalidFileSetAside,
+            SettingsEvent::EditorModeChanged { mode } => LogEvent::EditorModeChanged {
+                mode: match mode {
+                    super::editor_mode::EditorMode::FullBackend { .. } => "FullBackend",
+                    super::editor_mode::EditorMode::SimplifiedEmulation => "SimplifiedEmulation",
+                    super::editor_mode::EditorMode::PlainInput { .. } => "PlainInput",
+                },
+            },
+            SettingsEvent::ValuesChangedExternally { .. }
+            | SettingsEvent::EditorConfigDiskStateChanged { .. } => return,
+        };
+        self.record(utc_millis, logged);
+    }
+
+    /// Применённое изменение настроек: по записи на каждое затронутое поле.
+    /// Значения не пишутся — только имена полей: путь к конфигу редактора и
+    /// адрес посредника в журнале делать нечего (FR-041).
+    pub fn record_change(&mut self, utc_millis: i64, change: &super::apply::SettingsChange) {
+        let fields: [(&'static str, bool); 8] = [
+            ("theme", change.theme.is_some()),
+            ("editor_font_size", change.editor_font_size.is_some()),
+            ("current_vault", change.current_vault.is_some()),
+            (
+                "editor_mode_preference",
+                change.editor_mode_preference.is_some(),
+            ),
+            ("editor_config_path", change.editor_config_path.is_some()),
+            ("language", change.language.is_some()),
+            ("device", change.device.is_some()),
+            ("vault_sync", change.vault_sync.is_some()),
+        ];
+        for (field, touched) in fields {
+            if !touched {
+                continue;
+            }
+            let event = match field {
+                "current_vault" => LogEvent::VaultSwitched,
+                _ => LogEvent::SettingsChanged { field },
+            };
+            self.record(utc_millis, event);
+        }
+    }
+
+    /// Файлы, которые пора записать: `(текущий, предыдущий)`. `None` — с
+    /// прошлого вызова журнал не менялся.
+    pub fn take_unsaved(&mut self) -> Option<(&str, &str)> {
+        if !std::mem::take(&mut self.unsaved) {
+            return None;
+        }
+        Some((self.rotation.current(), self.rotation.previous()))
+    }
+
+    /// Весь журнал — для показа пользователю (FR-040).
+    pub fn text(&self) -> String {
+        self.rotation.all_text()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

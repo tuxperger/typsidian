@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../tauri-invoke.js";
 import type {
   ApplyPlan,
   ChangeTarget,
@@ -52,6 +52,7 @@ export function tauriDeviceSettings(
     async reveal() {
       await invoke("reveal_device_settings");
     },
+    journal: () => invoke<string>("device_journal"),
     async addFolder() {
       const path = await pickFolder();
       if (path === null) return { kind: "cancelled" };

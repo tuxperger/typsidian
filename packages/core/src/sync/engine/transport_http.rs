@@ -23,6 +23,24 @@ use crate::sync::settings::remote_url;
 pub struct TransportContext {
     pub auth: Auth,
     pub cancel: CancelToken,
+    /// Сколько обмен может молчать, прежде чем считается зависшим.
+    pub idle_limit: Duration,
+}
+
+/// Предел простоя сетевого обмена (research §9, FR-020, SC-004): столько сервер
+/// может не присылать ни байта — ни заголовков ответа, ни очередной порции
+/// тела. Не предел всей передачи: большой клон по медленному каналу идёт
+/// сколько нужно, пока данные приходят.
+pub const NETWORK_IDLE_LIMIT: Duration = Duration::from_secs(20);
+
+/// Наименьшая скорость отправки, при которой она ещё не считается зависшей.
+/// Ход отправки тела запроса отсюда не виден — виден только её конец, —
+/// поэтому предел для неё считается от размера тела.
+const SLOWEST_UPLOAD_BYTES_PER_SEC: u64 = 16 * 1024;
+
+/// Сколько ждать ответа на запрос с телом такого размера.
+fn response_limit(idle_limit: Duration, body_len: usize) -> Duration {
+    idle_limit + Duration::from_secs(body_len as u64 / SLOWEST_UPLOAD_BYTES_PER_SEC)
 }
 
 thread_local! {
@@ -137,7 +155,7 @@ fn host_of(url: &str) -> Option<String> {
     remote_url::host_of_hostport(hostport)
 }
 
-fn client() -> std::io::Result<reqwest::blocking::Client> {
+fn client(idle_limit: Duration) -> std::io::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         // Перенаправление — только на тот же хост и не с https на http: иначе
         // заголовок с токеном или сам пакет ушли бы открытым каналом (T068).
@@ -154,9 +172,10 @@ fn client() -> std::io::Result<reqwest::blocking::Client> {
             }
         }))
         .connect_timeout(Duration::from_secs(10))
-        // Предел всей передачи: большой первый клон медленного канала —
-        // единственный случай, когда он может понадобиться целиком.
-        .timeout(Duration::from_secs(600))
+        // У блокирующего клиента это предел ожидания, а не всей передачи: он
+        // применяется к ответу сервера и затем к каждому чтению тела по
+        // отдельности — то есть ровно предел простоя.
+        .timeout(idle_limit)
         .user_agent(concat!(
             "git/2.0 (typsidian/",
             env!("CARGO_PKG_VERSION"),
@@ -181,10 +200,19 @@ impl HttpStream {
             });
             return Err(std::io::Error::other("http только для этого устройства"));
         }
-        let client = client()?;
+        let idle_limit = self.context.idle_limit;
+        let client = client(idle_limit)?;
         let mut request = match self.method {
             Method::Get => client.get(&self.url),
-            Method::Post => client.post(&self.url).body(std::mem::take(&mut self.body)),
+            Method::Post => {
+                let body = std::mem::take(&mut self.body);
+                // Ответ придёт только после отправки всего тела, поэтому ждать
+                // его нужно дольше — соразмерно тому, что отправляется.
+                client
+                    .post(&self.url)
+                    .timeout(response_limit(idle_limit, body.len()))
+                    .body(body)
+            }
         }
         .header("Accept", self.accept)
         .header("Git-Protocol", "version=0");
@@ -280,6 +308,7 @@ mod tests {
             TransportContext {
                 auth: Auth::default(),
                 cancel: CancelToken::new(),
+                idle_limit: NETWORK_IDLE_LIMIT,
             },
             || {
                 assert!(current_context().is_some());

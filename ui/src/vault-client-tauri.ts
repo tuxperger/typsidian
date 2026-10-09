@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./tauri-invoke.js";
 import { listen } from "@tauri-apps/api/event";
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
@@ -102,9 +102,13 @@ export async function openVaultAt(path: string): Promise<VaultOpenResult> {
   // значения устройства и секреты этого vault. Не запомнился vault — нет и
   // сессии синхронизации; сам vault при этом работает (FR-038).
   let sync: SyncClient | undefined;
+  let settingsNotice: VaultEvent | undefined;
   try {
-    const vaultId = await invoke<string>("remember_vault", { path });
-    sync = await openTauriSync(vaultId);
+    const remembered = await invoke<{ id: string; notice?: VaultEvent }>("remember_vault", {
+      path,
+    });
+    settingsNotice = remembered.notice;
+    sync = await openTauriSync(remembered.id);
   } catch {
     // Молча: сказать об этом пользователю нечего — действия от него не требуется.
   }
@@ -112,6 +116,7 @@ export async function openVaultAt(path: string): Promise<VaultOpenResult> {
     ok: true,
     client: tauriVaultClient(profile, basename(root)),
     ...(sync === undefined ? {} : { sync }),
+    ...(settingsNotice === undefined ? {} : { settingsNotice }),
     // Предпросмотр приходит вместе с клиентом, как и на web: движок живёт в
     // оболочке всё время работы окна, и отдельного создания ему не нужно.
     preview: tauriPreviewClient(),

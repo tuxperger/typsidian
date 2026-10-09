@@ -147,6 +147,8 @@ export async function webSyncClient(
       withContext((ctx) => session.push(backend, ctx, confirmNotKeeper)),
     pull: (confirmNotKeeper) =>
       withContext((ctx) => session.pull(backend, ctx, confirmNotKeeper)),
+    restoreHistory: (confirmNotKeeper) =>
+      withContext((ctx) => session.restoreHistory(backend, ctx, confirmNotKeeper)),
     abortPull: () => plain(() => session.abortPull(backend)),
     conflicts: () => plain(() => session.conflicts(backend)),
     resolve: (id, resolution) =>

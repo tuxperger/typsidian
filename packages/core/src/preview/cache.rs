@@ -48,6 +48,9 @@ use super::snapshot::DependencySnapshot;
 #[derive(Debug, Default)]
 pub struct PackageCache {
     files: Mutex<HashMap<FileId, Bytes>>,
+    /// Содержимое связанных файлов vault от прошлой сборки той же заметки
+    /// (005 T122) — см. [`PackageCache::vault_files_of`].
+    vault_files: Mutex<VaultFiles>,
     /// Шаблоны, чей отпечаток уже сверен в этом сеансе (фича 007, FR-023).
     verified: Mutex<HashSet<PackageSpec>>,
     /// Шрифты из папки vault (фича 005, FR-027). Здесь, а не отдельным
@@ -56,9 +59,62 @@ pub struct PackageCache {
     vault_fonts: VaultFontCache,
 }
 
+/// Отметка файла vault: размер и время изменения ([`VaultBackend::file_mark`]).
+pub type FileMark = (u64, i64);
+
+#[derive(Debug, Default)]
+struct VaultFiles {
+    /// Заметка, к сборке которой относятся файлы. Кэш держит одну заметку:
+    /// переход к другой его сбрасывает, и память не копится по мере
+    /// хождения по vault.
+    note: String,
+    files: HashMap<FileId, (FileMark, Bytes)>,
+}
+
 impl PackageCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Связанные файлы vault, прочитанные прошлой сборкой заметки.
+    ///
+    /// Без этого каждый импорт поднимался бы заново отдельным проходом
+    /// компилятора на каждое нажатие клавиши: у заметки с сорока импортами это
+    /// сорок проходов вместо одного. Годится ли файл, решает вызывающий —
+    /// сверкой отметки с диском: содержимое, устаревшее хоть на байт, в
+    /// сборку попасть не должно.
+    pub fn vault_files_of(&self, note: &str) -> Vec<(FileId, FileMark, Bytes)> {
+        let cache = self.vault_files.lock().expect("кэш файлов vault");
+        if cache.note != note {
+            return Vec::new();
+        }
+        cache
+            .files
+            .iter()
+            .map(|(id, (mark, bytes))| (*id, *mark, bytes.clone()))
+            .collect()
+    }
+
+    /// Запоминает связанные файлы vault этой сборки — те, чья отметка известна
+    /// и которые компилятор действительно запрашивал. Прежний набор
+    /// заменяется целиком: импорт, убранный из текста, из кэша уходит. Ошибиться
+    /// здесь можно только в безопасную сторону — забытый файл просто
+    /// прочитается заново.
+    pub fn remember_vault_files(
+        &self,
+        note: &str,
+        snapshot: &DependencySnapshot,
+        marks: &HashMap<FileId, FileMark>,
+    ) {
+        let files = marks
+            .iter()
+            .filter(|(id, _)| snapshot.was_accessed(**id))
+            .filter_map(|(id, mark)| Some((*id, (*mark, snapshot.get(*id)?.clone()))))
+            .collect();
+        *self.vault_files.lock().expect("кэш файлов vault") = VaultFiles {
+            note: note.to_owned(),
+            files,
+        };
     }
 
     /// Кладёт в снимок всё, что уже известно про шаблоны.

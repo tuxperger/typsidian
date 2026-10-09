@@ -59,7 +59,7 @@ JS-тестов в репозитории нет — проверка по quick
 
 ## Phase 6: Polish
 
-- [ ] T018 Гейты качества: `.specify/scripts/typsidian/gates.sh all` и `scripts/check-i18n.sh` — fmt, оба таргета ядра, `cargo test`, `wasm-bindgen-test`, типы UI per Definition of done конституции
+- [X] T018 Гейты качества: `.specify/scripts/typsidian/gates.sh all` и `scripts/check-i18n.sh` — fmt, оба таргета ядра, `cargo test`, `wasm-bindgen-test`, типы UI per Definition of done конституции
 - [ ] T019 Прогнать quickstart.md в web и на рабочем столе, дополнить раздел о синхронизации в `README.md`, `**Status**: Implemented` в `specs/012-ignore-rules-editor/spec.md`
 
 ## Dependencies

@@ -468,3 +468,62 @@ pub async fn the_dependency_mark_follows_the_files() {
         .remove(std::path::Path::new("схема.svg"));
     assert_ne!(dependency_mark(&vault, &paths).await, appeared);
 }
+
+// ── Кэш связанных файлов между сборками (T122) ─────────────────────────────
+
+/// T122: связанный файл читается один раз, пока не изменится; изменившийся
+/// перечитывается, и в сборку идёт новое содержимое; импорт, убранный из
+/// текста, перестаёт быть зависимостью.
+pub async fn a_linked_file_is_read_once_until_it_changes() {
+    let vault = MemoryVault::new()
+        .with_file("оформление.typ", "#let метка = [ОДИН]\n")
+        .with_file("другое.typ", "#let иное = [ИНОЕ]\n");
+    let packages = PackageCache::new();
+    let text = "#import \"оформление.typ\": метка\n#import \"другое.typ\": иное\n#метка #иное\n";
+    let build = |text: &'static str, revision| {
+        compile_note_resolved(&vault, &packages, MAIN, text, revision, FontSet::builtin())
+    };
+    let words = |doc: &CompiledDocument| -> String {
+        doc.pages
+            .iter()
+            .flat_map(|page| page.text_runs.iter().map(|run| run.text.clone()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    for revision in 1..=3 {
+        let doc = build(text, revision).await.unwrap();
+        assert_eq!(
+            doc.outcome,
+            CompileOutcome::Succeeded,
+            "{:?}",
+            doc.diagnostics
+        );
+        assert!(words(&doc).contains("ОДИН"));
+    }
+    assert_eq!(vault.read_count("оформление.typ"), 1);
+    assert_eq!(vault.read_count("другое.typ"), 1);
+
+    vault
+        .files_handle()
+        .borrow_mut()
+        .insert("оформление.typ".into(), "#let метка = [ДВА-НОВОЕ]\n".into());
+    let doc = build(text, 4).await.unwrap();
+    assert!(words(&doc).contains("ДВА-НОВОЕ"), "{}", words(&doc));
+    assert_eq!(vault.read_count("оформление.typ"), 2);
+    assert_eq!(vault.read_count("другое.typ"), 1);
+
+    // Импорт убран из текста: файл уходит и из зависимостей, и из кэша.
+    let shorter = "#import \"оформление.typ\": метка\n#метка\n";
+    build(shorter, 5).await.unwrap();
+    let doc = build(shorter, 6).await.unwrap();
+    assert_eq!(doc.dependencies, ["оформление.typ"]);
+
+    // Файл удалён — сборка называет его, а не собирает из кэша.
+    vault
+        .files_handle()
+        .borrow_mut()
+        .remove(std::path::Path::new("оформление.typ"));
+    let doc = build(shorter, 7).await.unwrap();
+    assert_eq!(doc.outcome, CompileOutcome::Failed);
+}

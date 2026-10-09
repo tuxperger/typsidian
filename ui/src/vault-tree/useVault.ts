@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   AccessState,
+  VaultEvent,
   Note,
   OpenError,
 } from "../wasm-core/typsidian_core.js";
@@ -111,6 +112,12 @@ export type VaultOpenResult =
        * синхронизации не показывается; сам vault при этом работает (FR-038).
        */
       sync?: SyncClient;
+      /**
+       * Что ядро сказало о служебном месте при открытии (006 FR-024, FR-025):
+       * настройки уровня vault утрачены либо vault открыт только на чтение.
+       * Событием, а не флагами: оно идёт тем же путём, что и события опроса.
+       */
+      settingsNotice?: VaultEvent;
     }
   | { ok: false; error: OpenVaultError };
 
@@ -241,7 +248,7 @@ export function useVault(
       setState((prev) => ({ ...prev, isLoading: false, error: opened.error }));
       return;
     }
-    const { client, preview = null, sync = null } = opened;
+    const { client, preview = null, sync = null, settingsNotice } = opened;
     clientRef.current = client;
     const notes = await client.list();
     const accessState = await client.accessState();
@@ -255,10 +262,10 @@ export function useVault(
       error: null,
       bulkChangeDepth: 0,
       linksRevision: 0,
-      // Сбрасываются на каждое открытие: сообщения относятся к конкретному
-      // vault, и перенос их на следующий был бы прямой дезинформацией.
-      settingsLost: false,
-      settingsReadOnly: false,
+      // Выставляются заново на каждое открытие: сообщения относятся к
+      // конкретному vault, и перенос их на следующий был бы дезинформацией.
+      settingsLost: settingsNotice?.type === "VaultSettingsLost",
+      settingsReadOnly: settingsNotice?.type === "VaultSettingsReadOnly",
     });
   }, []);
 

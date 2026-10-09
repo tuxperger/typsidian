@@ -77,6 +77,10 @@ pub struct DependencySnapshot {
     /// Блокировка не горячая: она берётся только на промахе, то есть считаное
     /// число раз за сборку.
     missing: Mutex<HashSet<FileId>>,
+    /// Файлы, которые компилятор действительно запрашивал. Нужны кэшу
+    /// связанных файлов (005 T122): подложенный из кэша, но не востребованный
+    /// файл — импорт, которого в тексте больше нет, — хранить дальше незачем.
+    accessed: Mutex<HashSet<FileId>>,
     iterations: u16,
 }
 
@@ -85,6 +89,7 @@ impl Clone for DependencySnapshot {
         Self {
             files: self.files.clone(),
             missing: Mutex::new(self.missing.lock().expect("snapshot mutex").clone()),
+            accessed: Mutex::new(self.accessed.lock().expect("snapshot mutex").clone()),
             iterations: self.iterations,
         }
     }
@@ -119,6 +124,26 @@ impl DependencySnapshot {
 
     pub fn contains(&self, id: FileId) -> bool {
         self.files.contains_key(&id)
+    }
+
+    /// Отмечает, что компилятор получил файл из снимка.
+    pub fn record_access(&self, id: FileId) {
+        self.accessed.lock().expect("snapshot mutex").insert(id);
+    }
+
+    /// Все файлы, которые компилятор получил из снимка.
+    pub fn accessed(&self) -> Vec<FileId> {
+        self.accessed
+            .lock()
+            .expect("snapshot mutex")
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    /// Запрашивал ли компилятор этот файл хоть в одном проходе над снимком.
+    pub fn was_accessed(&self, id: FileId) -> bool {
+        self.accessed.lock().expect("snapshot mutex").contains(&id)
     }
 
     /// Отмечает, что компилятор просил файл, которого в снимке нет.

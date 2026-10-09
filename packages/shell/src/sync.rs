@@ -698,6 +698,22 @@ pub async fn sync_pull(
 }
 
 #[tauri::command]
+pub async fn sync_restore_history(
+    app: AppHandle,
+    device: State<'_, Device>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    secrets: State<'_, Secrets>,
+    confirm_not_keeper: bool,
+) -> Answer<PullOutcome> {
+    with_sync!(app, device, vault, sync_state, |backend, session, ctx| Ok(
+        session
+            .restore_history(backend, &secrets.0, &ctx, confirm_not_keeper)
+            .await?
+    ))
+}
+
+#[tauri::command]
 pub async fn sync_abort_pull(
     vault: State<'_, Vault>,
     sync_state: State<'_, SyncState>,

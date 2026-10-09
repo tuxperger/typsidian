@@ -10,6 +10,7 @@ use super::apply::{plan, ApplyContext, ApplyPlan, SettingsChange};
 use super::events::SettingsEvent;
 use super::folder_ref::{FolderRegistry, Resolved};
 use super::format::{self, FolderRefs};
+use super::logging::{Journal, LogEvent, LOG_FILE_NAME, LOG_PREVIOUS_FILE_NAME};
 use super::store::{
     invalid_file_path, SettingsStore, StorageState, StoreCapabilities, StoreError,
     SETTINGS_FILE_NAME,
@@ -98,6 +99,8 @@ pub struct NativeStore {
     pending_invalid: bool,
     folder_refs: FolderRefs,
     events: VecDeque<SettingsEvent>,
+    /// Журнал приложения; файлы — рядом с файлом настроек (FR-040).
+    journal: Journal,
     /// Взводится наблюдателем; разбирается в `poll_events`.
     dirty: Arc<AtomicBool>,
     _watcher: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, FileIdMap>>,
@@ -163,9 +166,17 @@ impl NativeStore {
             pending_invalid,
             folder_refs,
             events: VecDeque::new(),
+            journal: Journal::default(),
             dirty: Arc::new(AtomicBool::new(false)),
             _watcher: None,
         };
+        store.journal = Journal::resume(
+            std::fs::read_to_string(store.dir.join(LOG_FILE_NAME)).unwrap_or_default(),
+            std::fs::read_to_string(store.dir.join(LOG_PREVIOUS_FILE_NAME)).unwrap_or_default(),
+        );
+        if store.state == StorageState::Loaded {
+            store.journal.record(now_millis(), LogEvent::SettingsLoaded);
+        }
 
         if store.state == StorageState::DefaultsAfterUnreadable {
             store.events.push_back(SettingsEvent::StorageUnreadable);
@@ -372,6 +383,7 @@ impl SettingsStore for NativeStore {
         // FR-014: при недоступном на запись каталоге изменение всё равно
         // вступает в силу — до конца сессии. Отказ здесь означал бы, что
         // приложение теряет настраиваемость из-за прав на каталог.
+        self.journal.record_change(now_millis(), change);
         if self.state == StorageState::ReadOnlyForSession {
             self.settings = next;
             return ApplyPlan::Applied;
@@ -379,7 +391,10 @@ impl SettingsStore for NativeStore {
 
         self.settings = next;
         match self.persist() {
-            Ok(()) => ApplyPlan::Applied,
+            Ok(()) => {
+                self.flush_journal();
+                ApplyPlan::Applied
+            }
             Err(_) => {
                 self.state = StorageState::ReadOnlyForSession;
                 self.events.push_back(SettingsEvent::StorageBecameReadOnly);
@@ -425,7 +440,16 @@ impl SettingsStore for NativeStore {
                 self.events.push_back(event);
             }
         }
+        let now = now_millis();
+        for event in &self.events {
+            self.journal.record_event(now, event);
+        }
+        self.flush_journal();
         self.events.drain(..).collect()
+    }
+
+    fn journal_text(&self) -> String {
+        self.journal.text()
     }
 }
 
@@ -464,7 +488,9 @@ impl FolderRegistry for NativeStore {
             &mut self.settings.known_vaults,
             VaultRecord::new(id.clone(), location),
         );
+        self.journal.record(now_millis(), LogEvent::VaultAdded);
         self.persist()?;
+        self.flush_journal();
         Ok(id)
     }
 
@@ -490,11 +516,27 @@ impl FolderRegistry for NativeStore {
         if self.settings.current_vault.as_ref() == Some(id) {
             self.settings.current_vault = None;
         }
-        self.persist()
+        self.journal.record(now_millis(), LogEvent::VaultForgotten);
+        let saved = self.persist();
+        self.flush_journal();
+        saved
     }
 }
 
 impl NativeStore {
+    /// Записывает журнал на диск, если в нём есть новое. Отказ записи журнала
+    /// ничего не отменяет и никуда не сообщается: журнал — подспорье, а не
+    /// данные пользователя, и ронять из-за него настройку нельзя.
+    fn flush_journal(&mut self) {
+        if self.state == StorageState::ReadOnlyForSession {
+            return;
+        }
+        if let Some((current, previous)) = self.journal.take_unsaved() {
+            let _ = write_atomically(&self.dir.join(LOG_FILE_NAME), current);
+            let _ = write_atomically(&self.dir.join(LOG_PREVIOUS_FILE_NAME), previous);
+        }
+    }
+
     /// Доступность записи для показа списка (FR-023).
     pub async fn availability_of(&self, id: &VaultId) -> Availability {
         self.resolve(id).await.availability()

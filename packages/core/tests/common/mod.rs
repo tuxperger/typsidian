@@ -281,6 +281,20 @@ impl VaultBackend for MemoryVault {
             .ok_or(ReadError::NotFound)
     }
 
+    async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        // «Слишком большой» файл здесь — обычный файл с объявленным отказом
+        // `TooLarge`: чтение без предела отдаёт его содержимое.
+        match self.failures.get(path) {
+            Some(ReadError::TooLarge) | None => self
+                .files
+                .borrow()
+                .get(path)
+                .cloned()
+                .ok_or(ReadError::NotFound),
+            Some(error) => Err(error.clone()),
+        }
+    }
+
     async fn write(
         &mut self,
         path: &Path,

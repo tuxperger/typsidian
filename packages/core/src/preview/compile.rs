@@ -14,7 +14,7 @@ use typst::syntax::FileId;
 use typst_layout::PagedDocument;
 
 use super::anchor::{ResolvedAnchor, ScrollAnchor};
-use super::cache::PackageCache;
+use super::cache::{FileMark, PackageCache};
 use super::diagnostics::{sort_by_location, translate, Diagnostic, DiagnosticSeverity};
 use super::fonts::FontSet;
 use super::packages::{
@@ -206,6 +206,17 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
     // Файлы шаблонов, известные с прошлых сборок, — сразу в снимок. Каждый
     // промах здесь стоил бы отдельного прохода, то есть полной пересборки.
     packages.seed(&mut snapshot);
+    // Связанные файлы прошлой сборки этой заметки — те, что с тех пор не
+    // менялись на диске (005 T122). Изменившийся или исчезнувший файл сюда не
+    // попадает, и компилятор запросит его заново обычным порядком.
+    let mut marks: std::collections::HashMap<FileId, FileMark> = std::collections::HashMap::new();
+    for (id, mark, bytes) in packages.vault_files_of(note_path) {
+        let Some(path) = vault_path(id) else { continue };
+        if backend.file_mark(std::path::Path::new(&path)).await == Some(mark) {
+            snapshot.insert(id, bytes);
+            marks.insert(id, mark);
+        }
+    }
 
     // Причины отказов копятся между проходами: файл, который не прочитался,
     // на следующем проходе уже не запрашивается, а его имя обязано дойти до
@@ -247,6 +258,7 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
         let missing = returned.missing();
         if missing.is_empty() || !returned.begin_iteration() {
             packages.absorb(&returned);
+            packages.remember_vault_files(note_path, &returned, &marks);
             let (mut document, pdf) = with_font_problems((document, pdf));
             document.dependencies = vault_dependencies(main, &returned, &failures);
             return Ok((document, pdf, failures));
@@ -257,9 +269,18 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
         // тратил восемь сборок на заведомо тот же отказ.
         let mut progressed = false;
         for id in missing {
+            // Отметка снимается до чтения: изменись файл между ними, следующая
+            // сборка увидит другую отметку и прочитает его заново.
+            let mark = match vault_path(id) {
+                Some(path) => backend.file_mark(std::path::Path::new(&path)).await,
+                None => None,
+            };
             match read_dependency(backend, id).await {
                 Ok(bytes) => {
                     returned.insert(id, bytes);
+                    if let Some(mark) = mark {
+                        marks.insert(id, mark);
+                    }
                     progressed = true;
                 }
                 Err(error) => {
@@ -282,6 +303,7 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
                 Err(reason) => return Ok((stopped(note_path, revision, reason), None, failures)),
             };
             packages.absorb(&returned);
+            packages.remember_vault_files(note_path, &returned, &marks);
             let (mut document, pdf) = with_font_problems((document, pdf));
             document.dependencies = vault_dependencies(main, &returned, &failures);
             return Ok((document, pdf, failures));

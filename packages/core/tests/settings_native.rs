@@ -1307,3 +1307,51 @@ async fn chosen_language_survives_reopen_and_reset_clears_it() {
     let on_disk = fs::read_to_string(settings_path(&dir)).unwrap();
     assert!(!on_disk.contains("language"), "{on_disk}");
 }
+
+#[tokio::test]
+async fn the_journal_records_events_without_values_and_survives_a_restart() {
+    // 004 FR-040, FR-041, FR-043 (T093, T112): журнал пишется рядом с
+    // настройками, называет событие и поле, но не значение и не путь, и
+    // продолжается после перезапуска.
+    let dir = TempDir::new().unwrap();
+    let vault = TempDir::new().unwrap();
+    {
+        let mut store = store_in(&dir).await;
+        store
+            .apply(
+                &SettingsChange::theme(Theme::Dark),
+                &ApplyContext::unobstructed(),
+            )
+            .await;
+        store
+            .add(
+                vault.path().to_path_buf(),
+                vault.path().to_string_lossy().into_owned(),
+            )
+            .await
+            .unwrap();
+
+        let journal = store.journal_text();
+        assert!(journal.contains("SettingsLoaded"), "{journal}");
+        assert!(journal.contains("SettingsChanged"), "{journal}");
+        assert!(journal.contains("theme"), "{journal}");
+        assert!(journal.contains("VaultAdded"), "{journal}");
+        // Ни значения, ни пути: только имена событий и полей.
+        assert!(
+            !journal.contains("Dark") && !journal.contains("dark"),
+            "{journal}"
+        );
+        assert!(
+            !journal.contains(&*vault.path().to_string_lossy()),
+            "{journal}"
+        );
+    }
+
+    let on_disk = fs::read_to_string(dir.path().join("typsidian.log")).unwrap();
+    assert!(on_disk.contains("VaultAdded"));
+
+    let reopened = store_in(&dir).await;
+    let journal = reopened.journal_text();
+    assert!(journal.contains("VaultAdded"), "прежние записи на месте");
+    assert_eq!(journal.matches("SettingsLoaded").count(), 2);
+}

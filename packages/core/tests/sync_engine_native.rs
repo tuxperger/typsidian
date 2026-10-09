@@ -722,3 +722,59 @@ async fn a_pull_never_writes_through_a_symlinked_folder() {
         "получение записало файл вне vault"
     );
 }
+
+#[tokio::test]
+async fn a_silent_server_is_given_up_on_after_the_idle_limit() {
+    // T072, FR-020, SC-004: сервер принял соединение и молчит. Обмен обязан
+    // закончиться отказом по пределу простоя, а не висеть до общего предела
+    // передачи; снимки при этом целы.
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("порт loopback");
+    let address = listener.local_addr().unwrap();
+    // Соединения принимаются и удерживаются открытыми без единого байта в ответ.
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming().flatten() {
+            held.push(stream);
+        }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.typ"), "= A\n").unwrap();
+    let mut backend = NativeBackend::open(dir.path()).await.unwrap();
+    let engine = NativeGitEngine::open(dir.path()).with_idle_limit(Duration::from_millis(600));
+    let mut session = SyncSession::new(engine, None, "vault-1");
+    session
+        .enable_history(&mut backend, &ctx(1_700_000_000_000, 'a'), "Первый")
+        .await
+        .unwrap();
+
+    let secrets = MemorySecretStore::new();
+    let started = Instant::now();
+    let error = session
+        .connect_remote(
+            &mut backend,
+            &secrets,
+            &ctx(1_700_000_001_000, 'a'),
+            &format!("http://{address}/notes.git"),
+            Credentials::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, SyncError::Timeout);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "ждали {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        session
+            .history(&backend, None, None, 10)
+            .await
+            .unwrap()
+            .snapshots
+            .len(),
+        1
+    );
+}

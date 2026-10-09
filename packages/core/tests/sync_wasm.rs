@@ -224,3 +224,13 @@ async fn ignore_editor_recreates_a_deleted_file_only_on_request() {
 async fn ignore_editor_waits_for_an_unfinished_pull() {
     cases::ignore_editor_waits_for_an_unfinished_pull().await;
 }
+
+#[wasm_bindgen_test]
+async fn a_file_over_the_note_size_limit_is_pulled_like_any_other() {
+    cases::a_file_over_the_note_size_limit_is_pulled_like_any_other().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_lost_history_is_restored_from_the_remote() {
+    cases::a_lost_history_is_restored_from_the_remote().await;
+}

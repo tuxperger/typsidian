@@ -426,6 +426,7 @@ export function SettingsPanel({
             diagnostics={state.diagnostics}
             onReveal={() => void device.reveal().catch(() => {})}
             onResetToDefaults={() => void runReset()}
+            loadJournal={() => device.journal()}
             resetMessage={resetMessage === null ? null : resetMessage(t)}
           />
         )}

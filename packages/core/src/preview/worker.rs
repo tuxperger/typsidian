@@ -77,6 +77,9 @@ struct JobHeader {
 struct ResultHeader {
     document: CompiledDocument,
     missing: Vec<FileKey>,
+    /// Файлы, которые компилятор получил из снимка: по ним основной экземпляр
+    /// решает, что держать в кэше связанных файлов.
+    accessed: Vec<FileKey>,
 }
 
 fn field(object: &JsValue, name: &str) -> Result<JsValue, JsValue> {
@@ -180,6 +183,12 @@ pub fn run_compile_job(message: JsValue) -> Result<JsValue, JsValue> {
             .into_iter()
             .map(FileKey::of)
             .collect(),
+        accessed: output
+            .snapshot
+            .accessed()
+            .into_iter()
+            .map(FileKey::of)
+            .collect(),
         document: output.document,
     };
     set(&reply, "header", &to_js(&header)?);
@@ -253,6 +262,9 @@ impl CompileExecutor for WorkerExecutor {
                 let snapshot = job.snapshot;
                 for id in header.missing.iter().filter_map(FileKey::id) {
                     snapshot.record_missing(id);
+                }
+                for id in header.accessed.iter().filter_map(FileKey::id) {
+                    snapshot.record_access(id);
                 }
                 Ok(CompileOutput {
                     document: header.document,

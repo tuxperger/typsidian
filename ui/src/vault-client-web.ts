@@ -355,7 +355,13 @@ async function openWebVaultFromHandle(
   const { vault, preview, queue } = webClients(backend, new PreviewEngine());
   // FR-007: открытый vault становится последним. После успеха, а не до:
   // папка, которую не удалось открыть, последней не становится.
-  const vaultId = knownId ?? (await rememberWebVault(handle));
+  const remembered =
+    knownId === null ? await rememberWebVault(handle) : { id: knownId, wasKnown: true };
+  const vaultId = remembered?.id ?? null;
+  // 006 FR-024, FR-025: утрачены ли настройки уровня vault и можно ли их
+  // менять, решает ядро; отсюда ему нужен один факт — открывали ли папку
+  // раньше, а знает его хранилище устройства.
+  const settingsNotice = backend.serviceDirStatus(remembered?.wasKnown ?? false);
   // Синхронизации нужен идентификатор записи: под ним лежат значения
   // устройства и секреты этого vault (фича 011). Не запомнился vault или не
   // собралась сессия — vault работает без неё (FR-038).
@@ -367,7 +373,13 @@ async function openWebVaultFromHandle(
       sync = undefined;
     }
   }
-  return { ok: true, client: vault, preview, ...(sync === undefined ? {} : { sync }) };
+  return {
+    ok: true,
+    client: vault,
+    preview,
+    ...(sync === undefined ? {} : { sync }),
+    ...(settingsNotice === undefined ? {} : { settingsNotice }),
+  };
 }
 
 /** Жест «создать vault из удалённого репозитория» (фича 011, FR-013). */
@@ -390,13 +402,19 @@ export const cloneWebVault: VaultCloner = webVaultCloner(ensureWasmInitialized, 
  * Отказ хранилища открытие не отменяет и пользователю не показывается: vault
  * уже открыт и работает, не запомнилась только точка входа следующего запуска.
  */
-async function rememberWebVault(handle: FileSystemDirectoryHandle): Promise<string | null> {
+async function rememberWebVault(
+  handle: FileSystemDirectoryHandle,
+): Promise<{ id: string; wasKnown: boolean } | null> {
   try {
     const store = await deviceStore();
     return await deviceStoreQueue.run(async () => {
+      // «Открывали раньше» видно только здесь: запись о той же папке не
+      // дублируется, так что неизменное число записей и значит «уже была».
+      const before = store.settings().known_vaults?.length ?? 0;
       const id = await store.addVault(handle, handle.name);
+      const wasKnown = (store.settings().known_vaults?.length ?? 0) === before;
       await store.apply(changeOf({ current_vault: id }));
-      return id;
+      return { id, wasKnown };
     });
   } catch {
     // Молча: действия от пользователя это не требует.

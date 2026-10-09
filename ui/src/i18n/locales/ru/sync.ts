@@ -102,6 +102,9 @@ export const sync: Translation<typeof en> = {
   "sync.history.lost":
     "У этого vault была история, а теперь её нет: папку истории удалили или vault перенесли без неё.",
   "sync.history.createNew": "Начать новую историю…",
+  "sync.history.restoreFromRemote": "Загрузить историю из удалённого репозитория",
+  "sync.history.restoreFromRemoteHint":
+    "Адрес удалённого репозитория записан в настройках vault — история, скорее всего, цела там. Файлы, которые разошлись с ней, станут конфликтами; молча ничего не перезапишется.",
   "sync.history.foreign": (p) =>
     `Vault лежит внутри репозитория ${p.root}, созданного вне приложения. Снимков в нём приложение не делает.`,
   "sync.history.mirror": (p) =>

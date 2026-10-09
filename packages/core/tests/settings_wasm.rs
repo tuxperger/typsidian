@@ -796,3 +796,30 @@ async fn chosen_language_survives_reopen_and_reset_clears_it() {
     let again = <WebStore as SettingsStore>::open().await.unwrap();
     assert_eq!(again.settings().language, None);
 }
+
+#[wasm_bindgen_test]
+async fn the_journal_records_events_without_values_and_survives_a_restart() {
+    // 004 FR-040, FR-041 — тот же журнал, что и на native, только в OPFS.
+    // Файлы журнала переживают соседние тесты, поэтому проверяется прирост.
+    let mut store = fresh_store().await;
+    let before = store.journal_text().matches("SettingsChanged").count();
+    store
+        .apply(
+            &SettingsChange::theme(Theme::Dark),
+            &ApplyContext::unobstructed(),
+        )
+        .await;
+
+    let journal = store.journal_text();
+    assert_eq!(journal.matches("SettingsChanged").count(), before + 1);
+    assert!(journal.contains("theme"));
+    assert!(!journal.contains("Dark") && !journal.contains("dark"));
+
+    let reopened = <WebStore as SettingsStore>::open()
+        .await
+        .expect("повторное открытие");
+    assert_eq!(
+        reopened.journal_text().matches("SettingsChanged").count(),
+        before + 1
+    );
+}

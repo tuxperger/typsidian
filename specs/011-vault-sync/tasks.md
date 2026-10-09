@@ -156,11 +156,43 @@ JS-тестов в репозитории нет — проверка по quick
 ## Phase 10: Convergence
 
 - [ ] T071 Вынести сетевую часть `pull`/`push`/`tick`/`refresh_mirror` из-под блокировки vault: fetch и push без `VaultBackend`, запись файлов — отдельным шагом под блокировкой, в `packages/core/src/sync/session.rs` и `packages/shell/src/sync.rs`; в web — не занимать очередь `wasm-call-queue` на время сети (`ui/src/sync/sync-client-web.ts`), чтобы сохранение заметок не ждало обмена per FR-020, SC-004, Constitution X (partial)
-- [ ] T072 Предел простоя сетевого обмена (20 с без данных, 30 с без прогресса — research §9) в `packages/core/src/sync/engine/transport_http.rs` вместо одного общего предела 600 с; в `packages/core/src/sync/engine/transport_ssh.rs` — тот же предел и завершение процесса `ssh` по `CancelToken`, а не только в `Drop`; тест «сервер принял соединение и молчит» в `packages/core/tests/sync_engine_native.rs` per FR-020, SC-004 (partial)
-- [ ] T073 Получение при локальном файле больше предела заметки (10 МБ): читать версии для `pull`/`resolve` без этого предела (отдельный метод `VaultBackend` или потоковое сравнение по хэшу) вместо отказа «локальный файл не читается» в `packages/core/src/sync/session.rs`; тест в `packages/core/tests/common/sync_cases.rs` per Edge Cases «огромные или двоичные файлы», FR-016 (partial)
+- [X] T072 Предел простоя сетевого обмена (20 с без данных, 30 с без прогресса — research §9) в `packages/core/src/sync/engine/transport_http.rs` вместо одного общего предела 600 с; в `packages/core/src/sync/engine/transport_ssh.rs` — тот же предел и завершение процесса `ssh` по `CancelToken`, а не только в `Drop`; тест «сервер принял соединение и молчит» в `packages/core/tests/sync_engine_native.rs` per FR-020, SC-004 (partial)
+- [X] T073 Получение при локальном файле больше предела заметки (10 МБ): читать версии для `pull`/`resolve` без этого предела (отдельный метод `VaultBackend` или потоковое сравнение по хэшу) вместо отказа «локальный файл не читается» в `packages/core/src/sync/session.rs`; тест в `packages/core/tests/common/sync_cases.rs` per Edge Cases «огромные или двоичные файлы», FR-016 (partial)
 - [ ] T074 Vault внутри чужого репозитория: либо реализовать список изменений и снимки, ограниченные путями vault (префикс из `RepoProbe::ForeignParent` в `packages/core/src/sync/engine/native.rs`, `session.rs`), либо через `/speckit-clarify` закрепить в spec.md нынешнее поведение «только показ, без записи» per Edge Cases «vault — часть более крупного репозитория», T021 (contradicts)
 - [ ] T075 Живой прогресс массовых операций: доставлять `SyncEvent::Progress` во время первого снимка, получения и клонирования (отдельный канал событий, не ждущий блокировки сессии) и показывать «N из M» в `ui/src/sync/useSync.ts`, `SyncIndicator.tsx`, `EnableHistoryWizard.tsx`, `RemoteDialog.tsx` per Constitution X, contracts/core-sync-api.md «События» (partial)
 - [ ] T076 Закрепление сертификата Syncthing внутри TLS-рукопожатия (свой проверяющий сертификат `rustls` со сравнением отпечатка) вместо сверки на отдельном запросе `/rest/noauth/health` в `packages/core/src/sync/syncthing.rs` per T068 п. 10, FR-014 (partial)
 - [ ] T077 Хранилище секретов и память: не считать секрет удалённым при ошибке удаления из keyring, блокировка и защита от повреждённого файла секретов на Android в `packages/shell/src/sync.rs`; пределы размера блоба, тела отправки и `stderr` ssh с отказом, видимым пользователю, в `packages/core/src/sync/engine/native.rs`, `transport_ssh.rs` per T068 п. 13–14, FR-014 (partial)
 - [ ] T078 Обновление состояния Syncthing по long-poll `/rest/events` с запасным опросом вместо опроса по такту в `packages/core/src/sync/syncthing.rs`, `packages/shell/src/sync.rs` per plan research §8, FR-022 (partial)
-- [ ] T079 При `HistoryState::Lost` и записанном адресе удалённого репозитория предлагать, кроме новой истории, загрузку истории из удалённого в `packages/core/src/sync/session.rs`, `ui/src/sync/SyncPanel.tsx` per Edge Cases «история удалена» (partial)
+- [X] T079 При `HistoryState::Lost` и записанном адресе удалённого репозитория предлагать, кроме новой истории, загрузку истории из удалённого в `packages/core/src/sync/session.rs`, `ui/src/sync/SyncPanel.tsx` per Edge Cases «история удалена» (partial)
+
+---
+
+## Доделка 2026-10-09
+
+**T073.** `VaultBackend::read_bytes_any_size`: чтение без предела размера заметки. Им читаются
+локальные версии при получении и разрешении конфликтов (`read_local`, `read_bytes` в
+`session.rs`); редактор и предпросмотр по-прежнему ограничены. Тест
+`a_file_over_the_note_size_limit_is_pulled_like_any_other` на обоих таргетах.
+
+**T079.** `SyncSession::restore_history`: пустая локальная история и обычное получение в неё.
+Адрес обязан быть подтверждён на этом устройстве (T068) — проверяется до создания истории,
+иначе отказ оставил бы пустую историю. Совпавшие файлы не трогаются, разошедшиеся становятся
+конфликтами получения. Привязки `restoreHistory` / `sync_restore_history`; в панели — кнопка
+«Загрузить историю из удалённого репозитория» при `Lost` и записанном адресе. Тест
+`a_lost_history_is_restored_from_the_remote` на обоих таргетах. В окне и в браузере не
+прогонялось: `FakeGitEngine` покрывает политику, а не isomorphic-git и не libgit2.
+
+**T072 — выполнена для HTTP, для SSH вынесена в T080.** Общий предел передачи в 600 с заменён
+пределом простоя `NETWORK_IDLE_LIMIT` = 20 с: у блокирующего клиента `reqwest` заданный
+предел применяется к ожиданию ответа и к каждому чтению тела по отдельности. Для запроса с
+телом (отправка) ответ ждётся дольше — соразмерно размеру тела при наименьшей скорости
+16 КиБ/с: ход отправки изнутри не виден. Отдельного предела «30 с без прогресса» нет —
+прогресс здесь и есть приход данных. Тест `a_silent_server_is_given_up_on_after_the_idle_limit`
+(сервер принимает соединение и молчит) в `sync_engine_native.rs`.
+
+- [ ] T080 Предел простоя и отмена для SSH-транспорта: чтение `stdout` процесса `ssh` в
+      `packages/core/src/sync/engine/transport_ssh.rs` блокирующее, без предела, а
+      `CancelToken` проверяется только перед чтением — зависший `ssh` не прерывается ни
+      отменой, ни временем. Читать в отдельном потоке с ожиданием по такту, завершать
+      процесс по отмене и по `idle_limit` из `TransportContext`; тест с подставным `ssh`
+      per FR-020, SC-004 (вынесено из T072)

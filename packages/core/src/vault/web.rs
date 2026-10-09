@@ -497,6 +497,13 @@ impl VaultBackend for WebBackend {
             .map_err(|_| ReadError::Io)
     }
 
+    async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        let handle = self.find_handle(path).await.ok_or(ReadError::NotFound)?;
+        read_file_handle_bytes(&handle)
+            .await
+            .map_err(|_| ReadError::Io)
+    }
+
     async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
         if self.write_denied() {
             return Err(WriteError::AccessDenied);
@@ -1576,6 +1583,18 @@ impl WebBackend {
     #[wasm_bindgen(js_name = accessState)]
     pub fn access_state_js(&self) -> AccessState {
         VaultBackend::access_state(self)
+    }
+
+    /// Что сказать о служебном месте сразу после открытия (006 FR-024,
+    /// FR-025): настройки уровня vault утрачены либо vault открыт только на
+    /// чтение. `was_known` — открывали ли эту папку на этом устройстве раньше;
+    /// знает это хранилище устройства, а не backend.
+    #[wasm_bindgen(js_name = serviceDirStatus)]
+    pub fn service_dir_status_js(
+        &self,
+        was_known: bool,
+    ) -> Option<crate::vault::events::VaultEvent> {
+        crate::vault::vault_settings::service_dir_status(self, was_known)
     }
 
     #[wasm_bindgen(js_name = rootPath)]

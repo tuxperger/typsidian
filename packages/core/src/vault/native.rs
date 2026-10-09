@@ -1243,6 +1243,13 @@ impl VaultBackend for NativeBackend {
         })
     }
 
+    async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        std::fs::read(self.root_path.join(path)).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ReadError::NotFound,
+            _ => ReadError::Io,
+        })
+    }
+
     async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
         if self.write_denied() {
             return Err(WriteError::AccessDenied);

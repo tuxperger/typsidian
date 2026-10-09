@@ -1190,6 +1190,39 @@ impl<E: GitEngine> SyncSession<E> {
     }
 
     /// Получение снимков с сервера со слиянием (FR-016, FR-017, research §9).
+    /// Возвращает утраченную историю из удалённого репозитория (Edge Cases
+    /// «история удалена», T079).
+    ///
+    /// Локальной истории нет, но адрес удалённого репозитория записан в
+    /// настройках vault — значит, история где-то цела. Заводится пустая
+    /// локальная, и в неё идёт обычное получение: файлы, совпавшие с
+    /// удалённой версией, остаются как есть, разошедшиеся становятся
+    /// конфликтами того же рода, что при любом получении. Ничего не
+    /// перезаписывается молча.
+    ///
+    /// Если получение не удалось (нет сети, отказ доступа), пустая история
+    /// остаётся — получение можно повторить обычным порядком.
+    pub async fn restore_history<B: VaultBackend, S: SecretStore>(
+        &mut self,
+        backend: &mut B,
+        secrets: &S,
+        ctx: &SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<PullOutcome, SyncError> {
+        match self.engine.probe().await? {
+            RepoProbe::Absent => {}
+            RepoProbe::Local | RepoProbe::Mirror => return Err(SyncError::HistoryExists),
+            RepoProbe::ForeignParent { .. } => return Err(SyncError::ForeignRepository),
+        }
+        // До создания истории: адрес обязан быть записан и подтверждён на этом
+        // устройстве (T068). Иначе отказ оставил бы после себя пустую историю,
+        // которую вернуть уже нечем.
+        self.remote_spec(backend, secrets, ctx).await?;
+        self.engine.init(DEFAULT_BRANCH).await?;
+        self.events.push(SyncEvent::OverviewChanged);
+        self.pull(backend, secrets, ctx, confirm_not_keeper).await
+    }
+
     pub async fn pull<B: VaultBackend, S: SecretStore>(
         &mut self,
         backend: &mut B,
@@ -2174,7 +2207,7 @@ async fn read_local<B: VaultBackend>(
     backend: &B,
     path: &str,
 ) -> Result<Option<Vec<u8>>, SyncError> {
-    match backend.read_bytes(Path::new(path)).await {
+    match backend.read_bytes_any_size(Path::new(path)).await {
         Ok(bytes) => Ok(Some(bytes)),
         Err(ReadError::NotFound) => Ok(None),
         Err(ReadError::Io | ReadError::TooLarge) => Err(SyncError::Io {
@@ -2184,7 +2217,7 @@ async fn read_local<B: VaultBackend>(
 }
 
 async fn read_bytes<B: VaultBackend>(backend: &B, path: &str) -> Option<Vec<u8>> {
-    match backend.read_bytes(Path::new(path)).await {
+    match backend.read_bytes_any_size(Path::new(path)).await {
         Ok(bytes) => Some(bytes),
         Err(ReadError::NotFound | ReadError::Io | ReadError::TooLarge) => None,
     }

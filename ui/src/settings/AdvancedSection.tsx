@@ -12,6 +12,8 @@ export interface AdvancedSectionProps {
   diagnostics: Diagnostics | null;
   onReveal: () => void;
   onResetToDefaults: () => void;
+  /** Журнал приложения из ядра (FR-040) — читается, когда его открыли. */
+  loadJournal: () => Promise<string>;
   /** Итог последнего сброса словами — отказ объясняется, а не замалчивается. */
   resetMessage?: string | null;
 }
@@ -33,10 +35,21 @@ export function AdvancedSection({
   diagnostics,
   onReveal,
   onResetToDefaults,
+  loadJournal,
   resetMessage = null,
 }: AdvancedSectionProps): React.JSX.Element {
   const { t } = useI18n();
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
+  // `null` — журнал не открывали: до двух мегабайт текста незачем читать и
+  // держать в разметке, пока о нём не попросили.
+  const [journal, setJournal] = useState<string | null>(null);
+  const [journalNote, setJournalNote] = useState<"copied" | "failed" | null>(null);
+  const showJournal = (): void => {
+    setJournalNote(null);
+    void loadJournal()
+      .then(setJournal)
+      .catch(() => setJournalNote("failed"));
+  };
 
   return (
     <section aria-label={t("settings.section.advanced")}>
@@ -88,6 +101,53 @@ export function AdvancedSection({
         <DiagnosticsView diagnostics={diagnostics} />
       ) : (
         <p role="status">{t("settings.advanced.notOpen")}</p>
+      )}
+
+      <h3>{t("settings.advanced.journal")}</h3>
+      <p>{t("settings.advanced.journalHint")}</p>
+      {journal === null ? (
+        <button type="button" onClick={showJournal}>
+          {t("settings.advanced.journalShow")}
+        </button>
+      ) : (
+        <>
+          <div role="group">
+            <button type="button" onClick={showJournal}>
+              {t("settings.advanced.journalRefresh")}
+            </button>
+            <button
+              type="button"
+              disabled={journal === ""}
+              onClick={() => {
+                // Копирование — действие самого пользователя: журнал покидает
+                // приложение только так (FR-042).
+                void navigator.clipboard
+                  .writeText(journal)
+                  .then(() => setJournalNote("copied"))
+                  .catch(() => setJournalNote("failed"));
+              }}
+            >
+              {t("settings.advanced.journalCopy")}
+            </button>
+            <button type="button" onClick={() => setJournal(null)}>
+              {t("settings.advanced.journalHide")}
+            </button>
+          </div>
+          {journal === "" ? (
+            <p role="status">{t("settings.advanced.journalEmpty")}</p>
+          ) : (
+            <pre className="ts-journal" tabIndex={0} aria-label={t("settings.advanced.journal")}>
+              {journal}
+            </pre>
+          )}
+        </>
+      )}
+      {journalNote !== null && (
+        <p role={journalNote === "failed" ? "alert" : "status"}>
+          {journalNote === "copied"
+            ? t("settings.advanced.journalCopied")
+            : t("settings.advanced.journalFailed")}
+        </p>
       )}
     </section>
   );

@@ -295,6 +295,20 @@ impl WebSyncSession {
             .map_err(js_error)
     }
 
+    /// Вернуть утраченную историю из удалённого репозитория (T079).
+    #[wasm_bindgen(js_name = restoreHistory)]
+    pub async fn restore_history(
+        &mut self,
+        backend: &mut WebBackend,
+        ctx: SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<PullOutcome, JsValue> {
+        self.inner
+            .restore_history(backend, &IdbSecretStore, &ctx, confirm_not_keeper)
+            .await
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = abortPull)]
     pub async fn abort_pull(&mut self, backend: &mut WebBackend) -> Result<(), JsValue> {
         self.inner.abort_pull(backend).await.map_err(js_error)

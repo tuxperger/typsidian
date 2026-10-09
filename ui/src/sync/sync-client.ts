@@ -101,6 +101,12 @@ export interface SyncClient {
   disconnectRemote(): Promise<void>;
   push(confirmNotKeeper: boolean): Promise<RemoteStatus>;
   pull(confirmNotKeeper: boolean): Promise<PullOutcome>;
+  /**
+   * Вернуть утраченную историю из удалённого репозитория: заводит пустую
+   * локальную и получает в неё. Расхождения с файлами vault — конфликты, как
+   * при обычном получении.
+   */
+  restoreHistory(confirmNotKeeper: boolean): Promise<PullOutcome>;
   abortPull(): Promise<void>;
   conflicts(): Promise<Conflict[]>;
   resolve(id: string, resolution: Resolution): Promise<void>;

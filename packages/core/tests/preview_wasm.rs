@@ -696,3 +696,8 @@ async fn an_unavailable_vault_is_named_and_the_text_still_builds() {
 async fn the_dependency_mark_follows_the_files() {
     common::preview_cases::the_dependency_mark_follows_the_files().await;
 }
+
+#[wasm_bindgen_test]
+async fn a_linked_file_is_read_once_until_it_changes() {
+    common::preview_cases::a_linked_file_is_read_once_until_it_changes().await;
+}

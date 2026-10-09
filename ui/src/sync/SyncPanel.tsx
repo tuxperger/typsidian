@@ -318,7 +318,30 @@ function HistorySection({
       {history.kind === "Lost" && (
         <>
           <p className="ts-dialog__warn">{t("sync.history.lost")}</p>
-          <button type="button" className="ts-btn ts-btn--accent" onClick={onEnable}>
+          {/* История цела в удалённом репозитории — вернуть её оттуда лучше,
+              чем начинать новую: новая с прежней уже не сойдётся (T079). */}
+          {overview.settings.remote_url !== undefined && (
+            <>
+              <p className="ts-dialog__hint">{t("sync.history.restoreFromRemoteHint")}</p>
+              <button
+                type="button"
+                className="ts-btn ts-btn--accent"
+                disabled={busy}
+                onClick={() =>
+                  void sync.runGated("pull", (confirm) => sync.client.restoreHistory(confirm))
+                }
+              >
+                {t("sync.history.restoreFromRemote")}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className={
+              overview.settings.remote_url === undefined ? "ts-btn ts-btn--accent" : "ts-btn"
+            }
+            onClick={onEnable}
+          >
             {t("sync.history.createNew")}
           </button>
         </>

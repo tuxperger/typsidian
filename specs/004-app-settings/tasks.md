@@ -329,68 +329,68 @@ description: "Task list for Application Settings implementation"
 
 ### Tests for User Story 3
 
-- [ ] T065 [P] [US3] Тест: отказ внешнего процесса переводит состояние в `PlainInput` и
+- [X] T065 [P] [US3] Тест: отказ внешнего процесса переводит состояние в `PlainInput` и
       **никогда** в `SimplifiedEmulation`; текст и позиция курсора сохранены (FR-035) в
       `packages/core/tests/settings_native.rs` и `packages/core/tests/settings_wasm.rs`
-- [ ] T066 [P] [US3] Тест: выход из `PlainInput` происходит только по явному действию,
+- [X] T066 [P] [US3] Тест: выход из `PlainInput` происходит только по явному действию,
       самопроизвольного восстановления нет (FR-035) в
       `packages/core/tests/settings_native.rs`
-- [ ] T067 [P] [US3] Тест: переключение между полноценным режимом и упрощённой эмуляцией по
+- [X] T067 [P] [US3] Тест: переключение между полноценным режимом и упрощённой эмуляцией по
       выбору пользователя меняет наблюдаемое состояние (FR-027) в
       `packages/core/tests/settings_native.rs` и `packages/core/tests/settings_wasm.rs`
-- [ ] T068 [P] [US3] Тест: при недоступном полноценном режиме `current_mode()` не возвращает
+- [X] T068 [P] [US3] Тест: при недоступном полноценном режиме `current_mode()` не возвращает
       `FullBackend` ни при каких обстоятельствах (FR-034, FR-004) в
       `packages/core/tests/settings_native.rs` и `packages/core/tests/settings_wasm.rs`
-- [ ] T069 [P] [US3] Тест: указание пути к несуществующему или нечитаемому файлу конфига даёт
+- [X] T069 [P] [US3] Тест: указание пути к несуществующему или нечитаемому файлу конфига даёт
       причину отказа, и конфиг **не** помечается применённым (FR-033) в
       `packages/core/tests/settings_native.rs`
-- [ ] T070 [P] [US3] Тест: изменение конфига с последующим возвратом прежнего содержимого до
+- [X] T070 [P] [US3] Тест: изменение конфига с последующим возвратом прежнего содержимого до
       применения даёт `InSync`, а не ложное `Changed` (FR-026, research.md §8) в
       `packages/core/tests/settings_native.rs`
-- [ ] T071 [P] [US3] Тест: удалённый или нечитаемый конфиг показывается, но полноценный режим
+- [X] T071 [P] [US3] Тест: удалённый или нечитаемый конфиг показывается, но полноценный режим
       продолжает работать на ранее применённом (FR-026) в
       `packages/core/tests/settings_native.rs`
-- [ ] T072 [P] [US3] Тест: смена режима при открытой заметке с правками возвращает
+- [X] T072 [P] [US3] Тест: смена режима при открытой заметке с правками возвращает
       `RequiresNoteSave` (FR-029) в `packages/core/tests/settings_native.rs` и
       `packages/core/tests/settings_wasm.rs`
-- [ ] T073 [P] [US3] Тест: неудавшееся сохранение даёт `Rejected { SaveFailed }`, режим не
+- [X] T073 [P] [US3] Тест: неудавшееся сохранение даёт `Rejected { SaveFailed }`, режим не
       меняется, правки не потеряны (FR-030) в `packages/core/tests/settings_native.rs`
-- [ ] T074 [P] [US3] Тест: неразрешённый конфликт даёт `Rejected { UnresolvedConflict }` без
+- [X] T074 [P] [US3] Тест: неразрешённый конфликт даёт `Rejected { UnresolvedConflict }` без
       единой записи в файл; при отсутствии открытой заметки смена режима возвращает `Applied`
       без шага сохранения (FR-031, FR-032) в `packages/core/tests/settings_native.rs` и
       `packages/core/tests/settings_wasm.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T075 [US3] Реализовать машину состояний `EditorMode` с запретом автоотката
+- [X] T075 [US3] Реализовать машину состояний `EditorMode` с запретом автоотката
       `FullBackend → SimplifiedEmulation` по отказу процесса в
       `packages/core/src/settings/editor_mode.rs` (FR-035, `data-model.md` → запрещённые
       переходы)
-- [ ] T076 [US3] Реализовать переключение между полноценным режимом и упрощённой эмуляцией по
+- [X] T076 [US3] Реализовать переключение между полноценным режимом и упрощённой эмуляцией по
       выбору пользователя и хранение `editor_mode_preference` в
       `packages/core/src/settings/editor_mode.rs` (FR-027)
-- [ ] T077 [US3] Реализовать вычисление `ConfigDiskState` через `FileStamp` из
+- [X] T077 [US3] Реализовать вычисление `ConfigDiskState` через `FileStamp` из
       `packages/core/src/stamp.rs` и хранение `applied_stamp` в
       `packages/core/src/settings/editor_mode.rs` (FR-026, research.md §8; зависит от T007)
-- [ ] T078 [US3] Реализовать применение конфига только по явному действию (`apply_config`),
+- [X] T078 [US3] Реализовать применение конфига только по явному действию (`apply_config`),
       без автоматического перечитывания, в `packages/core/src/settings/editor_mode.rs`
       (FR-026)
-- [ ] T079 [US3] Реализовать обработку отсутствующего или нечитаемого конфига по указанному
+- [X] T079 [US3] Реализовать обработку отсутствующего или нечитаемого конфига по указанному
       пути в `packages/core/src/settings/editor_mode.rs`: сообщить причину и **не** показывать
       конфиг применённым (FR-033)
-- [ ] T080 [US3] Реализовать предусловия `ApplyPlan` для смены режима — `RequiresNoteSave`,
+- [X] T080 [US3] Реализовать предусловия `ApplyPlan` для смены режима — `RequiresNoteSave`,
       `Rejected { SaveFailed }`, `Rejected { UnresolvedConflict }`, немедленный `Applied` без
       открытой заметки — в `packages/core/src/settings/apply.rs` (FR-029…FR-032)
-- [ ] T081 [US3] Реализовать события `EditorModeChanged` и `EditorConfigDiskStateChanged` в
+- [X] T081 [US3] Реализовать события `EditorModeChanged` и `EditorConfigDiskStateChanged` в
       `packages/core/src/settings/events.rs` (contracts/frontend-settings.md)
-- [ ] T082 [US3] Реализовать `ui/src/settings/KeybindingsSection.tsx`: три состояния как
+- [X] T082 [US3] Реализовать `ui/src/settings/KeybindingsSection.tsx`: три состояния как
       размеченный union с исчерпывающим `switch`, переключение режима, путь к применённому
       конфигу, признак «изменён, не применён» с действием применения (FR-025, FR-026, FR-027,
       принцип IV)
-- [ ] T083 [US3] Реализовать выбор и смену файла конфига жестом пользователя в
+- [X] T083 [US3] Реализовать выбор и смену файла конфига жестом пользователя в
       `ui/src/settings/KeybindingsSection.tsx` с передачей пути в ядро (FR-028) — вызывается в
       UI, не в ядре, по образцу `showDirectoryPicker` в `ui/src/vault-tree/useVault.ts`
-- [ ] T084 [US3] Реализовать двухшаговый разбор `ApplyPlan` в `ui/src/settings/useSettings.ts`
+- [X] T084 [US3] Реализовать двухшаговый разбор `ApplyPlan` в `ui/src/settings/useSettings.ts`
       и заметное сообщение о переходе в `PlainInput` с причиной и действием возврата в
       `ui/src/settings/KeybindingsSection.tsx`: `RequiresNoteSave` → `VaultBackend::write` →
       сообщение о сохранении → повтор `apply`; отказ → показать причину, режим не менять
@@ -411,36 +411,36 @@ description: "Task list for Application Settings implementation"
 
 ### Tests for User Story 4
 
-- [ ] T085 [P] [US4] Тест: сброс к умолчаниям применяется целиком; при неразрешённом
+- [X] T085 [P] [US4] Тест: сброс к умолчаниям применяется целиком; при неразрешённом
       конфликте по открытой заметке **ни одна** настройка не меняется (FR-037, кларификация
       2026-08-09) в `packages/core/tests/settings_native.rs` и
       `packages/core/tests/settings_wasm.rs`
-- [ ] T086 [P] [US4] Тест: сброс не удаляет список известных vault и не изменяет ни одного
+- [X] T086 [P] [US4] Тест: сброс не удаляет список известных vault и не изменяет ни одного
       файла внутри vault (FR-038, SC-011) в `packages/core/tests/settings_native.rs`
-- [ ] T087 [P] [US4] Тест-сканер: на vault с заметками-маркерами прогнать сценарии и
+- [X] T087 [P] [US4] Тест-сканер: на vault с заметками-маркерами прогнать сценарии и
       просканировать журналы на присутствие маркерного текста — совпадений быть не должно
       (FR-041, research.md §12) в `packages/core/tests/settings_native.rs`
-- [ ] T088 [P] [US4] Тест: в журналах отсутствуют абсолютные пути, используются только пути
+- [X] T088 [P] [US4] Тест: в журналах отсутствуют абсолютные пути, используются только пути
       относительно корня vault (research.md §12) в `packages/core/tests/settings_native.rs`
-- [ ] T089 [P] [US4] Тест: ротация журналов удерживает суммарный объём ≤2 МиБ (FR-043) в
+- [X] T089 [P] [US4] Тест: ротация журналов удерживает суммарный объём ≤2 МиБ (FR-043) в
       `packages/core/tests/settings_native.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T090 [US4] Реализовать сброс к умолчаниям как полный `SettingsChange`, проходящий те же
+- [X] T090 [US4] Реализовать сброс к умолчаниям как полный `SettingsChange`, проходящий те же
       предусловия, что смена режима, в `packages/core/src/settings/apply.rs` (FR-037;
       зависит от T080)
-- [ ] T091 [US4] Гарантировать, что сброс не затрагивает `known_vaults` и не обращается к
+- [X] T091 [US4] Гарантировать, что сброс не затрагивает `known_vaults` и не обращается к
       содержимому vault, в `packages/core/src/settings/apply.rs` (FR-038)
-- [ ] T092 [P] [US4] Реализовать сбор `Diagnostics` (версия приложения, текущий `EditorMode` с
+- [X] T092 [P] [US4] Реализовать сбор `Diagnostics` (версия приложения, текущий `EditorMode` с
       причиной, сведения об окружении, `StoreCapabilities` + `StorageState`) в
       `packages/core/src/settings/diagnostics.rs` (FR-039)
-- [ ] T093 [P] [US4] Реализовать журналирование с ротацией двух файлов по 1 МиБ и записью
+- [X] T093 [P] [US4] Реализовать журналирование с ротацией двух файлов по 1 МиБ и записью
       только перечислимых событий и путей относительно корня vault в
       `packages/core/src/settings/logging.rs` (FR-040, FR-041, FR-043, research.md §12)
-- [ ] T094 [US4] Обеспечить отсутствие автоматической отправки диагностики и журналов куда бы
+- [X] T094 [US4] Обеспечить отсутствие автоматической отправки диагностики и журналов куда бы
       то ни было в `packages/core/src/settings/diagnostics.rs` (FR-042, принцип IX)
-- [ ] T095 [US4] Реализовать `ui/src/settings/AdvancedSection.tsx`: сброс к умолчаниям с явным
+- [X] T095 [US4] Реализовать `ui/src/settings/AdvancedSection.tsx`: сброс к умолчаниям с явным
       подтверждением, показ диагностики и доступ к журналам (FR-037, FR-039, FR-040)
 
 **Checkpoint**: все четыре user story независимо работоспособны
@@ -653,7 +653,7 @@ US3 намеренно стоит третьей, а не первой, несм
       состояние моста, сведения об окружении. Сейчас файл (57 строк) показывает только
       расположение хранилища, а его собственный doc-комментарий признаёт пропуск —
       «Диагностика, журналы и подтверждение сброса добавляются задачами US4» per FR-039 (missing)
-- [ ] T112 [P] Вывести журналы в раздел «Дополнительно» per FR-040, FR-041 (missing)
+- [X] T112 [P] Вывести журналы в раздел «Дополнительно» per FR-040, FR-041 (missing)
       - **Заблокировано, обнаружено при реализации 2026-08-09.** Формулировка выше
         неверна: `settings/logging.rs` ничего не пишет и не ротирует. Модуль
         платформенно-нейтрален (единственный `cfg` в нём — `#[cfg(test)]`), задаёт типы
@@ -673,3 +673,37 @@ US3 намеренно стоит третьей, а не первой, несм
       эти два каталога разошлись (`pkg` от 11:45, копия от 19:55, разный размер `.wasm`).
       Добавить скрипт `build:wasm` в корневой `package.json`, выполняющий сборку и
       копирование одной командой per plan: Project Structure (missing)
+
+---
+
+## Доделка 2026-10-09
+
+**Отметки фаз 5–6.** T065–T092, T094, T095 отмечены по свидетельствам из Phase 8: названные
+там тесты на месте и зелёные в прогоне от 2026-10-09 (`cargo test -p typsidian-core` и
+`wasm-pack test` целиком). T068 покрыта `null_bridge_never_reports_full_backend`.
+
+**T093, T112 — журнал приложения.** Блокировка из Phase 8 снята: приёмника журналов не
+было, теперь он есть.
+
+- `settings/logging.rs`: `Journal` — какие события попадают в журнал и что из него ещё не
+  записано. События хранилища (`record_event`), применённые изменения по одному на поле
+  (`record_change`, без значений — только имена полей), добавление и забывание vault.
+  Внешняя правка значений и смена состояния файла конфига редактора в журнал не идут: они
+  приходят слишком часто.
+- `NativeStore` пишет `typsidian.log` и `typsidian.previous.log` рядом с `settings.json`,
+  `WebStore` — те же два файла в OPFS. Отказ записи журнала ничего не отменяет.
+- `SettingsStore::journal_text`; привязки `journalText` (wasm) и `device_journal` (Tauri).
+  Отдельным вызовом, а не полем снимка: журнал — до двух мегабайт, снимок запрашивается
+  постоянно.
+- Раздел «Дополнительно»: «Показать журнал», обновить, скопировать, скрыть. Журнал покидает
+  приложение только копированием (FR-042).
+
+Тест `the_journal_records_events_without_values_and_survives_a_restart` на обоих таргетах;
+сценарий `scripts/dev/scenarios/settings-journal.mjs` в headless-браузере. На рабочем столе
+не запускалось.
+
+**Оговорка.** Время в записи — миллисекунды эпохи, как задаёт прежний `LogEntry::render`;
+читаемой даты в журнале нет.
+
+Открыто 9 задач — все ручные: прогоны quickstart (T096, T097) и проверки бюджетов по ним
+(T098–T104).

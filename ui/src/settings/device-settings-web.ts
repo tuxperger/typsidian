@@ -67,6 +67,10 @@ export function webDeviceSettings(): DeviceSettingsClient {
       const store = await deviceStore();
       await queue.run(async () => store.reveal());
     },
+    async journal() {
+      const store = await deviceStore();
+      return queue.run(async () => store.journalText());
+    },
     async addFolder() {
       const picker = (
         window as unknown as {

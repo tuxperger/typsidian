@@ -102,6 +102,9 @@ export const sync = {
   "sync.history.lost":
     "This vault had a history, and now it is gone: the history folder was deleted or the vault was moved without it.",
   "sync.history.createNew": "Start a new history…",
+  "sync.history.restoreFromRemote": "Load the history from the remote repository",
+  "sync.history.restoreFromRemoteHint":
+    "The remote repository address is stored in the vault settings, so the history is most likely intact there. Files that differ from it become conflicts; nothing is overwritten silently.",
   "sync.history.foreign": (p: { root: string }) =>
     `The vault lies inside the repository ${p.root}, created outside the app. The app does not take snapshots in it.`,
   "sync.history.mirror": (p: { keeper: string }) =>

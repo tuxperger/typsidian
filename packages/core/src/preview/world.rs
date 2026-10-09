@@ -82,6 +82,7 @@ impl World for PreviewWorld {
         let Some(bytes) = self.snapshot.get(id) else {
             return self.miss(id);
         };
+        self.snapshot.record_access(id);
         let text = std::str::from_utf8(bytes)
             .map_err(|_| FileError::InvalidUtf8)?
             .to_owned();
@@ -90,7 +91,10 @@ impl World for PreviewWorld {
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         match self.snapshot.get(id) {
-            Some(bytes) => Ok(bytes.clone()),
+            Some(bytes) => {
+                self.snapshot.record_access(id);
+                Ok(bytes.clone())
+            }
             None => self.miss(id),
         }
     }

@@ -1692,3 +1692,52 @@ async fn external_change_signals_the_shell_without_polling() {
         "после сигнала в очереди обязано что-то быть"
     );
 }
+
+#[tokio::test]
+async fn vault_settings_apply_at_once_and_an_outside_edit_raises_no_event() {
+    // 006 T056. FR-033: значение, записанное через приложение, действует
+    // сразу — следующее чтение его уже видит. FR-040: правка `vault.json`
+    // мимо приложения никаким событием не сопровождается, потому что служебное
+    // место исключено из наблюдения; подхватить её до следующего открытия
+    // vault приложению нечем, и это закреплённое поведение, а не дефект.
+    use typsidian_core::vault::vault_settings::{
+        read_vault_settings, write_vault_settings, VaultOverrides,
+    };
+
+    let dir = TempDir::new().unwrap();
+    write_note(dir.path(), "заметка.typ", "текст");
+    let mut backend = NativeBackend::open(dir.path()).await.unwrap();
+
+    let written = VaultOverrides {
+        editor_font_size: Some(18),
+        ..VaultOverrides::default()
+    };
+    write_vault_settings(&mut backend, &written).await.unwrap();
+    assert_eq!(read_vault_settings(&backend).await.unwrap(), written);
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    backend.poll_events();
+
+    let settings_file = dir.path().join(".typsidian/vault.json");
+    assert!(settings_file.is_file(), "настройки лежат в служебном месте");
+    // Правка «руками»: то же содержимое с другим значением.
+    let edited = fs::read_to_string(&settings_file)
+        .unwrap()
+        .replace("18", "22");
+    fs::write(&settings_file, edited).unwrap();
+
+    let events = drain_events_for(&mut backend, Duration::from_secs(2)).await;
+    assert!(
+        events.is_empty(),
+        "правка служебного места не должна порождать событий: {events:?}"
+    );
+    // Сам файл при этом читается как есть — при следующем открытии vault
+    // приложение увидит правку.
+    assert_eq!(
+        read_vault_settings(&backend)
+            .await
+            .unwrap()
+            .editor_font_size,
+        Some(22)
+    );
+}

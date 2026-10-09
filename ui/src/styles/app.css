@@ -5606,3 +5606,19 @@ button.ts-diagnostics__place:focus-visible {
   color: var(--text-primary, var(--steel-100));
   text-decoration-style: solid;
 }
+
+/* Журнал приложения в разделе «Дополнительно» (004 FR-040): моноширинный
+ * текст в рамке с собственной прокруткой — он бывает длиннее самой панели. */
+.ts-journal {
+  margin: 0;
+  padding: var(--space-2);
+  max-height: 320px;
+  overflow: auto;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-200);
+  white-space: pre;
+}
