@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
   Change,
   Conflict,
@@ -35,6 +35,34 @@ import {
 //
 // Значения устройства (автор, посредник) лежат в настройках устройства (004),
 // поэтому читаются и пишутся теми же командами, что и панель настроек.
+
+/**
+ * Приводит ответ Tauri к форме, в которой те же типы приходят из wasm.
+ *
+ * `Option::None` ядра через `serde_json` становится `null`, а через wasm —
+ * отсутствующим полем (`T | undefined` в типах `tsify`). Общий UI сверяется с
+ * `undefined`, и `null` в поле вроде `overview.remote` ронял панель при первом
+ * же обращении к его свойствам. Меняются только поля объектов: `null` на
+ * верхнем уровне — законный ответ команды (`sync_syncthing_discover`).
+ */
+function withoutNullFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNullFields);
+  if (typeof value !== "object" || value === null) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (field !== null) result[key] = withoutNullFields(field);
+  }
+  return result;
+}
+
+async function invoke<T = void>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return withoutNullFields(await tauriInvoke(command, args)) as T;
+  } catch (cause) {
+    // Отказ — тот же `SyncError` ядра, и поля у него те же.
+    throw withoutNullFields(cause);
+  }
+}
 
 /**
  * Открывает сессию синхронизации для только что открытого vault и отдаёт её
