@@ -174,3 +174,53 @@ async fn a_remote_address_changed_elsewhere_gets_neither_snapshots_nor_the_token
 async fn pulled_paths_that_alias_the_history_folder_are_refused() {
     cases::pulled_paths_that_alias_the_history_folder_are_refused().await;
 }
+
+#[wasm_bindgen_test]
+async fn ignore_editor_opens_an_existing_file_and_saves_the_edit() {
+    cases::ignore_editor_opens_an_existing_file_and_saves_the_edit().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_offers_the_block_for_an_absent_file_without_creating_it() {
+    cases::ignore_editor_offers_the_block_for_an_absent_file_without_creating_it().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_keeps_crlf_line_endings() {
+    cases::ignore_editor_keeps_crlf_line_endings().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_does_not_touch_what_it_cannot_edit() {
+    cases::ignore_editor_does_not_touch_what_it_cannot_edit().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_saves_on_a_device_that_is_not_the_keeper() {
+    cases::ignore_editor_saves_on_a_device_that_is_not_the_keeper().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_asks_before_saving_without_required_rules() {
+    cases::ignore_editor_asks_before_saving_without_required_rules().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_complete_rules_lift_the_declined_flag() {
+    cases::ignore_editor_complete_rules_lift_the_declined_flag().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_does_not_overwrite_an_outside_change() {
+    cases::ignore_editor_does_not_overwrite_an_outside_change().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_recreates_a_deleted_file_only_on_request() {
+    cases::ignore_editor_recreates_a_deleted_file_only_on_request().await;
+}
+
+#[wasm_bindgen_test]
+async fn ignore_editor_waits_for_an_unfinished_pull() {
+    cases::ignore_editor_waits_for_an_unfinished_pull().await;
+}

@@ -149,6 +149,63 @@ export const sync = {
   "sync.ignore.fix": "Add the rules",
   "sync.ignore.showRules": "Show the rules",
   "sync.ignore.hideRules": "Hide the rules",
+  "sync.ignore.open": "Open the rules",
+  "sync.rules.title": "Exclusion rules",
+  "sync.rules.explain":
+    "The rule files live in the vault root. You can open and edit them here without leaving the app.",
+  "sync.rules.gitignore": "History rules",
+  "sync.rules.gitignoreHint": "what stays out of snapshots",
+  "sync.rules.stignore": "Syncthing rules",
+  "sync.rules.stignoreHint": "what is not delivered to other devices",
+  "sync.rules.edit": "Open",
+  "sync.rules.sharedGit": "This file is shared by all devices and is itself part of snapshots.",
+  "sync.rules.perDeviceSt":
+    "Every device has its own copy: Syncthing does not deliver this file, so the edit applies only here.",
+  "sync.rules.notInEffectGit":
+    "This vault has no history right now — the rules take effect once it does.",
+  "sync.rules.notInEffectSt":
+    "Syncthing was not detected in this folder — the rules take effect once it becomes a Syncthing folder.",
+  "sync.rules.foreignParent":
+    "The vault sits inside another repository: rules from the folders above also apply and are not shown here.",
+  "sync.rules.willCreate": "The file does not exist yet — it will be created on save.",
+  "sync.rules.field": (p: { file: string }) => `Contents of ${p.file}`,
+  "sync.rules.blockLabel": "app rules",
+  "sync.rules.blockHint":
+    "The highlighted lines are maintained by the app. You may change them, but without them service data ends up in snapshots or in delivery.",
+  "sync.rules.cannot.NotText": "The file is not UTF-8 text — it cannot be edited here.",
+  "sync.rules.cannot.TooLarge": "The file exceeds the note size limit — it cannot be edited here.",
+  "sync.rules.cannot.NotAFile":
+    "This name is a symbolic link or something that cannot be read as a file. Editing is unavailable.",
+  "sync.rules.cannot.ReadOnly": "The vault is open without write access — the edit cannot be saved.",
+  "sync.rules.cannot.HistoryBusy":
+    "The history has an unfinished operation. Finish or abort it — then the rules can be saved.",
+  "sync.rules.missing": "App rules are missing:",
+  "sync.rules.riskStIgnore":
+    "Without them the history folder and caches travel through Syncthing to other devices and get corrupted.",
+  "sync.rules.riskGitIgnore":
+    "Without them caches, Syncthing service files and conflict copies end up in snapshots.",
+  "sync.rules.restore": "Restore the app rules",
+  "sync.rules.complete": "The app rules are in place.",
+  "sync.rules.saved": "Saved.",
+  "sync.rules.saving": "Saving…",
+  "sync.rules.updatedOutside": "The file changed on disk — the new version is shown.",
+  "sync.rules.staleOutside":
+    "The file changed on disk while you were editing. On save the app will show both versions.",
+  "sync.rules.confirmTitle": "Save without the app rules?",
+  "sync.rules.confirmSave": "Save without them",
+  "sync.rules.backToEdit": "Back to editing",
+  "sync.rules.divergedTitle": "The file changed on disk",
+  "sync.rules.divergedExplain":
+    "The version on disk is not the one you started from. Nothing was written. Lines marked “<” are yours, “>” are from disk.",
+  "sync.rules.deletedExplain":
+    "The file was deleted from disk while you were editing. Nothing was written.",
+  "sync.rules.takeDisk": "Take the version from disk",
+  "sync.rules.dropMine": "Discard my edit",
+  "sync.rules.overwrite": "Write mine",
+  "sync.rules.recreate": "Create the file again",
+  "sync.rules.closeTitle": "The edit is not saved",
+  "sync.rules.closeExplain": (p: { file: string }) => `${p.file} has unsaved changes.`,
+  "sync.rules.discard": "Discard",
 
   "sync.wizard.title": "Enable history",
   "sync.wizard.rulesLabel": "Rules to be added",

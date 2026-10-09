@@ -117,6 +117,12 @@ impl MemoryVault {
         self
     }
 
+    /// Vault, папка которого стала недоступна (отмонтирована, отозван доступ).
+    pub fn unavailable(mut self) -> Self {
+        self.access_state = AccessState::Unavailable;
+        self
+    }
+
     /// Vault, у которого служебного места при открытии не было.
     pub fn without_service_dir(mut self) -> Self {
         self.service_dir_existed = false;
@@ -171,6 +177,16 @@ impl VaultBackend for MemoryVault {
         notes
     }
 
+    async fn file_mark(&self, path: &Path) -> Option<(u64, i64)> {
+        // Времени изменения у файлов в памяти нет — его роль играет хэш
+        // содержимого: отметка обязана меняться вместе с файлом.
+        self.files.borrow().get(path).map(|bytes| {
+            let hash = bytes.iter().fold(0i64, |hash, byte| {
+                hash.wrapping_mul(31).wrapping_add(*byte as i64)
+            });
+            (bytes.len() as u64, hash)
+        })
+    }
     /// Шрифты среди положенных файлов. Время изменения — хэш
     /// содержимого: у памяти часов нет, а подмена файла тем же размером
     /// обязана выглядеть изменением, иначе кэш шрифтов её не заметит.
@@ -393,6 +409,7 @@ pub mod language_cases;
 pub mod message_cases;
 pub mod package_cases;
 pub mod placement_cases;
+pub mod preview_cases;
 pub mod search_cases;
 pub mod sync_cases;
 pub mod template_cases;

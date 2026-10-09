@@ -1468,7 +1468,7 @@ input.ts-sources__url:focus {
   width: var(--ts-page);
   /* Лист крупнее колонки не сжимается — панель прокручивается вбок. */
   flex: 0 0 auto;
-  background: #fbfaf7;
+  background: var(--paper);
   box-shadow: var(--shadow-xl);
   border-radius: 1px;
   overflow: hidden;
@@ -2911,7 +2911,7 @@ input.ts-sources__url:focus {
   gap: 4px;
   padding: 9px 10px;
   border-radius: 1px;
-  background: #fbfaf7;
+  background: var(--paper);
   box-shadow: var(--shadow-xl);
   color: #1c1e21;
   font-family: var(--font-serif);
@@ -3251,7 +3251,7 @@ input.ts-sources__url:focus {
   border-radius: var(--radius-sm);
   /* Та же «бумага», что в предпросмотре документа: символ показывается таким,
    * каким он выйдет на листе, а не таким, как в тёмной панели. */
-  background: #fbfaf7;
+  background: var(--paper);
   color: #1c1e21;
   font-family: var(--font-serif, Georgia, serif);
   font-size: 22px;
@@ -5456,4 +5456,153 @@ input.ts-sources__url:focus {
   .ts-sync-history__body {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Редактор правил исключения (фича 012). Диалог шире обычного: правила —
+ * строки с путями, и перенос посреди пути читается хуже прокрутки. */
+.ts-sync-rules-editor {
+  width: min(720px, 94vw);
+  max-height: 90vh;
+}
+
+.ts-sync-rules-editor .ts-dialog__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.ts-sync-rules-editor__file {
+  font-family: var(--font-mono);
+  color: var(--steel-400);
+}
+
+.ts-sync-rules-editor .ts-dialog__body,
+.ts-sync-rules-editor__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ts-sync-rules-editor__main[hidden] {
+  display: none;
+}
+
+.ts-sync-rules-editor .ts-dialog__body p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.ts-sync-rules-editor__field {
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+}
+
+.ts-sync-rules-editor__field:focus-within {
+  border-color: var(--border-strong);
+}
+
+.ts-sync-rules-editor__field[data-readonly] {
+  opacity: 0.7;
+}
+
+.ts-sync-rules-editor__field .cm-editor {
+  height: min(44vh, 420px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--steel-200);
+}
+
+.ts-sync-rules-editor__field .cm-editor.cm-focused {
+  outline: none;
+}
+
+.ts-sync-rules-editor__field .cm-scroller {
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.ts-sync-rules-editor__field .cm-content {
+  padding: var(--space-2) 0;
+  caret-color: var(--steel-100);
+}
+
+.ts-sync-rules-editor__field .cm-line {
+  padding: 0 var(--space-3);
+}
+
+/* Блок правил приложения: полоса слева и приглушённый фон; подпись — на
+ * первой строке, справа, чтобы не сдвигать сам текст. */
+.ts-sync-rules-editor__field .cm-line.ts-sync-rules-editor__block {
+  background: var(--steel-900);
+  box-shadow: inset 2px 0 0 var(--hivis-500);
+}
+
+.ts-sync-rules-editor__field .cm-line.ts-sync-rules-editor__block[data-label]::after {
+  content: attr(data-label);
+  float: right;
+  margin-left: var(--space-3);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--steel-400);
+  pointer-events: none;
+}
+
+.ts-sync-rules-editor .ts-dialog__foot {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ts-sync-rules-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ts-sync-rules-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.ts-sync-rules-list li > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .ts-sync-rules-editor {
+    width: 100vw;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .ts-sync-rules-editor__field .cm-editor {
+    height: 38vh;
+  }
+}
+
+/* Место замечания, к которому можно перейти (005 FR-015): выглядит как то же
+ * место строкой, но откликается на наведение и фокус. */
+button.ts-diagnostics__place {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+button.ts-diagnostics__place:hover,
+button.ts-diagnostics__place:focus-visible {
+  color: var(--text-primary, var(--steel-100));
+  text-decoration-style: solid;
 }

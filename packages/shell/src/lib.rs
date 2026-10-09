@@ -1204,6 +1204,31 @@ async fn template_preview(
 /// Очереди вызовов, обязательной на web, здесь нет и не требуется: ограничение
 /// «recursive use of an object» — свойство границы wasm-bindgen, а не ядра.
 /// Нативный бэкенд защищён обычным `Mutex` состояния vault.
+/// Синхронная фаза сборки — в пуле блокирующих потоков, с пределом времени
+/// (005 FR-007, FR-026, T021).
+///
+/// Команда и так идёт не в потоке окна, но без этого долгая сборка занимала бы
+/// рабочий поток асинхронной среды, на котором живут остальные команды.
+/// Поток нельзя прервать снаружи: по истечении предела результат
+/// отбрасывается, а поток дорабатывает сам (research.md §3).
+struct ThreadExecutor;
+
+impl preview::CompileExecutor for ThreadExecutor {
+    async fn run(
+        &self,
+        job: preview::CompileJob,
+    ) -> Result<preview::CompileOutput, preview::ExecutorError> {
+        let limit = std::time::Duration::from_secs(u64::from(preview::BUILD_TIME_LIMIT_SECS));
+        let work = tokio::task::spawn_blocking(move || job.run_inline());
+        match tokio::time::timeout(limit, work).await {
+            Ok(Ok(output)) => Ok(output),
+            // Паника компилятора — не превышение предела: пусть будет видна.
+            Ok(Err(failure)) => std::panic::resume_unwind(failure.into_panic()),
+            Err(_) => Err(preview::ExecutorError::TimedOut),
+        }
+    }
+}
+
 #[tauri::command]
 async fn preview_compile(
     state: State<'_, Vault>,
@@ -1211,8 +1236,10 @@ async fn preview_compile(
     note_path: String,
     text: String,
     revision: u64,
+    anchor: Option<preview::ScrollAnchor>,
 ) -> Answer<CompiledDocument, Failure<SnapshotError>> {
-    with_vault!(state, |backend| preview::compile_note_resolved(
+    with_vault!(state, |backend| preview::compile_note_resolved_on(
+        &ThreadExecutor,
         backend,
         &engine.packages,
         &note_path,
@@ -1221,7 +1248,21 @@ async fn preview_compile(
         engine.fonts.clone(),
     )
     .await
+    .map(|document| document.with_anchor(anchor.as_ref()))
     .map_err(Failure::Core))
+}
+
+/// Отметка состояния связанных файлов (005 FR-020): изменилась — предпросмотр
+/// пора пересобрать. Содержимое файлов не читается.
+#[tauri::command]
+async fn preview_dependency_mark(
+    state: State<'_, Vault>,
+    paths: Vec<String>,
+) -> Answer<String, Failure<SnapshotError>> {
+    with_vault!(state, |backend| Ok(preview::dependency_mark(
+        backend, &paths
+    )
+    .await))
 }
 
 /// То же, но недостающие внешние шаблоны доустанавливаются (фича 007, FR-001).
@@ -1241,8 +1282,10 @@ async fn preview_compile_with_templates(
     text: String,
     revision: u64,
     overrides: VaultOverrides,
+    anchor: Option<preview::ScrollAnchor>,
 ) -> Answer<CompiledDocument, Failure<SnapshotError>> {
-    with_vault!(state, |backend| preview::compile_note_with_templates(
+    with_vault!(state, |backend| preview::compile_note_with_templates_on(
+        &ThreadExecutor,
         backend,
         &engine.packages,
         &note_path,
@@ -1252,6 +1295,7 @@ async fn preview_compile_with_templates(
         &overrides.template_policy(),
     )
     .await
+    .map(|document| document.with_anchor(anchor.as_ref()))
     .map_err(Failure::Core))
 }
 
@@ -1578,6 +1622,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             template_event,
             preview_compile,
             preview_compile_with_templates,
+            preview_dependency_mark,
             preview_install_template,
             preview_installed_templates,
             export_pdf,
@@ -1597,6 +1642,10 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             sync::sync_ignore_reports,
             sync::sync_apply_ignore,
             sync::sync_decline_stignore,
+            sync::sync_ignore_open,
+            sync::sync_ignore_check,
+            sync::sync_ignore_restore,
+            sync::sync_ignore_save,
             sync::sync_enable_history,
             sync::sync_changes,
             sync::sync_snapshot,

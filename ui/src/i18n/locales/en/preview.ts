@@ -21,6 +21,7 @@ export const preview = {
   "preview.openNote": "Open a note to see its typeset view.",
   "preview.buildingLong": "Building…",
   "preview.warnings": "Warnings",
+  "preview.reveal": (p: { place: string }) => `Go to ${p.place}`,
   "preview.installing": "Downloading…",
   "preview.install": "Download template",
   "preview.page": (p: { number: number }) => `Page ${p.number}`,

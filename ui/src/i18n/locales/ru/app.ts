@@ -11,6 +11,10 @@ export const app: Translation<typeof en> = {
     `содержимое шаблона ${p.spec} разошлось с записанным отпечатком (${p.actual} вместо ${p.recorded.slice(0, 12)}); приложение его не переустанавливает`,
   "app.vaultFontUnusable": (p) => `шрифт ${p.path}: ${p.reason}`,
   "app.noteOutsideVault": (p) => `${p.path}: заметка вне папки vault`,
+  "app.buildTimedOut": (p) =>
+    `Сборка остановлена: она шла дольше ${p.seconds} с. Проверьте, нет ли в документе бесконечного цикла.`,
+  "app.vaultUnavailable":
+    "Папка vault недоступна: связанные файлы и шрифты не прочитаны, вид может быть неполным. Текст в редакторе сохранён.",
   "app.resolve.notFound": "файл не найден",
   "app.resolve.unreadable": "файл не читается",
   "app.resolve.accessDenied": "нет прав на чтение",

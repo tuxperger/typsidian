@@ -15,16 +15,20 @@ use std::rc::Rc;
 use typsidian_core::sync::autosnapshot::AutoDecision;
 use typsidian_core::sync::engine::fake::{FakeGitEngine, FakeNetwork, FakeRepo};
 use typsidian_core::sync::engine::CancelToken;
-use typsidian_core::sync::ignore::IgnoreFile;
+use typsidian_core::sync::ignore::{
+    self, Editability, IgnoreDocument, IgnoreFile, IgnoreRefusal, IgnoreSaveOutcome,
+    IgnoreSaveRequest, LineEnding,
+};
 use typsidian_core::sync::keeper::KeeperState;
 use typsidian_core::sync::secrets::MemorySecretStore;
 use typsidian_core::sync::session::{self, ConflictSource, Credentials, Resolution};
 use typsidian_core::sync::settings::{self as sync_settings, Keeper, VaultSyncSettings};
 use typsidian_core::sync::{
     Author, Change, ChangeKind, Content, DeviceIdentity, DeviceVaultSync, HistoryState, Revision,
-    ShellCapabilities, SyncContext, SyncError, SyncSession,
+    ShellCapabilities, SyncContext, SyncError, SyncEvent, SyncSession,
 };
 use typsidian_core::vault::backend::VaultBackend;
+use typsidian_core::vault::conflict::DiffLine;
 
 use super::MemoryVault;
 
@@ -1193,4 +1197,314 @@ pub async fn pulled_paths_that_alias_the_history_folder_are_refused() {
     // Получение откатилось целиком: ни ловушки, ни соседних файлов.
     assert_eq!(b.text(".git./config"), None);
     assert_eq!(b.text("b.typ"), None);
+}
+
+// ── Редактор правил исключения (фича 012) ──────────────────────────────────
+
+fn save_request(document: &IgnoreDocument, text: &str) -> IgnoreSaveRequest {
+    IgnoreSaveRequest {
+        file: document.file,
+        text: text.to_string(),
+        line_ending: document.line_ending,
+        base: document.base.clone(),
+        confirm_incomplete: false,
+        overwrite: false,
+    }
+}
+
+/// Файл правил со всеми обязательными правилами и строкой пользователя.
+fn full_rules(file: IgnoreFile, user: &str) -> String {
+    ignore::restore_block(file, user)
+}
+
+impl Fixture {
+    async fn save_rules(&mut self, request: IgnoreSaveRequest) -> IgnoreSaveOutcome {
+        let ctx = self.ctx();
+        self.session
+            .ignore_save(&mut self.vault, &ctx, request)
+            .await
+            .unwrap()
+    }
+
+    /// Запись в обход сессии — «другая программа» или Syncthing.
+    fn write_outside(&self, path: &str, bytes: &[u8]) {
+        self.vault
+            .files_handle()
+            .borrow_mut()
+            .insert(PathBuf::from(path), bytes.to_vec());
+    }
+}
+
+pub async fn ignore_editor_opens_an_existing_file_and_saves_the_edit() {
+    let on_disk = full_rules(IgnoreFile::GitIgnore, "*.pdf\n");
+    let mut f = fixture(&[("a.typ", "= A\n"), (".gitignore", &on_disk)], None);
+    f.enable().await;
+    f.session.poll_events();
+
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    assert!(document.exists);
+    assert_eq!(document.editable, Editability::Editable);
+    assert!(document.in_effect);
+    assert_eq!(document.text, on_disk);
+    assert!(document.check.missing.is_empty());
+    assert!(document.check.block.is_some());
+
+    let edited = format!("черновики/\n{on_disk}");
+    let outcome = f.save_rules(save_request(&document, &edited)).await;
+    let IgnoreSaveOutcome::Saved { document: saved } = outcome else {
+        panic!("ожидалось сохранение: {outcome:?}");
+    };
+    assert_eq!(f.text(".gitignore").unwrap(), edited);
+    assert_eq!(saved.text, edited);
+    assert_ne!(saved.base, document.base);
+    // Сводка перечитывается, а сам файл правил — обычное изменение vault.
+    assert!(f
+        .session
+        .poll_events()
+        .contains(&SyncEvent::OverviewChanged));
+    let changes = f.session.changes(&f.vault).await.unwrap();
+    assert!(changes.iter().any(|change| change.path == ".gitignore"));
+}
+
+pub async fn ignore_editor_offers_the_block_for_an_absent_file_without_creating_it() {
+    let mut f = fixture(&[("a.typ", "= A\n")], None);
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::StIgnore).await;
+    assert!(!document.exists);
+    assert_eq!(document.base, None);
+    assert_eq!(document.editable, Editability::Editable);
+    // Ни истории, ни Syncthing: правила пока не действуют, но правятся.
+    assert!(!document.in_effect);
+    assert!(document.text.starts_with("// typsidian:begin"));
+    assert!(document.check.missing.is_empty());
+    assert_eq!(f.text(".stignore"), None);
+
+    let text = document.text.clone();
+    let outcome = f.save_rules(save_request(&document, &text)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".stignore").unwrap(), text);
+
+    let git = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    assert!(!git.in_effect);
+}
+
+pub async fn ignore_editor_keeps_crlf_line_endings() {
+    let unix = full_rules(IgnoreFile::GitIgnore, "*.pdf\n");
+    let dos = unix.replace('\n', "\r\n");
+    let mut f = fixture(&[(".gitignore", &dos)], None);
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    assert_eq!(document.line_ending, LineEnding::CrLf);
+    assert_eq!(document.text, unix);
+
+    let edited = format!("*.log\n{unix}");
+    let outcome = f.save_rules(save_request(&document, &edited)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".gitignore").unwrap(), edited.replace('\n', "\r\n"));
+}
+
+pub async fn ignore_editor_does_not_touch_what_it_cannot_edit() {
+    let mut f = fixture(&[("a.typ", "= A\n")], None);
+    f.write_outside(".gitignore", &[0xff, 0xfe, 0x00]);
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    assert_eq!(document.editable, Editability::NotText);
+    assert_eq!(document.text, "");
+    let outcome = f.save_rules(save_request(&document, "*.pdf\n")).await;
+    assert_eq!(
+        outcome,
+        IgnoreSaveOutcome::Refused {
+            reason: IgnoreRefusal::NotText
+        }
+    );
+    assert_eq!(f.vault.bytes_of(".gitignore").unwrap(), [0xff, 0xfe, 0x00]);
+
+    // Vault без права записи: файл виден, сохранение названо причиной.
+    let rules = full_rules(IgnoreFile::GitIgnore, "");
+    let mut g = fixture(&[(".gitignore", &rules)], None);
+    let vault = std::mem::replace(&mut g.vault, MemoryVault::new());
+    g.vault = vault.read_only();
+    let document = g.session.ignore_open(&g.vault, IgnoreFile::GitIgnore).await;
+    assert_eq!(document.editable, Editability::ReadOnly);
+    assert_eq!(document.text, rules);
+    let outcome = g.save_rules(save_request(&document, "*.pdf\n")).await;
+    assert_eq!(
+        outcome,
+        IgnoreSaveOutcome::Refused {
+            reason: IgnoreRefusal::ReadOnly
+        }
+    );
+    assert_eq!(g.text(".gitignore").unwrap(), rules);
+}
+
+pub async fn ignore_editor_saves_on_a_device_that_is_not_the_keeper() {
+    let rules = full_rules(IgnoreFile::GitIgnore, "");
+    let mut f = fixture(&[("a.typ", "= A\n"), (".gitignore", &rules)], None);
+    f.enable().await;
+    set_keeper(&mut f, OTHER).await;
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    let edited = format!("*.log\n{rules}");
+    let outcome = f.save_rules(save_request(&document, &edited)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".gitignore").unwrap(), edited);
+}
+
+pub async fn ignore_editor_asks_before_saving_without_required_rules() {
+    let rules = full_rules(IgnoreFile::StIgnore, "*.tmp\n");
+    let mut f = fixture(
+        &[
+            ("a.typ", "= A\n"),
+            (".stfolder/.keep", ""),
+            (".stignore", &rules),
+        ],
+        None,
+    );
+    f.enable().await;
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::StIgnore).await;
+    assert!(document.in_effect);
+
+    let broken = rules.replace("/.git\n", "");
+    let outcome = f.save_rules(save_request(&document, &broken)).await;
+    assert_eq!(
+        outcome,
+        IgnoreSaveOutcome::NeedsConfirmation {
+            missing: vec!["/.git".to_string()]
+        }
+    );
+    assert_eq!(f.text(".stignore").unwrap(), rules);
+
+    // Дословная отмена выше блока — то же нарушение (в `.stignore` выигрывает
+    // первая строка).
+    let cancelled = format!("!/.git\n{rules}");
+    let outcome = f.save_rules(save_request(&document, &cancelled)).await;
+    assert!(matches!(
+        outcome,
+        IgnoreSaveOutcome::NeedsConfirmation { .. }
+    ));
+
+    let outcome = f
+        .save_rules(IgnoreSaveRequest {
+            confirm_incomplete: true,
+            ..save_request(&document, &broken)
+        })
+        .await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".stignore").unwrap(), broken);
+    // Предупреждение панели никуда не делось (011 §FR-026).
+    let ctx = f.ctx();
+    let overview = f.session.overview(&f.vault, &ctx).await;
+    assert!(overview
+        .ignore_warnings
+        .iter()
+        .any(|report| report.file == IgnoreFile::StIgnore));
+}
+
+pub async fn ignore_editor_complete_rules_lift_the_declined_flag() {
+    let mut f = fixture(&[("a.typ", "= A\n"), (".stfolder/.keep", "")], None);
+    let ctx = f.ctx();
+    f.session.decline_stignore(&ctx);
+    f.absorb_device_update();
+    assert!(f.device_sync.stignore_declined);
+
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::StIgnore).await;
+    let text = document.text.clone();
+    let outcome = f.save_rules(save_request(&document, &text)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    f.absorb_device_update();
+    assert!(!f.device_sync.stignore_declined);
+}
+
+pub async fn ignore_editor_does_not_overwrite_an_outside_change() {
+    let rules = full_rules(IgnoreFile::GitIgnore, "*.pdf\n");
+    let mut f = fixture(&[("a.typ", "= A\n"), (".gitignore", &rules)], None);
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    let mine = format!("моё/\n{rules}");
+    let theirs = format!("чужое/\n{rules}");
+    f.write_outside(".gitignore", theirs.as_bytes());
+
+    let outcome = f.save_rules(save_request(&document, &mine)).await;
+    let IgnoreSaveOutcome::Diverged { disk, diff } = outcome else {
+        panic!("ожидалось расхождение: {outcome:?}");
+    };
+    assert_eq!(disk.text, theirs);
+    assert!(diff.contains(&DiffLine::Local {
+        text: "моё/".into()
+    }));
+    assert!(diff.contains(&DiffLine::External {
+        text: "чужое/".into()
+    }));
+    assert_eq!(f.text(".gitignore").unwrap(), theirs);
+
+    // Тот же текст, что уже на диске, расхождением не считается.
+    let outcome = f.save_rules(save_request(&document, &theirs)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+
+    // «Записать свою» — явный выбор пользователя.
+    let outcome = f
+        .save_rules(IgnoreSaveRequest {
+            overwrite: true,
+            ..save_request(&document, &mine)
+        })
+        .await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".gitignore").unwrap(), mine);
+}
+
+pub async fn ignore_editor_recreates_a_deleted_file_only_on_request() {
+    let rules = full_rules(IgnoreFile::GitIgnore, "*.pdf\n");
+    let mut f = fixture(&[(".gitignore", &rules)], None);
+    let document = f.session.ignore_open(&f.vault, IgnoreFile::GitIgnore).await;
+    f.vault
+        .files_handle()
+        .borrow_mut()
+        .remove(Path::new(".gitignore"));
+
+    let edited = format!("*.log\n{rules}");
+    let outcome = f.save_rules(save_request(&document, &edited)).await;
+    let IgnoreSaveOutcome::Diverged { disk, .. } = outcome else {
+        panic!("ожидалось расхождение: {outcome:?}");
+    };
+    assert!(!disk.exists);
+    assert_eq!(f.text(".gitignore"), None);
+
+    let outcome = f
+        .save_rules(IgnoreSaveRequest {
+            overwrite: true,
+            ..save_request(&document, &edited)
+        })
+        .await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
+    assert_eq!(f.text(".gitignore").unwrap(), edited);
+}
+
+pub async fn ignore_editor_waits_for_an_unfinished_pull() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("n.typ", BASE)], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    a.push().await.unwrap();
+    let mut b = clone_of(&remote).await;
+    a.put("n.typ", &BASE.replace("Второй абзац.", "Второй — A."))
+        .await;
+    a.snap("A").await;
+    a.push().await.unwrap();
+    b.put("n.typ", &BASE.replace("Второй абзац.", "Второй — B."))
+        .await;
+    b.snap("B").await;
+    assert_eq!(b.pull().await.unwrap().conflicts, 1);
+
+    let document = b.session.ignore_open(&b.vault, IgnoreFile::GitIgnore).await;
+    let before = b.text(".gitignore");
+    let edited = format!("*.log\n{}", document.text);
+    let outcome = b.save_rules(save_request(&document, &edited)).await;
+    assert_eq!(
+        outcome,
+        IgnoreSaveOutcome::Refused {
+            reason: IgnoreRefusal::HistoryBusy
+        }
+    );
+    assert_eq!(b.text(".gitignore"), before);
+
+    // Правила Syncthing история не держит.
+    let stignore = b.session.ignore_open(&b.vault, IgnoreFile::StIgnore).await;
+    let text = stignore.text.clone();
+    let outcome = b.save_rules(save_request(&stignore, &text)).await;
+    assert!(matches!(outcome, IgnoreSaveOutcome::Saved { .. }));
 }

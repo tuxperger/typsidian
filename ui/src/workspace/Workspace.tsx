@@ -245,7 +245,17 @@ function WorkspaceView({
   // Синхронизация (фича 011) появляется позже этого колбэка — по той же
   // причине берётся из ref.
   const syncRef = useRef<SyncControl | null>(null);
+  // Связанные файлы показанной сборки (005 FR-020): изменение любого из них
+  // пересобирает предпросмотр. Что считать связанным, сказало ядро — здесь
+  // только сверка пути события со списком.
+  const previewDependenciesRef = useRef<ReadonlySet<string>>(new Set());
+  const notePreviewDependencies = useCallback((paths: string[]) => {
+    previewDependenciesRef.current = new Set(paths);
+  }, []);
   const noticeEvent = useCallback((event: VaultEvent) => {
+    if (touchesAny(event, previewDependenciesRef.current)) {
+      setRebuildToken((token) => token + 1);
+    }
     // Любое изменение файлов — повод перечитать сводку синхронизации и начать
     // отсчёт паузы автоснимка заново; что из этого следует, решает ядро.
     syncRef.current?.noticeVaultChange();
@@ -579,6 +589,13 @@ function WorkspaceView({
       setReveal(place);
     },
     [state.notes, openNote, openEntry],
+  );
+
+  // Перейти можно только к файлу, который редактор открывает, — то есть к
+  // заметке из индекса vault.
+  const canRevealPath = useCallback(
+    (path: string) => state.notes.some((entry) => entry.path.toString() === path),
+    [state.notes],
   );
 
   useEffect(() => {
@@ -1378,6 +1395,11 @@ function WorkspaceView({
               // Фича 009: кнопка «PDF» в тулбаре — только у открытой заметки.
               onExport={openNotePath === null ? undefined : exportCurrent}
               exporting={exporter.busy}
+              // Фича 005: переход к месту замечания и пересборка при правке
+              // связанного файла.
+              onReveal={revealDiagnostic}
+              canReveal={canRevealPath}
+              onDependencies={notePreviewDependencies}
             />
           </>
         )}
@@ -1624,4 +1646,25 @@ function countFolders(notes: Note[]): number {
     }
   }
   return folders.size;
+}
+
+/**
+ * Задевает ли событие vault один из путей. Массовое изменение путей не
+ * называет, поэтому при непустом списке считается задевшим: пересобрать
+ * лишний раз дешевле, чем показать устаревший вид.
+ */
+function touchesAny(event: VaultEvent, paths: ReadonlySet<string>): boolean {
+  if (paths.size === 0) return false;
+  switch (event.type) {
+    case "NoteCreated":
+    case "NoteUpdated":
+    case "NoteDeleted":
+      return paths.has(event.path);
+    case "NoteRenamed":
+      return paths.has(event.from_path) || paths.has(event.to_path);
+    case "BulkChangeSettled":
+      return true;
+    default:
+      return false;
+  }
 }

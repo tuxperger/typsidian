@@ -147,6 +147,63 @@ export const sync: Translation<typeof en> = {
   "sync.ignore.fix": "Добавить правила",
   "sync.ignore.showRules": "Показать правила",
   "sync.ignore.hideRules": "Скрыть правила",
+  "sync.ignore.open": "Открыть правила",
+  "sync.rules.title": "Правила исключения",
+  "sync.rules.explain":
+    "Файлы правил лежат в корне vault. Здесь их можно открыть и изменить, не выходя из приложения.",
+  "sync.rules.gitignore": "Правила истории",
+  "sync.rules.gitignoreHint": "что не попадает в снимки",
+  "sync.rules.stignore": "Правила Syncthing",
+  "sync.rules.stignoreHint": "что не доставляется на другие устройства",
+  "sync.rules.edit": "Открыть",
+  "sync.rules.sharedGit": "Этот файл общий для всех устройств и сам попадает в снимки.",
+  "sync.rules.perDeviceSt":
+    "У каждого устройства этот файл свой: Syncthing его не доставляет, и правка действует только здесь.",
+  "sync.rules.notInEffectGit":
+    "Истории в этом vault сейчас нет — правила начнут действовать, когда она появится.",
+  "sync.rules.notInEffectSt":
+    "Syncthing в этой папке не обнаружен — правила начнут действовать, когда папка станет его папкой.",
+  "sync.rules.foreignParent":
+    "Vault лежит внутри другого репозитория: на файлы действуют и правила каталогов выше, здесь они не показаны.",
+  "sync.rules.willCreate": "Файла ещё нет — он будет создан при сохранении.",
+  "sync.rules.field": (p) => `Содержимое файла ${p.file}`,
+  "sync.rules.blockLabel": "правила приложения",
+  "sync.rules.blockHint":
+    "Подсвеченные строки приложение ведёт само. Их можно менять, но без них служебные данные попадут в снимки или в доставку.",
+  "sync.rules.cannot.NotText": "Файл не является текстом в UTF-8 — править его здесь нельзя.",
+  "sync.rules.cannot.TooLarge": "Файл больше предела размера заметки — править его здесь нельзя.",
+  "sync.rules.cannot.NotAFile":
+    "Под этим именем — символическая ссылка или то, что не читается как файл. Правка недоступна.",
+  "sync.rules.cannot.ReadOnly": "Vault открыт без права записи — сохранить правку нельзя.",
+  "sync.rules.cannot.HistoryBusy":
+    "У истории незавершённая операция. Завершите или отмените её — после этого правила можно сохранить.",
+  "sync.rules.missing": "Не хватает правил приложения:",
+  "sync.rules.riskStIgnore":
+    "Без них служебный каталог истории и кэши уедут через Syncthing на другие устройства и испортятся.",
+  "sync.rules.riskGitIgnore":
+    "Без них в снимки попадут кэши, служебные файлы Syncthing и конфликтные копии.",
+  "sync.rules.restore": "Вернуть правила приложения",
+  "sync.rules.complete": "Правила приложения на месте.",
+  "sync.rules.saved": "Сохранено.",
+  "sync.rules.saving": "Сохранение…",
+  "sync.rules.updatedOutside": "Файл изменился на диске — показана новая версия.",
+  "sync.rules.staleOutside":
+    "Файл изменился на диске, пока вы его правили. При сохранении приложение покажет обе версии.",
+  "sync.rules.confirmTitle": "Сохранить без правил приложения?",
+  "sync.rules.confirmSave": "Сохранить без них",
+  "sync.rules.backToEdit": "Вернуться к правке",
+  "sync.rules.divergedTitle": "Файл изменился на диске",
+  "sync.rules.divergedExplain":
+    "На диске не та версия, с которой вы начали правку. Ничего не записано. Строки «<» — ваши, «>» — с диска.",
+  "sync.rules.deletedExplain":
+    "Файл удалён с диска, пока вы его правили. Ничего не записано.",
+  "sync.rules.takeDisk": "Взять версию с диска",
+  "sync.rules.dropMine": "Отбросить мою правку",
+  "sync.rules.overwrite": "Записать мою",
+  "sync.rules.recreate": "Создать файл заново",
+  "sync.rules.closeTitle": "Правка не сохранена",
+  "sync.rules.closeExplain": (p) => `В файле ${p.file} есть несохранённые изменения.`,
+  "sync.rules.discard": "Отбросить",
 
   "sync.wizard.title": "Включение истории",
   "sync.wizard.rulesLabel": "Правила, которые будут добавлены",

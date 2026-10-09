@@ -3,6 +3,8 @@ import {
   cloneVault,
   deviceSyncChange,
   ensureDeviceChange,
+  ignoreCheck,
+  ignoreRestore,
   syncContext,
   type DeviceVaultSync,
   type SyncContext,
@@ -107,6 +109,13 @@ export async function webSyncClient(
     ignoreReports: () => plain(() => session.ignoreReports(backend)),
     applyIgnore: (file) => withContext((ctx) => session.applyIgnore(backend, ctx, file)),
     declineStignore: () => withContext((ctx) => session.declineStignore(ctx)),
+
+    ignoreOpen: (file) => plain(() => session.ignoreOpen(backend, file)),
+    // Чистые функции ядра: очередь сессии им не нужна, и набор в редакторе
+    // не ждёт идущего обмена.
+    ignoreCheck: async (file, text) => ignoreCheck(file, text),
+    ignoreRestore: async (file, text) => ignoreRestore(file, text),
+    ignoreSave: (request) => withContext((ctx) => session.ignoreSave(backend, ctx, request)),
     enableHistory: (message) =>
       withContext((ctx) => session.enableHistory(backend, ctx, message)),
 

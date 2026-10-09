@@ -22,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 # `fs` — ради обзора папок устройства (выбор vault на Android): каталог с
 # тысячей записей читается заметное время, и делать это синхронной командой
 # значило бы держать поток окна.
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "fs", "time"] }
 # Файл секретов синхронизации на Android (фича 011, research §10).
 serde_json = "1"
 

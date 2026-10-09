@@ -185,16 +185,18 @@ interface LastVaultRecord {
  */
 function tauriPreviewClient(): PreviewClient {
   return {
-    compile: (notePath, text, revision) =>
-      invoke<CompiledDocument>("preview_compile", { notePath, text, revision }),
+    dependencyMark: (paths) => invoke<string>("preview_dependency_mark", { paths }),
+    compile: (notePath, text, revision, anchor) =>
+      invoke<CompiledDocument>("preview_compile", { notePath, text, revision, anchor }),
     // Фича 007: то же, но недостающие внешние шаблоны доустанавливаются. Это
     // отдельная команда, а не флаг: путь может писать в vault и ходить в сеть.
-    compileWithTemplates: (notePath, text, revision, overrides) =>
+    compileWithTemplates: (notePath, text, revision, overrides, anchor) =>
       invoke<CompiledDocument>("preview_compile_with_templates", {
         notePath,
         text,
         revision,
         overrides,
+        anchor,
       }),
     // FR-010: явная установка — настройка автозагрузки здесь не спрашивается.
     installTemplate: (spec, overrides) =>

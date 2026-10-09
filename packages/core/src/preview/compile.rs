@@ -13,6 +13,7 @@ use typst::foundations::Bytes;
 use typst::syntax::FileId;
 use typst_layout::PagedDocument;
 
+use super::anchor::{ResolvedAnchor, ScrollAnchor};
 use super::cache::PackageCache;
 use super::diagnostics::{sort_by_location, translate, Diagnostic, DiagnosticSeverity};
 use super::fonts::FontSet;
@@ -53,6 +54,30 @@ pub struct CompiledDocument {
     /// не фильтрует: пропуск неизменившихся — забота UI (research.md §5).
     pub pages: Vec<RenderedPage>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Файлы vault, от которых зависит этот результат, кроме самой заметки:
+    /// импорты, изображения, снимки досок — и те, что сборка искала, но не
+    /// нашла. Изменение любого из них делает показанный вид устаревшим
+    /// (FR-020, FR-021): появление недостающего файла тоже меняет результат.
+    /// Пути — внутри vault, через `/`, по алфавиту.
+    pub dependencies: Vec<String>,
+    /// Куда прокрутить, чтобы на экране осталось прежнее место (FR-004).
+    /// Есть, только когда сборку просили с якорем и в документе нашлось, к
+    /// чему его привязать, — см. [`CompiledDocument::with_anchor`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub anchor: Option<ResolvedAnchor>,
+}
+
+impl CompiledDocument {
+    /// Разрешает якорь прокрутки в этом документе.
+    ///
+    /// Отдельный шаг после сборки, а не её параметр: якорь — забота показа, и
+    /// экспорту или проверке шаблона он не нужен. У неудавшейся сборки
+    /// страниц нет, показ остаётся прежним — и якоря нет.
+    pub fn with_anchor(mut self, anchor: Option<&ScrollAnchor>) -> Self {
+        self.anchor = anchor.and_then(|anchor| super::anchor::resolve(anchor, &self.pages));
+        self
+    }
 }
 
 /// Собирает заметку из текста редактора.
@@ -94,7 +119,32 @@ pub async fn compile_note_resolved<B: VaultBackend>(
     revision: u64,
     fonts: FontSet,
 ) -> Result<CompiledDocument, SnapshotError> {
+    compile_note_resolved_on(
+        &InlineExecutor,
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+    )
+    .await
+}
+
+/// [`compile_note_resolved`] с выбором места, где идёт синхронная фаза
+/// (FR-007): оболочка передаёт исполнителя, который не занимает поток
+/// интерфейса и обрывает сборку по пределу времени.
+pub async fn compile_note_resolved_on<B: VaultBackend, E: CompileExecutor>(
+    executor: &E,
+    backend: &B,
+    packages: &PackageCache,
+    note_path: &str,
+    source_text: &str,
+    revision: u64,
+    fonts: FontSet,
+) -> Result<CompiledDocument, SnapshotError> {
     let (document, _, failures) = compile_collecting_failures(
+        executor,
         backend,
         packages,
         note_path,
@@ -140,7 +190,8 @@ pub(crate) type PdfBytes = Option<Vec<u8>>;
 /// нужен `ResolveError::PackageMissing`, а не строка сообщения. Разбирать
 /// собственный текст обратно — верный способ разойтись с ним при первой же
 /// правке формулировки.
-pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
+pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecutor>(
+    executor: &E,
     backend: &B,
     packages: &PackageCache,
     note_path: &str,
@@ -163,6 +214,7 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
 
     // Шрифты из папки vault (FR-027): список — на каждую сборку, чтобы шрифт,
     // положенный в папку, действовал без переоткрытия заметки (FR-029).
+    let vault_unavailable = backend.access_state() == crate::vault::AccessState::Unavailable;
     let (vault_fonts, font_problems) = packages.vault_fonts().load(backend).await;
     let fonts = fonts.with_fonts(vault_fonts);
     let with_font_problems = |(mut document, pdf): (CompiledDocument, PdfBytes)| {
@@ -173,17 +225,30 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
                 .iter()
                 .map(|problem| Diagnostic::app(DiagnosticSeverity::Warning, problem.app_message())),
         );
+        // Папка vault недоступна (FR-025): сам текст собран из буфера
+        // редактора, но связанные файлы и шрифты прочитать было неоткуда, и
+        // вид может быть неполным — пользователь обязан знать почему.
+        if vault_unavailable {
+            document.diagnostics.push(Diagnostic::app(
+                DiagnosticSeverity::Warning,
+                AppMessage::VaultUnavailable,
+            ));
+        }
         (document, pdf)
     };
 
     loop {
-        let (document, pdf, mut returned) =
-            compile_with(main, note_path, snapshot, revision, fonts.clone(), render);
+        let job = CompileJob::new(main, note_path, snapshot, revision, fonts.clone(), render);
+        let (document, pdf, mut returned) = match executor.run(job).await {
+            Ok(output) => output.into_parts(),
+            Err(reason) => return Ok((stopped(note_path, revision, reason), None, failures)),
+        };
 
         let missing = returned.missing();
         if missing.is_empty() || !returned.begin_iteration() {
             packages.absorb(&returned);
-            let (document, pdf) = with_font_problems((document, pdf));
+            let (mut document, pdf) = with_font_problems((document, pdf));
+            document.dependencies = vault_dependencies(main, &returned, &failures);
             return Ok((document, pdf, failures));
         }
 
@@ -211,10 +276,14 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend>(
         }
 
         if !progressed {
-            let (document, pdf, returned) =
-                compile_with(main, note_path, returned, revision, fonts, render);
+            let job = CompileJob::new(main, note_path, returned, revision, fonts, render);
+            let (document, pdf, returned) = match executor.run(job).await {
+                Ok(output) => output.into_parts(),
+                Err(reason) => return Ok((stopped(note_path, revision, reason), None, failures)),
+            };
             packages.absorb(&returned);
-            let (document, pdf) = with_font_problems((document, pdf));
+            let (mut document, pdf) = with_font_problems((document, pdf));
+            document.dependencies = vault_dependencies(main, &returned, &failures);
             return Ok((document, pdf, failures));
         }
 
@@ -249,7 +318,34 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
     fonts: FontSet,
     policy: &TemplatePolicy,
 ) -> Result<CompiledDocument, SnapshotError> {
+    compile_note_with_templates_on(
+        &InlineExecutor,
+        backend,
+        packages,
+        note_path,
+        source_text,
+        revision,
+        fonts,
+        policy,
+    )
+    .await
+}
+
+/// [`compile_note_with_templates`] с выбором исполнителя — см.
+/// [`compile_note_resolved_on`].
+#[allow(clippy::too_many_arguments)]
+pub async fn compile_note_with_templates_on<B: VaultBackend, E: CompileExecutor>(
+    executor: &E,
+    backend: &mut B,
+    packages: &PackageCache,
+    note_path: &str,
+    source_text: &str,
+    revision: u64,
+    fonts: FontSet,
+    policy: &TemplatePolicy,
+) -> Result<CompiledDocument, SnapshotError> {
     let (document, _) = build_with_templates(
+        executor,
         backend,
         packages,
         note_path,
@@ -271,7 +367,8 @@ pub async fn compile_note_with_templates<B: VaultBackend>(
 /// дописанный после сборки (непрочитанный файл, неудачная установка), делает
 /// документ несобранным, и файл из него писать нельзя (009 FR-008).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn build_with_templates<B: VaultBackend>(
+pub(crate) async fn build_with_templates<B: VaultBackend, E: CompileExecutor>(
+    executor: &E,
     backend: &mut B,
     packages: &PackageCache,
     note_path: &str,
@@ -282,6 +379,7 @@ pub(crate) async fn build_with_templates<B: VaultBackend>(
     render: &Render,
 ) -> Result<(CompiledDocument, PdfBytes), SnapshotError> {
     let (document, pdf) = build_installing_templates(
+        executor,
         backend,
         packages,
         note_path,
@@ -297,7 +395,8 @@ pub(crate) async fn build_with_templates<B: VaultBackend>(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn build_installing_templates<B: VaultBackend>(
+async fn build_installing_templates<B: VaultBackend, E: CompileExecutor>(
+    executor: &E,
     backend: &mut B,
     packages: &PackageCache,
     note_path: &str,
@@ -308,6 +407,7 @@ async fn build_installing_templates<B: VaultBackend>(
     render: &Render,
 ) -> Result<(CompiledDocument, PdfBytes), SnapshotError> {
     let (document, pdf, failures) = compile_collecting_failures(
+        executor,
         backend,
         packages,
         note_path,
@@ -384,6 +484,7 @@ async fn build_installing_templates<B: VaultBackend>(
     // Пересборка: теперь недостающие шаблоны на месте. Прежние причины отказов
     // не переносятся — они относились к состоянию до установки.
     let (document, pdf, failures) = compile_collecting_failures(
+        executor,
         backend,
         packages,
         note_path,
@@ -535,6 +636,184 @@ async fn install_missing<B: VaultBackend>(
 /// его копия разошлась бы с этой при первой же правке.
 use super::packages::parse_spec;
 
+// ── Исполнитель синхронной фазы (FR-007, FR-026) ───────────────────────────
+
+/// Предел времени одной сборки (FR-026). Дольше — значит документ зациклен или
+/// непомерно тяжёл; сборку обрывает исполнитель, а пользователь получает
+/// названную причину вместо вечного «собирается».
+pub const BUILD_TIME_LIMIT_SECS: u32 = 10;
+
+/// Один проход компилятора над готовым снимком — всё, что нужно, чтобы
+/// выполнить его где угодно: в этом же потоке, в соседнем или в Web Worker.
+pub struct CompileJob {
+    pub(crate) main: FileId,
+    pub(crate) note_path: String,
+    pub(crate) snapshot: DependencySnapshot,
+    pub(crate) revision: u64,
+    pub(crate) fonts: FontSet,
+    pub(crate) render: Render,
+}
+
+impl CompileJob {
+    fn new(
+        main: FileId,
+        note_path: &str,
+        snapshot: DependencySnapshot,
+        revision: u64,
+        fonts: FontSet,
+        render: &Render,
+    ) -> Self {
+        Self {
+            main,
+            note_path: note_path.to_owned(),
+            snapshot,
+            revision,
+            fonts,
+            render: render.clone(),
+        }
+    }
+
+    /// Выполняет проход на месте, в вызывающем потоке.
+    pub fn run_inline(self) -> CompileOutput {
+        let (document, pdf, snapshot) = compile_with(
+            self.main,
+            &self.note_path,
+            self.snapshot,
+            self.revision,
+            self.fonts,
+            &self.render,
+        );
+        CompileOutput {
+            document,
+            pdf,
+            snapshot,
+        }
+    }
+}
+
+/// Итог прохода: документ и снимок с отметками о том, чего не хватило.
+pub struct CompileOutput {
+    pub(crate) document: CompiledDocument,
+    pub(crate) pdf: PdfBytes,
+    pub(crate) snapshot: DependencySnapshot,
+}
+
+impl CompileOutput {
+    fn into_parts(self) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
+        (self.document, self.pdf, self.snapshot)
+    }
+}
+
+/// Почему проход не дал результата.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutorError {
+    /// Сборка шла дольше [`BUILD_TIME_LIMIT_SECS`] и оборвана.
+    TimedOut,
+    /// Сборку отменили: заметку закрыли или перешли к другой (FR-011).
+    Cancelled,
+}
+
+/// Где выполняется синхронная фаза сборки — единственный платформенный шов
+/// предпросмотра (contracts/compile-engine.md). Резолв зависимостей, порядок
+/// проходов и разбор итога от исполнителя не зависят.
+#[allow(async_fn_in_trait)]
+pub trait CompileExecutor {
+    async fn run(&self, job: CompileJob) -> Result<CompileOutput, ExecutorError>;
+}
+
+/// Исполнитель «здесь и сейчас»: тесты, экспорт, разовые сборки.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InlineExecutor;
+
+impl CompileExecutor for InlineExecutor {
+    async fn run(&self, job: CompileJob) -> Result<CompileOutput, ExecutorError> {
+        Ok(job.run_inline())
+    }
+}
+
+/// Документ сборки, не дошедшей до конца: страниц нет. Оборванная по пределу
+/// называет причину (FR-012, FR-026); отменённая замечаний не несёт — её
+/// отменил сам пользователь, и сообщать ему об этом нечего.
+fn stopped(note_path: &str, revision: u64, reason: ExecutorError) -> CompiledDocument {
+    let diagnostics = match reason {
+        ExecutorError::TimedOut => vec![Diagnostic::app(
+            DiagnosticSeverity::Error,
+            AppMessage::BuildTimedOut {
+                seconds: BUILD_TIME_LIMIT_SECS,
+            },
+        )],
+        ExecutorError::Cancelled => Vec::new(),
+    };
+    CompiledDocument {
+        revision,
+        note_path: note_path.to_owned(),
+        outcome: CompileOutcome::Failed,
+        pages: Vec::new(),
+        diagnostics,
+        dependencies: Vec::new(),
+        anchor: None,
+    }
+}
+
+/// Отметка состояния связанных файлов (FR-020).
+///
+/// Две отметки различаются тогда и только тогда, когда хоть один из файлов
+/// появился, исчез или изменил размер либо время изменения. Содержимое не
+/// читается: вопрос «не пора ли пересобрать» задаётся каждые пару секунд, а
+/// среди зависимостей бывают изображения на мегабайты. О правке заметок vault
+/// сообщает событием сам; эта отметка — для всего, чего в его индексе нет.
+pub async fn dependency_mark<B: VaultBackend>(backend: &B, paths: &[String]) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for path in paths {
+        hasher.update(path.as_bytes());
+        match backend.file_mark(std::path::Path::new(path)).await {
+            Some((size, modified)) => {
+                hasher.update(&[1]);
+                hasher.update(&size.to_le_bytes());
+                hasher.update(&modified.to_le_bytes());
+            }
+            None => {
+                hasher.update(&[0]);
+            }
+        }
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+/// Сколько сборок подряд результат мемоизации живёт неиспользованным.
+///
+/// Малое число оставляет в кэше только то, что нужно соседним правкам одного
+/// документа, — этого хватает для пересборки по мере набора, а память после
+/// перехода к другой заметке возвращается за несколько сборок. Значение то же,
+/// что у `typst watch`.
+const MEMO_MAX_AGE: usize = 10;
+
+/// Файлы vault, от которых зависит результат: всё, что вошло в сборку, кроме
+/// самой заметки, и всё, что сборка искала в vault и не получила.
+fn vault_dependencies(
+    main: FileId,
+    snapshot: &DependencySnapshot,
+    failures: &[(String, ResolveError)],
+) -> Vec<String> {
+    let mut paths: Vec<String> = snapshot
+        .dependencies()
+        .into_iter()
+        .filter(|id| *id != main)
+        .filter_map(vault_path)
+        // Имя неудавшегося файла — путь vault либо условное «<пакет>»; второе
+        // файлом не является и следить за ним нечем.
+        .chain(
+            failures
+                .iter()
+                .map(|(name, _)| name.clone())
+                .filter(|name| !name.starts_with('<')),
+        )
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 /// Один проход сборки. Возвращает результат и снимок обратно — в нём
 /// накопленные файлы и список того, чего не хватило.
 fn compile_with(
@@ -547,6 +826,11 @@ fn compile_with(
 ) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
     let world = PreviewWorld::new(main, snapshot, fonts.into_fonts());
     let compiled = typst::compile::<PagedDocument>(&world);
+    // Кэш мемоизации компилятора между сборками сохраняется — на нём держится
+    // скорость пересборки по мере набора (FR-008), — но без вытеснения он
+    // только растёт: каждая правка оставляет в нём свои промежуточные
+    // результаты навсегда.
+    typst::comemo::evict(MEMO_MAX_AGE);
 
     let mut diagnostics: Vec<Diagnostic> = compiled
         .warnings
@@ -581,6 +865,8 @@ fn compile_with(
             outcome,
             pages,
             diagnostics,
+            dependencies: Vec::new(),
+            anchor: None,
         },
         pdf,
         world.into_snapshot(),

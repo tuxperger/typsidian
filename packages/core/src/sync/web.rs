@@ -9,7 +9,10 @@ use wasm_bindgen::prelude::*;
 
 use super::engine::web::JsGitEngine;
 use super::engine::CancelToken;
-use super::ignore::{IgnoreFile, IgnoreReport};
+use super::ignore::{
+    self, IgnoreCheck, IgnoreDocument, IgnoreFile, IgnoreReport, IgnoreSaveOutcome,
+    IgnoreSaveRequest,
+};
 use super::secrets::web::IdbSecretStore;
 use super::session::{self, Conflict, Credentials, PullOutcome, Resolution, TickOutcome};
 use super::settings::VaultSyncSettingsPatch;
@@ -118,6 +121,24 @@ impl WebSyncSession {
     #[wasm_bindgen(js_name = declineStignore)]
     pub fn decline_stignore(&mut self, ctx: SyncContext) {
         self.inner.decline_stignore(&ctx);
+    }
+
+    #[wasm_bindgen(js_name = ignoreOpen)]
+    pub async fn ignore_open(&self, backend: &WebBackend, file: IgnoreFile) -> IgnoreDocument {
+        self.inner.ignore_open(backend, file).await
+    }
+
+    #[wasm_bindgen(js_name = ignoreSave)]
+    pub async fn ignore_save(
+        &mut self,
+        backend: &mut WebBackend,
+        ctx: SyncContext,
+        request: IgnoreSaveRequest,
+    ) -> Result<IgnoreSaveOutcome, JsValue> {
+        self.inner
+            .ignore_save(backend, &ctx, request)
+            .await
+            .map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = enableHistory)]
@@ -409,4 +430,18 @@ pub fn sync_context(settings: crate::settings::Settings, vault: String, now: f64
         now as i64,
         ShellCapabilities::current(false),
     )
+}
+
+/// Проверка текста редактора правил (фича 012, FR-010). Свободная функция, а
+/// не метод сессии: она чистая и зовётся по мере набора — в том числе пока
+/// сессия занята сохранением.
+#[wasm_bindgen(js_name = ignoreCheck)]
+pub fn ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
+    ignore::check(file, &text)
+}
+
+/// Текст редактора с возвращённым блоком приложения (фича 012, FR-011).
+#[wasm_bindgen(js_name = ignoreRestore)]
+pub fn ignore_restore(file: IgnoreFile, text: String) -> String {
+    ignore::restore_block(file, &text)
 }

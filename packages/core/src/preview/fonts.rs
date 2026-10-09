@@ -62,6 +62,24 @@ impl FontSet {
         self.fonts
     }
 
+    /// Байты файлов шрифтов, добавленных после первых `skip` начертаний, — без
+    /// повторов: у нескольких начертаний одного файла (TTC) данные общие.
+    /// Нужны исполнителю в воркере: встроенный набор у него свой, а шрифты
+    /// vault приходится передавать.
+    pub fn data_after(&self, skip: usize) -> Vec<Bytes> {
+        let mut files: Vec<Bytes> = Vec::new();
+        for font in self.fonts.iter().skip(skip) {
+            let data = font.data();
+            let known = files.last().is_some_and(|last| {
+                std::ptr::eq(last.as_slice().as_ptr(), data.as_slice().as_ptr())
+            });
+            if !known {
+                files.push(data.clone());
+            }
+        }
+        files
+    }
+
     pub fn len(&self) -> usize {
         self.fonts.len()
     }

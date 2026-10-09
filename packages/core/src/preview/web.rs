@@ -5,15 +5,17 @@
 //! отдельное заимствование на границе wasm-bindgen — сборка документа не
 //! конфликтует с циклом опроса vault, который живёт в `WebBackend`.
 //!
-//! Здесь пока нет исполнителя в Web Worker (T022): сборка идёт в том же потоке,
-//! то есть FR-007 выполняется лишь для коротких документов. Форма вызова от
-//! появления воркера не изменится — изменится место исполнения.
+//! Синхронная фаза сборки идёт в Web Worker, когда интерфейс его подключил
+//! (`setCompileWorker`, см. `worker.rs`); до этого и при его отказе — в этом
+//! же потоке. Форма вызова от места исполнения не зависит.
 
 use wasm_bindgen::prelude::*;
 
+use super::anchor::ScrollAnchor;
 use super::cache::PackageCache;
-use super::compile::{compile_note_resolved, CompiledDocument};
+use super::compile::{compile_note_resolved, compile_note_resolved_on, CompiledDocument};
 use super::fonts::FontSet;
+use super::worker::WorkerExecutor;
 use typst::foundations::Bytes;
 
 /// Движок предпросмотра: набор шрифтов, кэш шаблонов и сборка документа.
@@ -27,6 +29,11 @@ pub struct PreviewEngine {
     /// заметка с большим шаблоном поднимала бы его заново на каждое нажатие
     /// клавиши — `cache.rs` объясняет, почему это сотня пересборок.
     packages: PackageCache,
+    /// Сколько начертаний во встроенном наборе — всё, что сверх, пришло из
+    /// vault и едет воркеру вместе со сборкой.
+    builtin_fonts: usize,
+    /// Исполнитель в Web Worker; `None` — сборка идёт на месте.
+    executor: Option<WorkerExecutor>,
 }
 
 #[wasm_bindgen]
@@ -34,10 +41,22 @@ impl PreviewEngine {
     /// Движок со встроенным набором шрифтов (FR-027).
     #[wasm_bindgen(constructor)]
     pub fn new() -> PreviewEngine {
+        let fonts = FontSet::builtin();
         PreviewEngine {
-            fonts: FontSet::builtin(),
+            builtin_fonts: fonts.len(),
+            fonts,
             packages: PackageCache::new(),
+            executor: None,
         }
+    }
+
+    /// Подключает сборку в Web Worker (FR-007). `post` — функция интерфейса
+    /// `(сообщение) => Promise<ответ>`, владеющая воркером; её договор описан
+    /// у [`WorkerExecutor`]. Экспорт в PDF по-прежнему идёт на месте: это
+    /// явное действие с собственным ходом выполнения, а не фон набора текста.
+    #[wasm_bindgen(js_name = setCompileWorker)]
+    pub fn set_compile_worker(&mut self, post: js_sys::Function) {
+        self.executor = Some(WorkerExecutor::new(post, self.builtin_fonts));
     }
 
     /// Сколько файлов шаблонов удержано между сборками. Нужен диагностике:
@@ -78,17 +97,48 @@ impl PreviewEngine {
         note_path: &str,
         source_text: &str,
         revision: u64,
+        anchor: Option<ScrollAnchor>,
     ) -> Result<CompiledDocument, JsError> {
-        compile_note_resolved(
-            backend,
-            &self.packages,
-            note_path,
-            source_text,
-            revision,
-            self.fonts.clone(),
-        )
-        .await
-        .map_err(|err| JsError::new(&format!("{err:?}")))
+        let built = match &self.executor {
+            Some(executor) => {
+                compile_note_resolved_on(
+                    executor,
+                    backend,
+                    &self.packages,
+                    note_path,
+                    source_text,
+                    revision,
+                    self.fonts.clone(),
+                )
+                .await
+            }
+            None => {
+                compile_note_resolved(
+                    backend,
+                    &self.packages,
+                    note_path,
+                    source_text,
+                    revision,
+                    self.fonts.clone(),
+                )
+                .await
+            }
+        };
+        built
+            .map(|document| document.with_anchor(anchor.as_ref()))
+            .map_err(|err| JsError::new(&format!("{err:?}")))
+    }
+
+    /// Отметка состояния связанных файлов (FR-020): изменилась — пора
+    /// пересобрать. Содержимое файлов не читается. Через `wasm-call-queue`,
+    /// как и сборка: вызов занимает заимствование `WebBackend`.
+    #[wasm_bindgen(js_name = dependencyMark)]
+    pub async fn dependency_mark_js(
+        &self,
+        backend: &crate::vault::web::WebBackend,
+        paths: Vec<String>,
+    ) -> String {
+        super::compile::dependency_mark(backend, &paths).await
     }
 
     /// То же, но недостающие внешние шаблоны доустанавливаются (фича 007,
@@ -110,18 +160,39 @@ impl PreviewEngine {
         source_text: &str,
         revision: u64,
         overrides: crate::vault::vault_settings::VaultOverrides,
+        anchor: Option<ScrollAnchor>,
     ) -> Result<CompiledDocument, JsError> {
-        super::compile::compile_note_with_templates(
-            backend,
-            &self.packages,
-            note_path,
-            source_text,
-            revision,
-            self.fonts.clone(),
-            &overrides.template_policy(),
-        )
-        .await
-        .map_err(|err| JsError::new(&format!("{err:?}")))
+        let policy = overrides.template_policy();
+        let built = match &self.executor {
+            Some(executor) => {
+                super::compile::compile_note_with_templates_on(
+                    executor,
+                    backend,
+                    &self.packages,
+                    note_path,
+                    source_text,
+                    revision,
+                    self.fonts.clone(),
+                    &policy,
+                )
+                .await
+            }
+            None => {
+                super::compile::compile_note_with_templates(
+                    backend,
+                    &self.packages,
+                    note_path,
+                    source_text,
+                    revision,
+                    self.fonts.clone(),
+                    &policy,
+                )
+                .await
+            }
+        };
+        built
+            .map(|document| document.with_anchor(anchor.as_ref()))
+            .map_err(|err| JsError::new(&format!("{err:?}")))
     }
 
     /// Экспортирует заметку в PDF (фича 009, contracts/core-export-api.md).

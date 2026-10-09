@@ -477,6 +477,12 @@ impl VaultBackend for WebBackend {
             .map_err(|_| ReadError::Io)
     }
 
+    async fn file_mark(&self, path: &Path) -> Option<(u64, i64)> {
+        let handle = self.find_handle(path).await?;
+        let (size, modified) = file_meta(&handle).await?;
+        Some((size, modified as i64))
+    }
+
     async fn read_bytes(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
         let handle = self.find_handle(path).await.ok_or(ReadError::NotFound)?;
         // Порядок проверок тот же, что в `read` и у `NativeBackend` (принцип II).

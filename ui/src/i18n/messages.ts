@@ -49,6 +49,10 @@ export function message(t: Translate, m: AppMessage): string {
       return t("app.vaultFontUnusable", { path: m.path, reason: fontProblem(t, m.reason) });
     case "NoteOutsideVault":
       return t("app.noteOutsideVault", { path: m.path });
+    case "BuildTimedOut":
+      return t("app.buildTimedOut", { seconds: m.seconds });
+    case "VaultUnavailable":
+      return t("app.vaultUnavailable");
     default: {
       const exhaustive: never = m;
       return exhaustive;

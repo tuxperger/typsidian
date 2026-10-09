@@ -22,7 +22,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::messages::AppMessage;
-use crate::preview::compile::{build_with_templates, PdfMeta, Render};
+use crate::preview::compile::{build_with_templates, InlineExecutor, PdfMeta, Render};
 use crate::preview::snapshot::SnapshotError;
 use crate::preview::{Diagnostic, DiagnosticSeverity, FontSet, PackageCache};
 use crate::vault::backend::{ReadError, VaultBackend, WriteError};
@@ -143,6 +143,7 @@ pub async fn export_note_pdf<B: VaultBackend>(
         ident: note_path.to_owned(),
     });
     let built = build_with_templates(
+        &InlineExecutor,
         backend,
         packages,
         note_path,

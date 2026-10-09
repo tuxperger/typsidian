@@ -1,4 +1,5 @@
 import {
+  buildTimeLimitMs,
   exportBatchCancel,
   exportBatchNext,
   exportBatchRecord,
@@ -14,6 +15,7 @@ import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
 import { ensureWasmInitialized } from "./wasm-init.js";
+import { createCompileWorker } from "./preview/compile-worker-client.js";
 import type { SyncClient, VaultCloner } from "./sync/sync-client.js";
 import { webSyncClient, webVaultCloner } from "./sync/sync-client-web.js";
 import { deviceStore, deviceStoreQueue } from "./settings/deviceStore.js";
@@ -264,13 +266,22 @@ function webPreviewClient(
   backend: WebBackend,
   call: <T>(op: () => T | Promise<T>) => Promise<T>,
 ): PreviewClient {
+  // Сборка предпросмотра — в Web Worker (005 FR-007): поток интерфейса не
+  // ждёт компилятор, а сборка дольше предела обрывается. Без `Worker`
+  // (старый браузер, тестовая среда) ядро собирает на месте, как раньше.
+  const worker =
+    typeof Worker === "undefined" ? null : createCompileWorker(buildTimeLimitMs());
+  if (worker !== null) engine.setCompileWorker(worker.post);
   return {
-    compile: (notePath, text, revision) =>
-      call(() => engine.compile(backend, notePath, text, BigInt(revision))),
+    // Мимо очереди: отмена обязана дойти, пока сборка её занимает.
+    cancel: () => worker?.cancel(),
+    dependencyMark: (paths) => call(() => engine.dependencyMark(backend, paths)),
+    compile: (notePath, text, revision, anchor) =>
+      call(() => engine.compile(backend, notePath, text, BigInt(revision), anchor)),
     // Фича 007: тот же движок, но недостающие шаблоны доустанавливаются.
     // Идёт через ту же очередь: путь пишет в vault, и наложение на цикл
     // опроса упало бы «recursive use of an object».
-    compileWithTemplates: (notePath, text, revision, overrides) =>
+    compileWithTemplates: (notePath, text, revision, overrides, anchor) =>
       call(() =>
         engine.compileWithTemplates(
           backend,
@@ -278,6 +289,7 @@ function webPreviewClient(
           text,
           BigInt(revision),
           overrides,
+          anchor,
         ),
       ),
     // FR-010: явная установка идёт через ту же очередь — она тоже пишет в

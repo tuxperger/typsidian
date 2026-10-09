@@ -23,7 +23,10 @@ use crate::vault::FolderAccess;
 use super::autosnapshot::{self, AutoDecision, SnapshotFacts};
 use super::conflict_copy;
 use super::engine::{Auth, CancelToken, GitEngine, RawChange, RawStatus, RemoteSpec, RepoProbe};
-use super::ignore::{self, IgnoreFile, IgnoreReport};
+use super::ignore::{
+    self, Editability, IgnoreDocument, IgnoreFile, IgnoreRefusal, IgnoreReport, IgnoreSaveOutcome,
+    IgnoreSaveRequest, LineEnding,
+};
 use super::keeper::{self, KeeperFacts, KeeperState};
 use super::merge::{self, MergeResult};
 use super::secrets::{SecretKind, SecretStore};
@@ -478,6 +481,129 @@ impl<E: GitEngine> SyncSession<E> {
     pub fn decline_stignore(&mut self, ctx: &SyncContext) {
         self.update_device(ctx, |device| device.stignore_declined = true);
         self.events.push(SyncEvent::OverviewChanged);
+    }
+
+    // ── Редактор правил исключения (фича 012) ──────────────────────────────
+
+    /// Файл правил для редактора (012 §FR-001). Не отказывает: всё, что
+    /// мешает правке, названо в `editable`.
+    pub async fn ignore_open<B: VaultBackend>(
+        &self,
+        backend: &B,
+        file: IgnoreFile,
+    ) -> IgnoreDocument {
+        let probe = self.engine.probe().await.ok();
+        let foreign_parent =
+            file == IgnoreFile::GitIgnore && matches!(probe, Some(RepoProbe::ForeignParent { .. }));
+        let in_effect = match file {
+            IgnoreFile::GitIgnore => matches!(
+                probe,
+                Some(RepoProbe::Local | RepoProbe::ForeignParent { .. })
+            ),
+            IgnoreFile::StIgnore => syncthing_detected(backend).await,
+        };
+        let on_disk = read_ignore(backend, file).await;
+        let read_only = backend.access_state() != crate::vault::AccessState::ReadWrite;
+        let document = |exists, text: String, line_ending, base, editable| IgnoreDocument {
+            file,
+            exists,
+            check: ignore::check(file, &text),
+            text,
+            line_ending,
+            base,
+            editable: match editable {
+                Editability::Editable if read_only => Editability::ReadOnly,
+                other => other,
+            },
+            in_effect,
+            foreign_parent,
+        };
+        match on_disk {
+            // Файла нет — редактор открывается с блоком приложения, а сам
+            // файл появится только при сохранении (FR-005).
+            OnDisk::Absent => document(
+                false,
+                ignore::restore_block(file, ""),
+                LineEnding::Lf,
+                None,
+                Editability::Editable,
+            ),
+            OnDisk::Text { text, mark } => document(
+                true,
+                LineEnding::to_editor(&text),
+                LineEnding::detect(&text),
+                Some(mark),
+                Editability::Editable,
+            ),
+            OnDisk::Unusable(reason) => document(true, String::new(), LineEnding::Lf, None, reason),
+        }
+    }
+
+    /// Сохраняет текст редактора в файл правил (012 §FR-003).
+    ///
+    /// Файл пишется только при исходе `Saved`. Роль хранителя не
+    /// спрашивается: это правка файла vault, а не операция истории (FR-020).
+    pub async fn ignore_save<B: VaultBackend>(
+        &mut self,
+        backend: &mut B,
+        ctx: &SyncContext,
+        request: IgnoreSaveRequest,
+    ) -> Result<IgnoreSaveOutcome, SyncError> {
+        let file = request.file;
+        let current = self.ignore_open(backend, file).await;
+        if let Some(reason) = IgnoreRefusal::from_editability(current.editable) {
+            return Ok(IgnoreSaveOutcome::Refused { reason });
+        }
+        // Посреди слияния или получения рабочее дерево принадлежит операции:
+        // правило, сменившееся на полпути, изменило бы её набор файлов
+        // (FR-017).
+        if file == IgnoreFile::GitIgnore && self.history_busy().await {
+            return Ok(IgnoreSaveOutcome::Refused {
+                reason: IgnoreRefusal::HistoryBusy,
+            });
+        }
+        if current.base != request.base && !request.overwrite {
+            // Тот же текст, что на диске, расхождением не считается, даже
+            // если правку начинали с другой версии: терять нечего.
+            let same = current.exists && current.text == request.text;
+            if !same {
+                let diff = line_diff(&request.text, &current.text);
+                return Ok(IgnoreSaveOutcome::Diverged {
+                    disk: current,
+                    diff,
+                });
+            }
+        }
+        let missing = ignore::check(file, &request.text).missing;
+        if !missing.is_empty() && !request.confirm_incomplete {
+            return Ok(IgnoreSaveOutcome::NeedsConfirmation { missing });
+        }
+
+        let bytes = request.line_ending.to_file(&request.text).into_bytes();
+        write_file(backend, file.path(), Some(&bytes)).await?;
+        // Полные правила Syncthing снимают прежний отказ от них, как и
+        // `apply_ignore`; неполные его не трогают — предупреждение остаётся
+        // (FR-012).
+        if file == IgnoreFile::StIgnore && missing.is_empty() && ctx.device_sync.stignore_declined {
+            self.update_device(ctx, |device| device.stignore_declined = false);
+        }
+        self.events.push(SyncEvent::OverviewChanged);
+        Ok(IgnoreSaveOutcome::Saved {
+            document: self.ignore_open(backend, file).await,
+        })
+    }
+
+    /// Есть ли у истории незавершённая операция.
+    async fn history_busy(&self) -> bool {
+        if self.pull.is_some() {
+            return true;
+        }
+        matches!(self.engine.probe().await, Ok(RepoProbe::Local))
+            && self
+                .engine
+                .head()
+                .await
+                .is_ok_and(|head| head.in_progress.is_some())
     }
 
     // ── История и снимки (US1) ────────────────────────────────────────────
@@ -2012,6 +2138,33 @@ fn to_slash(path: &Path) -> String {
 
 async fn read_text<B: VaultBackend>(backend: &B, path: &str) -> Option<String> {
     backend.read(Path::new(path)).await.ok()
+}
+
+/// Файл правил на диске глазами редактора (фича 012).
+enum OnDisk {
+    Absent,
+    Text { text: String, mark: String },
+    Unusable(Editability),
+}
+
+async fn read_ignore<B: VaultBackend>(backend: &B, file: IgnoreFile) -> OnDisk {
+    let path = Path::new(file.path());
+    // Раньше чтения: сквозь ссылку файл прочитался бы как обычный.
+    if backend.is_symlink(path).await {
+        return OnDisk::Unusable(Editability::NotAFile);
+    }
+    match backend.read_bytes(path).await {
+        Ok(bytes) => {
+            let mark = ignore::version_mark(&bytes);
+            match String::from_utf8(bytes) {
+                Ok(text) => OnDisk::Text { text, mark },
+                Err(_) => OnDisk::Unusable(Editability::NotText),
+            }
+        }
+        Err(ReadError::NotFound) => OnDisk::Absent,
+        Err(ReadError::TooLarge) => OnDisk::Unusable(Editability::TooLarge),
+        Err(ReadError::Io) => OnDisk::Unusable(Editability::NotAFile),
+    }
 }
 
 /// Локальный файл перед тем, как его менять: `Ok(None)` — файла нет, отказ —

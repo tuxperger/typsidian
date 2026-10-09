@@ -11,13 +11,14 @@ import {
   type SetStateAction,
 } from "react";
 import type {
-  CompiledDocument,
   Diagnostic,
+  DiagnosticLocation,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
 import { Icon } from "../icons/Icons.js";
 import { PreviewPage } from "./PreviewPage.js";
+import { useCompiledDocument } from "./useCompiledDocument.js";
 import { describeInstallError } from "./describeInstallError.js";
 import { diagnosticText } from "../i18n/messages.js";
 import { useI18n, type Phrase } from "../i18n/index.js";
@@ -34,7 +35,7 @@ import { copyText, useContextMenu } from "../menu/ContextMenu.js";
  * (contracts/frontend-preview.md). Значение выбрано под SC-002 «обновление ≤1 с
  * после остановки»: пауза плюс сама сборка обязаны уложиться в бюджет.
  */
-export const PREVIEW_DEBOUNCE_MS = 250;
+export { PREVIEW_DEBOUNCE_MS } from "./useCompiledDocument.js";
 
 /**
  * Ступени масштаба листа.
@@ -94,30 +95,24 @@ export interface PreviewPaneProps {
   onExport?: (() => void) | undefined;
   /** Экспорт идёт — кнопка недоступна, пока не пришёл итог. */
   exporting?: boolean;
-}
-
-/** Что показывает панель прямо сейчас (data-model.md «PreviewState»). */
-interface PreviewState {
-  /** Последний **успешно** собранный документ. */
-  shown: CompiledDocument | null;
-  /** `shown` не соответствует текущему тексту (FR-014). */
-  isStale: boolean;
-  isBuilding: boolean;
-  diagnostics: Diagnostic[];
   /**
-   * Сборка не состоялась вовсе — вызов ядра отказал, диагностик нет. Здесь
-   * техническое описание отказа как есть: формулирует его не приложение.
+   * Переход к месту замечания в редакторе (FR-015). Открыть связанный файл и
+   * поставить курсор умеет рабочая область — панель только просит.
    */
-  failure: string | null;
+  onReveal?: ((place: DiagnosticLocation) => void) | undefined;
+  /**
+   * Можно ли открыть файл в редакторе. Место в файле, который редактором не
+   * открывается (шрифт, изображение, файл шаблона), остаётся строкой без
+   * действия — кнопка, которая ничего не делает, хуже её отсутствия.
+   */
+  canReveal?: ((path: string) => boolean) | undefined;
+  /**
+   * Файлы vault, от которых зависит последняя сборка, — рабочая область
+   * пересобирает заметку, когда один из них меняется (FR-020).
+   */
+  onDependencies?: ((paths: string[]) => void) | undefined;
 }
 
-const INITIAL: PreviewState = {
-  shown: null,
-  isStale: false,
-  isBuilding: false,
-  diagnostics: [],
-  failure: null,
-};
 
 export function PreviewPane({
   client,
@@ -128,10 +123,11 @@ export function PreviewPane({
   vaultOverrides = null,
   onExport,
   exporting = false,
+  onReveal,
+  canReveal,
+  onDependencies,
 }: PreviewPaneProps): React.JSX.Element {
   const { t } = useI18n();
-  const [state, setState] = useState<PreviewState>(INITIAL);
-  const [lastMs, setLastMs] = useState<number | null>(null);
   // Масштаб — дело показа, а не документа: сборка от него не зависит, поэтому
   // он живёт здесь и переживает переключение заметок, как и в просмотрщиках.
   const [zoomIndex, setZoomIndex] = useState(ZOOM_DEFAULT);
@@ -145,15 +141,16 @@ export function PreviewPane({
   // Колбэк в ref: новая ссылка на него не должна перезапускать сборку.
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
-  // Монотонная версия текста: результат более старой сборки не должен вытеснять
-  // более новый (FR-009). Ядро помечает результат этой же версией.
-  const revisionRef = useRef(0);
-  const shownRevisionRef = useRef(-1);
-  // Явная загрузка шаблона (007 FR-010). Счётчик — чтобы после установки
-  // пересобрать заметку сразу, не дожидаясь правки текста.
-  const [installRound, setInstallRound] = useState(0);
-  // Пересборка из контекстного меню — тот же приём, что после установки шаблона.
-  const [menuRound, setMenuRound] = useState(0);
+  // Сборка, её состояние и всё, что вокруг неё, — в хуке; панель показывает.
+  const { state, lastMs, rebuild } = useCompiledDocument({
+    client,
+    notePath,
+    text,
+    rebuildToken,
+    vaultOverrides,
+    scroller: previewRef,
+    onDependencies,
+  });
   const contextMenu = useContextMenu();
   const [installing, setInstalling] = useState<string | null>(null);
   const [installNote, setInstallNote] = useState<{
@@ -183,74 +180,18 @@ export function PreviewPane({
               fingerprint: report.fingerprint,
             }),
         });
-        setInstallRound((round) => round + 1);
+        // После установки заметка пересобирается сразу, не дожидаясь правки
+        // текста (007 FR-010).
+        rebuild();
       } catch (cause) {
         setInstallNote({ ok: false, text: describeInstallError(cause) });
       } finally {
         setInstalling(null);
       }
     },
-    [client, vaultOverrides],
+    [client, vaultOverrides, rebuild],
   );
   const canInstall = Boolean(client?.installTemplate && vaultOverrides);
-
-  useEffect(() => {
-    if (!client || notePath === null) {
-      setState(INITIAL);
-      shownRevisionRef.current = -1;
-      return;
-    }
-
-    const revision = ++revisionRef.current;
-    setState((prev) => ({ ...prev, isBuilding: true }));
-
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        // Время меряется вокруг вызова ядра: это ровно то, сколько пользователь
-        // ждал результат. Своего поля с длительностью `CompiledDocument` не
-        // несёт, а выдумывать его в ядре ради надписи незачем.
-        const startedAt = performance.now();
-        try {
-          // Путь с доустановкой шаблонов — только когда клиент его умеет и
-          // настройки vault прочитаны. Иначе обычная сборка: заметка без
-          // подключений в обоих случаях в сеть не заходит (007 FR-008).
-          const document =
-            client.compileWithTemplates && vaultOverrides
-              ? await client.compileWithTemplates(
-                  notePath,
-                  text,
-                  revision,
-                  vaultOverrides,
-                )
-              : await client.compile(notePath, text, revision);
-          setLastMs(Math.round(performance.now() - startedAt));
-          // Пришёл результат для текста, который уже устарел, — выбрасываем.
-          if (document.revision < shownRevisionRef.current) return;
-          shownRevisionRef.current = document.revision;
-
-          setState((prev) => ({
-            // Успешная сборка заменяет вид; неуспешная оставляет прежний и
-            // помечает его несоответствующим тексту (FR-014).
-            shown: document.outcome === "Succeeded" ? document : prev.shown,
-            isStale: document.outcome !== "Succeeded",
-            isBuilding: false,
-            diagnostics: document.diagnostics,
-            failure: null,
-          }));
-        } catch (cause) {
-          setState((prev) => ({
-            ...prev,
-            isBuilding: false,
-            isStale: true,
-            diagnostics: [],
-            failure: String(cause),
-          }));
-        }
-      })();
-    }, PREVIEW_DEBOUNCE_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [client, notePath, text, rebuildToken, vaultOverrides, installRound, menuRound]);
 
   // Шапка узнаёт о сборке отсюда, а не считает её сама.
   useEffect(() => {
@@ -410,7 +351,7 @@ export function PreviewPane({
             {
               label: t("workspace.rebuild"),
               disabled: !client || notePath === null,
-              run: () => setMenuRound((round) => round + 1),
+              run: rebuild,
             },
             { kind: "separator" },
             {
@@ -486,6 +427,8 @@ export function PreviewPane({
                       diagnostic={d}
                       onInstall={canInstall ? install : undefined}
                       installing={installing}
+                      onReveal={onReveal}
+                      canReveal={canReveal}
                     />
                   ))}
                 </ul>
@@ -522,7 +465,12 @@ export function PreviewPane({
       {warnings.length > 0 && (
         <ul className="ts-diagnostics" aria-label={t("preview.warnings")}>
           {warnings.map((d, i) => (
-            <DiagnosticItem key={`w${i}`} diagnostic={d} />
+            <DiagnosticItem
+              key={`w${i}`}
+              diagnostic={d}
+              onReveal={onReveal}
+              canReveal={canReveal}
+            />
           ))}
         </ul>
       )}
@@ -549,6 +497,8 @@ function DiagnosticItem({
   diagnostic,
   onInstall,
   installing = null,
+  onReveal,
+  canReveal,
 }: {
   diagnostic: Diagnostic;
   /**
@@ -559,6 +509,8 @@ function DiagnosticItem({
   onInstall?: ((spec: string) => void | Promise<void>) | undefined;
   /** Какой шаблон ставится прямо сейчас. */
   installing?: string | null;
+  onReveal?: ((place: DiagnosticLocation) => void) | undefined;
+  canReveal?: ((path: string) => boolean) | undefined;
 }): React.JSX.Element {
   const { t } = useI18n();
   const template = diagnostic.template;
@@ -575,10 +527,21 @@ function DiagnosticItem({
           (010 FR-004); текст собирается при рендере (FR-014). */}
       <span>{diagnosticText(t, diagnostic)}</span>
       {place && (
-        <span className="ts-diagnostics__place">
-          {" "}
-          — {place.path}:{place.line}:{place.column}
-        </span>
+        <>
+          {" — "}
+          {onReveal && canReveal?.(place.path) ? (
+            <button
+              type="button"
+              className="ts-diagnostics__place"
+              title={t("preview.reveal", { place: placeText(place) })}
+              onClick={() => onReveal(place)}
+            >
+              {placeText(place)}
+            </button>
+          ) : (
+            <span className="ts-diagnostics__place">{placeText(place)}</span>
+          )}
+        </>
       )}
       {template && onInstall && (
         <>
@@ -595,4 +558,9 @@ function DiagnosticItem({
       )}
     </li>
   );
+}
+
+/** Место замечания строкой: `файл:строка:колонка`. */
+function placeText(place: DiagnosticLocation): string {
+  return `${place.path}:${place.line}:${place.column}`;
 }

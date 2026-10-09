@@ -679,3 +679,127 @@ fn a_diagnostic_carries_the_message_kind_only_when_the_app_made_it() {
 fn log_text_names_the_user_values_verbatim() {
     app_messages::log_text_names_the_user_values_verbatim();
 }
+
+// ── Общие случаи сборки (T054…T056, T073…T076, T091, T093, T095, T099) ────
+
+#[tokio::test]
+async fn a_two_level_import_and_an_image_build_with_the_note() {
+    common::preview_cases::a_two_level_import_and_an_image_build_with_the_note().await;
+}
+
+#[tokio::test]
+async fn a_missing_file_is_a_dependency_too() {
+    common::preview_cases::a_missing_file_is_a_dependency_too().await;
+}
+
+#[tokio::test]
+async fn a_cyclic_import_fails_with_a_named_reason() {
+    common::preview_cases::a_cyclic_import_fails_with_a_named_reason().await;
+}
+
+#[tokio::test]
+async fn the_build_uses_the_given_text_and_never_reads_the_note_file() {
+    common::preview_cases::the_build_uses_the_given_text_and_never_reads_the_note_file().await;
+}
+
+#[test]
+fn the_result_carries_the_revision_of_its_text() {
+    common::preview_cases::the_result_carries_the_revision_of_its_text();
+}
+
+#[test]
+fn a_diagnostic_names_its_reason_and_place() {
+    common::preview_cases::a_diagnostic_names_its_reason_and_place();
+}
+
+#[test]
+fn diagnostics_are_ordered_by_place() {
+    common::preview_cases::diagnostics_are_ordered_by_place();
+}
+
+#[test]
+fn a_warning_does_not_fail_the_build() {
+    common::preview_cases::a_warning_does_not_fail_the_build();
+}
+
+#[tokio::test]
+async fn a_diagnostic_in_a_linked_file_points_at_that_file() {
+    common::preview_cases::a_diagnostic_in_a_linked_file_points_at_that_file().await;
+}
+
+#[test]
+fn an_anchor_follows_its_text_to_another_page() {
+    common::preview_cases::an_anchor_follows_its_text_to_another_page();
+}
+
+#[test]
+fn an_anchor_picks_the_nearest_of_equal_fragments() {
+    common::preview_cases::an_anchor_picks_the_nearest_of_equal_fragments();
+}
+
+#[test]
+fn a_vanished_anchor_resolves_nearby_and_never_to_the_start() {
+    common::preview_cases::a_vanished_anchor_resolves_nearby_and_never_to_the_start();
+}
+
+#[test]
+fn no_anchor_without_a_request_or_without_text() {
+    common::preview_cases::no_anchor_without_a_request_or_without_text();
+}
+
+#[tokio::test]
+async fn a_build_over_the_time_limit_is_named_and_changes_nothing() {
+    common::preview_cases::a_build_over_the_time_limit_is_named_and_changes_nothing().await;
+}
+
+#[tokio::test]
+async fn every_compiler_pass_goes_through_the_executor() {
+    common::preview_cases::every_compiler_pass_goes_through_the_executor().await;
+}
+
+#[tokio::test]
+async fn a_font_added_to_and_removed_from_the_vault_updates_the_set() {
+    // T102: набор шрифтов следует за папкой vault в обе стороны, и кэш
+    // разобранных шрифтов между сборками этому не мешает.
+    let vault = MemoryVault::new();
+    let packages = PackageCache::new();
+    let build = |revision| {
+        compile_note_resolved(
+            &vault,
+            &packages,
+            MAIN,
+            LIBERTINUS_NOTE,
+            revision,
+            FontSet::default(),
+        )
+    };
+
+    assert!(unknown_font(&build(1).await.unwrap()));
+
+    vault
+        .files_handle()
+        .borrow_mut()
+        .insert("Libertinus.otf".into(), libertinus_bytes());
+    assert!(!unknown_font(&build(2).await.unwrap()), "шрифт появился");
+
+    vault
+        .files_handle()
+        .borrow_mut()
+        .remove(std::path::Path::new("Libertinus.otf"));
+    assert!(unknown_font(&build(3).await.unwrap()), "шрифт удалён");
+}
+
+#[tokio::test]
+async fn a_cancelled_build_yields_nothing_to_show() {
+    common::preview_cases::a_cancelled_build_yields_nothing_to_show().await;
+}
+
+#[tokio::test]
+async fn an_unavailable_vault_is_named_and_the_text_still_builds() {
+    common::preview_cases::an_unavailable_vault_is_named_and_the_text_still_builds().await;
+}
+
+#[tokio::test]
+async fn the_dependency_mark_follows_the_files() {
+    common::preview_cases::the_dependency_mark_follows_the_files().await;
+}

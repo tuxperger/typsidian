@@ -53,6 +53,10 @@ pub enum AppMessage {
     VaultFontUnusable { path: String, reason: FontProblem },
     /// Путь заметки не выражается относительно корня vault (005 FR-023).
     NoteOutsideVault { path: String },
+    /// Сборка оборвана по пределу времени (005 FR-026).
+    BuildTimedOut { seconds: u32 },
+    /// Папка vault недоступна во время сборки (005 FR-025).
+    VaultUnavailable,
 }
 
 /// Почему связанный файл не прочитался. Зеркало [`ResolveError`] без шаблонов:
@@ -183,6 +187,12 @@ impl AppMessage {
             },
             AppMessage::NoteOutsideVault { path } => {
                 format!("{path}: the note path is outside the vault")
+            }
+            AppMessage::BuildTimedOut { seconds } => {
+                format!("the build was stopped after {seconds} seconds")
+            }
+            AppMessage::VaultUnavailable => {
+                "the vault folder is unavailable; linked files were not read".to_owned()
             }
         }
     }

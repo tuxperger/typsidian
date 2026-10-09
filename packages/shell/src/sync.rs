@@ -19,7 +19,10 @@ use typsidian_core::settings::store::SettingsStore;
 use typsidian_core::settings::VaultId;
 use typsidian_core::sync::engine::native::NativeGitEngine;
 use typsidian_core::sync::engine::CancelToken;
-use typsidian_core::sync::ignore::{IgnoreFile, IgnoreReport};
+use typsidian_core::sync::ignore::{
+    self, IgnoreCheck, IgnoreDocument, IgnoreFile, IgnoreReport, IgnoreSaveOutcome,
+    IgnoreSaveRequest,
+};
 use typsidian_core::sync::secrets::{
     entry_name, MemorySecretStore, SecretKind, SecretStore, SecretStoreError,
 };
@@ -462,6 +465,46 @@ pub async fn sync_decline_stignore(
     with_sync!(app, device, vault, sync_state, |_backend, session, ctx| {
         session.decline_stignore(&ctx);
         Ok(())
+    })
+}
+
+// ── Редактор правил исключения (фича 012) ──────────────────────────────────
+
+#[tauri::command]
+pub async fn sync_ignore_open(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    file: IgnoreFile,
+) -> Answer<IgnoreDocument> {
+    let vault_guard = vault.0.lock().await;
+    let backend = vault_guard.as_ref().ok_or_else(not_open)?;
+    let sync_guard = sync_state.0.lock().await;
+    let open = sync_guard.as_ref().ok_or_else(not_open)?;
+    Ok(open.session.ignore_open(backend, file).await)
+}
+
+/// Чистая проверка текста: ни vault, ни сессия не нужны, поэтому набор в
+/// редакторе не ждёт идущего обмена.
+#[tauri::command]
+pub fn sync_ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
+    ignore::check(file, &text)
+}
+
+#[tauri::command]
+pub fn sync_ignore_restore(file: IgnoreFile, text: String) -> String {
+    ignore::restore_block(file, &text)
+}
+
+#[tauri::command]
+pub async fn sync_ignore_save(
+    app: AppHandle,
+    device: State<'_, Device>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    request: IgnoreSaveRequest,
+) -> Answer<IgnoreSaveOutcome> {
+    with_sync!(app, device, vault, sync_state, |backend, session, ctx| {
+        Ok(session.ignore_save(backend, &ctx, request).await?)
     })
 }
 

@@ -11,6 +11,10 @@ export const app = {
     `The content of template ${p.spec} diverged from its recorded fingerprint (${p.actual} instead of ${p.recorded.slice(0, 12)}); the app doesn’t reinstall it`,
   "app.vaultFontUnusable": (p: { path: string; reason: string }) => `Font ${p.path}: ${p.reason}`,
   "app.noteOutsideVault": (p: { path: string }) => `${p.path}: the note is outside the vault folder`,
+  "app.buildTimedOut": (p: { seconds: number }) =>
+    `The build was stopped: it ran longer than ${p.seconds} s. Check the document for an endless loop.`,
+  "app.vaultUnavailable":
+    "The vault folder is unavailable: linked files and fonts were not read, so the view may be incomplete. The text in the editor is kept.",
   "app.resolve.notFound": "file not found",
   "app.resolve.unreadable": "file can’t be read",
   "app.resolve.accessDenied": "no permission to read",

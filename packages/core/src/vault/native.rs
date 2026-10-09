@@ -1147,6 +1147,24 @@ impl VaultBackend for NativeBackend {
         false
     }
 
+    async fn is_symlink(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(self.root_path.join(path))
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    }
+
+    async fn file_mark(&self, path: &Path) -> Option<(u64, i64)> {
+        let metadata = std::fs::metadata(self.root_path.join(path)).ok()?;
+        if !metadata.is_file() {
+            return None;
+        }
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_millis() as i64);
+        Some((metadata.len(), modified))
+    }
+
     /// Тот же приём, что у [`probe_access_state`], только про вложенную папку:
     /// дешёвые `metadata`/`read_dir` без файлов-пробников.
     async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {

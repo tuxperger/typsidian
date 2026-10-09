@@ -7,8 +7,12 @@ import type {
   DeviceVaultSync,
   FileDiff,
   HistoryPage,
+  IgnoreCheck,
+  IgnoreDocument,
   IgnoreFile,
   IgnoreReport,
+  IgnoreSaveOutcome,
+  IgnoreSaveRequest,
   Keeper,
   PullOutcome,
   RemoteStatus,
@@ -73,6 +77,14 @@ export interface SyncClient {
   ignoreReports(): Promise<IgnoreReport[]>;
   applyIgnore(file: IgnoreFile): Promise<void>;
   declineStignore(): Promise<void>;
+
+  /** Файл правил для редактора (фича 012). Не отказывает: причина — в `editable`. */
+  ignoreOpen(file: IgnoreFile): Promise<IgnoreDocument>;
+  /** Проверка текста редактора; к диску не обращается. */
+  ignoreCheck(file: IgnoreFile, text: string): Promise<IgnoreCheck>;
+  /** Текст с возвращённым блоком правил приложения. */
+  ignoreRestore(file: IgnoreFile, text: string): Promise<string>;
+  ignoreSave(request: IgnoreSaveRequest): Promise<IgnoreSaveOutcome>;
   enableHistory(message: string): Promise<Snapshot>;
 
   changes(): Promise<Change[]>;

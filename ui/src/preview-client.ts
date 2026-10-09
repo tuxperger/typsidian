@@ -7,6 +7,7 @@ import type {
   ExportReport,
   InstalledTemplate,
   InstallReport,
+  ScrollAnchor,
   VaultOverrides,
 } from "./wasm-core/typsidian_core.js";
 
@@ -28,6 +29,7 @@ export interface PreviewClient {
     notePath: string,
     text: string,
     revision: number,
+    anchor?: ScrollAnchor,
   ): Promise<CompiledDocument>;
 
   /**
@@ -51,6 +53,7 @@ export interface PreviewClient {
     text: string,
     revision: number,
     overrides: VaultOverrides,
+    anchor?: ScrollAnchor,
   ): Promise<CompiledDocument>;
 
   /**
@@ -64,6 +67,19 @@ export interface PreviewClient {
    * `undefined` — клиент этого не умеет; тогда кнопка не показывается.
    */
   installTemplate?(spec: string, overrides: VaultOverrides): Promise<InstallReport>;
+
+  /**
+   * Прекратить идущую сборку: заметку закрыли или перешли к другой (FR-011).
+   * `undefined` — клиент этого не умеет; тогда сборка дорабатывает, а её
+   * результат отбрасывается.
+   */
+  cancel?(): void;
+
+  /**
+   * Отметка состояния связанных файлов (FR-020): изменилась — пора
+   * пересобрать. Что в неё входит, решает ядро; интерфейс только сравнивает.
+   */
+  dependencyMark?(paths: string[]): Promise<string>;
 
   /**
    * Установленные шаблоны: имя, версия, источник и отпечаток (фича 007, US5).

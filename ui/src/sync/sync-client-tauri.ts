@@ -6,7 +6,10 @@ import type {
   DeviceVaultSync,
   FileDiff,
   HistoryPage,
+  IgnoreCheck,
+  IgnoreDocument,
   IgnoreReport,
+  IgnoreSaveOutcome,
   Keeper,
   PullOutcome,
   RemoteStatus,
@@ -98,6 +101,11 @@ function tauriSyncClient(vaultId: string): SyncClient {
     ignoreReports: () => invoke<IgnoreReport[]>("sync_ignore_reports"),
     applyIgnore: (file) => invoke<void>("sync_apply_ignore", { file }),
     declineStignore: () => invoke<void>("sync_decline_stignore"),
+
+    ignoreOpen: (file) => invoke<IgnoreDocument>("sync_ignore_open", { file }),
+    ignoreCheck: (file, text) => invoke<IgnoreCheck>("sync_ignore_check", { file, text }),
+    ignoreRestore: (file, text) => invoke<string>("sync_ignore_restore", { file, text }),
+    ignoreSave: (request) => invoke<IgnoreSaveOutcome>("sync_ignore_save", { request }),
     enableHistory: (message) => invoke<Snapshot>("sync_enable_history", { message }),
 
     changes: () => invoke<Change[]>("sync_changes"),

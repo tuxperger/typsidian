@@ -5,6 +5,7 @@ import type {
   Change,
   Conflict,
   FileDiff,
+  IgnoreFile,
   IgnoreReport,
   Snapshot,
   SyncError,
@@ -21,6 +22,7 @@ import {
   describeSyncError,
 } from "./describe.js";
 import { EnableHistoryWizard } from "./EnableHistoryWizard.js";
+import { IgnoreEditor } from "./IgnoreEditor.js";
 import { MergeEditor } from "./MergeEditor.js";
 import { RemoteDialog } from "./RemoteDialog.js";
 import { asSyncError, remoteCapabilities, type DiscoveredSyncthing } from "./sync-client.js";
@@ -61,8 +63,9 @@ export function SyncPanel({
   const [remoteError, setRemoteError] = useState<SyncError | null>(null);
   const [merging, setMerging] = useState<Conflict | null>(null);
   const [proxy, setProxy] = useState<string | null>(null);
+  const [rulesFile, setRulesFile] = useState<IgnoreFile | null>(null);
 
-  const overlayOpen = wizardOpen || remoteOpen || merging !== null;
+  const overlayOpen = wizardOpen || remoteOpen || merging !== null || rulesFile !== null;
   // Диалог поверх панели закрывается первым и своим обработчиком.
   useDismissOnEscape(overlayOpen ? null : onClose);
 
@@ -100,7 +103,12 @@ export function SyncPanel({
         ) : (
           <>
             {overview.ignore_warnings.map((report) => (
-              <IgnoreWarning key={report.file} sync={sync} report={report} />
+              <IgnoreWarning
+                key={report.file}
+                sync={sync}
+                report={report}
+                onOpen={() => setRulesFile(report.file)}
+              />
             ))}
 
             <HistorySection
@@ -119,6 +127,7 @@ export function SyncPanel({
               onMerge={setMerging}
             />
             <KeeperSection sync={sync} overview={overview} i18n={i18n} />
+            <RulesSection onOpen={setRulesFile} />
 
             <details className="ts-sync__section">
               <summary className="ts-eyebrow">{t("sync.settings.title")}</summary>
@@ -167,6 +176,10 @@ export function SyncPanel({
 
       {merging !== null && (
         <MergeEditor sync={sync} conflict={merging} onClose={() => setMerging(null)} />
+      )}
+
+      {rulesFile !== null && (
+        <IgnoreEditor sync={sync} file={rulesFile} onClose={() => setRulesFile(null)} />
       )}
     </aside>
   );
@@ -218,9 +231,11 @@ function ErrorNotice({
 function IgnoreWarning({
   sync,
   report,
+  onOpen,
 }: {
   sync: SyncControl;
   report: IgnoreReport;
+  onOpen: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [shown, setShown] = useState(false);
@@ -244,6 +259,9 @@ function IgnoreWarning({
         </button>
         <button type="button" className="ts-btn" onClick={() => setShown((value) => !value)}>
           {shown ? t("sync.ignore.hideRules") : t("sync.ignore.showRules")}
+        </button>
+        <button type="button" className="ts-btn" onClick={onOpen}>
+          {t("sync.ignore.open")}
         </button>
         {report.file === "StIgnore" && (
           <button
@@ -1083,6 +1101,39 @@ function KeeperSection({
           </button>
         )}
       </div>
+    </section>
+  );
+}
+
+/**
+ * Вход в редактор файлов правил (фича 012, FR-001). Раздел виден всегда:
+ * правила можно править и до включения истории, и без Syncthing — действуют
+ * ли они сейчас, скажет сам редактор.
+ */
+function RulesSection({ onOpen }: { onOpen: (file: IgnoreFile) => void }): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <section className="ts-sync__section" aria-label={t("sync.rules.title")}>
+      <h2 className="ts-eyebrow">{t("sync.rules.title")}</h2>
+      <p className="ts-dialog__hint">{t("sync.rules.explain")}</p>
+      <ul className="ts-sync-rules-list">
+        <li>
+          <span>
+            {t("sync.rules.gitignore")} — {t("sync.rules.gitignoreHint")}
+          </span>
+          <button type="button" className="ts-btn" onClick={() => onOpen("GitIgnore")}>
+            {t("sync.rules.edit")}
+          </button>
+        </li>
+        <li>
+          <span>
+            {t("sync.rules.stignore")} — {t("sync.rules.stignoreHint")}
+          </span>
+          <button type="button" className="ts-btn" onClick={() => onOpen("StIgnore")}>
+            {t("sync.rules.edit")}
+          </button>
+        </li>
+      </ul>
     </section>
   );
 }

@@ -104,40 +104,40 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Две фазы сборки
 
-- [ ] T012 [P] Тест: замыкание зависимостей сходится за несколько итераций резолв↔сборка;
+- [X] T012 [P] Тест: замыкание зависимостей сходится за несколько итераций резолв↔сборка;
       документ с двухуровневым импортом собирается, в `packages/core/tests/preview_native.rs`
       и `packages/core/tests/preview_wasm.rs`
-- [ ] T013 [P] Тест: превышение предела итераций даёт `DependencyBudgetExhausted`, а не
+- [X] T013 [P] Тест: превышение предела итераций даёт `DependencyBudgetExhausted`, а не
       бесконечный цикл, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs`
-- [ ] T014 Реализовать трейт `DependencyResolver` в
+- [X] T014 Реализовать трейт `DependencyResolver` в
       `packages/core/src/preview/resolve.rs` поверх существующего `VaultBackend` фичи 001 —
       своего доступа к файлам не заводить (принцип I, contracts/compile-engine.md)
-- [ ] T015 Реализовать итеративное чередование резолва и сборки в
+- [X] T015 Реализовать итеративное чередование резолва и сборки в
       `packages/core/src/preview/compile.rs` с пределом 8 итераций (research.md §2)
-- [ ] T016 Реализовать `ResolveError` (`NotFound`, `Unreadable`, `AccessDenied`,
+- [X] T016 Реализовать `ResolveError` (`NotFound`, `Unreadable`, `AccessDenied`,
       `OutsideVault`, `TooLarge`) в `packages/core/src/preview/resolve.rs` —
       contracts/compile-engine.md
 
 ### Исполнитель вне UI-потока
 
-- [ ] T017 [P] Тест: `spawn` не блокирует вызывающий поток; во время сборки вызывающая
+- [X] T017 [P] Тест: `spawn` не блокирует вызывающий поток; во время сборки вызывающая
       сторона продолжает выполняться, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-007)
-- [ ] T018 [P] Тест: после `cancel` результат этой сборки не приходит ни в одном событии, в
+- [X] T018 [P] Тест: после `cancel` результат этой сборки не приходит ни в одном событии, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
-- [ ] T019 [P] Тест: `cancel` и превышение предела времени не изменяют ни одного файла vault
+- [X] T019 [P] Тест: `cancel` и превышение предела времени не изменяют ни одного файла vault
       (сверка отпечатков до и после), в `packages/core/tests/preview_native.rs`
-- [ ] T020 Определить трейт `CompileExecutor` и `CompileHandle` в
+- [X] T020 Определить трейт `CompileExecutor` и `CompileHandle` в
       `packages/core/src/preview/mod.rs` — единственный платформенный шов фичи
       (contracts/compile-engine.md)
-- [ ] T021 Реализовать исполнителя на потоке в `packages/core/src/preview/native.rs`
+- [X] T021 Реализовать исполнителя на потоке в `packages/core/src/preview/native.rs`
       (`spawn_blocking`, результат каналом). Отмена — отбрасывание результата; поток
       дорабатывает (research.md §3, plan.md → Complexity Tracking)
-- [ ] T022 Реализовать исполнителя на Web Worker в `packages/core/src/preview/web.rs`:
+- [X] T022 Реализовать исполнителя на Web Worker в `packages/core/src/preview/web.rs`:
       отдельный экземпляр ядра, снимок передаётся сообщением, `terminate()` даёт настоящую
       отмену (research.md §3)
-- [ ] T023 Реализовать предел времени сборки 10 секунд в
+- [X] T023 Реализовать предел времени сборки 10 секунд в
       `packages/core/src/preview/compile.rs` с исходом `TimedOut` (FR-026)
 
 ### Результат сборки
@@ -163,7 +163,7 @@ description: "Task list for Note Rendering and Live Preview"
 - [ ] T029 Реализовать загрузку встроенного набора шрифтов в
       `packages/core/src/preview/fonts.rs`: файлы поставляются рядом с wasm-модулем, **не**
       внутри него (research.md §6, FR-027)
-- [ ] T030 Реализовать ленивую загрузку модуля компилятора в `ui/src/preview/`: модуль не
+- [X] T030 Реализовать ленивую загрузку модуля компилятора в `ui/src/preview/`: модуль не
       скачивается, пока пользователь не открыл текстовую заметку. 6,8 МБ brotli без ленивой
       загрузки проваливают SC-001 на первом открытии (research.md §6, §11)
 
@@ -211,11 +211,11 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Поверхность ядра для UI
 
-- [ ] T039 [P] [US1] Реализовать события `BuildStarted` и `BuildFinished` в
+- [X] T039 [P] [US1] Реализовать события `BuildStarted` и `BuildFinished` в
       `packages/core/src/preview/events.rs` — contracts/frontend-preview.md
-- [ ] T040 [US1] Расширить `ui/src/vault-client.ts` интерфейсом `PreviewClient`
+- [X] T040 [US1] Расширить `ui/src/vault-client.ts` интерфейсом `PreviewClient`
       (`requestBuild`, `cancelBuild`, `subscribePreview`) — contracts/frontend-preview.md
-- [ ] T041 [US1] Реализовать web-часть `PreviewClient` в `ui/src/vault-client-web.ts`,
+- [X] T041 [US1] Реализовать web-часть `PreviewClient` в `ui/src/vault-client-web.ts`,
       проведя **все** вызовы экземпляра ядра через `ui/src/wasm-call-queue.ts`: без очереди
       сборка наложится на цикл опроса vault и даст `recursive use of an object detected`
 - [X] T042 [US1] Реализовать native-часть `PreviewClient` в
@@ -250,7 +250,7 @@ description: "Task list for Note Rendering and Live Preview"
       contracts/text-layer.md обязательство 4)
 - [X] T045 [US1] Реализовать `ui/src/preview/PreviewPane.tsx`: колонка предпросмотра, список
       страниц, различимые границы между ними (FR-001, FR-003)
-- [ ] T046 [US1] Реализовать `ui/src/preview/useCompiledDocument.ts`: подписка на
+- [X] T046 [US1] Реализовать `ui/src/preview/useCompiledDocument.ts`: подписка на
       `PreviewEvent`, хранение `PreviewState` — data-model.md «PreviewState»
 - [X] T047 [US1] Заменить заглушку предпросмотра в `ui/src/workspace/Workspace.tsx`
       (строки 317-326) на `PreviewPane` и убрать устаревший комментарий на строке 67 о том,
@@ -270,7 +270,7 @@ description: "Task list for Note Rendering and Live Preview"
 - [ ] T052 [US1] Сверить вид со сборкой тем же файлом через сторонний `typst compile`;
       расхождения зафиксировать в `specs/005-live-preview/quickstart.md` → Сценарий 1
       (SC-008)
-- [ ] T053 [US1] Замерить время появления вида после открытия заметки на документе в 50
+- [X] T053 [US1] Замерить время появления вида после открытия заметки на документе в 50
       страниц и зафиксировать в `packages/core/benches/preview_scale.rs` (SC-001)
 
 **Checkpoint**: US1 самодостаточна — предпросмотр работает, хотя ещё не обновляется по мере
@@ -286,25 +286,25 @@ description: "Task list for Note Rendering and Live Preview"
 **Independent Test**: набрать несколько абзацев не сохраняя; вид догнал последнее состояние
 текста, ввод ни разу не подтормозил, файл на диске не изменился (quickstart.md, Сценарий 2).
 
-- [ ] T054 [P] [US2] Тест: результат сборки с `revision` меньше уже доставленного
+- [X] T054 [P] [US2] Тест: результат сборки с `revision` меньше уже доставленного
       отбрасывается и наверх не попадает, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-009)
-- [ ] T055 [P] [US2] Тест: при потоке правок собирается **последнее** состояние текста;
+- [X] T055 [P] [US2] Тест: при потоке правок собирается **последнее** состояние текста;
       промежуточные могут быть пропущены, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-008)
-- [ ] T056 [P] [US2] Тест: сборка идёт из переданного текста, а файл на диске не читается и
+- [X] T056 [P] [US2] Тест: сборка идёт из переданного текста, а файл на диске не читается и
       не изменяется (сверка отпечатка), в `packages/core/tests/preview_native.rs` (FR-002)
-- [ ] T057 [P] [US2] Тест: закрытие заметки прекращает её сборку — результат не приходит, в
+- [X] T057 [P] [US2] Тест: закрытие заметки прекращает её сборку — результат не приходит, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-011)
-- [ ] T058 [US2] Реализовать версионирование результата по `revision` и отбрасывание
+- [X] T058 [US2] Реализовать версионирование результата по `revision` и отбрасывание
       устаревших в `packages/core/src/preview/compile.rs` (research.md §9)
-- [ ] T059 [US2] Реализовать отмену сборки при закрытии заметки и при переходе к другой в
+- [X] T059 [US2] Реализовать отмену сборки при закрытии заметки и при переходе к другой в
       `packages/core/src/preview/mod.rs` (FR-011)
-- [ ] T060 [US2] Реализовать сохранение кэша `comemo` между пересборками и вызов
+- [X] T060 [US2] Реализовать сохранение кэша `comemo` между пересборками и вызов
       `comemo::evict(max_age)` после каждой сборки в
       `packages/core/src/preview/compile.rs` (research.md §10)
-- [ ] T061 [US2] Подобрать `max_age` замером в `packages/core/benches/preview_scale.rs`:
+- [X] T061 [US2] Подобрать `max_age` замером в `packages/core/benches/preview_scale.rs`:
       без кэша SC-002 недостижим, без вытеснения долгая сессия течёт по памяти
 - [X] T062 [US2] Реализовать дебаунс запроса сборки в
       `ui/src/preview/useCompiledDocument.ts` под порог SC-002 — дебаунс живёт в UI, потому
@@ -319,26 +319,26 @@ description: "Task list for Note Rendering and Live Preview"
 
 ### Удержание места при пересборке
 
-- [ ] T065 [P] [US2] Тест: якорь по тексту прогона находит то же место после переверстки,
+- [X] T065 [P] [US2] Тест: якорь по тексту прогона находит то же место после переверстки,
       сместившей его на другую страницу (`exact: true`), в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-004, SC-005)
-- [ ] T066 [P] [US2] Тест: якорь, чей текст исчез из документа, разрешается в ближайшее
+- [X] T066 [P] [US2] Тест: якорь, чей текст исчез из документа, разрешается в ближайшее
       сохранившееся место с `exact: false`, а **не** в начало документа, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-034, SC-005)
-- [ ] T067 [US2] Реализовать `ScrollAnchor`, `ResolvedAnchor` и правило разрешения якоря в
+- [X] T067 [US2] Реализовать `ScrollAnchor`, `ResolvedAnchor` и правило разрешения якоря в
       `packages/core/src/preview/anchor.rs` — правило над содержимым документа живёт в ядре
       (принцип I), contracts/frontend-preview.md
-- [ ] T068 [US2] Реализовать `ui/src/preview/useScrollAnchor.ts`: снять якорь с видимого на
+- [X] T068 [US2] Реализовать `ui/src/preview/useScrollAnchor.ts`: снять якорь с видимого на
       экране, передать его ядру, прокрутить к тому, что вернуло ядро. Собственного поиска
       совпадений в UI быть не должно — это была бы вторая реализация правила (принцип I)
-- [ ] T069 [US2] Реализовать перерисовку только изменившихся страниц по `digest` в
+- [X] T069 [US2] Реализовать перерисовку только изменившихся страниц по `digest` в
       `ui/src/preview/PreviewPane.tsx`: неизменившиеся узлы DOM не трогаются
       (research.md §5)
 - [ ] T070 [US2] Прогнать `quickstart.md` Сценарий 2 целиком на web- и native-сборке,
       включая шаги 6 и 7 (удержание места и исчезнувший фрагмент)
-- [ ] T071 [US2] Замерить задержку отклика на ввод во время сборки и время обновления после
+- [X] T071 [US2] Замерить задержку отклика на ввод во время сборки и время обновления после
       паузы; зафиксировать в `packages/core/benches/preview_scale.rs` (FR-007, SC-002,
       SC-003)
 - [X] T072 [US2] Убедиться, что действия «обновить предпросмотр» в интерфейсе нет вовсе, в
@@ -357,16 +357,16 @@ description: "Task list for Note Rendering and Live Preview"
 работает, прежний вид остался с пометкой, исправление возвращает согласованность
 (quickstart.md, Сценарий 3).
 
-- [ ] T073 [P] [US3] Тест: диагностика несёт причину словами и место — файл, строку, колонку
+- [X] T073 [P] [US3] Тест: диагностика несёт причину словами и место — файл, строку, колонку
       и байтовый диапазон, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-012, FR-013)
-- [ ] T074 [P] [US3] Тест: несколько диагностик отсортированы по `(path, byte_range.start)`,
+- [X] T074 [P] [US3] Тест: несколько диагностик отсортированы по `(path, byte_range.start)`,
       в `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-016)
-- [ ] T075 [P] [US3] Тест: предупреждения приходят с `severity: Warning` и **не** переводят
+- [X] T075 [P] [US3] Тест: предупреждения приходят с `severity: Warning` и **не** переводят
       сборку в `Failed`, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-018)
-- [ ] T076 [P] [US3] Тест: диагностика в связанном файле несёт `is_open_note: false` и путь
+- [X] T076 [P] [US3] Тест: диагностика в связанном файле несёт `is_open_note: false` и путь
       того файла, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-015)
 - [X] T077 [P] [US3] Тест: диагностика по файлу, не открываемому в редакторе (шрифт,
@@ -377,30 +377,30 @@ description: "Task list for Note Rendering and Live Preview"
 - [X] T079 [US3] Реализовать перевод `SourceDiagnostic` в `Diagnostic` через
       `WorldExt::range(span)` в `packages/core/src/preview/diagnostics.rs`
       (research.md §7)
-- [ ] T080 [US3] Реализовать перевод байтового диапазона в строку и колонку (1-based) в
+- [X] T080 [US3] Реализовать перевод байтового диапазона в строку и колонку (1-based) в
       `packages/core/src/preview/diagnostics.rs`
 - [X] T081 [US3] Реализовать вычисление `openable` по виду файла в
       `packages/core/src/preview/diagnostics.rs`, переиспользуя `FileKind` фичи 002 —
       второй классификации не заводить (принцип I)
-- [ ] T082 [US3] Реализовать разделение ошибок и предупреждений из формы `Warned` в
+- [X] T082 [US3] Реализовать разделение ошибок и предупреждений из формы `Warned` в
       `packages/core/src/preview/compile.rs` — не разбором текста сообщения
-- [ ] T083 [P] [US3] Реализовать `ui/src/preview/DiagnosticsList.tsx`: список диагностик,
+- [X] T083 [P] [US3] Реализовать `ui/src/preview/DiagnosticsList.tsx`: список диагностик,
       ошибки отличимы от предупреждений
-- [ ] T084 [US3] Реализовать пометку устаревания показанного вида в
+- [X] T084 [US3] Реализовать пометку устаревания показанного вида в
       `ui/src/preview/PreviewPane.tsx` при неуспешной сборке (FR-014)
-- [ ] T085 [US3] Реализовать состояние «показывать нечего» с обязательным называнием причины
+- [X] T085 [US3] Реализовать состояние «показывать нечего» с обязательным называнием причины
       в `ui/src/preview/PreviewPane.tsx`: пустая панель без объяснения запрещена
       (FR-014, SC-004)
-- [ ] T086 [US3] Реализовать переход к месту ошибки в открытой заметке в
+- [X] T086 [US3] Реализовать переход к месту ошибки в открытой заметке в
       `ui/src/preview/DiagnosticsList.tsx` (FR-015, SC-007)
-- [ ] T087 [US3] Реализовать переход к месту ошибки в связанном файле в
+- [X] T087 [US3] Реализовать переход к месту ошибки в связанном файле в
       `ui/src/preview/DiagnosticsList.tsx` и `ui/src/workspace/Workspace.tsx`: файл
       открывается в редакторе, курсор встаёт на место; одновременный показ двух файлов не
       вводится (FR-015)
-- [ ] T088 [US3] Реализовать отсутствие действия перехода при `openable: false` в
+- [X] T088 [US3] Реализовать отсутствие действия перехода при `openable: false` в
       `ui/src/preview/DiagnosticsList.tsx`: недействующую кнопку показывать запрещено
       (FR-033)
-- [ ] T089 [US3] Реализовать снятие пометки и очистку диагностик при исправлении ошибки в
+- [X] T089 [US3] Реализовать снятие пометки и очистку диагностик при исправлении ошибки в
       `ui/src/preview/useCompiledDocument.ts` (FR-017)
 - [ ] T090 [US3] Прогнать `quickstart.md` Сценарии 3 и 4 на web- и native-сборке, включая
       шаг 7 (заметка, не собравшаяся ни разу)
@@ -418,30 +418,30 @@ description: "Task list for Note Rendering and Live Preview"
 подключённый файл сторонним редактором, убедиться в обновлении без переоткрытия
 (quickstart.md, Сценарий 5).
 
-- [ ] T091 [P] [US4] Тест: заметка с двухуровневым импортом и изображением собирается вместе
+- [X] T091 [P] [US4] Тест: заметка с двухуровневым импортом и изображением собирается вместе
       с ними, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-019)
-- [ ] T092 [P] [US4] Тест: отсутствующий связанный файл называется поимённо с причиной, а не
+- [X] T092 [P] [US4] Тест: отсутствующий связанный файл называется поимённо с причиной, а не
       общей ошибкой сборки, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-021)
-- [ ] T093 [P] [US4] **Тест циклической связи** — поведение `typst` здесь зондом не
+- [X] T093 [P] [US4] **Тест циклической связи** — поведение `typst` здесь зондом не
       проверялось (research.md §11): два файла, подключающие друг друга, дают диагностику, а
       не зависание, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-022). Если `typst` зависает — нужен
       собственный предохранитель до сборки
-- [ ] T094 [P] [US4] Тест: ссылка за пределы папки vault отклоняется с `OutsideVault` **до**
+- [X] T094 [P] [US4] Тест: ссылка за пределы папки vault отклоняется с `OutsideVault` **до**
       чтения, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-023)
-- [ ] T095 [US4] Реализовать учёт связанных файлов сборки в
+- [X] T095 [US4] Реализовать учёт связанных файлов сборки в
       `packages/core/src/preview/snapshot.rs`: какие файлы vault прочитаны для этой заметки
-- [ ] T096 [US4] Реализовать событие `DependencyChanged` в
+- [X] T096 [US4] Реализовать событие `DependencyChanged` в
       `packages/core/src/preview/events.rs` — contracts/frontend-preview.md
-- [ ] T097 [US4] Подписать пересборку на изменения связанных файлов через существующий поток
+- [X] T097 [US4] Подписать пересборку на изменения связанных файлов через существующий поток
       `VaultEvent` фичи 001 в `packages/core/src/preview/mod.rs`: своего механизма слежения
       не вводить (spec.md → Assumptions, FR-020)
-- [ ] T098 [US4] Реализовать отказ `OutsideVault` до чтения в
+- [X] T098 [US4] Реализовать отказ `OutsideVault` до чтения в
       `packages/core/src/preview/resolve.rs` (FR-023)
-- [ ] T099 [US4] Реализовать обработку циклической связи в
+- [X] T099 [US4] Реализовать обработку циклической связи в
       `packages/core/src/preview/compile.rs` по результату T093
 
 ### Шрифты
@@ -449,24 +449,24 @@ description: "Task list for Note Rendering and Live Preview"
 - [X] T100 [P] [US4] Тест: шрифт из папки vault попадает в набор и применяется, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-027)
-- [ ] T101 [P] [US4] Тест: отсутствующий шрифт называется поимённо, а документ собирается с
+- [X] T101 [P] [US4] Тест: отсутствующий шрифт называется поимённо, а документ собирается с
       подстановкой и остаётся `Succeeded` — **не** `Failed`, в
       `packages/core/tests/preview_native.rs` и `packages/core/tests/preview_wasm.rs`
       (FR-028)
-- [ ] T102 [P] [US4] Тест: появление и удаление шрифта в vault обновляет набор по правилам
+- [X] T102 [P] [US4] Тест: появление и удаление шрифта в vault обновляет набор по правилам
       связанного файла, в `packages/core/tests/preview_native.rs` (FR-029)
-- [ ] T103 [P] [US4] Тест: шрифт, установленный в системе, но отсутствующий во встроенном
+- [X] T103 [P] [US4] Тест: шрифт, установленный в системе, но отсутствующий во встроенном
       наборе и в vault, **не** применяется, в `packages/core/tests/preview_native.rs` и
       `packages/core/tests/preview_wasm.rs` (FR-027)
 - [X] T104 [US4] Реализовать сбор шрифтов из папки vault в
       `packages/core/src/preview/fonts.rs` (FR-027)
-- [ ] T105 [US4] Реализовать `FontSet::missing()` и предупреждение о недостающих шрифтах в
+- [X] T105 [US4] Реализовать `FontSet::missing()` и предупреждение о недостающих шрифтах в
       `packages/core/src/preview/fonts.rs` (FR-028)
-- [ ] T106 [US4] Реализовать реакцию на появление и удаление шрифта в vault в
+- [X] T106 [US4] Реализовать реакцию на появление и удаление шрифта в vault в
       `packages/core/src/preview/fonts.rs` (FR-029)
-- [ ] T107 [US4] Проверить, что шрифты vault не показываются в дереве заметок — правило
+- [X] T107 [US4] Проверить, что шрифты vault не показываются в дереве заметок — правило
       фичи 001 и 002 действует без изменений (spec.md → Assumptions)
-- [ ] T108 [US4] Замерить время от изменения связанного файла до обновления предпросмотра и
+- [X] T108 [US4] Замерить время от изменения связанного файла до обновления предпросмотра и
       зафиксировать порог в `packages/core/benches/preview_scale.rs` (SC-006) — рядом с
       замерами SC-001 и SC-002/SC-003
 - [ ] T109 [US4] Прогнать `quickstart.md` Сценарии 5, 6 и 7 на web- и native-сборке
@@ -477,18 +477,18 @@ description: "Task list for Note Rendering and Live Preview"
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T110 [P] Реализовать исход `VaultUnavailable` и сообщение пользователю в
+- [X] T110 [P] Реализовать исход `VaultUnavailable` и сообщение пользователю в
       `packages/core/src/preview/compile.rs` и `ui/src/preview/PreviewPane.tsx`; текст в
       редакторе при этом сохраняется по правилам фичи 001 (FR-025)
-- [ ] T111 [P] Реализовать наследование предела размера заметки фичи 001 в
+- [X] T111 [P] Реализовать наследование предела размера заметки фичи 001 в
       `packages/core/src/preview/resolve.rs`: заметку, которую нельзя открыть, не собирать
       (FR-030)
-- [ ] T112 [P] Тест: все операции фичи выполняются при полностью отключённой сети без
+- [X] T112 [P] Тест: все операции фичи выполняются при полностью отключённой сети без
       отличий в поведении, в `packages/core/tests/preview_native.rs` (FR-024, SC-009)
-- [ ] T113 Убедиться, что пакеты Typst из сети не поддерживаются и попытка их использовать
+- [X] T113 Убедиться, что пакеты Typst из сети не поддерживаются и попытка их использовать
       даёт понятный отказ, в `packages/core/src/preview/world.rs` (research.md §8,
       принцип IX)
-- [ ] T114 [P] Проверить, что панель предпросмотра остаётся темочувствительной и использует
+- [X] T114 [P] Проверить, что панель предпросмотра остаётся темочувствительной и использует
       токены из `ui/src/styles/tokens/`, а не собственные цвета
 - [ ] T115 Прогнать `quickstart.md` Сценарии 9 и 10 (офлайн, границы, потолок гарантий) на
       web- и native-сборке
@@ -497,11 +497,11 @@ description: "Task list for Note Rendering and Live Preview"
 - [ ] T117 Зафиксировать фактический вес доставки wasm-модуля после `wasm-opt` и сжатия и
       время первого открытия на небыстром канале; сверить с бюджетом SC-001
       (research.md §11)
-- [ ] T118 Прогнать `pnpm typecheck` по всем пакетам (`ui/`, `apps/web/`, `apps/desktop/`):
+- [X] T118 Прогнать `pnpm typecheck` по всем пакетам (`ui/`, `apps/web/`, `apps/desktop/`):
       `strict` без `any` (принцип IV)
-- [ ] T119 Прогнать `cargo test -p typsidian-core` и
+- [X] T119 Прогнать `cargo test -p typsidian-core` и
       `wasm-pack test --headless --chrome packages/core` — оба обязательны (принцип II)
-- [ ] T120 Обновить раздел «Что готово» в `README.md`: фича 005 переходит из «не начато» в
+- [X] T120 Обновить раздел «Что готово» в `README.md`: фича 005 переходит из «не начато» в
       реализованное, а из списка «чего нет» уходит компиляция Typst и preview
 
 ---
@@ -693,3 +693,156 @@ plan.md → Project Structure.
 фичи 006 и 007 добавили ровно обратное: `preview/packages.rs::fetch_and_install`
 скачивает внешний шаблон, ради чего в `Cargo.toml` стоят `reqwest`, `flate2` и
 `tar`. Выполнять задачу в прежней формулировке значило бы откатить две фичи.
+
+---
+
+## Сверка с кодом и доделка (2026-10-09)
+
+Отметки не двигались с 2026-09-15, хотя фичи 006–009 дописывали предпросмотр. Сверка прошла
+по коду и тестам; прогон от 2026-10-09: `preview_native` — 42 теста, `preview_wasm` — 40,
+оба зелёные; `pnpm typecheck` по четырём пакетам чист; сценарий
+`scripts/dev/scenarios/preview.mjs` в headless-браузере на `next dev` проходит.
+
+### Сделано в этот заход
+
+| Задачи | Что и где |
+|---|---|
+| T060 | `typst::comemo::evict(MEMO_MAX_AGE)` после каждой сборки в `preview/compile.rs`. До этого кэш мемоизации только рос |
+| T065–T068 | `preview/anchor.rs` (`ScrollAnchor`, `ResolvedAnchor`, `resolve`), `CompiledDocument::with_anchor`; якорь уезжает в ядро параметром сборки и возвращается в `CompiledDocument.anchor`; `ui/src/preview/useScrollAnchor.ts` только снимает и прокручивает |
+| T069 | `PreviewPage` — `memo` по `digest` |
+| T054–T056, T073–T076, T091, T093, T099 | общая таблица `tests/common/preview_cases.rs` на обоих таргетах |
+| T095–T097 | `CompiledDocument.dependencies` (вошедшие файлы и те, что сборка не нашла); рабочая область пересобирает заметку по событию vault о таком файле |
+| T086–T088 | место замечания — кнопка, когда файл открывается редактором (`canReveal`), иначе строка без действия; переход — `revealDiagnostic` рабочей области |
+
+### Отметки, отставшие от кода
+
+| Задачи | Свидетельство |
+|---|---|
+| T012–T016, T080, T092, T094, T098, T111 | таблица от 2026-09-10 выше; тесты зелёные |
+| T040, T041 | `ui/src/preview-client.ts`, `previewClient` в `vault-client-web.ts` |
+| T058 | `revision` в `CompiledDocument`, отбрасывание в `PreviewPane.tsx` |
+| T082, T084, T085, T089 | разделение ошибок и предупреждений, пометка «не соответствует тексту», «показывать нечего» с причиной, очистка при удачной сборке — `PreviewPane.tsx` |
+| T101, T105, T106 | `FontSet::missing`, `VaultFontCache`; `font_outside_vault_is_reported_unknown`, `vault_font_is_read_once_per_change_not_per_compile`, `a_warning_does_not_fail_the_build` |
+
+### Отступления от буквы задач
+
+- **T039, T096 — событий сборки нет.** Вместо `BuildStarted`/`BuildFinished`/`DependencyChanged`
+  — запрос-ответ с `revision` и список `dependencies` в результате. Сборку запрашивает
+  интерфейс, поэтому её начало и конец он знает сам; отдельный канал событий дублировал бы это.
+- **T055** проверяет метку версии в ядре; «собирается последнее состояние» обеспечивает
+  дебаунс в `PreviewPane.tsx`, отдельного теста на него нет (JS-тестов в репозитории нет).
+- **T083** — `DiagnosticsList.tsx` не заведён: список — `DiagnosticItem` внутри `PreviewPane.tsx`.
+- **T097 — изображения и файлы данных.** Vault сообщает событиями только о заметках и досках;
+  остальные связанные файлы в индекс не входят. Для них пересборка идёт при возврате фокуса
+  в окно приложения — картинку правят во внешней программе. Событийной пересборки для таких
+  файлов нет; это остаток FR-020, см. T121.
+- **T113 закрыта как устаревшая**: фичи 006 и 007 ввели загрузку внешних шаблонов, задача в
+  прежней формулировке потребовала бы их откатить (см. раздел выше).
+
+### Что остаётся
+
+- **T018, T057, T059 — отмена сборки при закрытии заметки и переходе к другой.** Результат
+  такой сборки отбрасывается по `revision` и пути заметки, но сама она дорабатывает: воркер
+  убивается только по пределу времени. Убивать его на каждую смену заметки значило бы
+  каждый раз заново поднимать экземпляр ядра и терять кэш мемоизации.
+- **T029 — шрифты вне модуля.** Встроенный набор по-прежнему вшит в wasm (`typst-assets`,
+  feature `fonts`); цена — вес доставки. Требует раздачи файлов шрифтов каждой оболочкой.
+- **T046** — вынести состояние сборки из `PreviewPane.tsx` в `useCompiledDocument.ts`.
+- **T061, T053, T071, T108, T117** — замеры; `MEMO_MAX_AGE = 10` взят как у `typst watch`,
+  без замера.
+- **T064, T102, T103, T107, T110, T112, T114** — не сверялись.
+- **T050–T052, T070, T090, T109, T115, T116, T119, T120** — прогоны quickstart и итоговые шаги.
+
+- [X] T121 [US4] Пересборка по изменению связанного файла, которого нет в индексе vault
+      (изображение, файл данных): отметка версии таких зависимостей в ядре и сверка на такте
+      опроса vault в `packages/core/src/preview/` и `ui/src/preview/PreviewPane.tsx`, вместо
+      пересборки по возврату фокуса (FR-020, SC-006)
+
+### Сборка вне потока интерфейса (2026-10-09, второй заход)
+
+| Задачи | Что и где |
+|---|---|
+| T020 | `CompileExecutor`, `CompileJob`, `CompileOutput`, `ExecutorError`, `InlineExecutor` в `preview/compile.rs`; цикл резолва зовёт исполнителя на каждый проход (`every_compiler_pass_goes_through_the_executor`) |
+| T021 | `ThreadExecutor` в `packages/shell/src/lib.rs`: `spawn_blocking` с `tokio::time::timeout`; по пределу результат отбрасывается, поток дорабатывает |
+| T022, T030 | `preview/worker.rs` — форма сообщений и обе их стороны (`WorkerExecutor`, `runCompileJob`); `ui/src/preview/compile-worker.ts` — воркер со вторым экземпляром ядра, `compile-worker-client.ts` — его владелец. Воркер создаётся при первой сборке; если он не поднялся, ядро собирает на месте и пишет причину в консоль |
+| T023, T019 | `BUILD_TIME_LIMIT_SECS = 10`; исход — документ `Failed` с `AppMessage::BuildTimedOut`; на web по пределу `worker.terminate()`. `a_build_over_the_time_limit_is_named_and_changes_nothing` на обоих таргетах |
+| T017 | сценарий `scripts/dev/scenarios/preview-timeout.mjs`: во время десятисекундной сборки страница рисует ~60 кадров в секунду, затем показывает причину, прежний вид остаётся, после правки предпросмотр восстанавливается на новом воркере |
+
+**Отступления.** Трейт называется как в задаче, но `CompileHandle` и `spawn` нет: исполнитель
+— асинхронная функция «выполни проход», а не дескриптор задачи; отмена — отбрасывание
+результата по `revision`. Предел времени живёт у исполнителя, а не в `compile.rs`: оборвать
+синхронный `typst::compile` изнутри нечем. Экспорт в PDF (009) идёт через `InlineExecutor`,
+в потоке вызывающего. **T030** выполнена для второго экземпляра ядра; основной по-прежнему
+загружается при открытии vault — он нужен дереву и редактору, а не только предпросмотру.
+
+### Итог захода 2026-10-09
+
+Прогон после всех правок: `cargo test -p typsidian-core` — зелёный целиком, `preview_native`
+— 45 тестов; `wasm-pack test --headless --chrome packages/core` — зелёный целиком,
+`preview_wasm` — 43; `cargo check -p typsidian-shell` и `pnpm typecheck` чисты; сценарии
+`preview.mjs` и `preview-timeout.mjs` в headless-браузере проходят. В окне рабочего стола
+ничего из этого не прогонялось.
+
+Дополнительно закрыто: T102 (`a_font_added_to_and_removed_from_the_vault_updates_the_set`),
+T103 (`font_outside_vault_is_reported_unknown` — набор без системных шрифтов по построению),
+T107 (`classify` относит шрифты к `Other`, в дерево они не попадают), T114 (цвет листа
+вынесен в токен `--paper`; других собственных цветов у панели нет), T119, T120.
+
+**Замер к T117** (задача остаётся открытой — время первого открытия не мерялось):
+`typsidian_core_bg.wasm` после `wasm-opt` — 39,9 МБ, gzip -9 — 17,5 МБ. Это заметно больше
+10,5 МБ brotli, названных в срезе от 2026-09-06: с тех пор в модуль вошли загрузка шаблонов,
+экспорт в PDF и синхронизация. Модуль теперь загружается дважды — в окно и в воркер сборки
+(второй раз из кэша браузера).
+
+Открыто 22 задачи: отмена сборки (T018, T057, T059), шрифты вне модуля (T029), вынос
+состояния сборки из панели (T046), `beginEdit` на каждое нажатие (T064 — меняет гарантию
+001 FR-035, без решения не трогалась), `VaultUnavailable` (T110), офлайн-тест (T112),
+событийная пересборка для изображений (T121), замеры (T053, T061, T071, T108, T117) и
+ручные прогоны quickstart (T050–T052, T070, T090, T109, T115, T116).
+
+### Третий заход (2026-10-09): отмена, связанные файлы вне индекса, остатки
+
+| Задачи | Что и где |
+|---|---|
+| T018, T057, T059 | `ExecutorError::Cancelled`; `PreviewClient.cancel` — на web убивает воркер с идущей сборкой (`compile-worker-client.ts`), панель зовёт его при смене и закрытии заметки и не показывает результат, пришедший для другой заметки. Отменённая сборка не несёт ни страниц, ни замечаний (`a_cancelled_build_yields_nothing_to_show`). Сценарий `preview-timeout.mjs`: переход к другой заметке посреди долгой сборки показывает её вид меньше чем за секунду |
+| T121 | `VaultBackend::file_mark` (размер и время изменения без чтения), `preview::dependency_mark`, привязки `dependencyMark` / `preview_dependency_mark`; панель раз в 2 секунды сверяет отметку связанных файлов и пересобирает заметку при расхождении. Пересборка по возврату фокуса убрана. `the_dependency_mark_follows_the_files`; сценарий `preview.mjs` — правка `#read("данные.txt")` на диске |
+| T110 | `AppMessage::VaultUnavailable`: предупреждение, когда папка vault недоступна во время сборки; текст из буфера при этом собирается (`an_unavailable_vault_is_named_and_the_text_still_builds`) |
+| T046 | `ui/src/preview/useCompiledDocument.ts` — сборка, её состояние, отмена, слежение за зависимостями и якорь прокрутки; `PreviewPane.tsx` показывает |
+| T112 | покрыта тестами 007: `a_note_without_imports_never_reaches_for_the_network` и соседними в `install_cases.rs` на обоих таргетах; у предпросмотра без внешних шаблонов сетевого пути нет вовсе |
+
+**Отступления.** На рабочем столе и Android отмены нет: поток с идущей сборкой прервать
+нечем, её результат отбрасывается. `VaultUnavailable` — предупреждение, а не отказ: сам
+текст заметки собирается из буфера редактора, недоступны только связанные файлы и шрифты.
+
+### Замеры (T053, T061, T071, T108)
+
+`packages/core/benches/preview_scale.rs` был заглушкой; теперь мерит и проверяет пороги как
+условие прохождения. Прогон 2026-10-09, native, release, документ 50 страниц (65 КБ):
+
+| Что | Измерено | Бюджет |
+|---|---|---|
+| Первая сборка (SC-001) | 165 мс | 2 с |
+| Пересборка после правки в середине (SC-002) | медиана 139 мс, худшая 215 мс | 750 мс ядру + 250 мс дебаунса |
+| Начало и конец сессии из 40 правок (T061) | 143 мс / 146 мс | конец не медленнее начала вдвое |
+| Отметка 40 связанных файлов | 43 мкс | — |
+| Пересборка после правки одного из 40 импортов (SC-006) | 695 мс | 750 мс ядру + 1 с опроса + 250 мс дебаунса |
+
+`MEMO_MAX_AGE = 10` оставлен: за сессию пересборка не замедляется. Такт опроса связанных
+файлов сокращён с 2 до 1 секунды — с двумя порог SC-006 в худшем случае не выдерживался.
+SC-003 (отклик на ввод во время сборки) ядром не измерить; сценарий `preview-timeout.mjs`
+показывает ~60 кадров в секунду во время десятисекундной сборки.
+
+**Оговорки.** Замеры — на native; под wasm сборка медленнее, и там пороги не мерялись.
+Пересборка заметки с 40 импортами укладывается в бюджет с запасом в 55 мс: каждый импорт —
+отдельный проход цикла резолва, и содержимое связанных файлов между сборками не кэшируется
+(кэшируются только файлы шаблонов). На заметке с сотней связанных файлов SC-006 не
+выдержится — см. T122.
+
+- [ ] T122 [US4] Кэш содержимого связанных файлов vault между сборками одной заметки (по
+      отметке `file_mark`), чтобы пересборка не поднимала каждый импорт отдельным проходом
+      компилятора, в `packages/core/src/preview/cache.rs` и `compile.rs`; порог — в
+      `benches/preview_scale.rs` на 100 связанных файлах (SC-002, SC-006)
+
+Открыто 12 задач: шрифты вне модуля (T029), `beginEdit` на каждое нажатие (T064 — меняет
+гарантию 001 FR-035, нужно решение), кэш связанных файлов (T122), вес и время первого
+открытия (T117) и ручные прогоны quickstart (T050–T052, T070, T090, T109, T115, T116).

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { RenderedPage } from "../wasm-core/typsidian_core.js";
 import { TextLayer } from "./TextLayer.js";
 import { useI18n } from "../i18n/index.js";
@@ -16,7 +17,7 @@ import { useI18n } from "../i18n/index.js";
  * пользовательский ввод — он порождён ядром из текста заметки и наружу не
  * ходит (принцип IX).
  */
-export function PreviewPage({ page }: { page: RenderedPage }): React.JSX.Element {
+function PreviewPageView({ page }: { page: RenderedPage }): React.JSX.Element {
   const { t } = useI18n();
   return (
     <article
@@ -36,3 +37,16 @@ export function PreviewPage({ page }: { page: RenderedPage }): React.JSX.Element
     </article>
   );
 }
+
+/**
+ * Страница перерисовывается, только когда изменился её отпечаток (FR-010,
+ * T069): ядро отдаёт все страницы документа, а какие из них остались прежними,
+ * говорит `digest`. Он покрывает и картинку, и текстовый слой — они из одной
+ * сборки. Без этого правка последней страницы заново вставляла бы разметку
+ * каждой предыдущей.
+ */
+export const PreviewPage = memo(
+  PreviewPageView,
+  (previous, next) =>
+    previous.page.digest === next.page.digest && previous.page.index === next.page.index,
+);

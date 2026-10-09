@@ -18,6 +18,7 @@
 //! и ничего больше. Браузерный хендл туда не положить даже случайно — код
 //! просто не скомпилируется (research.md §11).
 
+pub mod anchor;
 pub mod cache;
 pub mod compile;
 pub mod diagnostics;
@@ -31,11 +32,16 @@ pub mod world;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+#[cfg(target_arch = "wasm32")]
+pub mod worker;
 
+pub use anchor::{ResolvedAnchor, ScrollAnchor};
 pub use cache::PackageCache;
 pub use compile::{
-    compile_note, compile_note_resolved, compile_note_with_templates, install_template,
-    CompileOutcome, CompiledDocument,
+    compile_note, compile_note_resolved, compile_note_resolved_on, compile_note_with_templates,
+    compile_note_with_templates_on, dependency_mark, install_template, CompileExecutor, CompileJob,
+    CompileOutcome, CompileOutput, CompiledDocument, ExecutorError, InlineExecutor,
+    BUILD_TIME_LIMIT_SECS,
 };
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;

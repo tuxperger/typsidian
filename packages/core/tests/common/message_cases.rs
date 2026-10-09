@@ -99,6 +99,14 @@ pub fn every_variant_has_a_stable_json_shape() {
             },
             json!({"code": "NoteOutsideVault", "path": "../вне.typ"}),
         ),
+        (
+            AppMessage::BuildTimedOut { seconds: 10 },
+            json!({"code": "BuildTimedOut", "seconds": 10}),
+        ),
+        (
+            AppMessage::VaultUnavailable,
+            json!({"code": "VaultUnavailable"}),
+        ),
     ];
 
     for (message, expected) in table {

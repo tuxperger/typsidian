@@ -22,6 +22,7 @@ export const preview: Translation<typeof en> = {
   "preview.openNote": "Откройте заметку, чтобы увидеть её свёрстанный вид.",
   "preview.buildingLong": "Собирается…",
   "preview.warnings": "Предупреждения",
+  "preview.reveal": (p) => `Перейти к ${p.place}`,
   "preview.installing": "Загружается…",
   "preview.install": "Загрузить шаблон",
   "preview.page": (p) => `Страница ${p.number}`,
