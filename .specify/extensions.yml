@@ -4,6 +4,8 @@
 # чтобы их нельзя было пропустить, переходя от фазы к фазе:
 #
 # - после specify — clarify: неоднозначности снимаются до плана, а не в нём;
+# - перед plan    — design-typsidian: интерфейс фичи рисуется макетом до плана,
+#   ссылка на макет попадает в plan.md (её проверяет .claude/hooks/design-gate.sh);
 # - после tasks   — analyze: конституция прямо запрещает его пропускать;
 # - после implement — quality-gates-typsidian (Definition of done), затем
 #   converge: сверка кода со spec/plan/tasks, чтобы «реализовано» означало
@@ -24,6 +26,11 @@ hooks:
       enabled: true
 
   before_plan:
+    - extension: typsidian-gates
+      command: design.typsidian
+      description: Нарисовать макет фичи до плана — вёрстка идёт по нему, а не по описанию
+      optional: false
+      enabled: true
     - extension: typsidian-gates
       command: speckit.checklist
       description: Гейт качества требований перед планом (конституция, шаг 2)

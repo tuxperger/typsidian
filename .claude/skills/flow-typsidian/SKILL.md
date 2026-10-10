@@ -1,6 +1,6 @@
 ---
 name: flow-typsidian
-description: Сквозной цикл Spec Kit для Typsidian — от идеи до закрытой фичи. Читать перед любой новой фичей, перед продолжением незакрытой и когда непонятно, какая /speckit-* команда следующая. Правило проекта — код продукта меняется только под задачи из tasks.md; этот скилл говорит, в каком порядке вызывать speckit-specify, checklist, clarify, plan, tasks, analyze, implement, converge и что проверять между ними.
+description: Сквозной цикл Spec Kit для Typsidian — от идеи до закрытой фичи. Читать перед любой новой фичей, перед продолжением незакрытой и когда непонятно, какая /speckit-* команда следующая. Правило проекта — код продукта меняется только под задачи из tasks.md; этот скилл говорит, в каком порядке вызывать speckit-specify, checklist, clarify, макет, plan, tasks, analyze, implement, converge и что проверять между ними.
 argument-hint: "Описание фичи или номер существующей (NNN)"
 user-invocable: true
 ---
@@ -29,6 +29,7 @@ user-invocable: true
 | Хуки этапов Spec Kit | `.specify/extensions.yml` |
 | Гейты качества | `.specify/scripts/typsidian/gates.sh`, скилл `quality-gates-typsidian` |
 | Работа с артефактами спек | агент `speckit-agent` |
+| Макеты и дизайн-система | скилл `design-typsidian` |
 
 ## Порядок
 
@@ -48,21 +49,26 @@ user-invocable: true
 4. **`/speckit-clarify`** — хук `after_specify`, автоматически. Для моста к Neovim
    обязателен (принцип V). Вопросы, на которые отвечает конституция или
    существующий код, закрывай сам и записывай в Assumptions.
-5. **`/speckit-plan`** — research.md, data-model.md, contracts/, quickstart.md.
+5. **Макет** — скилл `design-typsidian`, хук `before_plan`, автоматически. Фича с
+   интерфейсом сначала рисуется по готовой спеке и только потом планируется:
+   строка «Макет — …» попадает в Summary `plan.md`, по ней верстает
+   `frontend-agent`, без неё хук `design-gate` не даёт править `*.tsx`/`*.css`.
+   Фиче без интерфейса — «Макет — не требуется: <причина>».
+6. **`/speckit-plan`** — research.md, data-model.md, contracts/, quickstart.md.
    Constitution Check заполняется по существу: для каждого принципа — как фича его
    соблюдает. Отклонение — только с обоснованием в разделе Complexity/Deviation.
-6. **`/speckit-tasks`** — задачи по user stories. Тесты ядра на обоих путях
+7. **`/speckit-tasks`** — задачи по user stories. Тесты ядра на обоих путях
    (`cargo test` и `wasm-bindgen-test`) входят в задачи, а не откладываются.
-7. **`/speckit-analyze`** — хук `after_tasks`, автоматически; пропускать нельзя.
+8. **`/speckit-analyze`** — хук `after_tasks`, автоматически; пропускать нельзя.
    CRITICAL и HIGH находки исправляются в артефактах до реализации.
-8. **`/speckit-implement`** — по задачам, отмечая `[X]` по мере выполнения. Работу
+9. **`/speckit-implement`** — по задачам, отмечая `[X]` по мере выполнения. Работу
    по зонам отдавать агентам: `rust-core-agent`, `frontend-agent`,
    `tauri-shell-agent`, `nvim-bridge-agent`, `nix-env-agent`.
-9. **`quality-gates-typsidian`** — хук `after_implement`, автоматически.
-10. **`/speckit-converge`** — хук `after_implement`: сверка кода со спекой;
+10. **`quality-gates-typsidian`** — хук `after_implement`, автоматически.
+11. **`/speckit-converge`** — хук `after_implement`: сверка кода со спекой;
     недостающее дописывается в `tasks.md` и доделывается. Отдельно проверить, что
     логика ядра достижима из UI: цепочка ядро → биндинг → вызов в `ui/src`.
-11. В шапке спеки `**Status**: Implemented`, обновить README, если изменилось
+12. В шапке спеки `**Status**: Implemented`, обновить README, если изменилось
     пользовательское поведение. Коммит — по скиллу `git-typsidian`, фичей целиком.
 
 ## Точки, где останавливаться
@@ -74,7 +80,8 @@ user-invocable: true
 - план требует поправки конституции (отдельный шаг `/speckit-constitution`);
 - реализация упёрлась в гейт, который не чинится в рамках задач фичи;
 - решение расходится с макетом — часть расхождений намеренная, не переделывать
-  обратно без вопроса.
+  обратно без вопроса;
+- макет вводит то, чего нет в спеке, — показать его до плана.
 
 ## Мелкие правила
 

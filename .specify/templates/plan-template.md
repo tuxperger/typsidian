@@ -10,6 +10,8 @@
 
 [Extract from feature spec: primary requirement + technical approach from research]
 
+Макет — [ссылка на макет и экран по скиллу design-typsidian, либо «не требуется: причина»]
+
 ## Technical Context
 
 <!--

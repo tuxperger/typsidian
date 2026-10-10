@@ -13,6 +13,8 @@ Next.js), рабочий стол и Android (`apps/desktop`, `apps/mobile`, Tau
   Команды `/speckit-*` вызываются самостоятельно через Skill. Код в `packages/`,
   `ui/`, `apps/`, `nix/`, `scripts/`, `flake.nix` правится только под открытую
   задачу `tasks.md` активной фичи; иначе хук `spec-gate` запросит подтверждение.
+- **Интерфейс — по макету.** Новая фича с экраном: придумать функционал, нарисовать
+  его в Claude Design, верстать по этому макету (скилл `design-typsidian`).
 - **Идеи и предложения** фиксируются спекой стадии `spec` (скилл
   `roadmap-typsidian`), а не TODO в коде. Состояние всех фич — `specs/ROADMAP.md`
   (генерируется). `.specify/feature.json` — след последней `/speckit-*` команды,
@@ -34,6 +36,7 @@ Next.js), рабочий стол и Android (`apps/desktop`, `apps/mobile`, Tau
 | --- | --- |
 | `flow-typsidian` | начало/продолжение фичи, выбор следующей `/speckit-*` команды |
 | `roadmap-typsidian` | записать идею, посмотреть стадии, переключить активную фичу |
+| `design-typsidian` | фича с интерфейсом: макет в Claude Design до плана, вёрстка по нему |
 | `quality-gates-typsidian` | запуск cargo/pnpm, проверки перед «готово» и перед коммитом |
 | `git-typsidian` | любой коммит, ребейз, пуш |
 
@@ -58,13 +61,14 @@ Next.js), рабочий стол и Android (`apps/desktop`, `apps/mobile`, Tau
 | --- | --- | --- |
 | `session-context.sh` | SessionStart | активная фича, стадии всех фич, следующий шаг |
 | `spec-gate.sh` | PreToolUse Edit/Write | правка кода продукта без открытых задач → запрос подтверждения (`TYPSIDIAN_SPEC_GATE=off` отключает) |
+| `design-gate.sh` | PreToolUse Edit/Write | правка `*.tsx`/`*.css` интерфейса без строки «Макет — …» в `plan.md` фичи (с 013) → запрос подтверждения (`TYPSIDIAN_DESIGN_GATE=off` отключает) |
 | `git-guard.sh` | PreToolUse Bash | разрушающие git-команды → запрос подтверждения |
 | `check-i18n-edit.sh` | PostToolUse Edit/Write | хардкод интерфейса в изменённом файле |
 | `post-edit.sh` | PostToolUse Edit/Write | `rustfmt --check` файла, линт `spec.md`/`tasks.md`, перегенерация роадмапа |
 | `stop-gate.sh` | Stop | `cargo fmt --check` при изменённых `.rs`, актуальность роадмапа |
 
 Хуки этапов Spec Kit — `.specify/extensions.yml`: после `/speckit-specify` —
-`/speckit-clarify`, после `/speckit-tasks` — `/speckit-analyze`, после
+`/speckit-clarify`, перед `/speckit-plan` — `design-typsidian`, после `/speckit-tasks` — `/speckit-analyze`, после
 `/speckit-implement` — `quality-gates-typsidian` и `/speckit-converge`.
 
 ## Скрипты
