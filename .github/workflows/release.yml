@@ -1,18 +1,34 @@
 # Сборка оболочки рабочего стола и выпуск релиза.
 #
-#   тег `v*`            → .deb прикладывается к GitHub Release
-#   ручной запуск       → .deb остаётся артефактом прогона
+#   в `master` попала новая версия  → .deb и .AppImage в GitHub Release `vX.Y.Z`
+#   тег `v*`                        → то же самое для этого тега
+#   ручной запуск                   → пакеты остаются артефактами прогона
+#
+# Версия одна — `version` в `apps/desktop/src-tauri/tauri.conf.json`: из неё
+# Tauri берёт имена пакетов. «Новая» — значит, релиза `v<версия>` ещё нет:
+# достаточно поднять её (0.1.1, 0.2.0 …) и запушить в `master`, тег прогон
+# поставит сам. Прочие правки `tauri.conf.json` сборку не запускают — релиз
+# этой версии уже есть.
 #
 # Собирается НЕ через флейк: бинарь из dev-shell слинкован с библиотеками из
 # /nix/store и на обычном Debian/Ubuntu не запустится. Здесь — системные
 # WebKitGTK и rustup, как у пользователя пакета. Ubuntu 22.04 выбрана как
-# самая старая glibc, на которой есть webkit2gtk-4.1.
+# самая старая glibc, на которой есть webkit2gtk-4.1: и .deb, и AppImage
+# запускаются на ней и на всём, что новее.
 name: Release
 
 on:
   push:
+    branches: [master]
+    paths: [apps/desktop/src-tauri/tauri.conf.json]
     tags: ["v*"]
   workflow_dispatch:
+
+# Версию и тег нередко пушат разом: прогоны идут по очереди, и второй видит
+# уже готовый релиз, а не собирает его наперегонки с первым.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -23,23 +39,51 @@ env:
   PNPM_VERSION: "12.3.4"
 
 jobs:
-  desktop-deb:
-    name: Typsidian .deb (x86_64)
+  version:
+    name: Версия и нужен ли релиз
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      build: ${{ steps.version.outputs.build }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # Имя и версия пакета берутся из `tauri.conf.json`, а не из тега: без
+          # этой сверки тег `v0.2.0` выпустил бы релиз с `Typsidian_0.1.0_amd64.deb`.
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$tag" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::тег $GITHUB_REF_NAME, а в tauri.conf.json версия $version"
+            exit 1
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            build=true release=false
+          elif gh release view "$tag" > /dev/null 2>&1; then
+            echo "::notice::релиз $tag уже есть — собирать нечего"
+            build=false release=false
+          else
+            build=true release=true
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+  desktop-linux:
+    name: Typsidian .deb и .AppImage (x86_64)
+    needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-
-      # Имя и версия пакета берутся из `tauri.conf.json`, а не из тега: без
-      # этой сверки тег `v0.2.0` выпустил бы релиз с `Typsidian_0.1.0_amd64.deb`.
-      - name: Тег совпадает с версией оболочки
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::тег $GITHUB_REF_NAME, а в tauri.conf.json версия $version"
-            exit 1
-          fi
 
       - name: Системные библиотеки Tauri
         run: |
@@ -77,20 +121,30 @@ jobs:
       - name: "@typsidian/ui → ui/dist"
         run: pnpm --filter @typsidian/ui build
 
+      # AppImage назван явно: в `bundle.targets` его нет, потому что на NixOS
+      # он не собирается. linuxdeploy — сам AppImage, а FUSE на раннере нет.
       - name: cargo tauri build
         working-directory: apps/desktop
-        run: cargo tauri build --bundles deb
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo tauri build --bundles deb,appimage
 
       - uses: actions/upload-artifact@v4
         with:
-          name: typsidian-deb
-          path: target/release/bundle/deb/*.deb
+          name: typsidian-linux
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+      # Тега при пуше версии в `master` ещё нет — релиз ставит его на этот коммит.
       - name: GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" target/release/bundle/deb/*.deb \
-            --title "Typsidian $GITHUB_REF_NAME" --generate-notes
+          gh release create "$TAG" \
+            target/release/bundle/deb/*.deb \
+            target/release/bundle/appimage/*.AppImage \
+            --target "$GITHUB_SHA" --title "Typsidian $TAG" --generate-notes
