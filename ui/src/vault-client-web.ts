@@ -131,6 +131,17 @@ export function webVaultClient(
       call(() => backend.write(path, content, expected)),
     create: (path) => call(() => backend.create(path)),
     rename: (from, to) => call(() => backend.rename(from, to)),
+    moveTargets: (from, query) => call(() => backend.moveTargets(from, query)),
+    moveImpact: (request) => call(() => backend.moveImpact(request)),
+    moveEntry: (request, control) => {
+      // Вызов ядра занят до конца переноса, поэтому отмена — флаг, который
+      // ядро читает между файлами, а не второй вызов (023 research.md §6).
+      const cancel = { cancelled: control?.signal?.aborted ?? false };
+      control?.signal?.addEventListener("abort", () => {
+        cancel.cancelled = true;
+      });
+      return call(() => backend.moveEntry(request, control?.onProgress, cancel));
+    },
     delete: (path) => call(() => backend.delete(path)),
     backlinks: (path) => call(() => backend.backlinks(path)),
     brokenLinks: (path) => call(() => backend.brokenLinks(path)),

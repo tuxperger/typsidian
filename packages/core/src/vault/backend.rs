@@ -1,6 +1,9 @@
 use crate::vault::conflict::{DiffLine, EditConflict};
 use crate::vault::events::VaultEvent;
 use crate::vault::index::{FileStamp, Note};
+use crate::vault::relocate::{
+    MoveControl, MoveError, MoveImpact, MoveOutcome, MoveRefusal, MoveRequest, MoveTarget,
+};
 use crate::vault::AccessState;
 use std::path::{Path, PathBuf};
 
@@ -328,6 +331,29 @@ pub trait VaultBackend: Sized {
     async fn ensure_folder(&mut self, path: &Path) -> Result<(), WriteError>;
     async fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError>;
     async fn delete(&mut self, path: &Path) -> Result<(), DeleteError>;
+
+    /// Папки, которые могут принять `from`, в порядке показа (фича 023, FR-012,
+    /// FR-022); `query` — фильтр, пустой — все. Правила — в
+    /// [`crate::vault::relocate::move_targets`].
+    async fn move_targets(&self, from: &Path, query: &str) -> Vec<MoveTarget>;
+
+    /// Что сломается, если выполнить перенос (FR-016, FR-017). Отказы те же, что
+    /// у [`VaultBackend::move_entry`]: показывать подтверждение переноса,
+    /// который всё равно будет отклонён, незачем.
+    async fn move_impact(&self, request: &MoveRequest) -> Result<MoveImpact, MoveRefusal>;
+
+    /// Переносит заметку, доску или папку в другую папку vault, не меняя имени
+    /// (фича 023). Отдельная операция, а не `rename`: contracts/core-move-api.md.
+    ///
+    /// Гарантии: при `Err` и `Cancelled` файлы vault прежние; при `Done`
+    /// содержимое перенесённого побайтно прежнее, а индекс, правки, таблица
+    /// ссылок и пометки разделов уже следуют за новым путём; как внешнее
+    /// изменение или удаление перенос не показывается (FR-008).
+    async fn move_entry(
+        &mut self,
+        request: &MoveRequest,
+        control: &dyn MoveControl,
+    ) -> Result<MoveOutcome, MoveError>;
 
     /// Делегирует модулю `graph` (research.md §8) — vault-manager не парсит
     /// содержимое заметок сам.

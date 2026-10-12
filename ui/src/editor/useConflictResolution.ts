@@ -88,6 +88,8 @@ export function useConflictResolution(
   state: ConflictResolutionState;
   current: ConflictEntry | null;
   noteConflicted: (notePath: string, kind: ConflictKind) => void;
+  /** Заметки перенесены средствами приложения: конфликт едет за путём (023, FR-020). */
+  pathsMoved: (changes: readonly { from: string; to: string }[]) => void;
   showDiff: () => Promise<void>;
   hideDiff: () => void;
   keepLocal: () => Promise<void>;
@@ -121,6 +123,21 @@ export function useConflictResolution(
   }, []);
 
   const currentPath = current?.notePath ?? null;
+  const pathsMoved = useCallback((changes: readonly { from: string; to: string }[]) => {
+    if (changes.length === 0) return;
+    const moved = new Map(changes.map((change) => [change.from, change.to]));
+    setState((prev) => {
+      if (!prev.conflicts.some((c) => moved.has(c.notePath))) return prev;
+      return {
+        ...prev,
+        conflicts: prev.conflicts.map((c) => ({
+          ...c,
+          notePath: moved.get(c.notePath) ?? c.notePath,
+        })),
+      };
+    });
+  }, []);
+
   const dropCurrent = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -187,6 +204,7 @@ export function useConflictResolution(
     state,
     current,
     noteConflicted,
+    pathsMoved,
     showDiff,
     hideDiff,
     keepLocal,

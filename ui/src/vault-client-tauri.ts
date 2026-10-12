@@ -43,6 +43,9 @@ import type {
   MentionStep,
   MentionsAvailability,
   MentionsStart,
+  MoveImpact,
+  MoveOutcome,
+  MoveTarget,
   NameCheck,
   Note,
   PreviewState,
@@ -299,6 +302,11 @@ export function tauriVaultClient(
     create: (path) => invoke<void>("create", { path }),
     rename: (from, to) => invoke<void>("rename", { from, to }),
     delete: (path) => invoke<void>("delete", { path }),
+    moveTargets: (from, query) => invoke<MoveTarget[]>("move_targets", { from, query }),
+    moveImpact: (request) => invoke<MoveImpact>("move_impact", { request }),
+    // На рабочем столе перенос — один атомарный системный вызов: ни хода, ни
+    // отмены у него нет (023 research.md §5).
+    moveEntry: (request) => invoke<MoveOutcome>("move_entry", { request }),
     backlinks: (path) => invoke<Note[]>("backlinks", { path }),
     brokenLinks: (path) => invoke<string[]>("broken_links", { path }),
     accessState: () => invoke<AccessState>("access_state"),

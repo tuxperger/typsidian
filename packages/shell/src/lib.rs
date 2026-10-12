@@ -63,6 +63,9 @@ use typsidian_core::vault::conflict::{DiffLine, EditConflict};
 use typsidian_core::vault::events::VaultEvent;
 use typsidian_core::vault::index::Note;
 use typsidian_core::vault::native::NativeBackend;
+use typsidian_core::vault::relocate::{
+    MoveError, MoveImpact, MoveOutcome, MoveRefusal, MoveRequest, MoveTarget, NoControl,
+};
 use typsidian_core::vault::vault_settings::{
     self, SetKeybindingError, VaultOverrides, VaultSettingsError,
 };
@@ -826,6 +829,47 @@ async fn rename(
 ) -> Answer<(), Failure<RenameError>> {
     with_vault!(state, |backend| backend
         .rename(Path::new(&from), Path::new(&to))
+        .await
+        .map_err(Failure::Core))
+}
+
+/// Папки, которые могут принять `from` (фича 023, FR-012, FR-022).
+///
+/// Что допустимо и как фильтруется, решает ядро; окно получает готовый список.
+#[tauri::command]
+async fn move_targets(
+    state: State<'_, Vault>,
+    from: String,
+    query: String,
+) -> Answer<Vec<MoveTarget>, Failure<()>> {
+    with_vault!(state, |backend| Ok(backend
+        .move_targets(Path::new(&from), &query)
+        .await))
+}
+
+/// Что сломает перенос (фича 023, FR-016): заметки, чьи ссылки станут битыми.
+#[tauri::command]
+async fn move_impact(
+    state: State<'_, Vault>,
+    request: MoveRequest,
+) -> Answer<MoveImpact, Failure<MoveRefusal>> {
+    with_vault!(state, |backend| backend
+        .move_impact(&request)
+        .await
+        .map_err(Failure::Core))
+}
+
+/// Перенос заметки, доски или папки (фича 023, FR-001, FR-002).
+///
+/// `NoControl`: на native перенос — атомарный `rename`, ни хода, ни отмены у
+/// него нет (023 research.md §5).
+#[tauri::command]
+async fn move_entry(
+    state: State<'_, Vault>,
+    request: MoveRequest,
+) -> Answer<MoveOutcome, Failure<MoveError>> {
+    with_vault!(state, |backend| backend
+        .move_entry(&request, &NoControl)
         .await
         .map_err(Failure::Core))
 }
@@ -1813,6 +1857,9 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             write,
             create,
             rename,
+            move_targets,
+            move_impact,
+            move_entry,
             delete,
             backlinks,
             broken_links,

@@ -26,6 +26,10 @@ import type {
   MentionStep,
   MentionsAvailability,
   MentionsStart,
+  MoveImpact,
+  MoveOutcome,
+  MoveRequest,
+  MoveTarget,
   NameCheck,
   Note,
   OpenText,
@@ -63,6 +67,12 @@ import type {
 // Всё, что здесь async, async и в ядре либо становится таким на границе
 // процесса. Единственное исключение — `hasUnresolvedEdits`, см. ниже.
 
+/** Ход и отмена массового переноса (фича 023, принцип X). */
+export interface MoveControl {
+  onProgress?: (done: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
 export interface VaultClient {
   // ── Дерево и файлы (001 FR-003…FR-014) ──────────────────────────────
 
@@ -84,6 +94,27 @@ export interface VaultClient {
   create(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   delete(path: string): Promise<void>;
+
+  // ── Перенос между папками (фича 023) ────────────────────────────────
+
+  /**
+   * Папки, которые могут принять элемент, в порядке показа; `query` — фильтр
+   * окна «Переместить в…», пустой — все. Допустимость и совпадение решает ядро:
+   * жест хранит ответ как множество, окно рисует строки как пришли.
+   */
+  moveTargets(from: string, query: string): Promise<MoveTarget[]>;
+  /**
+   * Заметки, чьи ссылки перенос сделает битыми (FR-016). Отказ переноса
+   * (`MoveRefusal`) приходит отклонённым промисом.
+   */
+  moveImpact(request: MoveRequest): Promise<MoveImpact>;
+  /**
+   * Перенос заметки, доски или папки. На web папка копируется пофайлово —
+   * отсюда ход и отмена; на рабочем столе перенос атомарен, и `control` не
+   * используется.
+   */
+  moveEntry(request: MoveRequest, control?: MoveControl): Promise<MoveOutcome>;
+
   backlinks(path: string): Promise<Note[]>;
   brokenLinks(path: string): Promise<string[]>;
   accessState(): Promise<AccessState>;

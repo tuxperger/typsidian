@@ -320,6 +320,35 @@ impl VaultBackend for UntouchableVault {
         unreachable!("гейт профиля ничего не удаляет")
     }
 
+    async fn move_targets(
+        &self,
+        _from: &Path,
+        _query: &str,
+    ) -> Vec<typsidian_core::vault::relocate::MoveTarget> {
+        unreachable!("гейт профиля не переносит")
+    }
+
+    async fn move_impact(
+        &self,
+        _request: &typsidian_core::vault::relocate::MoveRequest,
+    ) -> Result<
+        typsidian_core::vault::relocate::MoveImpact,
+        typsidian_core::vault::relocate::MoveRefusal,
+    > {
+        unreachable!("гейт профиля не переносит")
+    }
+
+    async fn move_entry(
+        &mut self,
+        _request: &typsidian_core::vault::relocate::MoveRequest,
+        _control: &dyn typsidian_core::vault::relocate::MoveControl,
+    ) -> Result<
+        typsidian_core::vault::relocate::MoveOutcome,
+        typsidian_core::vault::relocate::MoveError,
+    > {
+        unreachable!("гейт профиля не переносит")
+    }
+
     async fn backlinks(&self, _path: &Path) -> Vec<Note> {
         unreachable!("гейт профиля не трогает индекс")
     }

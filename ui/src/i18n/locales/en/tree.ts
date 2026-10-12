@@ -82,4 +82,41 @@ export const tree = {
   "tree.create.nameLabel": "New note name",
   "tree.create.nameOrBoardLabel": "New note or board name",
   "tree.emptyNotesOrBoards": "The vault is empty — create your first note or board.",
+
+  // Перенос в дереве (фича 023).
+  "tree.move.menu": "Move to…",
+  "tree.move.done": (p: { folder: string }) => `Moved to ${p.folder}`,
+  "tree.move.undo": "Undo",
+  "tree.move.undone": "Move undone",
+  "tree.move.refused.nameConflict": (p: { folder: string; name: string }) =>
+    `“${p.folder}” already has ${p.name}. Rename one of them and try again.`,
+  "tree.move.refused.accessDenied": "The vault is read-only — moving is unavailable.",
+  "tree.move.refused.notFound": (p: { name: string }) => `“${p.name}” is no longer in the vault.`,
+  "tree.move.refused.targetNotFound": (p: { folder: string }) =>
+    `Folder “${p.folder}” no longer exists.`,
+  "tree.move.refused.io": (p: { name: string }) =>
+    `Could not move “${p.name}”. Nothing was changed.`,
+  "tree.move.partial": (p: { count: number; folder: string }) =>
+    `Not everything was moved: ${enN(p.count, "# file is", "# files are")} still in “${p.folder}”.`,
+  "tree.move.undoRefused": (p: { folder: string; name: string }) =>
+    `Could not undo: “${p.name}” has appeared in “${p.folder}”.`,
+  "tree.move.progress": (p: { done: number; total: number }) =>
+    `moving · ${p.done} of ${p.total}`,
+  "tree.move.cancel": "Stop",
+  "tree.move.filesCount": (p: { count: number }) => enN(p.count, "# file", "# files"),
+  "tree.backlinks.moveConsequence": (p: { name: string; folder: string; count: number }) =>
+    `After moving “${p.name}” to “${p.folder}”, links in ${enN(p.count, "# note", "# notes")} will stop working:`,
+  "tree.backlinks.moveAnyway": "Move",
+  "tree.move.dialog.title": "Move",
+  "tree.move.dialog.label": (p: { name: string }) => `Choose a folder for ${p.name}`,
+  "tree.move.dialog.placeholder": "Folder…",
+  "tree.move.dialog.root": "vault root",
+  "tree.move.dialog.empty": "No folder with that name",
+  "tree.move.dialog.hintSelect": "↑↓ select",
+  "tree.move.dialog.hintMove": "↵ move",
+  "tree.move.dialog.hintClose": "esc close",
+  "tree.move.a11y.grabbed": (p: { name: string }) => `Moving ${p.name}`,
+  "tree.move.a11y.over": (p: { folder: string }) => `Into folder ${p.folder}`,
+  "tree.move.a11y.overRoot": "Into the vault root",
+  "tree.move.a11y.denied": "Cannot drop here",
 } as const satisfies Entries;

@@ -8,6 +8,16 @@ pub struct LinkRecord {
     pub target_path: PathBuf,
 }
 
+/// Один переезд заметки в кэше. `links` — новые исходящие ссылки, разобранные
+/// из текста под новым путём; `None` — ссылки не пересчитываются (доска: её
+/// содержимое не Typst).
+#[derive(Debug, Clone)]
+pub struct CacheMove {
+    pub from: PathBuf,
+    pub to: PathBuf,
+    pub links: Option<Vec<PathBuf>>,
+}
+
 /// Персистентный кэш — производное, полностью восстановимое состояние
 /// (research.md §6): при рассинхронизации или повреждении система откатывается на
 /// полный обход (FR-002), пользовательские данные не теряются, потому что кэш
@@ -18,6 +28,18 @@ pub trait IndexCache {
     async fn upsert_note(&mut self, note: &Note);
     async fn remove_note(&mut self, path: &Path);
     async fn rename_note(&mut self, from: &Path, to: &Path);
+
+    /// Переезд заметок при переносе (фича 023, T007): каждая запись меняет
+    /// путь, а исходящие ссылки переносимой заметки пересчитываются.
+    ///
+    /// Пересчёт обязателен: кэш хранит уже **разрешённые** цели, а
+    /// относительная ссылка `[[имя]]` после переезда в другую папку находит
+    /// другую заметку. Входящие ссылки не трогаются — их текст не менялся, и
+    /// ссылки на старый путь теперь честно битые (FR-016, FR-019).
+    ///
+    /// Одним вызовом, потому что на native это одна транзакция: перенос папки
+    /// в тысячу заметок иначе платил бы за запись на диск тысячи раз.
+    async fn relocate(&mut self, moves: &[CacheMove]);
 
     async fn set_links(&mut self, source: &Path, targets: &[PathBuf]);
     async fn backlinks(&self, target: &Path) -> Vec<PathBuf>;
@@ -170,6 +192,56 @@ mod native_cache {
                 .await;
         }
 
+        async fn relocate(&mut self, moves: &[CacheMove]) {
+            // Одна транзакция на весь перенос: без неё каждое из тысяч
+            // обновлений платило бы за синхронизацию с диском отдельно.
+            let Ok(mut tx) = self.pool.begin().await else {
+                for item in moves {
+                    self.rename_note(&item.from, &item.to).await;
+                    if let Some(links) = &item.links {
+                        self.set_links(&item.to, links).await;
+                    }
+                }
+                return;
+            };
+            for item in moves {
+                let from = item.from.to_string_lossy().into_owned();
+                let to = item.to.to_string_lossy().into_owned();
+                let name = item
+                    .to
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let _ = sqlx::query("UPDATE notes SET path = ?, name = ? WHERE path = ?")
+                    .bind(&to)
+                    .bind(&name)
+                    .bind(&from)
+                    .execute(&mut *tx)
+                    .await;
+                let _ = sqlx::query("UPDATE links SET source_path = ? WHERE source_path = ?")
+                    .bind(&to)
+                    .bind(&from)
+                    .execute(&mut *tx)
+                    .await;
+                if let Some(links) = &item.links {
+                    let _ = sqlx::query("DELETE FROM links WHERE source_path = ?")
+                        .bind(&to)
+                        .execute(&mut *tx)
+                        .await;
+                    for target in links {
+                        let _ = sqlx::query(
+                            "INSERT OR IGNORE INTO links (source_path, target_path) VALUES (?, ?)",
+                        )
+                        .bind(&to)
+                        .bind(target.to_string_lossy().into_owned())
+                        .execute(&mut *tx)
+                        .await;
+                    }
+                }
+            }
+            let _ = tx.commit().await;
+        }
+
         async fn set_links(&mut self, source: &Path, targets: &[PathBuf]) {
             let source_str = source.to_string_lossy().into_owned();
             let _ = sqlx::query("DELETE FROM links WHERE source_path = ?")
@@ -270,6 +342,15 @@ mod web_cache {
             }
         }
 
+        async fn relocate(&mut self, moves: &[CacheMove]) {
+            for item in moves {
+                self.rename_note(&item.from, &item.to).await;
+                if let Some(links) = &item.links {
+                    self.links.insert(item.to.clone(), links.clone());
+                }
+            }
+        }
+
         async fn set_links(&mut self, source: &Path, targets: &[PathBuf]) {
             self.links.insert(source.to_path_buf(), targets.to_vec());
         }
@@ -285,5 +366,70 @@ mod web_cache {
         async fn links_from(&self, source: &Path) -> Vec<PathBuf> {
             self.links.get(source).cloned().unwrap_or_default()
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod relocate_tests {
+    use super::*;
+
+    fn stamp() -> FileStamp {
+        FileStamp::from_content(0, b"")
+    }
+
+    #[tokio::test]
+    async fn relocate_moves_rows_and_re_resolves_outgoing_links_only() {
+        let mut cache = SqliteCache::in_memory().await.unwrap();
+        for path in ["A/x.typ", "A/y.typ", "other.typ"] {
+            cache
+                .upsert_note(&Note::new(PathBuf::from(path), stamp()))
+                .await;
+        }
+        // x ссылается на соседа y и на заметку вне папки; other ссылается на x.
+        cache
+            .set_links(
+                Path::new("A/x.typ"),
+                &[PathBuf::from("A/y.typ"), PathBuf::from("A/z.typ")],
+            )
+            .await;
+        cache
+            .set_links(Path::new("other.typ"), &[PathBuf::from("A/x.typ")])
+            .await;
+
+        cache
+            .relocate(&[
+                CacheMove {
+                    from: PathBuf::from("A/x.typ"),
+                    to: PathBuf::from("B/A/x.typ"),
+                    // После переезда `[[y]]` разрешается в B/A/y.typ.
+                    links: Some(vec![PathBuf::from("B/A/y.typ")]),
+                },
+                CacheMove {
+                    from: PathBuf::from("A/y.typ"),
+                    to: PathBuf::from("B/A/y.typ"),
+                    links: None,
+                },
+            ])
+            .await;
+
+        let mut paths: Vec<_> = cache
+            .load_notes()
+            .await
+            .into_iter()
+            .map(|n| n.path.to_string_lossy().into_owned())
+            .collect();
+        paths.sort();
+        assert_eq!(paths, ["B/A/x.typ", "B/A/y.typ", "other.typ"]);
+        assert_eq!(
+            cache.links_from(Path::new("B/A/x.typ")).await,
+            vec![PathBuf::from("B/A/y.typ")]
+        );
+        assert!(cache.links_from(Path::new("A/x.typ")).await.is_empty());
+        // Входящая ссылка не переписана: теперь она честно битая.
+        assert_eq!(
+            cache.backlinks(Path::new("A/x.typ")).await,
+            vec![PathBuf::from("other.typ")]
+        );
+        assert!(cache.backlinks(Path::new("B/A/x.typ")).await.is_empty());
     }
 }

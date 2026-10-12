@@ -103,6 +103,42 @@ impl Index {
         Some(note)
     }
 
+    /// Переносит запись заметки — или все записи под папкой — на новое место
+    /// (фича 023, research.md §1). Имя записи не меняется: перенос не
+    /// переименовывает; `has_unsaved_edits` остаётся за записью.
+    ///
+    /// В отличие от [`Index::rename`], который переставляет одну запись, для
+    /// папки переезжают все заметки под ней, иначе индекс остался бы под
+    /// старыми путями. Возвращает пары по переехавшим записям, по прежнему
+    /// пути.
+    pub fn rename_prefix(&mut self, from: &Path, to: &Path) -> Vec<super::relocate::PathChange> {
+        let mut keys: Vec<PathBuf> = self
+            .notes
+            .keys()
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        keys.sort();
+        let mut changes = Vec::with_capacity(keys.len());
+        for old in keys {
+            let Some(mut note) = self.notes.remove(&old) else {
+                continue;
+            };
+            let new = super::relocate::rebase(from, to, &old);
+            note.path = new.clone();
+            note.name = new
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Вид зависит от места (папка `*.assets` делает файлы снимками),
+            // поэтому пересчитывается, а не копируется.
+            note.kind = super::classify(&new);
+            self.notes.insert(new.clone(), note);
+            changes.push(super::relocate::PathChange { from: old, to: new });
+        }
+        changes
+    }
+
     pub fn len(&self) -> usize {
         self.notes.len()
     }
@@ -130,5 +166,65 @@ impl Index {
             .collect();
         items.sort_by(|a, b| a.path.cmp(&b.path));
         items
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(path: &str) -> Note {
+        Note::new(PathBuf::from(path), FileStamp::from_content(0, b""))
+    }
+
+    #[test]
+    fn rename_prefix_moves_one_entry_for_a_file() {
+        let mut index = Index::new();
+        index.insert(note("A/x.typ"));
+        index.insert(note("A/y.typ"));
+        index
+            .get_mut(Path::new("A/x.typ"))
+            .unwrap()
+            .has_unsaved_edits = true;
+
+        let changes = index.rename_prefix(Path::new("A/x.typ"), Path::new("B/x.typ"));
+
+        assert_eq!(changes.len(), 1);
+        assert!(index.get(Path::new("A/x.typ")).is_none());
+        let moved = index
+            .get(Path::new("B/x.typ"))
+            .expect("запись на новом месте");
+        assert_eq!(moved.name, "x.typ");
+        assert!(
+            moved.has_unsaved_edits,
+            "несохранённые правки едут с записью"
+        );
+        assert!(index.get(Path::new("A/y.typ")).is_some());
+    }
+
+    #[test]
+    fn rename_prefix_moves_every_entry_under_a_folder_and_only_them() {
+        let mut index = Index::new();
+        index.insert(note("A/x.typ"));
+        index.insert(note("A/C/y.excalidraw"));
+        index.insert(note("A-b/w.typ"));
+
+        let changes = index.rename_prefix(Path::new("A"), Path::new("B/A"));
+
+        let moved: Vec<_> = changes.iter().map(|c| c.to.clone()).collect();
+        assert_eq!(
+            moved,
+            vec![
+                PathBuf::from("B/A/C/y.excalidraw"),
+                PathBuf::from("B/A/x.typ")
+            ]
+        );
+        assert!(index.get(Path::new("B/A/C/y.excalidraw")).is_some());
+        assert!(index.get(Path::new("A/x.typ")).is_none());
+        assert!(
+            index.get(Path::new("A-b/w.typ")).is_some(),
+            "соседняя папка с общим началом имени не затронута"
+        );
+        assert_eq!(index.len(), 3);
     }
 }

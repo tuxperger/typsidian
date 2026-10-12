@@ -3,15 +3,32 @@ import type { Note } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 
 /** Операция, ради которой спрашивают подтверждение (FR-027, FR-028). */
-export type BacklinksOperation = "delete" | "rename";
+export type BacklinksOperation = "delete" | "rename" | "move";
 
-export interface BacklinksConfirmRequest {
-  operation: BacklinksOperation;
-  note: Note;
-  /** Куда переименовывается — только для `rename`. */
-  nextPath?: string;
-  /** Заметки, чьи ссылки станут битыми (`backlinks(path)` из ядра). */
-  affected: Note[];
+export type BacklinksConfirmRequest =
+  | {
+      operation: "delete" | "rename";
+      note: Note;
+      /** Куда переименовывается — только для `rename`. */
+      nextPath?: string;
+      /** Заметки, чьи ссылки станут битыми (`backlinks(path)` из ядра). */
+      affected: Note[];
+    }
+  | {
+      /**
+       * Перенос в дереве (фича 023, FR-016, FR-017). Переносится не обязательно
+       * заметка — папка тоже, — поэтому вместо записи здесь имя; список приходит
+       * из `moveImpact` и включает саму перенесённую заметку, если битыми
+       * станут её собственные ссылки.
+       */
+      operation: "move";
+      name: string;
+      folder: string;
+      affected: Note[];
+    };
+
+function subjectName(request: BacklinksConfirmRequest): string {
+  return request.operation === "move" ? request.name : request.note.name;
 }
 
 export interface BacklinksConfirmDialogProps {
@@ -21,8 +38,10 @@ export interface BacklinksConfirmDialogProps {
 }
 
 function describeConsequence(t: Translate, request: BacklinksConfirmRequest): string {
-  const params = { name: request.note.name, count: request.affected.length };
+  const params = { name: subjectName(request), count: request.affected.length };
   switch (request.operation) {
+    case "move":
+      return t("tree.backlinks.moveConsequence", { ...params, folder: request.folder });
     case "delete":
       return t("tree.backlinks.deleteConsequence", params);
     case "rename":
@@ -30,7 +49,7 @@ function describeConsequence(t: Translate, request: BacklinksConfirmRequest): st
       // после переименования их ссылки указывают на старое имя (FR-028).
       return t("tree.backlinks.renameConsequence", params);
     default: {
-      const exhaustive: never = request.operation;
+      const exhaustive: never = request;
       return exhaustive;
     }
   }
@@ -42,6 +61,8 @@ function confirmLabel(t: Translate, operation: BacklinksOperation): string {
       return t("tree.backlinks.deleteAnyway");
     case "rename":
       return t("tree.backlinks.renameAnyway");
+    case "move":
+      return t("tree.backlinks.moveAnyway");
     default: {
       const exhaustive: never = operation;
       return exhaustive;
@@ -78,7 +99,7 @@ export function BacklinksConfirmDialog({
       className="ts-dialog"
       role="alertdialog"
       aria-modal="true"
-      aria-label={t("tree.backlinks.dialogLabel", { name: request.note.name })}
+      aria-label={t("tree.backlinks.dialogLabel", { name: subjectName(request) })}
     >
       <p>{describeConsequence(t, request)}</p>
       <ul aria-label={t("tree.backlinks.affectedLabel")}>

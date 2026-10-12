@@ -189,6 +189,30 @@ function createPage(cdp, sessionId, log) {
         await send("Input.dispatchMouseEvent", { type, ...box, button: "left", clickCount: 1 });
       }
     },
+    /** Центр элемента в координатах окна — для жестов мышью. */
+    async center(target) {
+      await waitFor(`Boolean(${locate(target)})`, { label: target });
+      return evaluate(`(() => {
+        const el = ${locate(target)};
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      })()`);
+    },
+    /**
+     * Одно событие мыши в точке: "mousePressed", "mouseMoved", "mouseReleased".
+     * Из них собирается перетаскивание — нажать, провести несколькими
+     * движениями, отпустить.
+     */
+    mouse: (type, x, y) =>
+      send("Input.dispatchMouseEvent", {
+        type,
+        x,
+        y,
+        button: "left",
+        buttons: type === "mouseReleased" ? 0 : 1,
+        clickCount: type === "mouseMoved" ? 0 : 1,
+      }),
     /** Ввод текста в элемент с фокусом — как с клавиатуры. */
     type: (text) => send("Input.insertText", { text }),
     /**

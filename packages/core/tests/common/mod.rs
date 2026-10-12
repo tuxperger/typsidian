@@ -425,6 +425,38 @@ impl VaultBackend for MemoryVault {
         Ok(())
     }
 
+    /// Перенос здесь не моделируется: у памяти нет ни папок, ни индекса, а
+    /// сценарии фичи 023 идут по настоящим backend (`relocate_cases`). Двойник
+    /// отвечает как backend, у которого нечего переносить.
+    async fn move_targets(
+        &self,
+        from: &Path,
+        query: &str,
+    ) -> Vec<typsidian_core::vault::relocate::MoveTarget> {
+        typsidian_core::vault::relocate::move_targets_of(self, from, query).await
+    }
+
+    async fn move_impact(
+        &self,
+        _request: &typsidian_core::vault::relocate::MoveRequest,
+    ) -> Result<
+        typsidian_core::vault::relocate::MoveImpact,
+        typsidian_core::vault::relocate::MoveRefusal,
+    > {
+        Err(typsidian_core::vault::relocate::MoveRefusal::NotFound)
+    }
+
+    async fn move_entry(
+        &mut self,
+        _request: &typsidian_core::vault::relocate::MoveRequest,
+        _control: &dyn typsidian_core::vault::relocate::MoveControl,
+    ) -> Result<
+        typsidian_core::vault::relocate::MoveOutcome,
+        typsidian_core::vault::relocate::MoveError,
+    > {
+        Err(typsidian_core::vault::relocate::MoveRefusal::NotFound.into())
+    }
+
     /// Заметки, ссылающиеся на `path`.
     ///
     /// Ссылки разбираются тем же `graph::links_in`, что и в настоящих
@@ -510,6 +542,7 @@ pub mod note_panel_cases;
 pub mod package_cases;
 pub mod placement_cases;
 pub mod preview_cases;
+pub mod relocate_cases;
 pub mod search_cases;
 pub mod structure_cases;
 pub mod sync_cases;

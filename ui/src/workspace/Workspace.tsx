@@ -361,6 +361,13 @@ function WorkspaceView({
   // Размеры колонок. Значения по умолчанию — из макета; двигает их
   // пользователь границами между колонками.
   const panes = usePaneLayout();
+  // Показать скрытое дерево из команды палитры (фича 023). Через ref: функция
+  // раскладки новая на каждую отрисовку, а список команд от неё зависеть не
+  // должен.
+  const sidebarHidden = panes.sidebarHidden;
+  const toggleSidebarRef = useRef(panes.toggleSidebar);
+  toggleSidebarRef.current = panes.toggleSidebar;
+  const showSidebar = useCallback(() => toggleSidebarRef.current(), []);
   // Настройки открытого vault. Нужны здесь троим: предпросмотру (выключатель
   // автозагрузки шаблонов и адреса, указанные пользователем, — фича 007),
   // сочетаниям клавиш и размеру шрифта редактора. Все трое живут в настройках
@@ -738,6 +745,19 @@ function WorkspaceView({
   // активация уже открытой (FR-002). Дописывание доски при уходе с вкладки и
   // отказ уйти с недописанной делает хук вкладок.
   const openEntry = useCallback((next: Note) => void openTab(next.path), [openTab]);
+
+  // Перенос в дереве (фича 023, FR-020): открытый файл остаётся открытым под
+  // новым путём. Вкладки и документы переезжают сами — по событиям
+  // `NoteRenamed`, которые ядро шлёт на каждый перенесённый файл (фича 014:
+  // тот же документ под новым ключом, текст не перечитывается, каретка и
+  // прокрутка остаются). Здесь за путём следуют только неразрешённые конфликты.
+  const applyPathChanges = conflicts.pathsMoved;
+  // «Переместить в…» из палитры — для открытого файла (FR-021). Окно живёт в
+  // боковой панели рядом с остальным переносом; сюда уходит только запрос.
+  const [moveToRequest, setMoveToRequest] = useState<{
+    entry: { path: string; name: string };
+    revision: number;
+  } | null>(null);
 
   // Переход к месту в заметке: к ошибке экспорта и предпросмотра (009 FR-008,
   // FR-016) и к ссылке из колонки заметки (013 FR-003) — открыть файл и
@@ -1242,6 +1262,21 @@ function WorkspaceView({
         });
       }
     }
+    // Фича 023, FR-021. «Переместить в…» — для открытого файла, заметки или
+    // доски. Окно выбора папки живёт в боковой панели, поэтому скрытая панель
+    // сначала показывается.
+    if (view === "workspace" && activeNote !== null) {
+      const entry = { path: activeNote.path, name: activeNote.name };
+      items.push({
+        id: "move-entry",
+        ...titled("tree.move.menu"),
+        icon: "folder",
+        run: () => {
+          if (sidebarHidden) showSidebar();
+          setMoveToRequest((previous) => ({ entry, revision: (previous?.revision ?? 0) + 1 }));
+        },
+      });
+    }
     // Фича 009. «Экспорт в PDF» — только при открытой заметке Typst (FR-009);
     // Центр экспорта доступен всегда, пока есть компилятор.
     if (previewClient !== null) {
@@ -1349,6 +1384,9 @@ function WorkspaceView({
     tabCommands,
     previewClient,
     openNotePath,
+    activeNote,
+    sidebarHidden,
+    showSidebar,
     exportCurrent,
     syncClient,
     syncOverview,
@@ -1680,6 +1718,9 @@ function WorkspaceView({
               folderCount={folderCount}
               onOpenNote={openEntry}
               onNotesChanged={refresh}
+              onPathsMoved={applyPathChanges}
+              moveToRequest={moveToRequest}
+              onMoveToRequestHandled={() => setMoveToRequest(null)}
               onCreated={(path) => void openPath(path)}
               onError={setOperationError}
               onOpenGraph={toggleView}

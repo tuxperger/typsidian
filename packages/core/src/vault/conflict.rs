@@ -103,6 +103,58 @@ impl ConflictRegistry {
         self.deleted_with_edits.remove(path);
     }
 
+    /// Всё, что привязано к пути заметки, переезжает вместе с ней (фича 023,
+    /// FR-020): буфер, неразрешённый конфликт и «удалено с правками». Для папки
+    /// — всё под ней. Без этого открытая заметка после переноса потеряла бы
+    /// несохранённые правки.
+    ///
+    /// Возвращает число переехавших записей (по всем трём таблицам).
+    pub fn rename_prefix(&mut self, from: &Path, to: &Path) -> usize {
+        let rebase = |path: &Path| super::relocate::rebase(from, to, path);
+        let mut moved = 0;
+
+        let buffers: Vec<PathBuf> = self
+            .buffers
+            .keys()
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        for old in buffers {
+            if let Some(buffer) = self.buffers.remove(&old) {
+                self.buffers.insert(rebase(&old), buffer);
+                moved += 1;
+            }
+        }
+
+        let conflicts: Vec<PathBuf> = self
+            .conflicts
+            .keys()
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        for old in conflicts {
+            if let Some(mut conflict) = self.conflicts.remove(&old) {
+                let new = rebase(&old);
+                conflict.note_path = new.clone();
+                self.conflicts.insert(new, conflict);
+                moved += 1;
+            }
+        }
+
+        let deleted: Vec<PathBuf> = self
+            .deleted_with_edits
+            .iter()
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        for old in deleted {
+            self.deleted_with_edits.remove(&old);
+            self.deleted_with_edits.insert(rebase(&old));
+            moved += 1;
+        }
+        moved
+    }
+
     pub fn has_unsaved_edits(&self, path: &Path) -> bool {
         self.buffers.contains_key(path)
     }
@@ -408,5 +460,51 @@ mod tests {
         assert!(diff.contains(&DiffLine::External {
             text: "внешняя".to_string()
         }));
+    }
+}
+
+#[cfg(test)]
+mod relocate_tests {
+    use super::*;
+
+    fn stamp(content: &str) -> FileStamp {
+        FileStamp::from_content(0, content.as_bytes())
+    }
+
+    #[test]
+    fn rename_prefix_carries_buffer_conflict_and_deletion_to_the_new_path() {
+        let mut registry = ConflictRegistry::new();
+        let edited = Path::new("A/x.typ");
+        registry.set_buffer(edited, "мои правки".to_string());
+        assert!(registry.observe_disk_change(edited, &stamp("было"), &stamp("внешнее")));
+        let gone = Path::new("A/C/y.typ");
+        registry.set_buffer(gone, "правки удалённой".to_string());
+        registry.observe_disk_deletion(gone);
+
+        let moved = registry.rename_prefix(Path::new("A"), Path::new("B/A"));
+
+        assert!(moved >= 3);
+        let new_edited = Path::new("B/A/x.typ");
+        assert!(registry.has_unsaved_edits(new_edited));
+        assert_eq!(registry.buffer(new_edited), Some("мои правки"));
+        assert_eq!(
+            registry.conflict(new_edited).map(|c| c.note_path.clone()),
+            Some(new_edited.to_path_buf()),
+            "конфликт держит новый путь и внутри"
+        );
+        assert!(registry.was_deleted_with_edits(Path::new("B/A/C/y.typ")));
+        assert!(!registry.has_unsaved_edits(edited));
+        assert!(!registry.was_deleted_with_edits(gone));
+    }
+
+    #[test]
+    fn rename_prefix_leaves_unrelated_paths_alone() {
+        let mut registry = ConflictRegistry::new();
+        registry.set_buffer(Path::new("A-b/x.typ"), "чужое".to_string());
+        registry.set_buffer(Path::new("A.typ"), "тоже чужое".to_string());
+
+        assert_eq!(registry.rename_prefix(Path::new("A"), Path::new("B/A")), 0);
+        assert!(registry.has_unsaved_edits(Path::new("A-b/x.typ")));
+        assert!(registry.has_unsaved_edits(Path::new("A.typ")));
     }
 }

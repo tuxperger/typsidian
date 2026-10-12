@@ -2,10 +2,15 @@ use crate::vault::backend::{
     valid_note_name, CreateError, DeleteError, OpenError, ReadError, RenameError, ResolveError,
     VaultBackend, WriteError,
 };
-use crate::vault::cache::{record_links, IndexCache, SqliteCache};
+use crate::vault::cache::{record_links, CacheMove, IndexCache, SqliteCache};
 use crate::vault::conflict::{line_diff, ConflictRegistry, ConflictStatus, DiffLine, EditConflict};
 use crate::vault::events::{links_invalidated, wrap_bulk_if_needed, VaultEvent};
 use crate::vault::index::{FileStamp, Index, Note};
+use crate::vault::relocate::{
+    check_move, conflict_name, normalize_request, placement_of, plan_steps, snapshot_folders_of,
+    MoveControl, MoveError, MoveImpact, MoveOutcome, MovePlan, MoveRefusal, MoveRequest,
+    MoveTarget,
+};
 use crate::vault::{AccessState, NOTE_SIZE_LIMIT_BYTES, SUPPORTED_NOTE_COUNT};
 use notify::event::{ModifyKind, RenameMode};
 use notify::{RecursiveMode, Watcher};
@@ -132,6 +137,26 @@ fn is_cross_device(error: &std::io::Error) -> bool {
         let _ = error;
         false
     }
+}
+
+/// Создаёт недостающие папки до `dir`, запоминая, какие создал именно она, —
+/// чтобы откат переноса убрал только их (фича 023): путь папки снимков
+/// `assets/<заметка>` в целевой папке может потребовать нового `assets`.
+fn create_dirs_tracking(dir: &Path, created: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let mut missing = Vec::new();
+    let mut current = dir;
+    while !current.exists() {
+        missing.push(current.to_path_buf());
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    for folder in missing.into_iter().rev() {
+        std::fs::create_dir(&folder)?;
+        created.push(folder);
+    }
+    Ok(())
 }
 
 fn stamp_for(path: &Path) -> std::io::Result<FileStamp> {
@@ -839,6 +864,46 @@ impl NativeBackend {
         })
     }
 
+    /// Проверки переноса и план (фича 023, contracts/core-move-api.md, шаг 1).
+    ///
+    /// Занятость имён смотрится **по диску**, а не по индексу (research.md §3):
+    /// в цели может лежать файл, которого дерево не показывает. Сравнение имён
+    /// отдано файловой системе — как в `create` и `rename` (001 §FR-012): на
+    /// системе без учёта регистра `План` и `план` конфликтуют.
+    async fn plan_move(&self, request: &MoveRequest) -> Result<MovePlan, MoveRefusal> {
+        if self.write_denied() {
+            return Err(MoveRefusal::AccessDenied);
+        }
+        let (from, to_folder) = normalize_request(request)?;
+        let new_path = check_move(&from, &to_folder)?;
+
+        let full_from = self.root_path.join(&from);
+        if std::fs::symlink_metadata(&full_from).is_err() {
+            return Err(MoveRefusal::NotFound);
+        }
+        let is_folder = full_from.is_dir();
+        if !to_folder.as_os_str().is_empty() && !self.root_path.join(&to_folder).is_dir() {
+            return Err(MoveRefusal::TargetNotFound);
+        }
+
+        let placement = placement_of(self).await;
+        let existing_snapshots: Vec<PathBuf> = snapshot_folders_of(&from, is_folder, placement)
+            .into_iter()
+            .filter(|folder| self.root_path.join(folder).is_dir())
+            .collect();
+        let steps = plan_steps(&from, &new_path, &existing_snapshots);
+        for (_, dest) in &steps {
+            if std::fs::symlink_metadata(self.root_path.join(dest)).is_ok() {
+                return Err(MoveRefusal::NameConflict {
+                    name: conflict_name(&to_folder, dest),
+                });
+            }
+        }
+
+        let indexed = self.index.lock().await.all();
+        Ok(MovePlan::new(&indexed, from, new_path, is_folder, steps))
+    }
+
     /// Публикует `LinksInvalidated` для заметок, ссылающихся на любой из
     /// `targets` (FR-030, T087). Вызывается локальными create/rename/delete:
     /// их сами по себе видит и watch()-пайплайн, но к моменту его срабатывания
@@ -1419,6 +1484,115 @@ impl VaultBackend for NativeBackend {
         }
         self.publish_links_invalidated(&[path.to_path_buf()]).await;
         Ok(())
+    }
+
+    async fn move_targets(&self, from: &Path, query: &str) -> Vec<MoveTarget> {
+        super::relocate::move_targets_of(self, from, query).await
+    }
+
+    async fn move_impact(&self, request: &MoveRequest) -> Result<MoveImpact, MoveRefusal> {
+        let plan = self.plan_move(request).await?;
+        let notes = self.index.lock().await.all();
+        Ok(super::relocate::impact_of(self, &notes, &plan.notes).await)
+    }
+
+    async fn move_entry(
+        &mut self,
+        request: &MoveRequest,
+        control: &dyn MoveControl,
+    ) -> Result<MoveOutcome, MoveError> {
+        // Все отказы — до первого изменения диска (contracts/core-move-api.md).
+        let plan = self.plan_move(request).await?;
+        if control.cancelled() {
+            return Ok(MoveOutcome::Cancelled);
+        }
+
+        // Каждый шаг плана — один `rename`: атомарно и мгновенно на одной
+        // файловой системе при любом размере папки (research.md §5). Если
+        // отказал не первый шаг, прежние возвращаются обратным `rename`, и
+        // vault остаётся как был.
+        let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut created_dirs: Vec<PathBuf> = Vec::new();
+        let total = plan.steps.len() as u32;
+        for (index, (source, dest)) in plan.steps.iter().enumerate() {
+            let (abs_source, abs_dest) = (self.root_path.join(source), self.root_path.join(dest));
+            let moved = match abs_dest.parent() {
+                Some(parent) => create_dirs_tracking(parent, &mut created_dirs),
+                None => Ok(()),
+            }
+            .and_then(|()| std::fs::rename(&abs_source, &abs_dest));
+            if moved.is_err() {
+                for (source, dest) in done.iter().rev() {
+                    let _ = std::fs::rename(dest, source);
+                }
+                for dir in created_dirs.iter().rev() {
+                    let _ = std::fs::remove_dir(dir);
+                }
+                return Err(MoveError::Io);
+            }
+            done.push((abs_source, abs_dest));
+            control.progress(index as u32 + 1, total);
+        }
+
+        // Файлы переехали; дальше состояние приложения догоняет диск ДО того,
+        // как наблюдатель `notify` доставит события: он увидит, что индекс уже
+        // на новых путях, и не покажет перенос как внешнее изменение или как
+        // удаление открытой заметки (FR-008). Замки — в порядке index -> cache.
+        let root = self.root_path.clone();
+        let renamed = plan.notes.clone();
+        let cache_moves: Vec<CacheMove> = tokio::task::spawn_blocking(move || {
+            renamed
+                .into_iter()
+                .map(|change| {
+                    // Ссылки пересчитываются из текста под новым путём; у доски
+                    // содержимое не Typst, и её ссылки не трогаются.
+                    let links = (crate::vault::classify(&change.to)
+                        == crate::vault::FileKind::Note)
+                        .then(|| std::fs::read(root.join(&change.to)).ok())
+                        .flatten()
+                        .map(|bytes| {
+                            crate::graph::links_in(&change.to, &String::from_utf8_lossy(&bytes))
+                        });
+                    CacheMove {
+                        from: change.from,
+                        to: change.to,
+                        links,
+                    }
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default();
+
+        let mut affected = Vec::new();
+        {
+            let mut index = self.index.lock().await;
+            index.rename_prefix(&plan.from, &plan.new_path);
+            let mut cache_guard = self.cache.lock().await;
+            if let Some(cache) = cache_guard.as_mut() {
+                cache.relocate(&cache_moves).await;
+                for change in &plan.notes {
+                    affected.extend(cache.backlinks(&change.from).await);
+                    affected.extend(cache.backlinks(&change.to).await);
+                }
+            }
+            self.conflicts
+                .lock()
+                .unwrap()
+                .rename_prefix(&plan.from, &plan.new_path);
+        }
+        // Настройки читаются и пишутся через `self`, поэтому замки уже отпущены.
+        super::relocate::move_section_marks(self, plan.is_folder, &plan.from, &plan.new_path).await;
+
+        // Без `wrap_bulk_if_needed`: пачка из двадцати `NoteRenamed` стала бы
+        // `BulkChange*`, то есть внешним изменением (FR-008).
+        let mut batch = super::relocate::rename_events(&plan.notes);
+        batch.extend(links_invalidated(affected));
+        if !batch.is_empty() {
+            self.events.lock().unwrap().extend(batch);
+            self.events_ready.notify_one();
+        }
+        Ok(plan.done())
     }
 
     async fn backlinks(&self, path: &Path) -> Vec<Note> {

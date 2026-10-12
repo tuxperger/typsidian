@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons/Icons.js";
 import { useI18n } from "../i18n/index.js";
 import type { VaultClient } from "../vault-client.js";
-import type { Note, Template } from "../wasm-core/typsidian_core.js";
+import type { Note, PathChange, Template } from "../wasm-core/typsidian_core.js";
+import { BacklinksConfirmDialog } from "./BacklinksConfirmDialog.js";
+import { MoveNotice } from "./MoveNotice.js";
+import { MoveToDialog } from "./MoveToDialog.js";
+import { TreeDragGhost } from "./TreeDragGhost.js";
+import { useMoveEntry, type MoveEntryRef } from "./useMoveEntry.js";
+import { useTreeDrag } from "./useTreeDrag.js";
 import { CreateFileMenu, type CreateKind } from "./CreateFileMenu.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
 import { VaultTreeActions, useVaultTreeActions } from "./VaultTreeActions.js";
@@ -58,6 +64,18 @@ export interface SidebarProps {
   onFileHistory?: ((note: Note) => void) | undefined;
   /** Пути с неразрешённым конфликтом — дерево помечает их значком (фича 011). */
   conflictPaths?: ReadonlySet<string> | undefined;
+  /**
+   * Файлы перенесены в дереве (фича 023, FR-020): открытый файл и его
+   * несохранённые правки следуют за путём. Пары приходят из ядра.
+   */
+  onPathsMoved?: ((moved: PathChange[]) => void) | undefined;
+  /**
+   * «Переместить в…» для открытого файла — из палитры команд (FR-021).
+   * Ревизия — чтобы повторный вызов для того же файла снова открыл окно.
+   */
+  moveToRequest?: { entry: MoveEntryRef; revision: number } | null;
+  /** Запрос принят — иначе панель, показанная заново, открыла бы окно ещё раз. */
+  onMoveToRequestHandled?: (() => void) | undefined;
 }
 
 export function Sidebar({
@@ -77,6 +95,9 @@ export function Sidebar({
   onInsertLink,
   onFileHistory,
   conflictPaths,
+  onPathsMoved,
+  moveToRequest = null,
+  onMoveToRequestHandled,
 }: SidebarProps): React.JSX.Element {
   const { t } = useI18n();
   const [filter, setFilter] = useState("");
@@ -105,6 +126,51 @@ export function Sidebar({
     onError,
     sections,
     onToggleSection: toggleSection,
+  });
+
+  // Перенос в дереве (фича 023): один путь для жеста, «Переместить в…» и
+  // отмены. Что допустимо и что сломается, решает ядро.
+  const move = useMoveEntry({
+    client,
+    onNotesChanged,
+    onPathsMoved,
+    onFoldersMoved: actions.remapExpanded,
+  });
+  const requestMove = move.requestMove;
+  const showMoveNotice = move.showNotice;
+  const [moveTo, setMoveTo] = useState<MoveEntryRef | null>(null);
+  const requestedEntry = moveToRequest?.entry ?? null;
+  const requestedRevision = moveToRequest?.revision ?? 0;
+  useEffect(() => {
+    if (requestedEntry === null) return;
+    setMoveTo(requestedEntry);
+    onMoveToRequestHandled?.();
+    // Ревизия в зависимостях намеренно: она и есть повод открыть окно заново.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedRevision]);
+
+  const drag = useTreeDrag({
+    disabled: actions.state.pendingPath !== null || move.busy,
+    loadTargets: useCallback((from: string) => client.moveTargets(from, ""), [client]),
+    // Недоступный на запись vault переноса не начинает и называет причину
+    // (FR-006). Состояние доступа — у ядра, здесь оно только спрашивается.
+    checkWritable: useCallback(
+      async () => (await client.accessState()) === "readWrite",
+      [client],
+    ),
+    onDenied: useCallback(
+      () =>
+        showMoveNotice({
+          kind: "failed",
+          message: (translate) => translate("tree.move.refused.accessDenied"),
+        }),
+      [showMoveNotice],
+    ),
+    onDrop: useCallback(
+      (source, toFolder) => void requestMove({ path: source.path, name: source.name }, toFolder),
+      [requestMove],
+    ),
+    onExpand: actions.expand,
   });
 
   // Выбор заготовки в галерее открывает тот же инлайн-ввод имени, что и «+»:
@@ -156,6 +222,10 @@ export function Sidebar({
       <nav
         className="ts-tree"
         aria-label={t("tree.navLabel")}
+        ref={drag.containerRef}
+        // Пустое место дерева — бросок в корень vault (фича 023, FR-011).
+        data-drop-folder=""
+        onPointerDown={drag.onPointerDown}
         onContextMenu={(event) => {
           if (actions.state.pendingPath !== null) return;
           contextMenu.open(event, [
@@ -175,14 +245,63 @@ export function Sidebar({
           onInsertLink={onInsertLink}
           onFileHistory={onFileHistory}
           conflictPaths={conflictPaths}
+          onMoveTo={setMoveTo}
         />
       </nav>
 
+      <TreeDragGhost
+        source={drag.active}
+        over={drag.over}
+        ghostRef={drag.ghostRef}
+        rootName={client.rootName}
+      />
+      <MoveNotice
+        notice={move.notice}
+        busy={move.busy}
+        onUndo={() => void move.undo()}
+        onDismiss={move.dismissNotice}
+      />
+      {moveTo !== null && (
+        <MoveToDialog
+          client={client}
+          entry={moveTo}
+          onPick={(folder) => void requestMove(moveTo, folder)}
+          onClose={() => setMoveTo(null)}
+        />
+      )}
+      <BacklinksConfirmDialog
+        request={
+          move.confirm === null
+            ? null
+            : {
+                operation: "move",
+                name: move.confirm.entry.name,
+                folder: move.confirm.folder,
+                affected: move.confirm.affected,
+              }
+        }
+        onConfirm={() => move.answerConfirm(true)}
+        onCancel={() => move.answerConfirm(false)}
+      />
+
       <div className="ts-sidebar__footer">
+        {/* Ход переноса большой папки — вместо счётчика, пока он идёт (макет
+            «Большая папка едет»). На рабочем столе перенос атомарен и сюда не
+            попадает. */}
+        {move.progress !== null ? (
+          <span className="ts-tree-progress" role="status">
+            {t("tree.move.progress", move.progress)}
+            <progress max={move.progress.total} value={move.progress.done} />
+            <button type="button" className="ts-btn ts-btn--quiet" onClick={move.cancel}>
+              {t("tree.move.cancel")}
+            </button>
+          </span>
+        ) : (
         <span>
           {t("common.notesCount", { count: notes.length })} ·{" "}
           {t("tree.foldersCount", { count: folderCount })}
         </span>
+        )}
         <span className="ts-spacer" />
         <button
           type="button"

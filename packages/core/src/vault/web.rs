@@ -2,10 +2,15 @@ use crate::vault::backend::{
     valid_note_name, CreateError, DeleteError, OpenError, ReadError, RenameError, ResolveError,
     VaultBackend, WriteError,
 };
-use crate::vault::cache::{record_links, IndexCache, MemoryCache};
+use crate::vault::cache::{record_links, CacheMove, IndexCache, MemoryCache};
 use crate::vault::conflict::{line_diff, ConflictRegistry, ConflictStatus, DiffLine, EditConflict};
 use crate::vault::events::{links_invalidated, wrap_bulk_if_needed, VaultEvent};
 use crate::vault::index::{FileStamp, Index, Note};
+use crate::vault::relocate::{
+    check_move, conflict_name, normalize_request, placement_of, plan_steps, snapshot_folders_of,
+    MoveControl, MoveError, MoveImpact, MoveOutcome, MovePlan, MoveRefusal, MoveRequest,
+    MoveTarget,
+};
 use crate::vault::{AccessState, NOTE_SIZE_LIMIT_BYTES, SUPPORTED_NOTE_COUNT};
 use js_sys::{Object, Reflect};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -233,6 +238,123 @@ async fn probe_permission_access_state(handle: &JsValue) -> AccessState {
     }
 }
 
+/// Все файлы и папки под папкой, **включая скрытое** (фича 023, FR-002).
+///
+/// Отдельный обход, а не `walk_directory`: тот отбирает то, что видит дерево, а
+/// перенос папки обязан увезти всё — вложения, снимки, скрытые файлы. Пути
+/// относительны `prefix`; папка всегда раньше своего содержимого, так что
+/// создавать их можно в порядке списка.
+async fn walk_everything(
+    dir_handle: &JsValue,
+    prefix: PathBuf,
+    files: &mut Vec<PathBuf>,
+    dirs: &mut Vec<PathBuf>,
+) -> Result<(), JsValue> {
+    let entries_iter = js_call0(dir_handle, "entries").await?;
+    loop {
+        let next_result = js_call0(&entries_iter, "next").await?;
+        if Reflect::get(&next_result, &JsValue::from_str("done"))?
+            .as_bool()
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
+        let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+        let name = Reflect::get(&value, &JsValue::from_str("0"))?
+            .as_string()
+            .unwrap_or_default();
+        let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
+        let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
+            .as_string()
+            .unwrap_or_default();
+        let child = prefix.join(&name);
+        if kind == "directory" {
+            dirs.push(child.clone());
+            Box::pin(walk_everything(&handle, child, files, dirs)).await?;
+        } else {
+            files.push(child);
+        }
+    }
+}
+
+/// `removeEntry(name, { recursive: true })` на хендле папки.
+async fn remove_entry_recursive(parent: &JsValue, name: &str) -> Result<(), JsValue> {
+    let remove_fn: js_sys::Function =
+        Reflect::get(parent, &JsValue::from_str("removeEntry"))?.dyn_into()?;
+    let opts = Object::new();
+    Reflect::set(
+        &opts,
+        &JsValue::from_str("recursive"),
+        &JsValue::from_bool(true),
+    )?;
+    let promise = remove_fn.call2(parent, &JsValue::from_str(name), &opts)?;
+    JsFuture::from(js_sys::Promise::from(promise)).await?;
+    Ok(())
+}
+
+/// Путь внутри шага переноса: пустой `rel` — сам шаг (файл).
+fn step_path(base: &Path, rel: &Path) -> PathBuf {
+    if rel.as_os_str().is_empty() {
+        base.to_path_buf()
+    } else {
+        base.join(rel)
+    }
+}
+
+/// Что известно о шаге после обхода источника.
+struct StepInventory {
+    source: PathBuf,
+    dest: PathBuf,
+    /// Папки внутри шага (относительно него), родитель раньше потомка.
+    dirs: Vec<PathBuf>,
+    /// Файлы шага; `""` — сам шаг является файлом.
+    files: Vec<PathBuf>,
+}
+
+/// Почему копирование остановилось.
+enum CopyStop {
+    Cancelled,
+    Failed,
+}
+
+/// Результат копирования, нужный для обновления состояния.
+#[derive(Default)]
+struct CopyReport {
+    /// Свежие метаданные `{size, lastModified}` скопированных файлов — чтобы
+    /// ближайший `pollForChanges` не принял собственный перенос за правку.
+    metas: Vec<(PathBuf, (u64, f64))>,
+    /// Тексты скопированных заметок для пересчёта ссылок.
+    texts: HashMap<PathBuf, String>,
+}
+
+/// Ход и отмена с JS-стороны (фича 023, research.md §6).
+///
+/// `on_progress(done, total)` и объект-флаг `{ cancelled: boolean }`: вызов
+/// ядра занят `&mut self`, второй вызов «отмени» в него не войдёт, поэтому
+/// интерфейс держит флаг у себя, а ядро читает его между файлами.
+struct JsMoveControl {
+    on_progress: Option<js_sys::Function>,
+    cancel: JsValue,
+}
+
+impl MoveControl for JsMoveControl {
+    fn progress(&self, done: u32, total: u32) {
+        if let Some(callback) = &self.on_progress {
+            let _ = callback.call2(&JsValue::NULL, &JsValue::from(done), &JsValue::from(total));
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        if self.cancel.is_undefined() || self.cancel.is_null() {
+            return false;
+        }
+        Reflect::get(&self.cancel, &JsValue::from_str("cancelled"))
+            .ok()
+            .and_then(|flag| flag.as_bool())
+            .unwrap_or(false)
+    }
+}
+
 /// Web-реализация `VaultBackend`: File System Access API + периодическая сверка
 /// вместо нативных FS-событий (research.md §3 — у File System Access API нет
 /// API подписки на изменения).
@@ -282,6 +404,178 @@ impl WebBackend {
     /// `NativeBackend::write_denied` (принцип II).
     fn write_denied(&self) -> bool {
         self.access_state != AccessState::ReadWrite
+    }
+
+    /// Есть ли по этому пути файл или папка. Занятость имени в цели
+    /// проверяется по обоим видам: на диске имя одно на файл и папку.
+    async fn entry_exists(&self, path: &Path) -> bool {
+        self.find_folder_handle(path).await.is_some() || self.find_handle(path).await.is_some()
+    }
+
+    /// Проверки переноса и план — паритет с `NativeBackend::plan_move`
+    /// (фича 023, принцип II). Занятость имён смотрится по хендлам, а не по
+    /// индексу: в цели может лежать файл, которого дерево не показывает.
+    async fn plan_move(&self, request: &MoveRequest) -> Result<MovePlan, MoveRefusal> {
+        if self.write_denied() {
+            return Err(MoveRefusal::AccessDenied);
+        }
+        let (from, to_folder) = normalize_request(request)?;
+        let new_path = check_move(&from, &to_folder)?;
+
+        let is_folder = if self.find_folder_handle(&from).await.is_some() {
+            true
+        } else if self.find_handle(&from).await.is_some() {
+            false
+        } else {
+            return Err(MoveRefusal::NotFound);
+        };
+        if !to_folder.as_os_str().is_empty() && self.find_folder_handle(&to_folder).await.is_none()
+        {
+            return Err(MoveRefusal::TargetNotFound);
+        }
+
+        let placement = placement_of(self).await;
+        let mut existing_snapshots = Vec::new();
+        for folder in snapshot_folders_of(&from, is_folder, placement) {
+            if self.find_folder_handle(&folder).await.is_some() {
+                existing_snapshots.push(folder);
+            }
+        }
+        let steps = plan_steps(&from, &new_path, &existing_snapshots);
+        for (_, dest) in &steps {
+            if self.entry_exists(dest).await {
+                return Err(MoveRefusal::NameConflict {
+                    name: conflict_name(&to_folder, dest),
+                });
+            }
+        }
+        let indexed = self.index.all();
+        Ok(MovePlan::new(&indexed, from, new_path, is_folder, steps))
+    }
+
+    /// Копирует шаги плана байтами в цель (research.md §6). Источник не
+    /// трогает: отмена и сбой откатываются удалением копии.
+    async fn copy_steps(
+        &mut self,
+        inventory: &[StepInventory],
+        control: &dyn MoveControl,
+    ) -> Result<CopyReport, CopyStop> {
+        let total: u32 = inventory.iter().map(|step| step.files.len() as u32).sum();
+        let mut done = 0u32;
+        let mut report = CopyReport::default();
+        control.progress(0, total);
+        for step in inventory {
+            if let Some(parent) = step.dest.parent() {
+                self.ensure_folder(parent)
+                    .await
+                    .map_err(|_| CopyStop::Failed)?;
+            }
+            if !step.dirs.is_empty() || !step.files.iter().any(|rel| rel.as_os_str().is_empty()) {
+                self.ensure_folder(&step.dest)
+                    .await
+                    .map_err(|_| CopyStop::Failed)?;
+            }
+            for dir in &step.dirs {
+                self.ensure_folder(&step.dest.join(dir))
+                    .await
+                    .map_err(|_| CopyStop::Failed)?;
+            }
+            for rel in &step.files {
+                // Между файлами управление возвращается циклу событий: флаг
+                // отмены ставит обработчик интерфейса.
+                if control.cancelled() {
+                    return Err(CopyStop::Cancelled);
+                }
+                let source = step_path(&step.source, rel);
+                let dest = step_path(&step.dest, rel);
+                let bytes = self
+                    .read_bytes_any_size(&source)
+                    .await
+                    .map_err(|_| CopyStop::Failed)?;
+                self.write_bytes(&dest, &bytes)
+                    .await
+                    .map_err(|_| CopyStop::Failed)?;
+                // «Убедиться» до удаления источника: размер копии совпал.
+                let handle = self.find_handle(&dest).await.ok_or(CopyStop::Failed)?;
+                let meta = file_meta(&handle).await.ok_or(CopyStop::Failed)?;
+                if meta.0 != bytes.len() as u64 {
+                    return Err(CopyStop::Failed);
+                }
+                if is_listed(&dest) {
+                    report.metas.push((dest.clone(), meta));
+                }
+                if crate::vault::classify(&dest) == crate::vault::FileKind::Note {
+                    report
+                        .texts
+                        .insert(dest, String::from_utf8_lossy(&bytes).into_owned());
+                }
+                done += 1;
+                control.progress(done, total);
+            }
+        }
+        Ok(report)
+    }
+
+    /// Удаляет скопированное в цели (откат до удаления источника).
+    async fn discard_copies(&self, roots: &[PathBuf]) {
+        for root in roots {
+            let Some(name) = root.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            let parent = match root.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => {
+                    self.find_folder_handle(parent).await
+                }
+                _ => Some(self.root_handle.clone()),
+            };
+            if let Some(parent) = parent {
+                let _ = remove_entry_recursive(&parent, &name).await;
+            }
+        }
+    }
+
+    /// Файлы, оставшиеся от шага на прежнем месте (FR-007).
+    async fn leftovers(&self, source: &Path) -> Vec<PathBuf> {
+        if let Some(handle) = self.find_folder_handle(source).await {
+            let (mut files, mut dirs) = (Vec::new(), Vec::new());
+            let _ = walk_everything(&handle, PathBuf::new(), &mut files, &mut dirs).await;
+            files.into_iter().map(|rel| source.join(rel)).collect()
+        } else if self.find_handle(source).await.is_some() {
+            vec![source.to_path_buf()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Перечитывает индекс, таблицу ссылок и снимок опроса с диска — после
+    /// частичного переноса дерево обязано показывать то, что есть (FR-007).
+    /// Несохранённые правки определяются реестром, а не диском.
+    async fn reindex_from_disk(&mut self) {
+        let mut found = Vec::new();
+        if walk_directory(&self.root_handle, PathBuf::new(), &mut found, usize::MAX)
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut index = Index::new();
+        let mut cache = MemoryCache::new();
+        let mut snapshot = HashMap::new();
+        for (path, handle) in found {
+            let Ok(content) = read_file_handle_text(&handle).await else {
+                continue;
+            };
+            let mut note = Note::new(path.clone(), stamp_from_content(&content));
+            note.has_unsaved_edits = self.conflicts.has_unsaved_edits(&path);
+            index.insert(note);
+            record_links(&mut cache, &path, &content).await;
+            if let Some(meta) = file_meta(&handle).await {
+                snapshot.insert(path, meta);
+            }
+        }
+        self.index = index;
+        self.cache = cache;
+        self.poll_snapshot = snapshot;
     }
 
     /// Паритет с `NativeBackend::publish_links_invalidated` (FR-030, T087).
@@ -693,6 +987,158 @@ impl VaultBackend for WebBackend {
         self.cache.remove_note(path).await;
         self.publish_links_invalidated(&[path.to_path_buf()]).await;
         Ok(())
+    }
+
+    async fn move_targets(&self, from: &Path, query: &str) -> Vec<MoveTarget> {
+        super::relocate::move_targets_of(self, from, query).await
+    }
+
+    async fn move_impact(&self, request: &MoveRequest) -> Result<MoveImpact, MoveRefusal> {
+        let plan = self.plan_move(request).await?;
+        let notes = self.index.all();
+        Ok(super::relocate::impact_of(self, &notes, &plan.notes).await)
+    }
+
+    /// Перенос на web: «скопировать всё в цель → убедиться → удалить источник»
+    /// (research.md §6). У File System Access API нет переноса папок.
+    ///
+    /// До удаления источника отмена и любой сбой удаляют скопированное:
+    /// исход `Cancelled` либо `Io`, vault прежний. Сбой удаления источника
+    /// оставляет полную копию в цели и остаток в источнике — `Partial`.
+    async fn move_entry(
+        &mut self,
+        request: &MoveRequest,
+        control: &dyn MoveControl,
+    ) -> Result<MoveOutcome, MoveError> {
+        let plan = self.plan_move(request).await?;
+        if control.cancelled() {
+            return Ok(MoveOutcome::Cancelled);
+        }
+
+        // Опись источника до первой записи: число файлов нужно полосе хода.
+        let mut inventory = Vec::with_capacity(plan.steps.len());
+        for (source, dest) in &plan.steps {
+            let (mut files, mut dirs) = (Vec::new(), Vec::new());
+            match self.find_folder_handle(source).await {
+                Some(handle) => {
+                    walk_everything(&handle, PathBuf::new(), &mut files, &mut dirs)
+                        .await
+                        .map_err(|_| MoveError::Io)?;
+                }
+                None => files.push(PathBuf::new()),
+            }
+            inventory.push(StepInventory {
+                source: source.clone(),
+                dest: dest.clone(),
+                dirs,
+                files,
+            });
+        }
+
+        // Что создаст копирование: откат удаляет самый верхний новый предок
+        // каждого шага. Существовавшее до переноса не трогается никогда.
+        let mut created_roots = Vec::new();
+        for (_, dest) in &plan.steps {
+            let mut top = dest.clone();
+            let mut current = dest.parent();
+            while let Some(parent) = current {
+                if parent.as_os_str().is_empty() || self.find_folder_handle(parent).await.is_some()
+                {
+                    break;
+                }
+                top = parent.to_path_buf();
+                current = parent.parent();
+            }
+            created_roots.push(top);
+        }
+
+        let report = match self.copy_steps(&inventory, control).await {
+            Ok(report) if !control.cancelled() => report,
+            Ok(_) | Err(CopyStop::Cancelled) => {
+                self.discard_copies(&created_roots).await;
+                return Ok(MoveOutcome::Cancelled);
+            }
+            Err(CopyStop::Failed) => {
+                self.discard_copies(&created_roots).await;
+                return Err(MoveError::Io);
+            }
+        };
+
+        // Дальше пути назад нет: копия полная и проверена.
+        let mut left: Vec<PathBuf> = Vec::new();
+        let mut failed = false;
+        for step in &inventory {
+            if !failed {
+                let parent = match step.source.parent() {
+                    Some(parent) if !parent.as_os_str().is_empty() => {
+                        self.find_folder_handle(parent).await
+                    }
+                    _ => Some(self.root_handle.clone()),
+                };
+                let name = step
+                    .source
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let removed = match parent {
+                    Some(parent) => remove_entry_recursive(&parent, &name).await.is_ok(),
+                    None => false,
+                };
+                if removed {
+                    continue;
+                }
+                failed = true;
+            }
+            left.extend(self.leftovers(&step.source).await);
+        }
+        let partial = !left.is_empty();
+
+        // Состояние приложения следует за путём (FR-020).
+        self.conflicts.rename_prefix(&plan.from, &plan.new_path);
+        let mut affected = Vec::new();
+        if partial {
+            self.reindex_from_disk().await;
+        } else {
+            self.index.rename_prefix(&plan.from, &plan.new_path);
+            let cache_moves: Vec<CacheMove> = plan
+                .notes
+                .iter()
+                .map(|change| CacheMove {
+                    from: change.from.clone(),
+                    to: change.to.clone(),
+                    links: report
+                        .texts
+                        .get(&change.to)
+                        .map(|text| crate::graph::links_in(&change.to, text)),
+                })
+                .collect();
+            self.cache.relocate(&cache_moves).await;
+            self.poll_snapshot
+                .retain(|path, _| !path.starts_with(&plan.from));
+            // Копии уже известны опросу: иначе ближайший `pollForChanges` принял
+            // бы собственный перенос за внешнюю правку каждого файла (FR-008).
+            self.poll_snapshot.extend(report.metas.iter().cloned());
+        }
+        for change in &plan.notes {
+            affected.extend(self.cache.backlinks(&change.from).await);
+            affected.extend(self.cache.backlinks(&change.to).await);
+        }
+        super::relocate::move_section_marks(self, plan.is_folder, &plan.from, &plan.new_path).await;
+
+        // Без `wrap_bulk_if_needed`: перенос — не внешнее изменение (FR-008).
+        self.events
+            .extend(super::relocate::rename_events(&plan.notes));
+        self.events.extend(links_invalidated(affected));
+
+        Ok(if partial {
+            MoveOutcome::Partial {
+                moved: plan.notes,
+                folders: plan.folders,
+                left,
+            }
+        } else {
+            plan.done()
+        })
     }
 
     async fn backlinks(&self, path: &Path) -> Vec<Note> {
@@ -1510,6 +1956,35 @@ impl WebBackend {
     #[wasm_bindgen(js_name = delete)]
     pub async fn delete_js(&mut self, path: &str) -> Result<(), DeleteError> {
         VaultBackend::delete(self, Path::new(path)).await
+    }
+
+    #[wasm_bindgen(js_name = moveTargets)]
+    pub async fn move_targets_js(&self, from: &str, query: &str) -> Vec<MoveTarget> {
+        VaultBackend::move_targets(self, Path::new(from), query).await
+    }
+
+    /// Отказ — reject с [`MoveRefusal`].
+    #[wasm_bindgen(js_name = moveImpact)]
+    pub async fn move_impact_js(&self, request: MoveRequest) -> Result<MoveImpact, MoveRefusal> {
+        VaultBackend::move_impact(self, &request).await
+    }
+
+    /// `on_progress(done, total)` вызывается после каждого файла; `cancel` —
+    /// объект-флаг `{ cancelled: boolean }`, который интерфейс держит у себя и
+    /// ставит в `true` для отмены (ядро читает его через `Reflect` между
+    /// файлами). Оба необязательны. Ошибка — reject с [`MoveError`].
+    #[wasm_bindgen(js_name = moveEntry)]
+    pub async fn move_entry_js(
+        &mut self,
+        request: MoveRequest,
+        on_progress: Option<js_sys::Function>,
+        cancel: JsValue,
+    ) -> Result<MoveOutcome, MoveError> {
+        let control = JsMoveControl {
+            on_progress,
+            cancel,
+        };
+        VaultBackend::move_entry(self, &request, &control).await
     }
 
     #[wasm_bindgen(js_name = backlinks)]

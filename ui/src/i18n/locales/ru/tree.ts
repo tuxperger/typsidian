@@ -83,4 +83,38 @@ export const tree: Translation<typeof en> = {
   "tree.create.nameLabel": "Имя новой заметки",
   "tree.create.nameOrBoardLabel": "Имя новой заметки или доски",
   "tree.emptyNotesOrBoards": "Vault пуст — создайте первую заметку или доску.",
+
+  // Перенос в дереве (фича 023).
+  "tree.move.menu": "Переместить в…",
+  "tree.move.done": (p) => `Перенесено в ${p.folder}`,
+  "tree.move.undo": "Отменить",
+  "tree.move.undone": "Перенос отменён",
+  "tree.move.refused.nameConflict": (p) =>
+    `В «${p.folder}» уже есть ${p.name}. Переименуйте одну из заметок и повторите.`,
+  "tree.move.refused.accessDenied": "Vault открыт только для чтения — перенос недоступен.",
+  "tree.move.refused.notFound": (p) => `«${p.name}» больше нет в vault.`,
+  "tree.move.refused.targetNotFound": (p) => `Папки «${p.folder}» больше нет.`,
+  "tree.move.refused.io": (p) => `Не удалось перенести «${p.name}». Ничего не изменилось.`,
+  "tree.move.partial": (p) =>
+    `Перенесено не всё: ${ruN(p.count, "# файл остался", "# файла остались", "# файлов остались")} в «${p.folder}».`,
+  "tree.move.undoRefused": (p) =>
+    `Отменить не получилось: в «${p.folder}» появилась «${p.name}».`,
+  "tree.move.progress": (p) => `перенос · ${p.done} из ${p.total}`,
+  "tree.move.cancel": "Прервать",
+  "tree.move.filesCount": (p) => ruN(p.count, "# файл", "# файла", "# файлов"),
+  "tree.backlinks.moveConsequence": (p) =>
+    `После переноса «${p.name}» в «${p.folder}» перестанут работать ссылки в ${ruN(p.count, "# заметке", "# заметках", "# заметках")}:`,
+  "tree.backlinks.moveAnyway": "Перенести",
+  "tree.move.dialog.title": "Переместить",
+  "tree.move.dialog.label": (p) => `Выбор папки для ${p.name}`,
+  "tree.move.dialog.placeholder": "Папка…",
+  "tree.move.dialog.root": "корень vault",
+  "tree.move.dialog.empty": "Нет папки с таким именем",
+  "tree.move.dialog.hintSelect": "↑↓ выбрать",
+  "tree.move.dialog.hintMove": "↵ перенести",
+  "tree.move.dialog.hintClose": "esc закрыть",
+  "tree.move.a11y.grabbed": (p) => `Переносится ${p.name}`,
+  "tree.move.a11y.over": (p) => `В папку ${p.folder}`,
+  "tree.move.a11y.overRoot": "В корень",
+  "tree.move.a11y.denied": "Сюда нельзя",
 };

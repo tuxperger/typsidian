@@ -139,6 +139,8 @@ const TreeExtrasContext = createContext<{
   onFileHistory?: (note: Note) => void;
   /** Пути с неразрешённым конфликтом получения или Syncthing (фича 011). */
   conflictPaths?: ReadonlySet<string>;
+  /** «Переместить в…» (фича 023, FR-021). */
+  onMoveTo?: (entry: { path: string; name: string }) => void;
 }>({});
 
 /** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
@@ -215,6 +217,11 @@ export interface VaultTreeActionsProps {
   onInsertLink?: ((note: Note) => void) | undefined;
   onFileHistory?: ((note: Note) => void) | undefined;
   conflictPaths?: ReadonlySet<string> | undefined;
+  /**
+   * Открыть «Переместить в…» для заметки, доски или папки (фича 023, FR-021).
+   * Не передан — пункта в меню нет.
+   */
+  onMoveTo?: ((entry: { path: string; name: string }) => void) | undefined;
 }
 
 type MenuTarget =
@@ -236,6 +243,13 @@ interface ActionsState {
   menu: MenuTarget | null;
   /** Путь заметки/будущей заметки, к которой сейчас идёт запрос к client. */
   pendingPath: string | null;
+  /**
+   * Свёрнутые папки (фича 023, FR-020). Хранятся свёрнутые, а не раскрытые:
+   * по умолчанию папка раскрыта (SC-002), и новая папка не должна требовать
+   * записи сюда. Живёт здесь, а не в строке папки: после переноса строка —
+   * другой узел React, и её собственное состояние не переехало бы.
+   */
+  collapsed: ReadonlySet<string>;
 }
 
 const INITIAL_STATE: ActionsState = {
@@ -247,6 +261,7 @@ const INITIAL_STATE: ActionsState = {
   createTemplate: null,
   menu: null,
   pendingPath: null,
+  collapsed: new Set<string>(),
 };
 
 /**
@@ -488,8 +503,41 @@ export function useVaultTreeActions({
     [state.pendingPath, effectiveConfirmDelete, performDelete],
   );
 
+  const toggleExpanded = useCallback((folder: string) => {
+    setState((prev) => {
+      const collapsed = new Set(prev.collapsed);
+      if (!collapsed.delete(folder)) collapsed.add(folder);
+      return { ...prev, collapsed };
+    });
+  }, []);
+
+  const expand = useCallback((folder: string) => {
+    setState((prev) => {
+      if (!prev.collapsed.has(folder)) return prev;
+      const collapsed = new Set(prev.collapsed);
+      collapsed.delete(folder);
+      return { ...prev, collapsed };
+    });
+  }, []);
+
+  // Свёрнутость едет за перенесённой папкой и за вложенными в неё: пары по
+  // каждой папке приходят из ядра (`MoveOutcome.folders`), здесь они только
+  // применяются.
+  const remapExpanded = useCallback((folders: readonly { from: string; to: string }[]) => {
+    if (folders.length === 0) return;
+    setState((prev) => {
+      const moved = new Map(folders.map((change) => [change.from, change.to]));
+      const collapsed = new Set<string>();
+      for (const path of prev.collapsed) collapsed.add(moved.get(path) ?? path);
+      return { ...prev, collapsed };
+    });
+  }, []);
+
   return {
     state,
+    toggleExpanded,
+    expand,
+    remapExpanded,
     openMenu,
     closeMenu,
     beginRename,
@@ -596,8 +644,9 @@ function NoteRow({
   const isBusy = actions.state.pendingPath !== null;
   const isOpen = useContext(OpenPathContext) === note.path.toString();
   const contextMenu = useContextMenu();
-  const { onInsertLink, onFileHistory, conflictPaths } = useContext(TreeExtrasContext);
+  const { onInsertLink, onFileHistory, conflictPaths, onMoveTo } = useContext(TreeExtrasContext);
   const { t } = useI18n();
+  const moveEntry = { path: note.path.toString(), name: note.name };
   const hasConflict = conflictPaths?.has(note.path.toString()) ?? false;
 
   if (isRenaming) {
@@ -619,6 +668,12 @@ function NoteRow({
     <li
       role="treeitem"
       className="ts-tree__file"
+      // Жест переноса (фича 023): что взяли и куда упадёт элемент, брошенный
+      // на эту строку, — в папку, где она лежит (FR-011).
+      data-drag-path={note.path}
+      data-drag-name={note.name}
+      data-drag-kind={isBoard(note) ? "board" : "note"}
+      data-drop-folder={folderOf(note.path.toString())}
       onContextMenu={(event) => {
         if (isBusy) return;
         contextMenu.open(event, [
@@ -632,6 +687,7 @@ function NoteRow({
           { kind: "separator" },
           copyPathItem(t, note.path.toString(), contextMenu.notify),
           { label: t("common.rename"), run: () => actions.beginRename(note) },
+          ...(onMoveTo ? [{ label: t("tree.move.menu"), run: () => onMoveTo(moveEntry) }] : []),
           { kind: "separator" },
           { label: t("tree.menu.deleteEllipsis"), danger: true, run: () => actions.requestDelete(note) },
         ]);
@@ -642,6 +698,7 @@ function NoteRow({
         onClick={() => onOpenNote(note)}
         disabled={isBusy}
         aria-current={isOpen ? "true" : undefined}
+        data-drag-handle=""
       >
         <FileKindMark note={note} />
         <span className="ts-tree__name">{stemOf(note.name)}</span>
@@ -686,6 +743,20 @@ function NoteRow({
               {t("common.rename")}
             </button>
           </li>
+          {onMoveTo && (
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  actions.closeMenu();
+                  onMoveTo(moveEntry);
+                }}
+              >
+                {t("tree.move.menu")}
+              </button>
+            </li>
+          )}
           <li role="none">
             <button
               type="button"
@@ -710,8 +781,8 @@ function FolderRow({
   actions: VaultTreeActionsController;
   onOpenNote: (note: Note) => void;
 }): React.JSX.Element {
-  // Верхний уровень раскрыт по умолчанию, как и в VaultTree.tsx (SC-002).
-  const [expanded, setExpanded] = useState(true);
+  // Раскрыта по умолчанию, как и в VaultTree.tsx (SC-002).
+  const expanded = !actions.state.collapsed.has(folder.path);
   const menu = actions.state.menu;
   const isMenuOpen = menu !== null && menu.kind === "folder" && menu.path === folder.path;
   const isCreatingHere = actions.state.creatingInFolder === folder.path;
@@ -725,12 +796,22 @@ function FolderRow({
   const isBusy = actions.state.pendingPath !== null;
   const contextMenu = useContextMenu();
   const { t } = useI18n();
+  const { onMoveTo } = useContext(TreeExtrasContext);
+  const moveEntry = { path: folder.path, name: folder.name };
 
   return (
     <li
       role="treeitem"
       aria-expanded={showChildren}
       className="ts-tree__folder"
+      // Жест переноса (фича 023): папку можно взять, и она же — цель броска
+      // для всего, что над ней и над её содержимым.
+      data-drag-path={folder.path}
+      data-drag-name={folder.name}
+      data-drag-kind="folder"
+      data-drag-count={countFiles(folder)}
+      data-drop-folder={folder.path}
+      data-folder-collapsed={showChildren ? undefined : ""}
       onContextMenu={(event) => {
         if (isBusy) return;
         contextMenu.open(event, [
@@ -749,6 +830,7 @@ function FolderRow({
               ]
             : []),
           copyPathItem(t, folder.path, contextMenu.notify),
+          ...(onMoveTo ? [{ label: t("tree.move.menu"), run: () => onMoveTo(moveEntry) }] : []),
         ]);
       }}
     >
@@ -756,7 +838,11 @@ function FolderRow({
           нарисован — там папки декоративные заголовки, а здесь они
           сворачиваются, и управляющий элемент без признака состояния был бы
           хуже точного совпадения с картинкой. */}
-      <button type="button" onClick={() => setExpanded((v) => !v)}>
+      <button
+        type="button"
+        onClick={() => actions.toggleExpanded(folder.path)}
+        data-drag-handle=""
+      >
         <Icon
           name="chevron"
           size={11}
@@ -814,6 +900,20 @@ function FolderRow({
               </button>
             </li>
           )}
+          {onMoveTo && (
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  actions.closeMenu();
+                  onMoveTo(moveEntry);
+                }}
+              >
+                {t("tree.move.menu")}
+              </button>
+            </li>
+          )}
         </ul>
       )}
       {showChildren && (
@@ -837,6 +937,15 @@ function FolderRow({
       )}
     </li>
   );
+}
+
+/** Сколько файлов дерева поедет вместе с папкой — число в ярлыке жеста. */
+function countFiles(folder: TreeFolder): number {
+  let count = 0;
+  for (const child of folder.children) {
+    count += child.kind === "note" ? 1 : countFiles(child);
+  }
+  return count;
 }
 
 function TreeNodeRow({
@@ -870,6 +979,7 @@ export function VaultTreeActions({
   onInsertLink,
   onFileHistory,
   conflictPaths,
+  onMoveTo,
 }: VaultTreeActionsProps): React.JSX.Element {
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
@@ -880,8 +990,9 @@ export function VaultTreeActions({
       ...(onInsertLink ? { onInsertLink } : {}),
       ...(onFileHistory ? { onFileHistory } : {}),
       ...(conflictPaths ? { conflictPaths } : {}),
+      ...(onMoveTo ? { onMoveTo } : {}),
     }),
-    [onInsertLink, onFileHistory, conflictPaths],
+    [onInsertLink, onFileHistory, conflictPaths, onMoveTo],
   );
 
   return (

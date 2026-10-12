@@ -3,6 +3,7 @@ pub mod cache;
 pub mod conflict;
 pub mod events;
 pub mod index;
+pub mod relocate;
 pub mod sections;
 pub mod service_dir;
 pub mod vault_settings;
