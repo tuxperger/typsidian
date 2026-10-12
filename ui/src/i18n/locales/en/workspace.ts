@@ -1,4 +1,4 @@
-import type { Entries } from "../define.js";
+import { enN, type Entries } from "../define.js";
 
 export const workspace = {
   "workspace.backToWorkspace": "Back to Workspace",
@@ -29,4 +29,43 @@ export const workspace = {
   "workspace.sidebarWidth": "Sidebar width",
   "workspace.editorPreviewSplit": "Editor and preview divider",
   "workspace.templateName": "Template",
+
+  // ── Вкладки и разделение редактора (фича 014) ──────────────────────
+  "workspace.tabs.label": "Open notes",
+  "workspace.tabs.groupLabel": (p: { group: number }) => `Group ${p.group}`,
+  "workspace.tabs.close": "Close tab",
+  "workspace.tabs.closeNamed": (p: { title: string }) => `Close “${p.title}”`,
+  "workspace.tabs.closeOthers": "Close other tabs",
+  "workspace.tabs.next": "Next tab",
+  "workspace.tabs.previous": "Previous tab",
+  "workspace.tabs.moveLeft": "Move tab left",
+  "workspace.tabs.moveRight": "Move tab right",
+  "workspace.tabs.board": "board",
+  "workspace.tabs.conflict": "conflict",
+  "workspace.tabs.unsaved": "not saved",
+  "workspace.tabs.count": (p: { count: number }) => enN(p.count, "# tab", "# tabs"),
+  "workspace.tabs.groupOf": (p: { group: number; count: number }) =>
+    `group ${p.group} of 2 · ${enN(p.count, "# tab", "# tabs")}`,
+  "workspace.tabs.back": "Back",
+  "workspace.tabs.forward": "Forward",
+  "workspace.tabs.split": "Split editor",
+  "workspace.tabs.unsplit": "Remove split",
+  "workspace.tabs.moveToOther": "Move to other group",
+  "workspace.tabs.focusOther": "Focus the other group",
+  "workspace.tabs.groupDivider": "Group divider",
+  "workspace.tabs.empty": "No note is open.",
+  "workspace.tabs.emptyHint": "Pick one in the tree or press",
+  "workspace.tabs.boardNoPreview": "A board has no preview",
+  "workspace.tabs.refused": "Tab not closed",
+  "workspace.tabs.refusedUnsaved": (p: { title: string }) =>
+    `“${p.title}” could not be saved. Your edits stay in the tab.`,
+  "workspace.tabs.refusedUnsavedWhy": (p: { title: string; reason: string }) =>
+    `“${p.title}” could not be saved. ${p.reason}`,
+  "workspace.tabs.refusedConflict": (p: { title: string }) =>
+    `“${p.title}” differs from the file on disk. Resolve the conflict and the tab will close.`,
+  "workspace.tabs.dismiss": "Dismiss",
+  "workspace.tabs.openNotes": "Open notes",
+  "workspace.tabs.openNotesButton": (p: { count: number }) =>
+    `Open notes: ${p.count}`,
+  "workspace.tabs.sheetClose": "Close the list",
 } as const satisfies Entries;

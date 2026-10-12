@@ -191,19 +191,54 @@ function createPage(cdp, sessionId, log) {
     },
     /** Ввод текста в элемент с фокусом — как с клавиатуры. */
     type: (text) => send("Input.insertText", { text }),
-    /** Клавиша: "Escape", "Enter"; модификаторы — { ctrl, alt, shift, meta }. */
-    async press(key, { ctrl, alt, shift, meta } = {}) {
+    /**
+     * Клавиша: "Escape", "Enter"; модификаторы — { ctrl, alt, shift, meta }.
+     * `code` — имя физической клавиши (`"Period"`, `"BracketLeft"`): для знаков и
+     * для проверки другой раскладки (`key: "ю", code: "Period"`).
+     */
+    async press(key, { ctrl, alt, shift, meta, code: physical } = {}) {
       const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
-      const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
-      const named = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8 };
-      const windowsVirtualKeyCode = named[key] ?? key.toUpperCase().charCodeAt(0);
+      const code = physical ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key);
+      const named = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, End: 35, Home: 36, PageDown: 34, PageUp: 33 };
+      const byCode = { Period: 190, Comma: 188, Backslash: 220, BracketLeft: 219, BracketRight: 221 };
+      const windowsVirtualKeyCode = byCode[code] ?? named[key] ?? key.toUpperCase().charCodeAt(0);
       for (const type of ["rawKeyDown", "keyUp"]) {
         await send("Input.dispatchKeyEvent", { type, key, code, modifiers, windowsVirtualKeyCode });
       }
     },
+    /** Скрипт, выполняемый в каждом новом документе (до кода страницы); действует после `reload`. */
+    addInitScript: (source) => send("Page.addScriptToEvaluateOnNewDocument", { source }),
+    /** Перезагрузка страницы и ожидание её готовности. */
+    async reload() {
+      await send("Page.reload");
+      await sleep(300);
+      await waitFor(`document.readyState === "complete"`, { label: "перезагрузка страницы" });
+    },
+    /**
+     * Мышь: `type` — "mouseMoved" | "mousePressed" | "mouseReleased"; перетаскивание из шагов.
+     * Движение идёт с нажатой левой кнопкой: с `button: "none"` chromium снимает
+     * захват указателя (`setPointerCapture`) на первом же шаге.
+     */
+    mouse: (type, x, y) =>
+      send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: type === "mouseMoved" ? 0 : 1 }),
+    /** Центр элемента в координатах окна — для `mouse`. */
+    center: (target) =>
+      evaluate(`(() => {
+        const el = ${locate(target)};
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      })()`),
     /** Видимый текст страницы или элемента. */
     text: (selector = "body") =>
       evaluate(`document.querySelector(${JSON.stringify(selector)})?.innerText ?? null`),
+    /** Размер окна страницы (эмуляция метрик): проверка узкого вида. */
+    viewport: (width, height) =>
+      send("Emulation.setDeviceMetricsOverride", {
+        width,
+        height,
+        deviceScaleFactor: 1,
+        mobile: false,
+      }),
     /** Снимок экрана в PNG. */
     async shot(path) {
       const { data } = await send("Page.captureScreenshot", { format: "png" });
@@ -244,6 +279,11 @@ try {
 
   await send("Runtime.enable");
   await send("Page.enable");
+  // Диалог «покинуть страницу» (beforeunload) в headless не закрыть руками, а он
+  // замораживает страницу: сценарий с перезагрузкой принимает его сам.
+  cdp.on("Page.javascriptDialogOpening", () => {
+    void send("Page.handleJavaScriptDialog", { accept: true });
+  });
   await send("Network.enable");
   if (opfsVault) await send("Page.addScriptToEvaluateOnNewDocument", { source: OPFS_VAULT });
 

@@ -49,7 +49,7 @@
 | `Open` | `path`, `target: Option<TextPlace>`, `leaving: Option<TextPlace>` | вкладка в активной группе либо активация существующей (FR-001, FR-002); запись в историю |
 | `Activate` | `tab`, `leaving` | активная вкладка и её группа; запись в историю |
 | `Cycle` | `direction: Next \| Previous`, `leaving` | соседняя по полосе, по кругу (FR-003) |
-| `Close` | `tab` | закрыть с проверкой (FR-005); активной становится предыдущая по `recent` (FR-006) |
+| `Close` | `tab`, `board_unsaved: bool` | закрыть с проверкой (FR-005); `board_unsaved` — состояние сохранения доски после дописывания (research.md §6); активной становится предыдущая по `recent` (FR-006) |
 | `CloseOthers` | `tab` | закрыть прочие вкладки группы, каждую с проверкой |
 | `Move` | `tab`, `group`, `index` | порядок в полосе и перенос между группами (FR-003, FR-016) |
 | `MoveToOtherGroup` | `tab` | перенос в другую группу (FR-016) |

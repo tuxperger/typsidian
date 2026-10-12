@@ -1355,3 +1355,93 @@ async fn the_journal_records_events_without_values_and_survives_a_restart() {
     assert!(journal.contains("VaultAdded"), "прежние записи на месте");
     assert_eq!(journal.matches("SettingsLoaded").count(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Фича 013 — состояние колонки заметки (T010): common/note_panel_cases.rs
+// ---------------------------------------------------------------------------
+
+use common::note_panel_cases as note_panel;
+
+#[test]
+fn note_panel_defaults_are_hidden_links_collapsed() {
+    note_panel::defaults_are_hidden_links_collapsed();
+}
+
+#[test]
+fn note_panel_state_round_trips_through_the_file() {
+    note_panel::state_round_trips_through_the_file();
+}
+
+#[test]
+fn note_panel_bad_value_does_not_break_the_rest() {
+    note_panel::a_bad_value_does_not_break_the_rest();
+}
+
+#[test]
+fn note_panel_unknown_mode_reads_as_links() {
+    note_panel::an_unknown_mode_reads_as_links();
+}
+
+#[test]
+fn note_panel_goes_to_the_device_even_with_an_open_vault() {
+    note_panel::the_state_goes_to_the_device_even_with_an_open_vault();
+}
+
+#[test]
+fn note_panel_reset_does_not_touch_the_state() {
+    note_panel::reset_does_not_touch_the_state();
+}
+
+#[test]
+fn note_panel_state_json_shape() {
+    note_panel::state_json_shape();
+}
+
+#[test]
+fn note_panel_outline_mode_and_kinds_round_trip() {
+    note_panel::the_outline_mode_and_kinds_round_trip();
+}
+
+#[test]
+fn note_panel_outline_state_json_shape() {
+    note_panel::the_outline_state_json_shape();
+}
+
+#[test]
+fn note_panel_outline_kinds_are_tolerant_on_read() {
+    note_panel::the_outline_kinds_are_tolerant_on_read();
+}
+
+// Фича 014 (T004, T055): common/vault_settings_cases.rs
+use common::vault_settings_cases as workspace_settings;
+
+#[test]
+fn a_punctuation_shortcut_carries_the_key_code() {
+    workspace_settings::a_punctuation_shortcut_carries_the_key_code();
+}
+
+// Фича 015 (T007).
+#[test]
+fn the_outline_command_has_its_name_and_default() {
+    workspace_settings::the_outline_command_has_its_name_and_default();
+}
+
+#[test]
+fn a_workspace_change_replaces_only_its_own_vault() {
+    workspace_settings::a_workspace_change_replaces_only_its_own_vault();
+}
+
+#[test]
+fn a_workspace_change_goes_to_the_device() {
+    workspace_settings::a_workspace_change_goes_to_the_device();
+}
+
+#[test]
+fn the_workspaces_key_round_trips_and_tolerates_garbage() {
+    workspace_settings::the_workspaces_key_round_trips_and_tolerates_garbage();
+}
+
+#[test]
+fn a_workspace_change_is_not_journaled() {
+    workspace_settings::a_workspace_change_is_not_journaled();
+}

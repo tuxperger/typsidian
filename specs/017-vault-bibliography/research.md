@@ -260,7 +260,7 @@ Vault только на чтение → `AccessDenied`, кнопка недос
   `hoverTooltip`.
 
 **Decision — кто какую ссылку отмечает**. Правило одно, в ядре:
-`sources::check::check_note(text, library, known_labels)`.
+`sources::check::check_note(text, library, known_labels)` (наружу — `SourceEngine::check_note(text, known_labels)`).
 
 | Запись | Условие | Отметка 017 |
 |---|---|---|

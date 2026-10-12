@@ -164,6 +164,25 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
             .flatten(),
     );
 
+    // Умолчание не пишется: файл остаётся чистым, пока колонку не трогали
+    // (фича 013).
+    set_or_remove(
+        &mut document,
+        "note_panel",
+        (settings.note_panel != super::NotePanelState::default())
+            .then(|| serde_json::to_value(settings.note_panel).ok())
+            .flatten(),
+    );
+
+    // Пустой список ключ убирает (фича 014).
+    set_or_remove(
+        &mut document,
+        "workspaces",
+        (!settings.workspaces.is_empty())
+            .then(|| serde_json::to_value(&settings.workspaces).ok())
+            .flatten(),
+    );
+
     write_known_vaults(&mut document, &settings.known_vaults);
     write_folder_refs(&mut document, folder_refs);
 

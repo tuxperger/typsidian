@@ -54,6 +54,81 @@ pub enum ModePreference {
     SimplifiedEmulation,
 }
 
+/// Режим колонки заметки (фича 013, research.md §12). Фича 015 добавила
+/// `Outline`, 017 добавит `Sources`; неизвестное значение из более новой версии
+/// читается как умолчание ([`NotePanelState::lenient`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(rename_all = "camelCase")]
+pub enum NotePanelMode {
+    #[default]
+    Links,
+    /// Оглавление заметки (фича 015): в файле - `"outline"`.
+    Outline,
+}
+
+/// Состояние колонки заметки — свойство устройства (фича 013, FR-021).
+///
+/// В `VaultOverrides` не попадает, сбросом к умолчаниям не затрагивается:
+/// это положение окна, а не настройка внешнего вида.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(default)]
+pub struct NotePanelState {
+    /// Колонка показана (на шторку узкого окна не действует).
+    pub shown: bool,
+    /// Активный режим.
+    pub mode: NotePanelMode,
+    /// Раскрыт ли список упоминаний (FR-012).
+    pub mentions_expanded: bool,
+    /// Какие виды пунктов, кроме заголовков, показывает оглавление (фича 015,
+    /// FR-010). Умолчание (оба выключены) не пишется: файл остаётся прежним, а
+    /// прежний интерфейс - собирающимся.
+    #[serde(skip_serializing_if = "outline_kinds_are_default")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub outline_kinds: crate::structure::OutlineKinds,
+}
+
+fn outline_kinds_are_default(kinds: &crate::structure::OutlineKinds) -> bool {
+    *kinds == crate::structure::OutlineKinds::default()
+}
+
+impl NotePanelState {
+    /// Разбор без права уронить файл: негодное поле читается как умолчание,
+    /// остальные поля и остальные настройки сохраняются.
+    pub fn lenient(value: &serde_json::Value) -> Self {
+        let flag = |key: &str| value.get(key).and_then(serde_json::Value::as_bool);
+        Self {
+            shown: flag("shown").unwrap_or_default(),
+            mode: value
+                .get("mode")
+                .and_then(|mode| serde_json::from_value(mode.clone()).ok())
+                .unwrap_or_default(),
+            mentions_expanded: flag("mentions_expanded").unwrap_or_default(),
+            outline_kinds: value
+                .get("outline_kinds")
+                .map(|kinds| {
+                    let flag = |key: &str| kinds.get(key).and_then(serde_json::Value::as_bool);
+                    crate::structure::OutlineKinds {
+                        figures: flag("figures").unwrap_or_default(),
+                        labels: flag("labels").unwrap_or_default(),
+                    }
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+fn lenient_note_panel<'de, D>(deserializer: D) -> Result<NotePanelState, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(NotePanelState::lenient(&value))
+}
+
 /// Версия приложения — из манифеста ядра, на этапе сборки.
 ///
 /// Показывается в подвале панели настроек (макет «Утилиты» § Настройки). Здесь,
@@ -115,9 +190,56 @@ pub struct Settings {
     /// браузера, адрес Syncthing.
     #[serde(default, deserialize_with = "lenient_vault_sync")]
     pub vault_sync: Vec<crate::sync::DeviceVaultSyncEntry>,
+    /// Состояние колонки заметки (фича 013): только устройству.
+    #[serde(deserialize_with = "lenient_note_panel")]
+    pub note_panel: NotePanelState,
+    /// Наборы вкладок по vault (фича 014, FR-021…FR-023): только устройству.
+    #[serde(deserialize_with = "lenient_workspaces")]
+    pub workspaces: Vec<VaultWorkspaceEntry>,
+}
+
+/// Набор вкладок одного vault на этом устройстве (фича 014, data-model
+/// «Сохранённый набор»).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct VaultWorkspaceEntry {
+    pub vault: VaultId,
+    pub value: crate::workspace::SavedWorkspace,
+}
+
+/// Негодная запись набора вкладок отбрасывается, а не роняет файл настроек
+/// (FR-023): вкладки восстанавливаются без неё, остальное читается как обычно.
+fn lenient_workspaces<'de, D>(deserializer: D) -> Result<Vec<VaultWorkspaceEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 impl Settings {
+    /// Сохранённый набор вкладок vault, если он есть.
+    pub fn workspace_for(&self, vault: &VaultId) -> Option<crate::workspace::SavedWorkspace> {
+        self.workspaces
+            .iter()
+            .find(|entry| &entry.vault == vault)
+            .map(|entry| entry.value.clone())
+    }
+
+    /// Забывает набор вкладок vault, когда сам vault забыт (фича 014).
+    pub fn forget_workspace(&mut self, vault: &VaultId) {
+        self.workspaces.retain(|entry| &entry.vault != vault);
+    }
+
     /// Значения синхронизации устройства для vault; умолчания, если их нет.
     pub fn vault_sync_for(&self, vault: &VaultId) -> crate::sync::DeviceVaultSync {
         self.vault_sync
@@ -172,6 +294,8 @@ impl Default for Settings {
             language: None,
             device: None,
             vault_sync: Vec::new(),
+            note_panel: NotePanelState::default(),
+            workspaces: Vec::new(),
         }
     }
 }
@@ -259,6 +383,8 @@ pub fn resolve(
         language: device.language.clone(),
         device: device.device.clone(),
         vault_sync: device.vault_sync.clone(),
+        note_panel: device.note_panel,
+        workspaces: device.workspaces.clone(),
     }
 }
 

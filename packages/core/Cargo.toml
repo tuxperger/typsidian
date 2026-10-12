@@ -195,3 +195,9 @@ wasm-bindgen-test = "0.3"
 [[bench]]
 name = "sync_status"
 harness = false
+
+# Оглавление заметки на 10 000 строк и 2 000 заголовков (фича 015, T045,
+# research.md §9).
+[[bench]]
+name = "structure_scale"
+harness = false

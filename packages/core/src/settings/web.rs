@@ -550,6 +550,7 @@ impl FolderRegistry for WebStore {
             let _ = registry_delete(registry, id.as_str()).await;
         }
         vaults::forget(&mut self.settings.known_vaults, id);
+        self.settings.forget_workspace(id);
         if self.settings.current_vault.as_ref() == Some(id) {
             self.settings.current_vault = None;
         }

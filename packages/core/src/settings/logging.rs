@@ -231,6 +231,9 @@ impl Journal {
     /// Значения не пишутся — только имена полей: путь к конфигу редактора и
     /// адрес посредника в журнале делать нечего (FR-041).
     pub fn record_change(&mut self, utc_millis: i64, change: &super::apply::SettingsChange) {
+        // Набор вкладок (`workspace`, фича 014) и состояние колонки заметки
+        // сюда намеренно не входят: иначе каждое переключение вкладки стало бы
+        // строкой журнала.
         let fields: [(&'static str, bool); 8] = [
             ("theme", change.theme.is_some()),
             ("editor_font_size", change.editor_font_size.is_some()),

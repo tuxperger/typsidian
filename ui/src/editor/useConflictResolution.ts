@@ -76,7 +76,15 @@ export function describeResolveError(t: Translate, error: ResolveError): string 
  * оставляет конфликт неразрешённым, чтобы его подхватил
  * `useWindowCloseGuard` (FR-037).
  */
-export function useConflictResolution(client: VaultClient | null): {
+export function useConflictResolution(
+  client: VaultClient | null,
+  /**
+   * Путь вкладки, чей конфликт показывается диалогом (фича 014, research.md §7):
+   * остальные ждут с признаком на своей вкладке. `undefined` — выбора нет, как
+   * раньше показывается первый по времени появления.
+   */
+  focusPath?: string | null,
+): {
   state: ConflictResolutionState;
   current: ConflictEntry | null;
   noteConflicted: (notePath: string, kind: ConflictKind) => void;
@@ -87,7 +95,10 @@ export function useConflictResolution(client: VaultClient | null): {
   dismissError: () => void;
 } {
   const [state, setState] = useState<ConflictResolutionState>(INITIAL_STATE);
-  const current = state.conflicts[0] ?? null;
+  const current =
+    focusPath === undefined
+      ? (state.conflicts[0] ?? null)
+      : (state.conflicts.find((entry) => entry.notePath === focusPath) ?? null);
 
   const noteConflicted = useCallback((notePath: string, kind: ConflictKind) => {
     setState((prev) => {
@@ -109,14 +120,15 @@ export function useConflictResolution(client: VaultClient | null): {
     });
   }, []);
 
+  const currentPath = current?.notePath ?? null;
   const dropCurrent = useCallback(() => {
     setState((prev) => ({
       ...prev,
-      conflicts: prev.conflicts.slice(1),
+      conflicts: prev.conflicts.filter((entry) => entry.notePath !== currentPath),
       diff: null,
       isResolving: false,
     }));
-  }, []);
+  }, [currentPath]);
 
   const showDiff = useCallback(async () => {
     if (!client || !current) return;

@@ -9,6 +9,7 @@ import {
 } from "@typsidian/ui/vault-client-tauri.js";
 import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
+import { tauriTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-tauri.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { lastMobileFolder, openMobileVault } from "./openMobileVault.js";
 import { useFolderPicker } from "./useFolderPicker.js";
@@ -41,6 +42,8 @@ export function MobileWorkspace(): React.JSX.Element {
   // Создание vault из удалённого репозитория (фича 011): пустую папку выбирает
   // тот же обзор, что и папку vault.
   const cloner = useMemo(() => tauriVaultCloner(picker.pick, openVaultAt), [picker.pick]);
+  // Набор вкладок vault в `settings.json` устройства (фича 014).
+  const tabsStore = useMemo(() => tauriTabsStore(), []);
 
   // Откуда начать обзор: последний открытый vault (FR-007). Спрашивается на
   // монтировании, а не при открытии обзора, — чтобы список был готов к первому
@@ -64,6 +67,10 @@ export function MobileWorkspace(): React.JSX.Element {
         // и на web, и из того же хранилища настроек устройства (FR-007).
         lastVault={lastTauriVault}
         cloneVault={cloner}
+        // Состояние колонки заметки (фича 013) хранится в настройках устройства.
+        device={device}
+        // Набор вкладок переживает перезапуск (фича 014).
+        tabsStore={tabsStore}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

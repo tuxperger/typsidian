@@ -10,12 +10,16 @@ import {
   openWebVaultById,
 } from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
+import { webTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-web.js";
 
 /**
  * Хранилище настроек устройства — `WebStore` поверх OPFS. Один объект на
  * страницу: панель подписывается на него эффектами.
  */
 const device = webDeviceSettings();
+
+/** Набор вкладок vault на устройстве (фича 014): тот же `WebStore`, что и у настроек. */
+const tabsStore = webTabsStore();
 
 /**
  * Оболочка web-клиента (plan.md → Project Structure).
@@ -49,6 +53,10 @@ export function VaultWorkspace(): React.JSX.Element {
         // панель меняет текущий vault в настройках, а открывает выбранный
         // рабочая область, потому что клиентом владеет она.
         cloneVault={cloneWebVault}
+        // Состояние колонки заметки (фича 013) хранится в настройках устройства.
+        device={device}
+        // Набор вкладок и разделение переживают перезапуск (фича 014).
+        tabsStore={tabsStore}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

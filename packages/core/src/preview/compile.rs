@@ -937,3 +937,49 @@ fn with_resolve_failures(
     document.outcome = CompileOutcome::Failed;
     document
 }
+
+/// Заголовок собранного документа: уровень и читаемый текст (фича 015, SC-005).
+#[cfg(feature = "test-support")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentHeading {
+    pub level: usize,
+    pub text: String,
+}
+
+/// Заголовки документа, как их видит интроспектор Typst, по порядку.
+///
+/// Нужна только тестам: сравнить оглавление по тексту (`structure::outline`)
+/// со строением, которое получилось у настоящего компилятора. В обычную
+/// сборку не попадает. `None` - заметка не собралась.
+#[cfg(feature = "test-support")]
+pub fn document_headings(
+    note_path: &str,
+    source_text: &str,
+    fonts: FontSet,
+) -> Option<Vec<DocumentHeading>> {
+    use typst::foundations::{NativeElement, StyleChain};
+    use typst::introspection::Introspector;
+    use typst::model::HeadingElem;
+
+    let main = DependencySnapshot::file_id(note_path).ok()?;
+    let mut snapshot = DependencySnapshot::new();
+    snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
+    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts());
+    let document = typst::compile::<PagedDocument>(&world).output.ok()?;
+    let found = document
+        .introspector()
+        .query(&HeadingElem::ELEM.select())
+        .iter()
+        .filter_map(|content| content.to_packed::<HeadingElem>())
+        .map(|heading| DocumentHeading {
+            level: heading.resolve_level(StyleChain::default()).get(),
+            text: heading
+                .body
+                .plain_text()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+        })
+        .collect();
+    Some(found)
+}

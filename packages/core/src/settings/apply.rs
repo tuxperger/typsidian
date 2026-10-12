@@ -44,6 +44,16 @@ pub struct SettingsChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub vault_sync: Option<crate::sync::DeviceVaultSyncEntry>,
+    /// Состояние колонки заметки (фича 013, FR-021). Всегда в устройство: см.
+    /// [`route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub note_panel: Option<super::NotePanelState>,
+    /// Набор вкладок одного vault (фича 014, FR-022): заменяет прежнюю запись
+    /// этого vault целиком. Всегда в устройство: см. [`route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub workspace: Option<super::VaultWorkspaceEntry>,
 }
 
 /// Выбор языка интерфейса (фича 010, data-model.md «LanguageChoice»).
@@ -62,6 +72,13 @@ impl SettingsChange {
     pub fn language(choice: LanguageChoice) -> Self {
         Self {
             language: Some(choice),
+            ..Self::default()
+        }
+    }
+
+    pub fn note_panel(state: super::NotePanelState) -> Self {
+        Self {
+            note_panel: Some(state),
             ..Self::default()
         }
     }
@@ -137,6 +154,17 @@ impl SettingsChange {
         }
         if let Some(device) = &self.device {
             next.device = Some(device.clone());
+        }
+        if let Some(state) = self.note_panel {
+            next.note_panel = state;
+        }
+        if let Some(entry) = &self.workspace {
+            next.workspaces
+                .retain(|existing| existing.vault != entry.vault);
+            // Набор без вкладок хранить незачем: запись исчезает.
+            if !entry.value.is_empty() {
+                next.workspaces.push(entry.clone());
+            }
         }
         if let Some(entry) = &self.vault_sync {
             next.vault_sync
@@ -313,14 +341,26 @@ pub fn route(change: &SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> 
     // устройству, по той же причине, что язык.
     let device = rest.device.take();
     let vault_sync = rest.vault_sync.take();
+    // Состояние колонки заметки (фича 013) — тоже только устройству.
+    let note_panel = rest.note_panel.take();
+    // Набор вкладок (фича 014, FR-022) — тоже только устройству: вне vault, вне
+    // его истории и доставки.
+    let workspace = rest.workspace.take();
     let mut routed = Vec::with_capacity(2);
-    if language.is_some() || device.is_some() || vault_sync.is_some() {
+    if language.is_some()
+        || device.is_some()
+        || vault_sync.is_some()
+        || note_panel.is_some()
+        || workspace.is_some()
+    {
         routed.push(RoutedChange {
             target: ChangeTarget::Device,
             change: SettingsChange {
                 language,
                 device,
                 vault_sync,
+                note_panel,
+                workspace,
                 ..SettingsChange::default()
             },
         });

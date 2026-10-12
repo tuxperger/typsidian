@@ -1,4 +1,4 @@
-import type { Translation } from "../define.js";
+import { ruN, type Translation } from "../define.js";
 import type { workspace as en } from "../en/workspace.js";
 
 export const workspace: Translation<typeof en> = {
@@ -29,4 +29,42 @@ export const workspace: Translation<typeof en> = {
   "workspace.sidebarWidth": "Ширина боковой панели",
   "workspace.editorPreviewSplit": "Граница редактора и предпросмотра",
   "workspace.templateName": "Заготовка",
+
+  // ── Вкладки и разделение редактора (фича 014) ──────────────────────
+  "workspace.tabs.label": "Открытые заметки",
+  "workspace.tabs.groupLabel": (p) => `Группа ${p.group}`,
+  "workspace.tabs.close": "Закрыть вкладку",
+  "workspace.tabs.closeNamed": (p) => `Закрыть «${p.title}»`,
+  "workspace.tabs.closeOthers": "Закрыть остальные",
+  "workspace.tabs.next": "Следующая вкладка",
+  "workspace.tabs.previous": "Предыдущая вкладка",
+  "workspace.tabs.moveLeft": "Передвинуть вкладку влево",
+  "workspace.tabs.moveRight": "Передвинуть вкладку вправо",
+  "workspace.tabs.board": "доска",
+  "workspace.tabs.conflict": "конфликт",
+  "workspace.tabs.unsaved": "не сохранено",
+  "workspace.tabs.count": (p) => ruN(p.count, "# вкладка", "# вкладки", "# вкладок"),
+  "workspace.tabs.groupOf": (p) =>
+    `группа ${p.group} из 2 · ${ruN(p.count, "# вкладка", "# вкладки", "# вкладок")}`,
+  "workspace.tabs.back": "Назад",
+  "workspace.tabs.forward": "Вперёд",
+  "workspace.tabs.split": "Разделить редактор",
+  "workspace.tabs.unsplit": "Убрать разделение",
+  "workspace.tabs.moveToOther": "Перенести в другую группу",
+  "workspace.tabs.focusOther": "Перевести фокус в другую группу",
+  "workspace.tabs.groupDivider": "Граница групп",
+  "workspace.tabs.empty": "Заметка не открыта.",
+  "workspace.tabs.emptyHint": "Выберите её в дереве или нажмите",
+  "workspace.tabs.boardNoPreview": "У доски нет предпросмотра",
+  "workspace.tabs.refused": "Вкладка не закрыта",
+  "workspace.tabs.refusedUnsaved": (p) =>
+    `«${p.title}» не удалось сохранить. Правки остались во вкладке.`,
+  "workspace.tabs.refusedUnsavedWhy": (p) =>
+    `«${p.title}» не удалось сохранить. ${p.reason}`,
+  "workspace.tabs.refusedConflict": (p) =>
+    `«${p.title}» отличается от файла на диске. Решите конфликт, и вкладка закроется.`,
+  "workspace.tabs.dismiss": "Понятно",
+  "workspace.tabs.openNotes": "Открытые заметки",
+  "workspace.tabs.openNotesButton": (p) => `Открытые заметки: ${p.count}`,
+  "workspace.tabs.sheetClose": "Закрыть список",
 };

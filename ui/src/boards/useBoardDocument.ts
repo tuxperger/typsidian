@@ -48,8 +48,11 @@ export interface BoardDocument {
    * Обязателен перед переключением на другую заметку, закрытием окна и
    * построением снимка (research.md §6): иначе снимок построится по
    * состоянию, которого нет в файле.
+   *
+   * Отвечает состоянием сохранения после записи (фича 014): закрыть вкладку
+   * доски можно, только если оно `Clean`.
    */
-  flush: () => Promise<void>;
+  flush: () => Promise<BoardSaveView>;
   /**
    * Показать на полотне другое содержимое — версию, выбранную при разрешении
    * конфликта (FR-015). Единственный случай, когда приложение перезаписывает
@@ -78,6 +81,12 @@ export function useBoardDocument(
   // момент планирования.
   const bufferRef = useRef<string | null>(null);
   const timerRef = useRef<number | null>(null);
+  // Последнее показанное состояние — для ответа `flush`, который не может ждать рендера.
+  const saveStateRef = useRef<BoardSaveView>({ state: "Clean" });
+  const publishSaveState = useCallback((next: BoardSaveView | ((previous: BoardSaveView) => BoardSaveView)) => {
+    saveStateRef.current = typeof next === "function" ? next(saveStateRef.current) : next;
+    setSaveState(saveStateRef.current);
+  }, []);
 
   const cancelPendingSave = useCallback(() => {
     if (timerRef.current !== null) {
@@ -86,21 +95,22 @@ export function useBoardDocument(
     }
   }, []);
 
-  const save = useCallback(async (): Promise<void> => {
+  const save = useCallback(async (): Promise<BoardSaveView> => {
     const buffer = bufferRef.current;
-    if (!client || path === null || buffer === null) return;
+    if (!client || path === null || buffer === null) return saveStateRef.current;
 
-    setSaveState({ state: "Saving" });
+    publishSaveState({ state: "Saving" });
     try {
       // `expected` не передаётся: обнаружение расхождения с диском — работа
       // ядра, которое держит снимок открытого файла. Придумывать его здесь
       // значило бы завести вторую версию правила о конфликтах.
       await client.writeBoard(path, buffer, undefined);
-      setSaveState({ state: "Clean" });
+      publishSaveState({ state: "Clean" });
     } catch (cause) {
-      setSaveState({ state: "Failed", reason: describeWriteFailure(cause) });
+      publishSaveState({ state: "Failed", reason: describeWriteFailure(cause) });
     }
-  }, [client, path]);
+    return saveStateRef.current;
+  }, [client, path, publishSaveState]);
 
   // Загрузка доски. Отказ чтения — не исключение, а состояние: повреждённый
   // файл остаётся на диске нетронутым (FR-017).
@@ -110,7 +120,7 @@ export function useBoardDocument(
     bufferRef.current = null;
     setContent(null);
     setReadError(null);
-    setSaveState({ state: "Clean" });
+    publishSaveState({ state: "Clean" });
     if (!client || path === null) return;
 
     void (async () => {
@@ -128,7 +138,7 @@ export function useBoardDocument(
     return () => {
       cancelled = true;
     };
-  }, [client, path, cancelPendingSave]);
+  }, [client, path, cancelPendingSave, publishSaveState]);
 
   const changed = useCallback(
     (next: string) => {
@@ -144,7 +154,7 @@ export function useBoardDocument(
       // React обязан увидеть ту же ссылку и не перерисовывать дерево. Новый
       // объект на каждый штрих перерисовывал бы весь workspace и съедал бюджет
       // отклика SC-005.
-      setSaveState((previous) =>
+      publishSaveState((previous) =>
         previous.state === "Dirty" ? previous : { state: "Dirty" },
       );
       // Ядро обязано знать о несохранённых правках доски — так же, как о
@@ -159,12 +169,12 @@ export function useBoardDocument(
         void save();
       }, BOARD_AUTOSAVE_DEBOUNCE_MS);
     },
-    [client, path, cancelPendingSave, save],
+    [client, path, cancelPendingSave, save, publishSaveState],
   );
 
-  const flush = useCallback(async (): Promise<void> => {
+  const flush = useCallback(async (): Promise<BoardSaveView> => {
     cancelPendingSave();
-    await save();
+    return save();
   }, [cancelPendingSave, save]);
 
   const replace = useCallback((next: string) => {
@@ -174,8 +184,8 @@ export function useBoardDocument(
     setContentRevision((revision) => revision + 1);
     // Выбранная версия уже на диске: `resolveConflict*` записал её сам, и
     // повторная запись отсюда была бы вторым решением о том же файле.
-    setSaveState({ state: "Clean" });
-  }, [cancelPendingSave]);
+    publishSaveState({ state: "Clean" });
+  }, [cancelPendingSave, publishSaveState]);
 
   const buffer = useCallback(() => bufferRef.current, []);
 

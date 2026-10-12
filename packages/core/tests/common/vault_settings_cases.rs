@@ -448,3 +448,171 @@ pub async fn a_bad_export_folder_in_the_file_is_dropped() {
     assert_eq!(read.export_folder, None);
     assert!(read.theme.is_some());
 }
+
+// ── Сочетания со знаками (фича 014, T004) ───────────────────────────────────
+
+/// Сочетание со знаком несёт имя физической клавиши в `ResolvedBinding.code`:
+/// по нему интерфейс сверяет нажатие в любой раскладке и с `Shift` (research.md §12).
+pub fn a_punctuation_shortcut_carries_the_key_code() {
+    let resolved = keybindings::resolve(&[], false);
+    let code_of = |command: CommandId| {
+        resolved
+            .iter()
+            .find(|binding| binding.command == command)
+            .map(|binding| binding.code.clone())
+            .unwrap()
+    };
+    assert_eq!(code_of(CommandId::TabNext), "Period");
+    assert_eq!(code_of(CommandId::TabPrevious), "Comma");
+    assert_eq!(code_of(CommandId::SplitEditor), "Backslash");
+    assert_eq!(code_of(CommandId::TabMoveToOtherGroup), "Backslash");
+    assert_eq!(code_of(CommandId::NavigateBack), "BracketLeft");
+    assert_eq!(code_of(CommandId::NavigateForward), "BracketRight");
+    // Буква, как и прежде.
+    assert_eq!(code_of(CommandId::TabClose), "KeyW");
+
+    // Два сочетания на `\` различаются Shift: из коробки конфликта нет.
+    for binding in &resolved {
+        assert!(binding.conflicts_with.is_empty(), "{:?}", binding.command);
+    }
+    let shifted = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::TabMoveToOtherGroup)
+        .unwrap();
+    assert_eq!(shifted.display, "Ctrl+Alt+Shift+\\");
+}
+
+// ── Команда оглавления (фича 015, T007) ─────────────────────────────────────
+
+/// `toggle-outline` стоит последней, имя и умолчание зафиксированы, а `problem()`
+/// сочетание не отвергает; ни одна другая команда умолчания не делит.
+pub fn the_outline_command_has_its_name_and_default() {
+    assert_eq!(
+        keybindings::COMMANDS.last(),
+        Some(&CommandId::ToggleOutline)
+    );
+    assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
+    assert_eq!(
+        CommandId::parse("toggle-outline"),
+        Some(CommandId::ToggleOutline)
+    );
+    let shortcut = CommandId::ToggleOutline.default_shortcut();
+    assert_eq!(shortcut.to_text(), "Mod+Shift+O");
+    assert_eq!(shortcut.problem(), None);
+
+    let resolved = keybindings::resolve(&[], false);
+    let binding = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::ToggleOutline)
+        .unwrap();
+    assert_eq!(binding.code, "KeyO");
+    assert_eq!(binding.display, "Ctrl+Shift+O");
+    assert!(binding.conflicts_with.is_empty());
+}
+
+// ── Набор вкладок в настройках устройства (фича 014, T055) ──────────────────
+
+fn saved_set(paths: &[&str]) -> typsidian_core::workspace::SavedWorkspace {
+    use typsidian_core::workspace::{SavedGroup, SavedWorkspace};
+    SavedWorkspace {
+        groups: vec![SavedGroup {
+            tabs: paths.iter().map(|p| p.to_string()).collect(),
+            active: Some(0),
+        }],
+        active_group: typsidian_core::workspace::GroupSlot::First,
+        ratio_permille: 500,
+    }
+}
+
+fn workspace_change(
+    vault: &str,
+    paths: &[&str],
+) -> typsidian_core::settings::apply::SettingsChange {
+    use typsidian_core::settings::apply::SettingsChange;
+    use typsidian_core::settings::{VaultId, VaultWorkspaceEntry};
+    SettingsChange {
+        workspace: Some(VaultWorkspaceEntry {
+            vault: VaultId::from_raw(vault),
+            value: saved_set(paths),
+        }),
+        ..SettingsChange::default()
+    }
+}
+
+/// Набор заменяет запись своего vault и не трогает чужую.
+pub fn a_workspace_change_replaces_only_its_own_vault() {
+    use typsidian_core::settings::{Settings, VaultId};
+    let a = VaultId::from_raw("a");
+    let b = VaultId::from_raw("b");
+    let s = workspace_change("a", &["x.typ"]).apply_to(&Settings::default());
+    let s = workspace_change("b", &["y.typ"]).apply_to(&s);
+    let s = workspace_change("a", &["z.typ", "w.typ"]).apply_to(&s);
+    assert_eq!(s.workspaces.len(), 2);
+    assert_eq!(s.workspace_for(&a), Some(saved_set(&["z.typ", "w.typ"])));
+    assert_eq!(s.workspace_for(&b), Some(saved_set(&["y.typ"])));
+    // Пустой набор убирает запись.
+    let s = workspace_change("a", &[]).apply_to(&s);
+    assert_eq!(s.workspace_for(&a), None);
+    assert_eq!(s.workspaces.len(), 1);
+    // Забытый vault теряет свой набор.
+    let mut s = s;
+    s.forget_workspace(&b);
+    assert!(s.workspaces.is_empty());
+}
+
+/// Маршрут: набор всегда в устройство, даже при открытом vault.
+pub fn a_workspace_change_goes_to_the_device() {
+    use typsidian_core::settings::apply::{route, ChangeTarget, SettingsChange};
+    use typsidian_core::settings::Theme;
+    let change = workspace_change("a", &["x.typ"]);
+    for open in [true, false] {
+        let routed = route(&change, open);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].target, ChangeTarget::Device);
+    }
+    let mixed = SettingsChange {
+        theme: Some(Theme::Dark),
+        ..change
+    };
+    let routed = route(&mixed, true);
+    assert_eq!(routed.len(), 2);
+    assert_eq!(routed[0].target, ChangeTarget::Device);
+    assert!(routed[0].change.workspace.is_some());
+    assert_eq!(routed[1].target, ChangeTarget::OpenVault);
+    assert!(routed[1].change.workspace.is_none());
+}
+
+/// Ключ `workspaces` переживает круг записи; негодное читается как пустое.
+pub fn the_workspaces_key_round_trips_and_tolerates_garbage() {
+    use typsidian_core::settings::format::{self, FolderRefs};
+    use typsidian_core::settings::{Settings, Theme, VaultId};
+    let s = workspace_change("a", &["x.typ"]).apply_to(&Settings::default());
+    let text = format::render("", &s, &FolderRefs::new());
+    assert!(text.contains("workspaces"), "{text}");
+    assert_eq!(
+        format::parse(&text)
+            .unwrap()
+            .workspace_for(&VaultId::from_raw("a")),
+        Some(saved_set(&["x.typ"]))
+    );
+    let cleared = format::render(&text, &Settings::default(), &FolderRefs::new());
+    assert!(!cleared.contains("workspaces"), "{cleared}");
+
+    for written in [
+        r#"{"theme": "dark", "workspaces": 42}"#,
+        r#"{"theme": "dark", "workspaces": "x"}"#,
+        r#"{"theme": "dark", "workspaces": [{"vault": "a", "value": {"groups": 3}}]}"#,
+    ] {
+        let parsed = format::parse(written).expect("файл разбирается");
+        assert_eq!(parsed.theme, Theme::Dark, "{written}");
+        assert!(parsed.workspaces.is_empty(), "{written}");
+    }
+}
+
+/// Набор из одного `workspace` не даёт записи журнала.
+pub fn a_workspace_change_is_not_journaled() {
+    use typsidian_core::settings::logging::Journal;
+    let mut journal = Journal::default();
+    journal.record_change(0, &workspace_change("a", &["x.typ"]));
+    assert_eq!(journal.text(), "");
+}

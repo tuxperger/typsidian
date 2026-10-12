@@ -12,6 +12,7 @@ import {
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+import type { TabId } from "../wasm-core/typsidian_core.js";
 import {
   insertSnippet,
   snippetFields,
@@ -19,6 +20,13 @@ import {
   type InsertOptions,
   type SnippetFieldState,
 } from "./snippet.js";
+import type { NoteDocument } from "./noteDocument.js";
+import { connectView, documentSync } from "./syncViews.js";
+import {
+  tabEditorStates,
+  type ScrollPosition,
+  type TabEditorEntry,
+} from "./tabEditorStates.js";
 
 // Редактор исходника Typst — колонка «Editor pane» макета.
 //
@@ -61,8 +69,18 @@ export interface CodeEditorHandle {
 }
 
 export interface CodeEditorProps {
-  value: string;
-  onChange: (next: string) => void;
+  /**
+   * Документ на путь (фича 014): текст, чтение и автосохранение принадлежат ему.
+   * Правка пользователя уходит в `document.edit`, чужие правки приходят в
+   * редактор транзакцией — отдельного `value`/`onChange` больше нет.
+   */
+  document: NoteDocument;
+  /**
+   * Вкладка, которой принадлежит редактор. По ней редактор поднимается из
+   * снимка (каретка, выделение, отмена, прокрутка) и сдаёт его, уходя. Редактор
+   * пересоздаётся при смене вкладки, а не пути.
+   */
+  tabId: TabId;
   onCaretMove?: (caret: CaretPosition) => void;
   /**
    * Ctrl/⌘ + колесо поверх текста — тот же жест, что в панели предпросмотра.
@@ -87,11 +105,6 @@ export interface CodeEditorProps {
    */
   onFieldState?: (state: SnippetFieldState | null) => void;
   /**
-   * Какой документ открыт — обычно путь заметки. Редактор пересоздаётся только
-   * при его смене: вместе с экземпляром уходят история правок и курсор.
-   */
-  documentId: string;
-  /**
    * Подпись поля для экранного диктора. Меняется без пересоздания редактора:
    * она переведена, и смена языка не должна сбрасывать курсор (010 FR-013).
    */
@@ -101,22 +114,93 @@ export interface CodeEditorProps {
   ref?: React.Ref<CodeEditorHandle>;
 }
 
+/** Обработчики вида. Лежат вне `EditorState`, чтобы тот переживал вкладку. */
+interface ViewCallbacks {
+  onCaretMove: ((caret: CaretPosition) => void) | undefined;
+  onSlashMenu: ((at: number) => void) | undefined;
+  onFieldState: ((state: SnippetFieldState | null) => void) | undefined;
+}
+
+const viewCallbacks = new WeakMap<EditorView, { current: ViewCallbacks }>();
+
+/**
+ * Подпись в отдельном отсеке: её замена — транзакция, а не новый редактор.
+ * Отсек общий для всех экземпляров: сохранённый `EditorState` вкладки несёт его
+ * в конфигурации и после возврата должен узнавать.
+ */
+const labelCompartment = new Compartment();
+
+function labelExtension(ariaLabel: string): Extension {
+  return EditorView.contentAttributes.of({ "aria-label": ariaLabel });
+}
+
+/** Слушатель вида — один на все экземпляры, без замыканий над компонентом. */
+const viewListener: Extension = EditorView.updateListener.of((update) => {
+  const callbacks = viewCallbacks.get(update.view)?.current;
+  if (callbacks === undefined) return;
+  if (update.docChanged || update.selectionSet) {
+    callbacks.onCaretMove?.(caretOf(update.state));
+    // Состояние полей считается тем же тактом, что и позиция каретки: поле
+    // «активно», пока курсор внутри него, и одно без другого не меняется.
+    callbacks.onFieldState?.(snippetFieldState(update.view));
+  }
+  // Меню по `/`: строка состоит ровно из неё, и её только что набрали. Проверка
+  // по итоговому состоянию, а не по тексту правки, — так вставка `/` из буфера
+  // обмена тоже считается, а удаление символов до одинокой `/` — нет.
+  if (update.docChanged && callbacks.onSlashMenu) {
+    const head = update.state.selection.main.head;
+    const line = update.state.doc.lineAt(head);
+    const typedSlash = update.transactions.some((transaction) =>
+      transaction.isUserEvent("input"),
+    );
+    if (typedSlash && line.text === "/" && head === line.to) {
+      callbacks.onSlashMenu(line.from);
+    }
+  }
+});
+
+function caretOf(state: EditorState): CaretPosition {
+  const head = state.selection.main.head;
+  const line = state.doc.lineAt(head);
+  return { line: line.number, column: head - line.from + 1, offset: head };
+}
+
+/**
+ * Состояние для вкладки: из снимка, если документ с тех пор не менялся, иначе
+ * новое с кареткой на прежнем месте. Снимок несёт историю отмены, которая имеет
+ * смысл только для того текста, на котором накоплена.
+ */
+function stateFor(
+  text: string,
+  entry: TabEditorEntry | null,
+  ariaLabel: string,
+): EditorState {
+  const saved = entry?.state ?? null;
+  if (saved !== null && saved.doc.length === text.length && saved.doc.toString() === text) {
+    return saved;
+  }
+  const anchor = Math.min(entry?.anchor ?? 0, text.length);
+  const head = Math.min(entry?.head ?? 0, text.length);
+  return EditorState.create({
+    doc: text,
+    selection: { anchor, head },
+    extensions: [...baseExtensions, labelCompartment.of(labelExtension(ariaLabel))],
+  });
+}
+
 export function CodeEditor({
-  value,
-  onChange,
+  document,
+  tabId,
   onCaretMove,
   onZoom,
   onSlashMenu,
   onFieldState,
-  documentId,
   ariaLabel,
   onContextMenu,
   ref,
 }: CodeEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
-  // Подпись в отдельном отсеке: её замена — транзакция, а не новый редактор.
-  const labelCompartment = useRef(new Compartment()).current;
 
   useImperativeHandle(
     ref,
@@ -143,78 +227,81 @@ export function CodeEditor({
 
   // Колбэки живут в ref: пересоздавать редактор из-за новой ссылки на
   // обработчик нельзя — вместе с ним пропадут история правок и позиция курсора.
-  const onChangeRef = useRef(onChange);
-  const onCaretMoveRef = useRef(onCaretMove);
+  const callbacks = useRef<ViewCallbacks>({ onCaretMove, onSlashMenu, onFieldState });
+  callbacks.current = { onCaretMove, onSlashMenu, onFieldState };
   const onZoomRef = useRef(onZoom);
-  const onSlashMenuRef = useRef(onSlashMenu);
-  const onFieldStateRef = useRef(onFieldState);
-  onChangeRef.current = onChange;
-  onCaretMoveRef.current = onCaretMove;
   onZoomRef.current = onZoom;
-  onSlashMenuRef.current = onSlashMenu;
-  onFieldStateRef.current = onFieldState;
+  const ariaLabelRef = useRef(ariaLabel);
+  ariaLabelRef.current = ariaLabel;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
+    const entry = tabEditorStates.take(tabId);
     const view = new EditorView({
       parent: host,
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          ...baseExtensions,
-          labelCompartment.of(EditorView.contentAttributes.of({ "aria-label": ariaLabel })),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString());
-            if (update.docChanged || update.selectionSet) {
-              const head = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(head);
-              onCaretMoveRef.current?.({
-                line: line.number,
-                column: head - line.from + 1,
-                offset: head,
-              });
-              // Состояние полей считается тем же тактом, что и позиция
-              // каретки: поле «активно», пока курсор внутри него, и одно без
-              // другого не меняется.
-              onFieldStateRef.current?.(snippetFieldState(update.view));
-            }
-            // Меню по `/`: строка состоит ровно из неё, и её только что
-            // набрали. Проверка по итоговому состоянию, а не по тексту
-            // правки, — так вставка `/` из буфера обмена тоже считается, а
-            // удаление символов до одинокой `/` — нет.
-            if (update.docChanged && onSlashMenuRef.current) {
-              const head = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(head);
-              const typedSlash = update.transactions.some((transaction) =>
-                transaction.isUserEvent("input"),
-              );
-              if (typedSlash && line.text === "/" && head === line.to) {
-                onSlashMenuRef.current(line.from);
-              }
-            }
-          }),
-        ],
-      }),
+      state: stateFor(document.text(), entry, ariaLabelRef.current),
     });
     viewRef.current = view;
+    viewCallbacks.set(view, callbacks);
+    // Подпись могла смениться, пока состояние лежало в снимке.
+    view.dispatch({
+      effects: labelCompartment.reconfigure(labelExtension(ariaLabelRef.current)),
+    });
+    const disconnect = connectView(view, document);
+    const unbindLive = tabEditorStates.bindLive(tabId, () => viewRef.current);
+
+    // Прокрутка: эффект снимка CodeMirror и, надёжнее, число — оно применяется
+    // после первого измерения (раньше у редактора нет высот), в два кадра:
+    // измерение и разметка видимой части идут своим тактом.
+    if (entry !== null) {
+      if (entry.state !== null && entry.scroll !== null) {
+        view.dispatch({ effects: entry.scroll.effect });
+      }
+      const top = entry.scrollTop;
+      if (top > 0) {
+        window.requestAnimationFrame(() =>
+          window.requestAnimationFrame(() => {
+            if (viewRef.current === view) view.scrollDOM.scrollTop = top;
+          }),
+        );
+      }
+    }
+    // Статус-бар узнаёт каретку сразу, а не после первого движения.
+    callbacks.current.onCaretMove?.(caretOf(view.state));
+
+    // Прокрутка запоминается по ходу дела, а не при уходе: к тому, как React
+    // запускает уборку эффекта, DOM редактора уже снят, и его `scrollTop` — ноль.
+    let lastScroll: ScrollPosition | null =
+      entry !== null && entry.scroll !== null ? entry.scroll : null;
+    let scrollTimer: number | null = null;
+    const noteScroll = (): void => {
+      if (scrollTimer !== null) return;
+      scrollTimer = window.requestAnimationFrame(() => {
+        scrollTimer = null;
+        lastScroll = { effect: view.scrollSnapshot(), top: view.scrollDOM.scrollTop };
+      });
+    };
+    view.scrollDOM.addEventListener("scroll", noteScroll, { passive: true });
 
     return () => {
+      view.scrollDOM.removeEventListener("scroll", noteScroll);
+      if (scrollTimer !== null) window.cancelAnimationFrame(scrollTimer);
+      unbindLive();
+      disconnect();
+      tabEditorStates.store(tabId, view.state, lastScroll);
+      viewCallbacks.delete(view);
       view.destroy();
       viewRef.current = null;
     };
-    // Пересоздание только при смене заметки; подпись догоняет эффект ниже.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentId]);
+  }, [document, tabId]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: labelCompartment.reconfigure(
-        EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
-      ),
+      effects: labelCompartment.reconfigure(labelExtension(ariaLabel)),
     });
-  }, [ariaLabel, labelCompartment]);
+  }, [ariaLabel]);
 
   // Ctrl/⌘ + колесо — кегль текста, как масштаб листа в предпросмотре.
   // Слушатель вешается вручную и непассивным: `onWheel` React ставит пассивным,
@@ -235,21 +322,6 @@ export function CodeEditor({
     host.addEventListener("wheel", onWheel, { passive: false });
     return () => host.removeEventListener("wheel", onWheel);
   }, []);
-
-  // Внешняя замена текста — переключение заметки, вставка доски, принятие
-  // внешней версии. Сравнение с текущим документом обязательно: без него
-  // каждая своя же правка возвращалась бы сюда и сбрасывала курсор в начало.
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const current = view.state.doc.toString();
-    if (current === value) return;
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: value },
-      // Курсор мог указывать за конец нового текста.
-      selection: { anchor: Math.min(view.state.selection.main.anchor, value.length) },
-    });
-  }, [value]);
 
   return <div className="ts-editor" ref={hostRef} onContextMenu={onContextMenu} />;
 }
@@ -396,7 +468,15 @@ const baseExtensions: Extension[] = [
   highlightActiveLine(),
   highlightActiveLineGutter(),
   history(),
-  keymap.of([...defaultKeymap, ...historyKeymap]),
+  // `Mod-Alt-\` (`indentSelection`) из раскладки убрано: то же сочетание у
+  // команды «Разделить редактор» (фича 014, research.md §12). У языка Typst в
+  // редакторе нет правил отступа, и команда здесь ничего полезного не делала.
+  keymap.of([
+    ...defaultKeymap.filter((binding) => binding.key !== "Mod-Alt-\\"),
+    ...historyKeymap,
+  ]),
+  documentSync,
+  viewListener,
   // Поля вставленного сниппета и переходы по ним (меню ⌘E). Внутри расширения
   // приоритет выше обычной раскладки, но только пока сниппет активен.
   snippetFields,

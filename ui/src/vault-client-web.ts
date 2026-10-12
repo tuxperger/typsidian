@@ -7,8 +7,20 @@ import {
   exportBatchStart,
   exportBatchView,
   exportCandidates,
+  linksBacklinksPage,
+  linksLinkMention,
+  linksMentionsAvailability,
+  linksMentionsCancel,
+  linksMentionsIn,
+  linksMentionsStart,
+  linksMentionsStep,
   PreviewEngine,
   WebBackend,
+  workspaceApply,
+  workspaceEmpty,
+  workspaceRestore,
+  workspaceSnapshot,
+  workspaceView,
   type VaultRecord,
 } from "./wasm-core/typsidian_core.js";
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
@@ -136,6 +148,7 @@ export function webVaultClient(
     boardWriteProfile: backend.boardWriteProfile,
 
     beginEdit: (path, buffer) => call(() => backend.beginEdit(path, buffer)),
+    discardEdit: (path) => call(() => backend.discardEdit(path)),
     pendingConflict: (path) => call(() => backend.pendingConflict(path)),
     conflictDiff: (path) => call(() => backend.conflictDiff(path)),
     resolveConflictKeepLocal: (path) =>
@@ -245,6 +258,33 @@ export function webVaultClient(
     setKeybinding: (command, shortcut) =>
       call(() => backend.setKeybinding(command, shortcut)),
     resetKeybinding: (command) => call(() => backend.resetKeybinding(command)),
+
+    // ── Вкладки и разделение редактора (фича 014) ─────────────────────
+    // Переход и показ берут факты из индекса vault — заимствуют backend,
+    // поэтому идут через `call`. Пустое состояние и снимок — чистые функции.
+    workspaceEmpty: async () => workspaceEmpty(),
+    workspaceApply: (state, action, widthPx) =>
+      call(() => workspaceApply(backend, state, action, widthPx)),
+    workspaceView: (state, widthPx) => call(() => workspaceView(backend, state, widthPx)),
+    workspaceSnapshot: async (state) => workspaceSnapshot(state),
+    workspaceRestore: (saved) => call(() => workspaceRestore(backend, saved)),
+
+    // ── Связи заметки (фича 013) ──────────────────────────────────────
+    // Чтение vault идёт через `call`: страница и проход заимствуют backend.
+    // Доступность и отмена прохода — чистые функции ядра без backend.
+    links: {
+      backlinksPage: (target, openTexts, offset, limit) =>
+        call(() => linksBacklinksPage(backend, target, openTexts, offset, limit)),
+      mentionsAvailability: async (target) => linksMentionsAvailability(target),
+      mentionsStart: (target) => call(() => linksMentionsStart(backend, target)),
+      mentionsStep: (state, openTexts) =>
+        call(() => linksMentionsStep(backend, state, openTexts)),
+      mentionsCancel: async (state) => linksMentionsCancel(state),
+      mentionsIn: (target, paths, openTexts) =>
+        call(() => linksMentionsIn(backend, target, paths, openTexts)),
+      linkMention: (request, editorText) =>
+        call(() => linksLinkMention(backend, request, editorText)),
+    },
   };
 }
 

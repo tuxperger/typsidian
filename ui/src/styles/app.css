@@ -17,6 +17,7 @@
   /* Размеры конструкции из handoff § Spacing / radii. */
   --ts-header-h: 44px;
   --ts-sidebar-w: 248px;
+  --ts-notepanel-w: 248px;
   --ts-bar-h: 26px;
 
   /* Тёмный контекст: дизайн-система задаёт семантические алиасы для светлой
@@ -84,6 +85,7 @@ body {
 .ts-dialog,
 .ts-embeds,
 .ts-sheet,
+.ts-notepanel__body,
 .ts-palette__list,
 .ts-insert__rail,
 .ts-insert__list,
@@ -100,6 +102,7 @@ body {
 .ts-dialog::-webkit-scrollbar,
 .ts-embeds::-webkit-scrollbar,
 .ts-sheet::-webkit-scrollbar,
+.ts-notepanel__body::-webkit-scrollbar,
 .ts-palette__list::-webkit-scrollbar,
 .ts-insert__rail::-webkit-scrollbar,
 .ts-insert__list::-webkit-scrollbar,
@@ -116,6 +119,7 @@ body {
 .ts-dialog::-webkit-scrollbar-track,
 .ts-embeds::-webkit-scrollbar-track,
 .ts-sheet::-webkit-scrollbar-track,
+.ts-notepanel__body::-webkit-scrollbar-track,
 .ts-palette__list::-webkit-scrollbar-track,
 .ts-insert__rail::-webkit-scrollbar-track,
 .ts-insert__list::-webkit-scrollbar-track,
@@ -128,6 +132,7 @@ body {
 .ts-dialog::-webkit-scrollbar-corner,
 .ts-embeds::-webkit-scrollbar-corner,
 .ts-sheet::-webkit-scrollbar-corner,
+.ts-notepanel__body::-webkit-scrollbar-corner,
 .ts-palette__list::-webkit-scrollbar-corner,
 .ts-insert__rail::-webkit-scrollbar-corner,
 .ts-insert__list::-webkit-scrollbar-corner,
@@ -146,6 +151,7 @@ body {
 .ts-dialog::-webkit-scrollbar-thumb,
 .ts-embeds::-webkit-scrollbar-thumb,
 .ts-sheet::-webkit-scrollbar-thumb,
+.ts-notepanel__body::-webkit-scrollbar-thumb,
 .ts-palette__list::-webkit-scrollbar-thumb,
 .ts-insert__rail::-webkit-scrollbar-thumb,
 .ts-insert__list::-webkit-scrollbar-thumb,
@@ -164,6 +170,7 @@ body {
 .ts-dialog::-webkit-scrollbar-thumb:hover,
 .ts-embeds::-webkit-scrollbar-thumb:hover,
 .ts-sheet::-webkit-scrollbar-thumb:hover,
+.ts-notepanel__body::-webkit-scrollbar-thumb:hover,
 .ts-palette__list::-webkit-scrollbar-thumb:hover,
 .ts-insert__rail::-webkit-scrollbar-thumb:hover,
 .ts-insert__list::-webkit-scrollbar-thumb:hover,
@@ -179,6 +186,7 @@ body {
 .ts-dialog::-webkit-scrollbar-thumb:active,
 .ts-embeds::-webkit-scrollbar-thumb:active,
 .ts-sheet::-webkit-scrollbar-thumb:active,
+.ts-notepanel__body::-webkit-scrollbar-thumb:active,
 .ts-palette__list::-webkit-scrollbar-thumb:active,
 .ts-insert__rail::-webkit-scrollbar-thumb:active,
 .ts-insert__list::-webkit-scrollbar-thumb:active,
@@ -5621,4 +5629,800 @@ button.ts-diagnostics__place:focus-visible {
   font-size: 11px;
   color: var(--steel-200);
   white-space: pre;
+}
+
+/* ── Колонка заметки и режим «Связи» (фича 013) ──────────────────────────
+ *
+ * Макет «Typsidian Связи» 1a–1c. Колонка 248px стоит между деревом и
+ * редактором (или доской); на узком окне та же панель становится шторкой
+ * снизу на скриме. Режимы колонки (`Связи`, позже `Структура` и `Источники`)
+ * делят одну оболочку `.ts-notepanel*`; всё, что внутри режима «Связи», —
+ * `.ts-links*`. */
+
+.ts-notepanel {
+  /* Фон `.side` макета темнее `--steel-950`, и токена для него нет: берётся
+   * производное от токена, а не литерал из макета. */
+  --ts-notepanel-bg: color-mix(in srgb, var(--steel-950) 80%, black);
+  flex: 0 0 var(--ts-notepanel-w);
+  width: var(--ts-notepanel-w);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ts-notepanel-bg);
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-notepanel__head {
+  flex: 0 0 var(--ts-bar-h);
+  height: var(--ts-bar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-notepanel__modes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Название режима: кнопка, выглядящая как подпись `.ts-eyebrow`. */
+.ts-notepanel__mode {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.ts-notepanel__mode:hover {
+  color: var(--steel-300);
+}
+
+.ts-notepanel__mode--on,
+.ts-notepanel__mode--on:hover {
+  color: var(--orange-400);
+}
+
+.ts-notepanel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Метка в рамке — `.tag` макета: счётчики и «устарело». */
+.ts-notepanel__tag {
+  display: inline-block;
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: var(--leading-normal);
+  color: var(--steel-500);
+  white-space: nowrap;
+}
+
+.ts-notepanel__tag--warn {
+  border-color: color-mix(in srgb, var(--hivis-500) 40%, transparent);
+  color: var(--hivis-500);
+}
+
+/* Шторка: та же панель снизу на скриме. Скрим занимает область под шапкой, как
+ * `.ts-overlay`; тап по нему закрывает шторку. */
+.ts-notepanel__overlay {
+  position: absolute;
+  inset: var(--ts-header-h) 0 0 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(20, 23, 26, 0.6);
+}
+
+.ts-notepanel--sheet {
+  flex: 0 1 auto;
+  width: 100%;
+  height: min(330px, 72%);
+  border-right: 0;
+  border-top: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-notepanel--sheet:focus {
+  outline: none;
+}
+
+.ts-notepanel--sheet .ts-notepanel__head {
+  flex-basis: calc(var(--ts-bar-h) + var(--space-2));
+  height: calc(var(--ts-bar-h) + var(--space-2));
+}
+
+/* Ручка шторки — кнопка закрытия: полоска макета внутри области нажатия. */
+.ts-notepanel__grab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.ts-notepanel__grab::before {
+  content: "";
+  width: var(--space-8);
+  height: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--steel-700);
+}
+
+.ts-notepanel__grab:hover::before {
+  background: var(--steel-500);
+}
+
+/* ── Режим «Связи» ─────────────────────────────────────────────────────── */
+
+.ts-links {
+  padding-bottom: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.ts-links__section--divided {
+  margin-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border-default);
+}
+
+/* Заголовок раздела: раскрывающая кнопка слева, счётчик или действие справа. */
+.ts-links__sec {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+}
+
+.ts-links__sechead {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ts-links__sechead:hover {
+  color: var(--steel-300);
+}
+
+.ts-links__hint {
+  color: var(--steel-500);
+  font-size: var(--text-xs);
+}
+
+.ts-links__group {
+  padding-bottom: var(--space-1);
+}
+
+.ts-links__grouphead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) 2px;
+  font-weight: var(--weight-semibold);
+  color: var(--steel-200);
+}
+
+.ts-links__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Папка источника, если она не та же, что у цели. */
+.ts-links__folder {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-regular);
+  color: var(--steel-500);
+}
+
+/* Строка-фрагмент: кнопка перехода и, у упоминаний, кнопка «Связать». */
+.ts-links__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding-right: var(--space-3);
+  color: var(--steel-500);
+}
+
+.ts-links__row:hover,
+.ts-links__row:focus-within {
+  color: var(--steel-300);
+}
+
+.ts-links__row--active {
+  background: var(--steel-900);
+  box-shadow: inset var(--border-width-thick) 0 0 var(--orange-500);
+  color: var(--steel-300);
+}
+
+.ts-links__snip {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) 0 var(--space-1) var(--space-6);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: var(--leading-normal);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+/* Выделение ссылки в фрагменте — того же цвета, что выделение в редакторе. */
+.ts-links__mark {
+  background: color-mix(in srgb, var(--orange-500) 35%, transparent);
+  color: var(--steel-100);
+}
+
+/* «Связать» в строке: компактная кнопка макета (20px). */
+.ts-links__link {
+  flex: 0 0 auto;
+  height: 20px;
+  margin-top: 2px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.ts-links__link:disabled {
+  opacity: 0.4;
+}
+
+.ts-links__note {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  color: var(--steel-500);
+  line-height: var(--leading-normal);
+}
+
+.ts-links__note--indent {
+  padding-left: var(--space-6);
+}
+
+.ts-links__note--muted {
+  color: var(--steel-600);
+}
+
+.ts-links__note--warn {
+  color: var(--hivis-500);
+}
+
+.ts-links__note--flush {
+  padding: 0;
+  margin-top: var(--space-2);
+}
+
+/* Пояснение вместо пустого места (FR-004, FR-011, FR-018). */
+.ts-links__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-5) var(--space-5);
+  text-align: center;
+  color: var(--steel-600);
+  line-height: var(--leading-normal);
+}
+
+.ts-links__code {
+  font-family: var(--font-mono);
+  color: var(--orange-400);
+}
+
+.ts-links__busy {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Полоса занятости макета: на всю ширину и тоньше, чем в шапке. */
+.ts-links__hazard {
+  width: 100%;
+  height: 4px;
+}
+
+.ts-links__more {
+  padding: var(--space-1) var(--space-3);
+}
+
+/* В шторке строки выше, а «Связать» крупнее — под палец (макет 1c). */
+.ts-notepanel--sheet .ts-links__grouphead {
+  font-size: var(--text-sm);
+}
+
+.ts-notepanel--sheet .ts-links__snip {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: var(--text-sm);
+}
+
+.ts-notepanel--sheet .ts-links__row {
+  align-items: center;
+}
+
+.ts-notepanel--sheet .ts-links__link {
+  height: 30px;
+  margin-top: 0;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-links__hazard .ts-hazard__fill {
+    animation: none;
+  }
+}
+
+/* Шапка на узком окне (фича 013, макет 1c): телефонная шапка держит только
+ * метку, кнопку дерева и кнопку панели заметки. Без этого кнопка «Связи»
+ * оказывалась за правым краем окна, а шторке было нечем открыться. */
+@media (max-width: 720px) {
+  .ts-header {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+
+  .ts-header__group {
+    gap: var(--space-2);
+  }
+
+  .ts-header .ts-wordmark,
+  .ts-header .ts-crumb,
+  .ts-header .ts-divider,
+  .ts-header .ts-compile,
+  .ts-header .ts-sync-pill,
+  .ts-header .ts-btn--cmd {
+    display: none;
+  }
+}
+
+/* ── Вкладки и разделение редактора (фича 014) ───────────────────────────
+ *
+ * Макет «Typsidian Вкладки» 1a–1c. Над каждой группой — полоса вкладок 30px на
+ * фоне темнее редактора; слева «Назад» и «Вперёд» по истории группы, справа
+ * «разделить». Активная вкладка — линия сверху: оранжевая у группы с кареткой,
+ * серая у другой. На телефоне полосы нет — список открытых заметок шторкой. */
+
+:root {
+  --ts-tabs-h: 30px;
+  --ts-tabs-btn: 22px;
+  --ts-tab-dot: 6px;
+}
+
+/* Контейнер групп занимает место прежней колонки редактора: доля пары
+ * «редактор + предпросмотр» приходит той же переменной. */
+.ts-groups {
+  flex: 1 1 0;
+  flex-grow: var(--ts-editor-grow, 1);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--steel-950);
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+/* Без колонки предпросмотра (доска при одной группе) группы занимают всё место. */
+.ts-groups--solo {
+  flex-grow: 1;
+  border-right: 0;
+}
+
+.ts-groups__cell {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.ts-groups--split .ts-groups__cell:first-child {
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-egroup {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ts-egroup__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Редактор внутри группы делит место с соседней группой, а не с предпросмотром:
+ * ни своей доли, ни правой рамки у него здесь нет. */
+.ts-egroup__body > .ts-pane--editor {
+  flex: 1 1 0;
+  border-right: 0;
+}
+
+.ts-egroup__empty p {
+  max-width: none;
+  line-height: var(--leading-normal);
+}
+
+/* Полоса вкладок. */
+.ts-tabs {
+  --ts-tabs-bg: color-mix(in srgb, var(--steel-950) 80%, black);
+  flex: 0 0 var(--ts-tabs-h);
+  height: var(--ts-tabs-h);
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--ts-tabs-bg);
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-tabs__nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-right: var(--border-width) solid var(--border-default);
+}
+
+.ts-tabs__nav--end {
+  border-right: 0;
+  border-left: var(--border-width) solid var(--border-default);
+}
+
+.ts-tabs__navbtn {
+  width: var(--ts-tabs-btn);
+  height: var(--ts-tabs-btn);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-300);
+  cursor: pointer;
+}
+
+.ts-tabs__navbtn:hover:not(:disabled) {
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+.ts-tabs__navbtn:disabled {
+  color: var(--steel-700);
+  cursor: default;
+}
+
+.ts-tabs__navbtn[aria-pressed="true"] {
+  color: var(--orange-400);
+}
+
+.ts-tabs__navbtn:focus-visible,
+.ts-tab:focus-visible,
+.ts-tab__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Полоса прокручивается, активная вкладка всегда видна (FR-008). Полосы
+ * прокрутки нет: перемещение — стрелками и самой вкладкой. */
+.ts-tabs__strip {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.ts-tabs__strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Полоса другой группы, на которую несут вкладку (FR-016). */
+.ts-tabs__strip[data-drop="true"] {
+  box-shadow: inset 0 -2px 0 var(--orange-500);
+}
+
+.ts-tab {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 var(--space-3) 0 10px;
+  border-right: var(--border-width) solid var(--border-default);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--steel-500);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ts-tab:hover {
+  color: var(--steel-300);
+}
+
+/* Активная вкладка: фон редактора и линия сверху. Оранжевая — у группы с
+ * кареткой, предпросмотр и колонка заметки следуют за ней (FR-009). */
+.ts-tab--on {
+  background: var(--steel-950);
+  color: var(--steel-100);
+  box-shadow: inset 0 2px 0 var(--steel-600);
+}
+
+.ts-tabs[data-focused="true"] .ts-tab--on {
+  box-shadow: inset 0 2px 0 var(--orange-500);
+}
+
+.ts-tab__title {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Кратчайший отличающий хвост папки у одноимённых заметок (FR-007). */
+.ts-tab__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-600);
+}
+
+/* Hi-vis жёлтый — только про несохранённое (handoff § Design Tokens), тот же
+ * знак, что в дереве. */
+.ts-tab__dot {
+  width: var(--ts-tab-dot);
+  height: var(--ts-tab-dot);
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--hivis-500);
+}
+
+.ts-tab__tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: var(--leading-normal);
+  color: var(--steel-500);
+}
+
+.ts-tab__tag--warn {
+  border-color: color-mix(in srgb, var(--hivis-500) 40%, transparent);
+  color: var(--hivis-500);
+}
+
+.ts-tab__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--steel-700);
+  cursor: pointer;
+}
+
+.ts-tab--on .ts-tab__close {
+  color: var(--steel-400);
+}
+
+.ts-tab__close:hover {
+  color: var(--orange-400);
+}
+
+/* Перетаскивание: переносимая вкладка приглушена, место падения — оранжевая черта. */
+.ts-tab--dragging {
+  opacity: 0.5;
+}
+
+.ts-tab--drop-before::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--orange-500);
+}
+
+.ts-tabs__drop-end {
+  flex: 0 0 2px;
+  align-self: stretch;
+  background: var(--orange-500);
+}
+
+/* Отказ закрыть вкладку (макет 1c): панель с причиной под содержимым группы. */
+.ts-tab-refused {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0 var(--space-3) var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid color-mix(in srgb, var(--danger) 60%, transparent);
+  border-left-width: var(--border-width-thick);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+}
+
+.ts-tab-refused__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-tab-refused__title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--danger);
+}
+
+.ts-tab-refused__text {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--steel-500);
+}
+
+/* Телефон: «Назад», «Вперёд» и название заметки в шапке (макет 1c). */
+.ts-phone-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ts-phone-nav__title {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ts-open-notes__count {
+  gap: var(--space-1);
+}
+
+/* Шторка «Открытые заметки»: та же поверхность, что у шторки колонки заметки. */
+.ts-open-notes__overlay {
+  position: absolute;
+  inset: var(--ts-header-h) 0 0 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(20, 23, 26, 0.6);
+}
+
+.ts-open-notes {
+  --ts-open-notes-bg: color-mix(in srgb, var(--steel-950) 80%, black);
+  width: 100%;
+  max-height: 72%;
+  display: flex;
+  flex-direction: column;
+  background: var(--ts-open-notes-bg);
+  border-top: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-open-notes:focus {
+  outline: none;
+}
+
+.ts-open-notes__grab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.ts-open-notes__grab::before {
+  content: "";
+  width: var(--space-8);
+  height: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--steel-700);
+}
+
+.ts-open-notes__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+}
+
+.ts-open-notes__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.ts-open-notes__item {
+  display: flex;
+  align-items: center;
+  border-top: var(--border-width) solid var(--border-default);
+}
+
+.ts-open-notes__item[data-active="true"] {
+  background: var(--steel-900);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-open-notes__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--steel-200);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-open-notes__open:focus-visible,
+.ts-open-notes__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.ts-open-notes__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-open-notes__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--steel-500);
+  cursor: pointer;
 }

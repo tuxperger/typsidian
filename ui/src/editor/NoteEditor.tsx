@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type {
   ElementSpec,
-  Embed,
-  Note,
   ReadError,
+  TabId,
   TextEdit,
+  TextPlace,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { hintWith, type ShortcutsState } from "../workspace/useShortcuts.js";
@@ -25,7 +25,8 @@ import {
   type CaretAnchor,
   type InsertRequest,
 } from "./InsertMenu.js";
-import { useNoteAutoSave, type NoteSaveState } from "./useNoteAutoSave.js";
+import type { NoteDocument, NoteSaveState } from "./noteDocument.js";
+import { useDocumentSnapshot } from "./useNoteDocument.js";
 import { InsertPanel, useInsertPanelVisible } from "./InsertPanel.js";
 import { elementById, type LocalizedElement } from "./typstElements.js";
 import { ParamForm, type ParamFormMode } from "./ParamForm.js";
@@ -41,8 +42,29 @@ import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 export interface NoteEditorProps {
   client: VaultClient;
-  note: Note | null;
-  onClose: () => void;
+  /**
+   * Документ на путь (фича 014): текст, чтение с диска и автосохранение
+   * принадлежат ему, а не этому компоненту. Заметка в двух группах — один
+   * документ и два редактора.
+   */
+  document: NoteDocument;
+  /** Имя файла с расширением — для подписи поля и предложения имени заготовки. */
+  name: string;
+  /** Вкладка, которой принадлежит редактор: по ней он поднимается из снимка. */
+  tabId: TabId;
+  /**
+   * Вкладка активна в группе с кареткой. Слушатели окна (меню вставки,
+   * параметры элемента), доступ к редактору для порта вставки и запрос из
+   * палитры работают только у неё — иначе при двух группах команда
+   * срабатывала бы дважды.
+   */
+  active: boolean;
+  /** Куда поставить каретку после перехода («Назад», ссылка, ошибка); `null` — никуда. */
+  place?: TextPlace | null;
+  /** Место исполнено: хук вкладок забывает его. */
+  onPlaceShown?: () => void;
+  /** Растёт, когда фокус надо отдать редактору (щелчок по вкладке). */
+  focusRequest?: number;
   /** Доски vault — среди них идёт выбор при вставке (FR-018). */
   boards?: BoardChoice[];
   /**
@@ -51,39 +73,19 @@ export interface NoteEditorProps {
    * перехватывал бы события у первого.
    */
   externalChange?: { path: string; revision: number } | null;
-  /**
-   * Версия заметки, принятая при разрешении конфликта (FR-022, FR-023).
-   *
-   * Ядро отдаёт её тому, кто решение исполнил, со словами «редактор обязан
-   * показать это вместо буфера» (`resolve_conflict_accept_external`), а решение
-   * принимает диалог выше по дереву — отсюда проп.
-   *
-   * С автосохранением это перестало быть украшением: буфер, оставленный после
-   * «принять внешнюю», ушёл бы в файл сам и отменил только что сделанный выбор
-   * пользователя.
-   */
-  acceptedExternal?: { path: string; text: string; revision: number } | null;
   /** Открыть доску на полотне: переход от вставки к источнику (FR-025). */
   onOpenBoard?: (boardPath: string) => void;
   /** Создать доску, когда вставлять пока нечего (US2 AS2). */
   onCreateBoard?: () => void;
-  /**
-   * Текущий текст буфера — для предпросмотра (фича 005, FR-002).
-   *
-   * Именно буфер, а не файл на диске: требование «без кнопки сохранить»
-   * (FR-006) иначе невыполнимо. Панель предпросмотра живёт выше по дереву,
-   * поэтому текст объявляется наверх, а не читается ею с диска.
-   */
-  onContentChange?: (text: string) => void;
   /**
    * Доступ к живому редактору — наверх, для порта вставки заготовок
    * (фича 003). Объявляется, а не спрашивается: галерея живёт выше по дереву и
    * до `CodeEditor` не дотягивается.
    *
    * Наверх идёт **функция доступа**, а не сам экземпляр: `CodeEditor`
-   * пересоздаётся при смене заметки, и значение, снятое однажды, устарело бы
-   * молча. `null` — заметка закрыта: вставлять некуда, и галерея сообщает об
-   * этом вместо того, чтобы предлагать неработающую кнопку.
+   * пересоздаётся при смене вкладки, и значение, снятое однажды, устарело бы
+   * молча. `null` — вкладка перестала быть активной: вставлять некуда, и галерея
+   * сообщает об этом вместо того, чтобы предлагать неработающую кнопку.
    */
   onEditorReady?: (getView: (() => EditorView | null) | null) => void;
   /** Сохранить открытую заметку как заготовку (фича 003, US2). */
@@ -107,6 +109,18 @@ export interface NoteEditorProps {
    * FR-006). Меняется — форма открывается для элемента под кареткой.
    */
   paramsRequest?: number;
+  /**
+   * Связи открытой заметки одной строкой для статус-бара («5 ссылок · 2
+   * упоминания»). Не передан — сегмента нет: он показывается только при
+   * показанной колонке заметки.
+   */
+  linksSummary?: string;
+  /**
+   * Сводка вкладок для статус-бара («6 вкладок», «группа 1 из 2 · 4 вкладки»).
+   * Передаётся редактору активной группы: статус-бар в коде у каждого редактора
+   * свой, а в макете один на окно (research.md §14).
+   */
+  tabsSummary?: string;
 }
 
 /**
@@ -124,23 +138,28 @@ export interface NoteEditorProps {
  */
 export function NoteEditor({
   client,
-  note,
-  onClose,
+  document,
+  name,
+  tabId,
+  active,
+  place = null,
+  onPlaceShown,
+  focusRequest = 0,
   boards = [],
   externalChange = null,
-  acceptedExternal = null,
   onOpenBoard,
   onCreateBoard,
-  onContentChange,
   onEditorReady,
   onSaveAsTemplate,
   fontSize,
   shortcuts,
   paramsRequest = 0,
+  linksSummary,
+  tabsSummary,
 }: NoteEditorProps): React.JSX.Element {
   const { t } = useI18n();
-  const [content, setContent] = useState("");
-  const [readError, setReadError] = useState<ReadError | null>(null);
+  const snapshot = useDocumentSnapshot(document);
+  const content = snapshot.text;
   const [isInserting, setIsInserting] = useState(false);
   const [insertError, setInsertError] = useState<Phrase | null>(null);
   const [isChoosingBoard, setIsChoosingBoard] = useState(false);
@@ -254,8 +273,8 @@ export function NoteEditor({
 
   /** Текст заметки сейчас — форме, чтобы ядро сверяло элемент и метки. */
   const noteText = useCallback(
-    () => editorRef.current?.view()?.state.doc.toString() ?? content,
-    [content],
+    () => editorRef.current?.view()?.state.doc.toString() ?? document.text(),
+    [document],
   );
 
   // Элемент под кареткой — для кнопки «Параметры» на панели (T033, FR-006).
@@ -268,7 +287,7 @@ export function NoteEditor({
   const openParams = useCallback(
     async (offset?: number) => {
       const view = editorRef.current?.view();
-      const text = view?.state.doc.toString() ?? content;
+      const text = view?.state.doc.toString() ?? document.text();
       const at = offset ?? view?.state.selection.main.head ?? caretRef.current.offset;
       const found = await client.elementAt(text, at);
       if (found.kind === "None") {
@@ -290,7 +309,7 @@ export function NoteEditor({
         block: false,
       });
     },
-    [client, content, contextMenu, t],
+    [client, document, contextMenu, t],
   );
 
   const closeForm = useCallback(() => {
@@ -337,12 +356,15 @@ export function NoteEditor({
   }, []);
 
   // Запрос из палитры команд (FR-006): счётчик сменился — открыть «Параметры».
+  // Реагирует только активная вкладка: при двух группах форма не откроется дважды.
+  // Счётчик запоминается и неактивной, чтобы старый запрос не сработал, когда
+  // вкладка станет активной.
   const lastParamsRequest = useRef(paramsRequest);
   useEffect(() => {
     if (paramsRequest === lastParamsRequest.current) return;
     lastParamsRequest.current = paramsRequest;
-    void openParams();
-  }, [paramsRequest, openParams]);
+    if (active) void openParams();
+  }, [paramsRequest, openParams, active]);
 
   // Панель вставки (макет § Панель вставки). Показана по умолчанию и убирается
   // кнопкой в тулбаре заметки: она для мыши и меню не заменяет.
@@ -364,41 +386,41 @@ export function NoteEditor({
     [insertElement],
   );
 
-  const notePath = note?.path ?? null;
+  const notePath = document.path;
   const embeds = useNoteEmbeds(client, notePath, content);
-
-  // Автосохранение вместо кнопки (FR-006 фичи 005 — предпросмотр собирается из
-  // буфера, а буфер теперь сам доходит до диска).
-  const autoSave = useNoteAutoSave(client, notePath);
-  const flushSave = autoSave.flush;
-
-  // Переключение на другую заметку и размонтирование обязаны дописать текущую:
-  // иначе последние нажатия остались бы в буфере дебаунса. `flushSave` меняется
-  // вместе с путём, поэтому уборка достаётся той заметке, которая закрывается, а
-  // не той, что открылась.
-  useEffect(() => () => void flushSave(), [flushSave]);
-
-  // Снимок истории делается только с сохранённого (фича 011, FR-006): клиент
-  // обязан уметь дописать этот буфер по требованию, не дожидаясь дебаунса.
-  useEffect(() => client.registerFlusher(flushSave), [client, flushSave]);
-
-  // Объявляем буфер наверх одним местом, а не в каждом `setContent`: путей
-  // изменения текста четыре (набор, чтение с диска, вставка доски, закрытие
-  // заметки), и любой пропущенный означал бы предпросмотр, молча отставший от
-  // текста (FR-002).
-  useEffect(() => {
-    onContentChange?.(content);
-  }, [content, onContentChange]);
 
   // Доступ к редактору объявляется наверх, пока заметка открыта. Функция, а не
   // значение: она спрашивает `editorRef` в момент вставки и потому не может
   // указывать на редактор предыдущей заметки.
   const getView = useCallback(() => editorRef.current?.view() ?? null, []);
-  const hasNote = note !== null;
   useEffect(() => {
-    onEditorReady?.(hasNote ? getView : null);
+    if (!active) return undefined;
+    onEditorReady?.(getView);
     return () => onEditorReady?.(null);
-  }, [hasNote, getView, onEditorReady]);
+  }, [active, getView, onEditorReady]);
+
+  // Место, куда надо встать после перехода («Назад», ссылка из колонки,
+  // замечание сборки): каретка в строку и колонку, прокрутка, фокус. Документ
+  // уже прочитан — иначе редактора ещё нет и эффект дождётся следующего кадра.
+  useEffect(() => {
+    if (!active || place === null || snapshot.read !== "ready") return;
+    const view = editorRef.current?.view() ?? null;
+    if (view === null) return;
+    const doc = view.state.doc;
+    const line = doc.line(Math.max(1, Math.min(place.line, doc.lines)));
+    const position = Math.min(line.to, line.from + Math.max(0, place.column - 1));
+    view.dispatch({ selection: { anchor: position }, scrollIntoView: true });
+    view.focus();
+    onPlaceShown?.();
+  }, [active, place, snapshot.read, onPlaceShown]);
+
+  // Фокус отдаётся редактору по запросу — щелчок по вкладке (SC-001).
+  const lastFocusRequest = useRef(focusRequest);
+  useEffect(() => {
+    if (focusRequest === lastFocusRequest.current) return;
+    lastFocusRequest.current = focusRequest;
+    if (active && snapshot.read === "ready") editorRef.current?.focus();
+  }, [focusRequest, active, snapshot.read]);
 
   // ⌘E открывает и закрывает меню вставки, Escape — только закрывает. Так же,
   // как ⌘K у палитры команд: слушатель на окне, потому что открыть меню нужно
@@ -409,7 +431,7 @@ export function NoteEditor({
   // при кириллической раскладке `key` для этой клавиши — «у», а не «e».
   // Без открытой заметки вставлять некуда, поэтому и слушателя нет.
   useEffect(() => {
-    if (!note) return;
+    if (!active) return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (shortcuts.matches("insert-menu", event)) {
         event.preventDefault();
@@ -428,7 +450,7 @@ export function NoteEditor({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [note, isInsertMenuOpen, openInsertMenu, closeInsertMenu, shortcuts, paramForm, openParams]);
+  }, [active, isInsertMenuOpen, openInsertMenu, closeInsertMenu, shortcuts, paramForm, openParams]);
 
   // Изменение файла в vault — повод пересчитать состояние вставок. Затрагивает
   // ли оно эту заметку, решает ядро внутри `fileChanged` (T056).
@@ -449,7 +471,6 @@ export function NoteEditor({
    */
   const insertBoard = useCallback(
     async (boardPath: string): Promise<void> => {
-      if (notePath === null) return;
       setIsInserting(true);
       setInsertError(null);
       try {
@@ -458,6 +479,7 @@ export function NoteEditor({
         // панели секунду назад. Одно чтение маленького файла дешевле, чем
         // второе место, знающее текущую политику (фича 006, FR-002).
         const overrides = await client.vaultSettings();
+        const content = document.text();
         const plan = await client.planEmbed(
           notePath,
           content,
@@ -479,13 +501,14 @@ export function NoteEditor({
         }
 
         const markup = await client.embedMarkup(plan);
-        const at = Math.min(caretRef.current.offset, content.length);
-        const next = `${content.slice(0, at)}${markup}${content.slice(at)}`;
-        setContent(next);
-        await client.beginEdit(notePath, next);
+        // Текст мог измениться, пока писался снимок: позиция считается по свежему.
+        const fresh = document.text();
+        const at = Math.min(caretRef.current.offset, fresh.length);
+        const next = `${fresh.slice(0, at)}${markup}${fresh.slice(at)}`;
         // Вставка — такая же правка буфера, как набор текста, и уходит в файл
-        // тем же путём: иначе разметка вставки жила бы только в окне.
-        autoSave.changed(next);
+        // тем же путём (автосохранением документа): иначе разметка вставки жила
+        // бы только в окне. Виды получают её сразу.
+        document.replace(next, false);
         setIsChoosingBoard(false);
       } catch (cause) {
         setInsertError(() => describeInsertFailure(cause));
@@ -493,77 +516,25 @@ export function NoteEditor({
         setIsInserting(false);
       }
     },
-    [client, notePath, content, autoSave],
+    [client, notePath, document],
   );
 
-  const acceptSaved = autoSave.accept;
-  useEffect(() => {
-    let cancelled = false;
-    setReadError(null);
-    if (!note) {
-      setContent("");
-      return;
-    }
-    void (async () => {
-      try {
-        const text = await client.read(note.path);
-        if (cancelled) return;
-        setContent(text);
-        // Прочитанное с диска — не правка: автосохранению говорится, что именно
-        // этот текст сейчас в файле, иначе первое же открытие заметки
-        // перезаписывало бы её тем же содержимым.
-        acceptSaved(text);
-      } catch (cause) {
-        if (!cancelled) setReadError(asReadError(cause));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, note, acceptSaved]);
 
-  // Принятая внешняя версия заменяет буфер (FR-022). Записывать её обратно не
-  // нужно и нельзя: она уже на диске — ядро её оттуда и прочитало, — поэтому
-  // автосохранению она объявляется как сохранённая, а не как правка.
-  const acceptedPath = acceptedExternal?.path ?? null;
-  const acceptedText = acceptedExternal?.text ?? null;
-  const acceptedRevision = acceptedExternal?.revision ?? 0;
-  useEffect(() => {
-    if (acceptedText === null || acceptedPath === null || acceptedPath !== notePath) {
-      return;
-    }
-    setContent(acceptedText);
-    acceptSaved(acceptedText);
-    // `acceptedRevision` в зависимостях намеренно: он и есть повод применить
-    // версию заново, если пользователь принял внешнюю дважды подряд.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptedPath, acceptedText, acceptedRevision, notePath, acceptSaved]);
-
-  if (!note) {
+  if (snapshot.read === "loading") {
     return (
       <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
-        <div className="ts-pane__toolbar">
-          <span className="ts-eyebrow">{t("editor.eyebrow")}</span>
-        </div>
         <div className="ts-placeholder">
-          <p role="status">{t("editor.chooseNote")}</p>
+          <p role="status">{t("common.loading")}</p>
         </div>
       </section>
     );
   }
 
-  if (readError) {
+  if (snapshot.read !== "ready") {
     return (
       <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
-        <div className="ts-pane__toolbar">
-          <h2 className="ts-pane__title">{note.name}</h2>
-          <span className="ts-spacer" />
-          <button type="button" className="ts-btn" onClick={onClose}>
-            {t("common.close")}
-          </button>
-        </div>
         <div className="ts-placeholder">
-          <p role="alert">{describeReadError(t, readError)}</p>
+          <p role="alert">{describeReadError(t, snapshot.read)}</p>
         </div>
       </section>
     );
@@ -571,8 +542,8 @@ export function NoteEditor({
 
   return (
     <section className="ts-pane ts-pane--editor" aria-label={t("editor.label")}>
+      {/* Заголовка и «Закрыть» здесь нет: их роль у вкладки (фича 014). */}
       <div className="ts-pane__toolbar">
-        <h2 className="ts-pane__title">{note.name}</h2>
         <span className="ts-spacer" />
         <div className="ts-group" role="group" aria-label={t("editor.actions")}>
           {/* Меню вставки открывается по ⌘E; кнопка здесь для того, кто про
@@ -621,7 +592,7 @@ export function NoteEditor({
               type="button"
               className="ts-btn ts-btn--shrink"
               title={t("editor.saveAsTemplate")}
-              onClick={() => onSaveAsTemplate(content)}
+              onClick={() => onSaveAsTemplate(document.text())}
             >
               {t("editor.saveAsTemplate")}
             </button>
@@ -641,9 +612,6 @@ export function NoteEditor({
               само, а состояние записи видно в статус-баре. Оставить её значило
               бы завести второй путь к тому же `write` и второй ответ на вопрос
               «сохранено ли». */}
-          <button type="button" className="ts-btn" onClick={onClose}>
-            {t("common.close")}
-          </button>
         </div>
       </div>
       {panelVisible && (
@@ -667,17 +635,11 @@ export function NoteEditor({
 
       <CodeEditor
         ref={editorRef}
-        documentId={note.path.toString()}
-        ariaLabel={t("editor.contentLabel", { name: note.name })}
-        value={content}
+        key={tabId}
+        document={document}
+        tabId={tabId}
+        ariaLabel={t("editor.contentLabel", { name })}
         onCaretMove={onCaretMove}
-        onChange={(next) => {
-          setContent(next);
-          // FR-035: ядро должно знать о несохранённых правках и держать сам
-          // буфер — иначе внешнее изменение будет применено молча.
-          void client.beginEdit(note.path, next);
-          autoSave.changed(next);
-        }}
         onSlashMenu={openInsertMenuAt}
         onContextMenu={(event) => {
           const view = editorRef.current?.view();
@@ -780,8 +742,11 @@ export function NoteEditor({
             {t("editor.fieldState", { index: fieldState.index, count: fieldState.count })}
           </span>
         )}
-        <SaveIndicator state={autoSave.state} />
+        <SaveIndicator state={snapshot.save} />
         <span className="ts-spacer" />
+
+        {linksSummary !== undefined && <span>{linksSummary}</span>}
+        {tabsSummary !== undefined && <span>{tabsSummary}</span>}
 
         {/* Кегль редактора — те же ступени, что у масштаба предпросмотра, и
             тот же жест Ctrl/⌘ + колесо поверх текста. Значение — сама кнопка:
@@ -906,15 +871,4 @@ function describeReadError(t: Translate, error: ReadError): string {
       return exhaustive;
     }
   }
-}
-
-/** Сужение `unknown` до `ReadError` без `any` (принцип IV). */
-function asReadError(cause: unknown): ReadError {
-  if (typeof cause === "object" && cause !== null && "kind" in cause) {
-    const { kind } = cause as { kind: unknown };
-    if (kind === "NotFound" || kind === "TooLarge" || kind === "Io") {
-      return { kind } as ReadError;
-    }
-  }
-  return { kind: "Io" };
 }

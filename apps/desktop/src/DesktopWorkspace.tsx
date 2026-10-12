@@ -8,6 +8,7 @@ import {
 } from "@typsidian/ui/vault-client-tauri.js";
 import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
+import { tauriTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-tauri.js";
 import { openDesktopVault, pickDesktopFolder } from "./openDesktopVault.js";
 
 /**
@@ -22,6 +23,9 @@ const device = tauriDeviceSettings(pickDesktopFolder);
  * тот же диалог ОС, что и папку vault.
  */
 const cloner = tauriVaultCloner(pickDesktopFolder, openVaultAt);
+
+/** Набор вкладок vault в `settings.json` устройства (фича 014). */
+const tabsStore = tauriTabsStore();
 
 /**
  * Оболочка рабочего стола (001 T112).
@@ -42,6 +46,10 @@ export function DesktopWorkspace(): React.JSX.Element {
         // хранилище, что и на Android, и те же команды оболочки.
         lastVault={lastTauriVault}
         cloneVault={cloner}
+        // Состояние колонки заметки (фича 013) хранится в настройках устройства.
+        device={device}
+        // Набор вкладок и разделение переживают перезапуск (фича 014).
+        tabsStore={tabsStore}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

@@ -8,9 +8,9 @@
 ```sh
 nix develop --command cargo test -p typsidian-core --lib attachments
 nix develop --command cargo test -p typsidian-core --lib ignore_match
-nix develop --command cargo test -p typsidian-core --test attachments_native --test vault_native --test settings_native --test preview_native
+nix develop --command cargo test -p typsidian-core --test attachments_native --test vault_native --test placement_native --test preview_native
 nix develop --command cargo build -p typsidian-core --target wasm32-unknown-unknown
-nix develop --command bash -c "cd packages/core && wasm-pack test --headless --chrome -- --test attachments_wasm --test vault_wasm --test settings_wasm --test preview_wasm"
+nix develop --command bash -c "cd packages/core && wasm-pack test --headless --chrome -- --test attachments_wasm --test vault_wasm --test placement_wasm --test preview_wasm"
 nix develop --command cargo test -p typsidian-shell
 ```
 
@@ -28,7 +28,7 @@ nix develop --command cargo test -p typsidian-shell
   не меняют состояние.
 - `ignore_match` (модульные, оба таргета через `attachment_cases`): папка, исключённая
   правилом, родителем, отменённая `!`, порядок для двух видов файлов (FR-020).
-- `vault_settings_cases`: круговая запись двух полей; негодное название отклонено, файл не
+- `vault_settings_cases` (раннеры `placement_*`): круговая запись двух полей; негодное название отклонено, файл не
   тронут (FR-017, FR-018).
 - `vault_native` / `vault_wasm`: `list_images` на настоящих бэкендах даёт один и тот же
   список (FR-025).
@@ -77,7 +77,7 @@ nix develop -c node scripts/dev/browser.mjs http://localhost:3000 \
    таблица названы пропущенными, в vault их нет.
 7. **Много файлов**. Бросить 50 картинок: панель «Копирую вложения: N из 50», печатать в
    редакторе можно; «Отменить» на середине — вставлены уже скопированные, остальных нет,
-   обрезанных файлов нет (`find <vault> -size 0` пуст).
+   обрезанных файлов нет (`find <vault> -size 0` пуст); отмена срабатывает не позже чем через 1 с (SC-005).
 8. **Большой файл**. Вставить картинку 34 МБ: диалог с именем и размером; «Отмена» — ни
    файла, ни текста; «Вставить» — файл скопирован, предпросмотр показывает.
 9. **Команда**. `Ctrl+Alt+I`, палитра и меню вставки открывают выбор файлов; результат как

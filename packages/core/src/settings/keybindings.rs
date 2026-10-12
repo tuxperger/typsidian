@@ -65,6 +65,24 @@ pub enum CommandId {
     SyncPull,
     /// Список конфликтов (фича 011, FR-016, FR-024).
     SyncResolveConflicts,
+    /// Показать или скрыть колонку заметки (фича 013, research.md §15).
+    ToggleNotePanel,
+    /// Закрыть вкладку (фича 014, research.md §12).
+    TabClose,
+    /// Следующая вкладка полосы (фича 014).
+    TabNext,
+    /// Предыдущая вкладка полосы (фича 014).
+    TabPrevious,
+    /// Разделить редактор или убрать разделение (фича 014).
+    SplitEditor,
+    /// Перенести вкладку в другую группу (фича 014).
+    TabMoveToOtherGroup,
+    /// Назад по истории переходов группы (фича 014).
+    NavigateBack,
+    /// Вперёд по истории переходов группы (фича 014).
+    NavigateForward,
+    /// Показать или скрыть оглавление заметки (фича 015, research.md §12).
+    ToggleOutline,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -89,6 +107,15 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::SyncPush,
     CommandId::SyncPull,
     CommandId::SyncResolveConflicts,
+    CommandId::ToggleNotePanel,
+    CommandId::TabClose,
+    CommandId::TabNext,
+    CommandId::TabPrevious,
+    CommandId::SplitEditor,
+    CommandId::TabMoveToOtherGroup,
+    CommandId::NavigateBack,
+    CommandId::NavigateForward,
+    CommandId::ToggleOutline,
 ];
 
 impl CommandId {
@@ -112,6 +139,15 @@ impl CommandId {
             Self::SyncPush => "sync-push",
             Self::SyncPull => "sync-pull",
             Self::SyncResolveConflicts => "sync-resolve-conflicts",
+            Self::ToggleNotePanel => "toggle-note-panel",
+            Self::TabClose => "tab-close",
+            Self::TabNext => "tab-next",
+            Self::TabPrevious => "tab-previous",
+            Self::SplitEditor => "split-editor",
+            Self::TabMoveToOtherGroup => "tab-move-to-other-group",
+            Self::NavigateBack => "navigate-back",
+            Self::NavigateForward => "navigate-forward",
+            Self::ToggleOutline => "toggle-outline",
         }
     }
 
@@ -156,6 +192,25 @@ impl CommandId {
             Self::SyncPush => (false, true, "u"),
             Self::SyncPull => (false, true, "g"),
             Self::SyncResolveConflicts => (false, true, "m"),
+            // Колонка заметки (фича 013): `Mod+Shift+L` среди умолчаний свободно,
+            // а CodeMirror его не занимает — оно живёт в `searchKeymap`, который
+            // не подключён.
+            Self::ToggleNotePanel => (true, false, "l"),
+            // Вкладки (фича 014, research.md §12) — на `Mod+Alt`, как
+            // синхронизация. Знаки несут имя физической клавиши через
+            // [`Shortcut::code`], поэтому работают и в кириллической раскладке.
+            Self::TabClose => (false, true, "w"),
+            Self::TabNext => (false, true, "."),
+            Self::TabPrevious => (false, true, ","),
+            Self::SplitEditor => (false, true, "\\"),
+            Self::TabMoveToOtherGroup => (true, true, "\\"),
+            Self::NavigateBack => (false, true, "["),
+            Self::NavigateForward => (false, true, "]"),
+            // Оглавление (фича 015, research.md §12): `Mod+Shift+O` среди умолчаний
+            // свободно, `o` не входит в зарезервированные клавиши, а `Shortcut::code`
+            // даёт `KeyO` - сочетание работает и в кириллической раскладке. В
+            // CodeMirror (`defaultKeymap`, `historyKeymap`) `Shift-Mod-o` не занято.
+            Self::ToggleOutline => (true, false, "o"),
         };
         Shortcut {
             mod_key: true,
@@ -334,7 +389,24 @@ impl Shortcut {
         if first.is_ascii_digit() {
             return Some(format!("Digit{first}"));
         }
-        None
+        // Знаки препинания (фича 014, research.md §12): без имени физической
+        // клавиши `Shift+\` (`key` — `|`), кириллическая раскладка (`[` — «х»)
+        // и ⌥ на macOS ломали бы сверку по `key`.
+        let name = match first {
+            '.' => "Period",
+            ',' => "Comma",
+            '\\' => "Backslash",
+            '[' => "BracketLeft",
+            ']' => "BracketRight",
+            ';' => "Semicolon",
+            '\'' => "Quote",
+            '/' => "Slash",
+            '-' => "Minus",
+            '=' => "Equal",
+            '`' => "Backquote",
+            _ => return None,
+        };
+        Some(name.to_string())
     }
 
     /// Как сочетание показывается пользователю.
@@ -493,6 +565,23 @@ mod tests {
                 binding.conflicts_with
             );
         }
+    }
+
+    #[test]
+    fn the_note_panel_toggle_has_a_unique_mod_shift_l_default() {
+        let shortcut = CommandId::ToggleNotePanel.default_shortcut();
+        assert_eq!(shortcut.to_text(), "Mod+Shift+L");
+        assert!(COMMANDS.contains(&CommandId::ToggleNotePanel));
+        let same: Vec<CommandId> = COMMANDS
+            .iter()
+            .copied()
+            .filter(|command| command.default_shortcut() == shortcut)
+            .collect();
+        assert_eq!(same, vec![CommandId::ToggleNotePanel]);
+        assert_eq!(
+            CommandId::parse("toggle-note-panel"),
+            Some(CommandId::ToggleNotePanel)
+        );
     }
 
     #[test]
@@ -689,6 +778,91 @@ mod tests {
             .find(|binding| binding.command == CommandId::CommandPalette)
             .unwrap();
         assert_eq!(palette.code, "KeyK");
+    }
+
+    #[test]
+    fn punctuation_carries_the_physical_key_name() {
+        // Фича 014, research.md §12.
+        for (key, code) in [
+            (".", "Period"),
+            (",", "Comma"),
+            ("\\", "Backslash"),
+            ("[", "BracketLeft"),
+            ("]", "BracketRight"),
+            (";", "Semicolon"),
+            ("'", "Quote"),
+            ("/", "Slash"),
+            ("-", "Minus"),
+            ("=", "Equal"),
+            ("`", "Backquote"),
+        ] {
+            assert_eq!(
+                Shortcut::normalize(true, false, true, key).code(),
+                Some(code.to_string()),
+                "{key}"
+            );
+        }
+        // Прочие знаки имени не получают.
+        assert_eq!(Shortcut::normalize(true, false, false, "!").code(), None);
+    }
+
+    #[test]
+    fn punctuation_shortcuts_survive_the_text_round_trip_and_are_valid() {
+        for (shift, key, text) in [(false, ".", "Mod+Alt+."), (true, "\\", "Mod+Alt+Shift+\\")] {
+            let shortcut = Shortcut::normalize(true, shift, true, key);
+            assert_eq!(shortcut.to_text(), text);
+            assert_eq!(Shortcut::parse(text).as_ref(), Some(&shortcut));
+            assert_eq!(shortcut.problem(), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn tab_commands_follow_the_note_panel_with_the_documented_defaults() {
+        // Семь команд вкладок стоят перед командами более поздних фич: самая
+        // последняя сейчас - `ToggleOutline` (фича 015).
+        let tail = &COMMANDS[COMMANDS.len() - 8..COMMANDS.len() - 1];
+        let expected = [
+            (CommandId::TabClose, "tab-close", "Mod+Alt+W"),
+            (CommandId::TabNext, "tab-next", "Mod+Alt+."),
+            (CommandId::TabPrevious, "tab-previous", "Mod+Alt+,"),
+            (CommandId::SplitEditor, "split-editor", "Mod+Alt+\\"),
+            (
+                CommandId::TabMoveToOtherGroup,
+                "tab-move-to-other-group",
+                "Mod+Alt+Shift+\\",
+            ),
+            (CommandId::NavigateBack, "navigate-back", "Mod+Alt+["),
+            (CommandId::NavigateForward, "navigate-forward", "Mod+Alt+]"),
+        ];
+        for (index, (command, name, text)) in expected.into_iter().enumerate() {
+            assert_eq!(tail[index], command);
+            assert_eq!(command.as_str(), name);
+            assert_eq!(CommandId::parse(name), Some(command));
+            assert_eq!(command.default_shortcut().to_text(), text);
+        }
+        // `ToggleNotePanel` остаётся на прежнем месте.
+        assert_eq!(COMMANDS[COMMANDS.len() - 9], CommandId::ToggleNotePanel);
+    }
+
+    #[test]
+    fn the_outline_command_comes_last_with_its_default() {
+        assert_eq!(COMMANDS.last(), Some(&CommandId::ToggleOutline));
+        assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
+        assert_eq!(
+            CommandId::parse("toggle-outline"),
+            Some(CommandId::ToggleOutline)
+        );
+        let shortcut = CommandId::ToggleOutline.default_shortcut();
+        assert_eq!(shortcut.to_text(), "Mod+Shift+O");
+        assert_eq!(shortcut.code(), Some("KeyO".to_string()));
+        assert_eq!(shortcut.problem(), None);
+        // Умолчание ни с одной другой командой не делится.
+        let same: Vec<CommandId> = COMMANDS
+            .iter()
+            .copied()
+            .filter(|command| command.default_shortcut() == shortcut)
+            .collect();
+        assert_eq!(same, vec![CommandId::ToggleOutline]);
     }
 
     #[test]

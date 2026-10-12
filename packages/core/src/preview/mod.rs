@@ -43,6 +43,8 @@ pub use compile::{
     CompileOutcome, CompileOutput, CompiledDocument, ExecutorError, InlineExecutor,
     BUILD_TIME_LIMIT_SECS,
 };
+#[cfg(feature = "test-support")]
+pub use compile::{document_headings, DocumentHeading};
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;
 pub use pages::{render_pages, RenderedPage};

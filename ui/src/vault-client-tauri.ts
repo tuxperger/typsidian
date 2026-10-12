@@ -14,6 +14,7 @@ import type {
 } from "./vault-tree/useVault.js";
 import type {
   AccessState,
+  BacklinksPage,
   Board,
   BoardEvent,
   BoardWriteProfile,
@@ -37,16 +38,26 @@ import type {
   RenderOutcome,
   InstalledTemplate,
   InstallReport,
+  LinkOutcome,
+  MentionScan,
+  MentionStep,
+  MentionsAvailability,
+  MentionsStart,
   NameCheck,
   Note,
   PreviewState,
   ResolvedBinding,
+  SavedWorkspace,
   SearchResults,
+  SourceGroup,
   Template,
   TemplateEvent,
   TemplateLibraryView,
+  Transition,
   VaultEvent,
   VaultOverrides,
+  WorkspaceState,
+  WorkspaceView,
 } from "./wasm-core/typsidian_core.js";
 
 // Реализация `VaultClient` поверх команд Tauri (001 T113, T114, T115) —
@@ -298,6 +309,10 @@ export function tauriVaultClient(
       unresolved = true;
       await invoke<void>("begin_edit", { path, buffer });
     },
+    discardEdit: async (path) => {
+      await invoke<void>("discard_edit", { path });
+      await refreshUnresolved();
+    },
     pendingConflict: async (path) => {
       const conflict = await invoke<EditConflict | null>("pending_conflict", { path });
       return conflict ?? undefined;
@@ -421,6 +436,36 @@ export function tauriVaultClient(
       invoke<VaultOverrides>("set_keybinding", { command, shortcut }),
     resetKeybinding: (command) =>
       invoke<VaultOverrides>("reset_keybinding", { command }),
+
+    // ── Вкладки и разделение редактора (фича 014) ─────────────────────
+    // Состояние вкладок в команде называется `workspace`, а не `state`: `state`
+    // в Tauri занят служебным параметром.
+    workspaceEmpty: () => invoke<WorkspaceState>("workspace_empty"),
+    workspaceApply: (workspace, action, widthPx) =>
+      invoke<Transition>("workspace_apply", { workspace, action, widthPx }),
+    workspaceView: (workspace, widthPx) =>
+      invoke<WorkspaceView>("workspace_view", { workspace, widthPx }),
+    workspaceSnapshot: (workspace) =>
+      invoke<SavedWorkspace>("workspace_snapshot", { workspace }),
+    workspaceRestore: (saved) => invoke<WorkspaceState>("workspace_restore", { saved }),
+
+    // ── Связи заметки (фича 013) ──────────────────────────────────────
+    // Состояние прохода в команде называется `scan`, а не `state`: `state` в
+    // Tauri занят служебным параметром.
+    links: {
+      backlinksPage: (target, openTexts, offset, limit) =>
+        invoke<BacklinksPage>("links_backlinks_page", { target, openTexts, offset, limit }),
+      mentionsAvailability: (target) =>
+        invoke<MentionsAvailability>("links_mentions_availability", { target }),
+      mentionsStart: (target) => invoke<MentionsStart>("links_mentions_start", { target }),
+      mentionsStep: (scan, openTexts) =>
+        invoke<MentionStep>("links_mentions_step", { scan, openTexts }),
+      mentionsCancel: (scan) => invoke<MentionScan>("links_mentions_cancel", { scan }),
+      mentionsIn: (target, paths, openTexts) =>
+        invoke<SourceGroup[]>("links_mentions_in", { target, paths, openTexts }),
+      linkMention: (request, editorText) =>
+        invoke<LinkOutcome>("links_link_mention", { request, editorText }),
+    },
   };
 }
 

@@ -104,6 +104,7 @@ packages/core/
 │   └── web.rs                      # wasm-bindgen: noteOutline, noteOutlineView, noteOutlineActive, noteOutlineCarry
 ├── src/preview/anchor.rs           # + HeadingProbe, locate_heading()
 ├── src/preview/web.rs              # + previewLocateHeading
+├── src/preview/compile.rs          # + заголовки собранного документа для тестов (feature test-support, SC-005)
 ├── src/settings/keybindings.rs     # + CommandId::ToggleOutline (Mod+Shift+O)
 ├── benches/structure_scale.rs      # 10 000 строк, 2 000 заголовков
 └── tests/common/structure_cases.rs · tests/structure_native.rs · tests/structure_wasm.rs

@@ -30,6 +30,16 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   "sync-push": "sync.command.push",
   "sync-pull": "sync.command.pull",
   "sync-resolve-conflicts": "sync.command.resolveConflicts",
+  "toggle-note-panel": "notePanel.command",
+  "tab-close": "workspace.tabs.close",
+  "tab-next": "workspace.tabs.next",
+  "tab-previous": "workspace.tabs.previous",
+  "split-editor": "workspace.tabs.split",
+  "tab-move-to-other-group": "workspace.tabs.moveToOther",
+  "navigate-back": "workspace.tabs.back",
+  "navigate-forward": "workspace.tabs.forward",
+  // Команда фичи 015 уже объявлена в ядре; её поведение в окне — 015 T020.
+  "toggle-outline": "notePanel.outlineCommand",
 };
 
 /**

@@ -261,3 +261,24 @@ impl Default for PreviewEngine {
         Self::new()
     }
 }
+
+/// Прогоны текстового слоя по страницам — аргумент [`preview_locate_heading_js`].
+/// Отдельный тип, потому что `Vec<Vec<T>>` через границу wasm-bindgen не
+/// проходит; в TypeScript это `TextRun[][]`.
+#[derive(serde::Serialize, serde::Deserialize, tsify_next::Tsify)]
+#[serde(transparent)]
+#[tsify(from_wasm_abi)]
+pub struct PageRuns(pub Vec<Vec<super::textlayer::TextRun>>);
+
+/// Место заголовка оглавления в собранном документе (фича 015, FR-004):
+/// `heading_probe` + `locate_heading`, проба наружу не выводится. Функция
+/// свободная — движок предпросмотра не нужен, страницы держит окно.
+#[wasm_bindgen(js_name = previewLocateHeading)]
+pub fn preview_locate_heading_js(
+    runs: PageRuns,
+    outline: crate::structure::Outline,
+    key: &str,
+) -> Option<super::anchor::ResolvedAnchor> {
+    let probe = crate::structure::heading_probe(&outline, key)?;
+    super::anchor::locate_heading(&runs.0, &probe)
+}

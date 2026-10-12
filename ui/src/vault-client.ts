@@ -1,5 +1,6 @@
 import type {
   AccessState,
+  BacklinksPage,
   Board,
   BoardEvent,
   BoardWriteProfile,
@@ -19,18 +20,31 @@ import type {
   RenderOutcome,
   RenderRequest,
   InsertionPoint,
+  LinkOutcome,
+  LinkRequest,
+  MentionScan,
+  MentionStep,
+  MentionsAvailability,
+  MentionsStart,
   NameCheck,
   Note,
+  OpenText,
   PreviewState,
   ResolvedBinding,
   SearchQuery,
   SearchResults,
   Shortcut,
+  SavedWorkspace,
+  SourceGroup,
   Template,
   TemplateEvent,
   TemplateLibraryView,
+  Transition,
   VaultEvent,
   VaultOverrides,
+  WorkspaceAction,
+  WorkspaceState,
+  WorkspaceView,
 } from "./wasm-core/typsidian_core.js";
 
 // Поверхность ядра, которой пользуется общий UI (001 T113, T114).
@@ -95,6 +109,12 @@ export interface VaultClient {
   // ── Несохранённые правки и конфликты (001 US4) ──────────────────────
 
   beginEdit(path: string, buffer: string): Promise<void>;
+  /**
+   * Снять объявленные правки: буфер вернулся к сохранённому тексту (фича 014,
+   * research.md §6). Без этого такая заметка осталась бы в ядре «несохранённой»,
+   * а вкладку с ней нельзя было бы закрыть.
+   */
+  discardEdit(path: string): Promise<void>;
   pendingConflict(path: string): Promise<EditConflict | undefined>;
   conflictDiff(path: string): Promise<DiffLine[]>;
   resolveConflictKeepLocal(path: string): Promise<void>;
@@ -329,6 +349,65 @@ export interface VaultClient {
 
   /** Возвращает команду к умолчанию ядра. */
   resetKeybinding(command: CommandId): Promise<VaultOverrides>;
+
+  // ── Вкладки и разделение редактора (фича 014) ───────────────────────
+  //
+  // Модель вкладок — в ядре (`packages/core/src/workspace`): окно держит
+  // значение состояния и отдаёт его сюда вместе с действием. Правил здесь нет.
+  // Ширина окна идёт в ядро, потому что подачу (две группы, одна полоса, список)
+  // выбирает оно, а не интерфейс.
+
+  workspaceEmpty(): Promise<WorkspaceState>;
+  workspaceApply(
+    state: WorkspaceState,
+    action: WorkspaceAction,
+    widthPx: number,
+  ): Promise<Transition>;
+  workspaceView(state: WorkspaceState, widthPx: number): Promise<WorkspaceView>;
+  workspaceSnapshot(state: WorkspaceState): Promise<SavedWorkspace>;
+  workspaceRestore(saved: SavedWorkspace): Promise<WorkspaceState>;
+
+  // ── Связи заметки (фича 013) ────────────────────────────────────────
+
+  /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
+  readonly links: LinksClient;
+}
+
+/**
+ * Связи заметки: кто на неё ссылается и где стоит её название без ссылки
+ * (фича 013, contracts/note-panel.md).
+ *
+ * Правил здесь нет: что считается ссылкой и упоминанием, как строятся фрагменты
+ * и порядок источников, решает ядро (`packages/core/src/links`). Клиент только
+ * передаёт вопрос через свою границу — wasm в том же процессе или команда Tauri.
+ *
+ * `openTexts` — тексты заметок, открытых в редакторе: места и фрагменты для них
+ * считаются по буферу, а не по диску (research.md §10).
+ */
+export interface LinksClient {
+  /** Порция обратных ссылок; источники ближайшие по папке — первыми. */
+  backlinksPage(
+    target: string,
+    openTexts: OpenText[],
+    offset: number,
+    limit: number,
+  ): Promise<BacklinksPage>;
+  /** Можно ли искать упоминания названия цели (FR-011). */
+  mentionsAvailability(target: string): Promise<MentionsAvailability>;
+  /** Начало прохода по vault; отказ — штатный ответ `Unavailable`, а не ошибка. */
+  mentionsStart(target: string): Promise<MentionsStart>;
+  /** Одна порция прохода: новое состояние и найденные группы. */
+  mentionsStep(state: MentionScan, openTexts: OpenText[]): Promise<MentionStep>;
+  /** Отмена прохода: после неё `mentionsStep` ничего не читает (FR-012). */
+  mentionsCancel(state: MentionScan): Promise<MentionScan>;
+  /** Упоминания только в названных заметках — точечное обновление (research.md §8). */
+  mentionsIn(target: string, paths: string[], openTexts: OpenText[]): Promise<SourceGroup[]>;
+  /**
+   * «Связать»: превратить упоминание в ссылку. `editorText` — текст заметки в
+   * редакторе, если она в нём открыта; тогда ядро вернёт правку для редактора,
+   * а на диск ничего не запишет (FR-016).
+   */
+  linkMention(request: LinkRequest, editorText: string | null): Promise<LinkOutcome>;
 }
 
 /**

@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::pages::RenderedPage;
+use super::textlayer::TextRun;
 
 /// Место документа, которое нужно удержать на экране.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,5 +91,79 @@ pub fn resolve(anchor: &ScrollAnchor, pages: &[RenderedPage]) -> Option<Resolved
     Some(match same {
         Some(ordinal) => at(ordinal, true),
         None => at(wanted, false),
+    })
+}
+
+/// Что искать в собранном документе, чтобы показать заголовок (фича 015,
+/// research.md §10). Ядро выводит пробу из оглавления
+/// ([`crate::structure::heading_probe`]), интерфейс её не видит.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct HeadingProbe {
+    /// Читаемый текст заголовка.
+    pub text: String,
+    /// Номер среди заголовков заметки с таким же текстом, с нуля.
+    pub occurrence: u32,
+}
+
+/// Находит заголовок среди прогонов текстового слоя.
+///
+/// `runs[i]` — прогоны страницы `i` в порядке чтения, как в
+/// `RenderedPage::text_runs`. Совпадение — прогон либо цепочка соседних
+/// прогонов одной страницы, чья склейка без пробелов равна тексту пробы
+/// (заголовок с оформлением и перенесённый на две строки дают несколько
+/// прогонов). Из совпадений берётся наибольший кегль: строка оглавления
+/// документа и колонтитул повторяют текст заголовка обычным кеглем. Из них —
+/// `probe.occurrence`-е по порядку чтения; номер за концом — последнее.
+///
+/// Результат указывает на первый прогон совпадения. Совпадений нет — `None`:
+/// предпросмотр остаётся на месте. [`resolve`] не затрагивается.
+pub fn locate_heading(runs: &[Vec<TextRun>], probe: &HeadingProbe) -> Option<ResolvedAnchor> {
+    let target: String = probe.text.split_whitespace().collect();
+    if target.is_empty() {
+        return None;
+    }
+    // (страница, первый прогон, кегль) в порядке чтения.
+    let mut found: Vec<(u32, u32, f64)> = Vec::new();
+    for (page, page_runs) in runs.iter().enumerate() {
+        let mut start = 0;
+        while start < page_runs.len() {
+            let mut joined = String::new();
+            let mut end = start;
+            let mut matched = false;
+            while end < page_runs.len() {
+                joined.extend(page_runs[end].text.split_whitespace().flat_map(str::chars));
+                end += 1;
+                if joined == target {
+                    matched = true;
+                    break;
+                }
+                // Склейка уже не начало текста — дальше цепочку не тянуть.
+                if !target.starts_with(&joined) {
+                    break;
+                }
+            }
+            if matched {
+                found.push((page as u32, start as u32, page_runs[start].size_pt));
+                start = end;
+            } else {
+                start += 1;
+            }
+        }
+    }
+    let largest = found
+        .iter()
+        .map(|(_, _, size)| *size)
+        .fold(f64::MIN, f64::max);
+    let best: Vec<&(u32, u32, f64)> = found
+        .iter()
+        .filter(|(_, _, size)| *size >= largest - f64::EPSILON)
+        .collect();
+    let pick = best.get(probe.occurrence as usize).or(best.last())?;
+    Some(ResolvedAnchor {
+        page_index: pick.0,
+        run_index: pick.1,
+        exact: true,
     })
 }

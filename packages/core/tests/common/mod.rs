@@ -43,6 +43,19 @@ pub struct MemoryVault {
     /// прав файловой системы на wasm32 нет, а различать `Absent` и
     /// `Unreadable` галерея заготовок обязана (003 FR-009, FR-016).
     folder_problems: HashMap<PathBuf, FolderProblem>,
+    /// Проверять ли `expected` в `write` (фича 013): расхождение с отпечатком
+    /// файла в памяти — `WriteError::Conflict`, как у настоящих backend. По
+    /// умолчанию выключено, чтобы прежние таблицы случаев вели себя как раньше.
+    check_expected: bool,
+    /// Пути, по которым тест объявил несохранённые правки (`begin_edit` двойник
+    /// не помнит; нужен только ответ `has_unsaved_edits`).
+    unsaved: std::collections::HashSet<PathBuf>,
+    /// Сколько раз файл успешно записан через `write` — по счётчику видно, что
+    /// отказ не тронул vault.
+    pub writes: std::cell::RefCell<HashMap<PathBuf, u32>>,
+    /// Отпечатки, которые индекс «запомнил» раньше, чем файл изменили снаружи
+    /// (фича 013): `list`/`list_folder` отдают их вместо настоящих.
+    lagging: HashMap<PathBuf, typsidian_core::stamp::FileStamp>,
 }
 
 impl MemoryVault {
@@ -55,6 +68,10 @@ impl MemoryVault {
             access_state: AccessState::ReadWrite,
             service_dir_existed: true,
             folder_problems: HashMap::new(),
+            check_expected: false,
+            unsaved: Default::default(),
+            writes: std::cell::RefCell::new(HashMap::new()),
+            lagging: HashMap::new(),
         }
     }
 
@@ -134,6 +151,51 @@ impl MemoryVault {
         self.files.clone()
     }
 
+    /// Включает проверку `expected` в `write` (фича 013).
+    pub fn checking_expected(mut self) -> Self {
+        self.check_expected = true;
+        self
+    }
+
+    /// Индекс запоминает текущий отпечаток файла и не обновляет его, когда
+    /// файл меняют снаружи (`replace_externally`): так проверяется запись по
+    /// устаревшему снимку (фича 013).
+    pub fn with_lagging_index(mut self, path: &str) -> Self {
+        if let Some(stamp) = self.stamp_of(path) {
+            self.lagging.insert(PathBuf::from(path), stamp);
+        }
+        self
+    }
+
+    /// Объявляет у заметки несохранённые правки вне редактора (фича 013).
+    pub fn with_unsaved_edits(mut self, path: &str) -> Self {
+        self.unsaved.insert(PathBuf::from(path));
+        self
+    }
+
+    /// Сколько раз файл успешно записан через `write`.
+    pub fn write_count(&self, path: &str) -> u32 {
+        *self.writes.borrow().get(&PathBuf::from(path)).unwrap_or(&0)
+    }
+
+    /// Сколько записей через `write` во всём vault.
+    pub fn total_writes(&self) -> u32 {
+        self.writes.borrow().values().sum()
+    }
+
+    /// Сколько чтений во всём vault.
+    pub fn total_reads(&self) -> u32 {
+        self.reads.borrow().values().sum()
+    }
+
+    /// Подменяет содержимое «снаружи» — между вызовами ядра, мимо `write` и его
+    /// счётчика: так приложение видит правку внешним редактором.
+    pub fn replace_externally(&self, path: &str, bytes: impl Into<Vec<u8>>) {
+        self.files
+            .borrow_mut()
+            .insert(PathBuf::from(path), bytes.into());
+    }
+
     pub fn read_count(&self, path: &str) -> u32 {
         *self.reads.borrow().get(&PathBuf::from(path)).unwrap_or(&0)
     }
@@ -169,7 +231,9 @@ impl VaultBackend for MemoryVault {
             .map(|(path, bytes)| {
                 Note::new(
                     path.clone(),
-                    typsidian_core::stamp::FileStamp::from_content(0, bytes),
+                    self.lagging.get(path).cloned().unwrap_or_else(|| {
+                        typsidian_core::stamp::FileStamp::from_content(0, bytes)
+                    }),
                 )
             })
             .collect();
@@ -299,16 +363,29 @@ impl VaultBackend for MemoryVault {
         &mut self,
         path: &Path,
         content: &str,
-        _expected: Option<typsidian_core::stamp::FileStamp>,
+        expected: Option<typsidian_core::stamp::FileStamp>,
     ) -> Result<(), WriteError> {
         // Гейт записи повторяет оба настоящих backend: без него проверить
         // FR-025 было бы нечем — прав файловой системы на wasm32 не существует.
         if self.access_state != AccessState::ReadWrite {
             return Err(WriteError::AccessDenied);
         }
+        if self.check_expected {
+            if let Some(expected) = &expected {
+                let current = self.stamp_of(&path.to_string_lossy());
+                if current.as_ref() != Some(expected) {
+                    return Err(WriteError::Conflict);
+                }
+            }
+        }
         self.files
             .borrow_mut()
             .insert(path.to_path_buf(), content.as_bytes().to_vec());
+        *self
+            .writes
+            .borrow_mut()
+            .entry(path.to_path_buf())
+            .or_insert(0) += 1;
         Ok(())
     }
 
@@ -359,7 +436,14 @@ impl VaultBackend for MemoryVault {
             if note.path == path {
                 continue;
             }
-            let Ok(content) = self.read(&note.path).await else {
+            // Индекс ссылок не читает файлы через `read`: ни счётчик чтений, ни
+            // объявленные отказы чтения на него не действуют (фича 013).
+            let Some(content) = self
+                .files
+                .borrow()
+                .get(&note.path)
+                .and_then(|bytes| String::from_utf8(bytes.clone()).ok())
+            else {
                 continue;
             };
             if typsidian_core::graph::links_in(&note.path, &content)
@@ -384,8 +468,8 @@ impl VaultBackend for MemoryVault {
 
     async fn discard_edit(&mut self, _path: &Path) {}
 
-    fn has_unsaved_edits(&self, _path: &Path) -> bool {
-        false
+    fn has_unsaved_edits(&self, path: &Path) -> bool {
+        self.unsaved.contains(path)
     }
 
     fn pending_conflict(&self, _path: &Path) -> Option<EditConflict> {
@@ -420,12 +504,16 @@ pub mod element_cases;
 pub mod export_cases;
 pub mod install_cases;
 pub mod language_cases;
+pub mod links_cases;
 pub mod message_cases;
+pub mod note_panel_cases;
 pub mod package_cases;
 pub mod placement_cases;
 pub mod preview_cases;
 pub mod search_cases;
+pub mod structure_cases;
 pub mod sync_cases;
 pub mod template_cases;
 pub mod textlayer_cases;
 pub mod vault_settings_cases;
+pub mod workspace_cases;

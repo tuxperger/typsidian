@@ -513,6 +513,7 @@ impl FolderRegistry for NativeStore {
         // ссылка на неё.
         self.folder_refs.remove(id.as_str());
         vaults::forget(&mut self.settings.known_vaults, id);
+        self.settings.forget_workspace(id);
         if self.settings.current_vault.as_ref() == Some(id) {
             self.settings.current_vault = None;
         }

@@ -34,6 +34,7 @@ use typsidian_core::boards::{
     ReadBoardError, SnapshotWriteError, WriteBoardError,
 };
 use typsidian_core::export;
+use typsidian_core::links;
 use typsidian_core::preview::{self, CompiledDocument, SnapshotError};
 use typsidian_core::settings::apply::{
     self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, RoutedChange, SettingsChange,
@@ -50,6 +51,7 @@ use typsidian_core::settings::store::{SettingsStore, StorageState, StoreCapabili
 use typsidian_core::settings::vaults::{VaultId, VaultRecord};
 use typsidian_core::settings::Settings;
 use typsidian_core::stamp::FileStamp;
+use typsidian_core::structure;
 use typsidian_core::templates::{
     self, NameCheck, PreviewState, ReadTemplateError, SaveTemplateError, TemplateLibraryView,
 };
@@ -65,6 +67,7 @@ use typsidian_core::vault::vault_settings::{
     self, SetKeybindingError, VaultOverrides, VaultSettingsError,
 };
 use typsidian_core::vault::{classify, AccessState, FileKind};
+use typsidian_core::workspace;
 
 /// Имя события, по которому окно получает пачку `VaultEvent`.
 ///
@@ -916,6 +919,16 @@ async fn begin_edit(
     })
 }
 
+/// Снимает буфер несохранённых правок (фича 014, research.md §6): буфер,
+/// вернувшийся к сохранённому тексту, иначе не давал бы закрыть вкладку.
+#[tauri::command]
+async fn discard_edit(state: State<'_, Vault>, path: String) -> Answer<(), Failure<()>> {
+    with_vault!(state, |backend| {
+        backend.discard_edit(Path::new(&path)).await;
+        Ok(())
+    })
+}
+
 #[tauri::command]
 async fn pending_conflict(
     state: State<'_, Vault>,
@@ -1448,6 +1461,196 @@ fn export_batch_view(state: export::BatchState) -> export::BatchView {
     export::batch::view(state)
 }
 
+// ── Связи заметки (фича 013) ────────────────────────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::links`: правил здесь нет. Проход
+// упоминаний — чистые переходы состояния, которое держит окно (как пакет
+// экспорта).
+
+#[tauri::command]
+async fn links_backlinks_page(
+    state: State<'_, Vault>,
+    target: String,
+    open_texts: Vec<links::OpenText>,
+    offset: u32,
+    limit: u32,
+) -> Answer<links::BacklinksPage, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::backlinks_page(
+        backend,
+        &target,
+        &open_texts,
+        offset,
+        limit
+    )
+    .await))
+}
+
+#[tauri::command]
+fn links_mentions_availability(target: String) -> links::MentionsAvailability {
+    links::availability(&target)
+}
+
+#[tauri::command]
+async fn links_mentions_start(
+    state: State<'_, Vault>,
+    target: String,
+) -> Answer<links::MentionsStart, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::mentions::start(
+        backend, &target
+    )
+    .await
+    .into()))
+}
+
+#[tauri::command]
+async fn links_mentions_step(
+    state: State<'_, Vault>,
+    scan: links::MentionScan,
+    open_texts: Vec<links::OpenText>,
+) -> Answer<links::MentionStep, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::mentions::step(
+        backend,
+        scan,
+        &open_texts
+    )
+    .await))
+}
+
+#[tauri::command]
+fn links_mentions_cancel(scan: links::MentionScan) -> links::MentionScan {
+    links::mentions::cancel(scan)
+}
+
+#[tauri::command]
+async fn links_mentions_in(
+    state: State<'_, Vault>,
+    target: String,
+    paths: Vec<String>,
+    open_texts: Vec<links::OpenText>,
+) -> Answer<Vec<links::SourceGroup>, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::in_notes(
+        backend,
+        &target,
+        &paths,
+        &open_texts
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn links_link_mention(
+    state: State<'_, Vault>,
+    request: links::LinkRequest,
+    editor_text: Option<String>,
+) -> Answer<links::LinkOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::link_mention(
+        backend,
+        &request,
+        editor_text.as_deref()
+    )
+    .await))
+}
+
+// ── Вкладки и разделение редактора (фича 014) ───────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::workspace`: правил здесь нет. Состояние
+// держит окно и передаёт его в каждый вызов, как пакет экспорта. Аргумент
+// состояния называется `workspace`, а не `state`: так зовётся `State<Vault>`.
+
+#[tauri::command]
+fn workspace_empty() -> workspace::WorkspaceState {
+    workspace::WorkspaceState::empty()
+}
+
+#[tauri::command]
+async fn workspace_apply(
+    state: State<'_, Vault>,
+    workspace: workspace::WorkspaceState,
+    action: workspace::WorkspaceAction,
+    width_px: u32,
+) -> Answer<workspace::Transition, Failure<()>> {
+    with_vault!(state, |backend| Ok(workspace::apply_with(
+        backend, workspace, action, width_px
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn workspace_view(
+    state: State<'_, Vault>,
+    workspace: workspace::WorkspaceState,
+    width_px: u32,
+) -> Answer<workspace::WorkspaceView, Failure<()>> {
+    with_vault!(state, |backend| Ok(workspace::view_with(
+        backend, &workspace, width_px
+    )
+    .await))
+}
+
+#[tauri::command]
+fn workspace_snapshot(workspace: workspace::WorkspaceState) -> workspace::SavedWorkspace {
+    workspace::snapshot(&workspace)
+}
+
+#[tauri::command]
+async fn workspace_restore(
+    state: State<'_, Vault>,
+    saved: workspace::SavedWorkspace,
+) -> Answer<workspace::WorkspaceState, Failure<()>> {
+    with_vault!(state, |backend| Ok(workspace::restore_with(
+        backend, &saved
+    )
+    .await))
+}
+
+// ── Оглавление заметки (фича 015) ───────────────────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::structure` и `preview::anchor`: правил
+// здесь нет, состояния оболочки тоже (как у `export_batch_*`): `Outline` и
+// запрос держит и передаёт окно. `None` приходит в окно как `null`, а из wasm -
+// как `undefined`: клиент приводит ответ к одному виду.
+
+#[tauri::command]
+fn structure_outline(text: String) -> structure::Outline {
+    structure::outline(&text)
+}
+
+#[tauri::command]
+fn structure_outline_view(
+    outline: structure::Outline,
+    request: structure::OutlineRequest,
+) -> structure::OutlineView {
+    structure::outline_view(&outline, &request)
+}
+
+#[tauri::command]
+fn structure_outline_active(
+    outline: structure::Outline,
+    request: structure::OutlineRequest,
+) -> Option<String> {
+    structure::outline_active(&outline, &request)
+}
+
+#[tauri::command]
+fn structure_outline_carry(
+    prev: structure::Outline,
+    next: structure::Outline,
+    collapsed: Vec<String>,
+) -> Vec<String> {
+    structure::carry_collapsed(&prev, &next, &collapsed)
+}
+
+/// `heading_probe` + `locate_heading`: проба наружу не выводится.
+#[tauri::command]
+fn preview_locate_heading(
+    runs: Vec<Vec<preview::TextRun>>,
+    outline: structure::Outline,
+    key: String,
+) -> Option<preview::ResolvedAnchor> {
+    let probe = structure::heading_probe(&outline, &key)?;
+    preview::anchor::locate_heading(&runs, &probe)
+}
+
 #[tauri::command]
 async fn check_template_name(
     state: State<'_, Vault>,
@@ -1665,6 +1868,24 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             export_batch_skip,
             export_batch_cancel,
             export_batch_view,
+            links_backlinks_page,
+            links_mentions_availability,
+            links_mentions_start,
+            links_mentions_step,
+            links_mentions_cancel,
+            links_mentions_in,
+            links_link_mention,
+            workspace_empty,
+            workspace_apply,
+            workspace_view,
+            workspace_snapshot,
+            workspace_restore,
+            structure_outline,
+            structure_outline_view,
+            structure_outline_active,
+            structure_outline_carry,
+            preview_locate_heading,
+            discard_edit,
             sync::sync_open,
             sync::sync_capabilities,
             sync::sync_overview,

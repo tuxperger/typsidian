@@ -13,25 +13,52 @@ use std::path::{Component, Path, PathBuf};
 /// заметку — писать `[[заметка.typ]]` от пользователя не требуется.
 const NOTE_EXTENSION: &str = "typ";
 
-/// Извлекает пути, на которые ссылается содержимое заметки.
-pub fn extract_links(content: &str) -> Vec<String> {
-    let mut links = Vec::new();
+/// Место ссылки `[[…]]` в тексте заметки (фича 013, research.md §2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkSite {
+    /// Цель как написана, без скобок, обрезанная по пробелам.
+    pub raw: String,
+    /// Диапазон всей записи вместе со скобками `[[…]]`, в байтах текста.
+    pub byte_start: usize,
+    pub byte_end: usize,
+}
+
+/// Все ссылки заметки с их местами, в порядке следования в тексте.
+///
+/// Единственный разбор `[[…]]` в ядре: индекс ссылок и панель связей обязаны
+/// видеть одни и те же ссылки, поэтому [`extract_links`] — отображение этой
+/// функции. Запись без закрывающей `]]` и с пустой целью ссылкой не считается.
+pub fn link_sites(content: &str) -> Vec<LinkSite> {
+    let mut sites = Vec::new();
     let bytes = content.as_bytes();
     let mut i = 0;
     while i + 1 < bytes.len() {
         if bytes[i] == b'[' && bytes[i + 1] == b'[' {
             if let Some(end) = content[i + 2..].find("]]") {
                 let target = content[i + 2..i + 2 + end].trim();
+                let byte_end = i + 2 + end + 2;
                 if !target.is_empty() {
-                    links.push(target.to_string());
+                    sites.push(LinkSite {
+                        raw: target.to_string(),
+                        byte_start: i,
+                        byte_end,
+                    });
                 }
-                i += 2 + end + 2;
+                i = byte_end;
                 continue;
             }
         }
         i += 1;
     }
-    links
+    sites
+}
+
+/// Извлекает пути, на которые ссылается содержимое заметки.
+pub fn extract_links(content: &str) -> Vec<String> {
+    link_sites(content)
+        .into_iter()
+        .map(|site| site.raw)
+        .collect()
 }
 
 /// Схлопывает `.` и `..` в пути, не обращаясь к файловой системе: цели ссылок
@@ -65,7 +92,8 @@ fn normalize(relative: &Path) -> Option<PathBuf> {
 ///
 /// - `[[имя]]` — соседняя заметка, относительно папки самой `source`;
 /// - `[[/путь/имя]]` — от корня vault;
-/// - расширение `.typ` дописывается, если его нет.
+/// - расширение `.typ` дописывается, если его нет; расширение доски
+///   (`.excalidraw`) сохраняется как есть (фича 013, research.md §3).
 ///
 /// `None`, если цель пуста или уводит за пределы vault. Существование цели
 /// здесь не проверяется: битая ссылка — нормальный результат (FR-030),
@@ -85,7 +113,8 @@ pub fn resolve_link_target(source: &Path, raw: &str) -> Option<PathBuf> {
     }
 
     let mut target = PathBuf::from(&rest);
-    if target.extension().and_then(|e| e.to_str()) != Some(NOTE_EXTENSION) {
+    let extension = target.extension().and_then(|e| e.to_str());
+    if extension != Some(NOTE_EXTENSION) && extension != Some(crate::vault::BOARD_EXTENSION) {
         let file_name = format!("{}.{NOTE_EXTENSION}", target.file_name()?.to_string_lossy());
         target.set_file_name(file_name);
     }
@@ -96,6 +125,42 @@ pub fn resolve_link_target(source: &Path, raw: &str) -> Option<PathBuf> {
         let base = source.parent().unwrap_or_else(|| Path::new(""));
         normalize(&base.join(target))
     }
+}
+
+/// Самая короткая запись ссылки `[[…]]`, которая из папки `source`
+/// разрешается ровно в `target` (фича 013, FR-017, research.md §9).
+///
+/// - цель в той же папке → `[[название]]`, иначе `[[/путь/название]]`;
+/// - `.typ` опускается, `.excalidraw` остаётся;
+/// - результат проверяется обратным разбором: `link_sites` обязан увидеть в нём
+///   одну ссылку, а [`resolve_link_target`] — вернуть `target`. Путь с `]]`,
+///   краевыми пробелами или обратной косой чертой этой проверки не проходит, и
+///   тогда записать ссылку на заметку нельзя — `None`.
+pub fn link_text(source: &Path, target: &Path) -> Option<String> {
+    let full = target.to_str()?.replace('\\', "/");
+    let shown = full
+        .strip_suffix(&format!(".{NOTE_EXTENSION}"))
+        .unwrap_or(&full);
+    let same_folder = source.parent().unwrap_or_else(|| Path::new(""))
+        == target.parent().unwrap_or_else(|| Path::new(""));
+    let inner = if same_folder {
+        let name = target.file_name()?.to_str()?;
+        name.strip_suffix(&format!(".{NOTE_EXTENSION}"))
+            .unwrap_or(name)
+            .to_string()
+    } else {
+        format!("/{shown}")
+    };
+    let text = format!("[[{inner}]]");
+
+    let sites = link_sites(&text);
+    let [site] = sites.as_slice() else {
+        return None;
+    };
+    if site.raw != inner || site.byte_start != 0 || site.byte_end != text.len() {
+        return None;
+    }
+    (resolve_link_target(source, &inner).as_deref() == Some(target)).then_some(text)
 }
 
 /// Исходящие ссылки заметки `source` как пути относительно корня vault.
@@ -178,6 +243,104 @@ mod tests {
             None
         );
         assert_eq!(resolve_link_target(Path::new("source.typ"), "   "), None);
+    }
+
+    #[test]
+    fn link_sites_ranges_are_byte_offsets_on_cyrillic() {
+        let content = "см. [[Проект]] и [[б]]";
+        let sites = link_sites(content);
+        assert_eq!(sites.len(), 2);
+        for site in &sites {
+            assert!(content.is_char_boundary(site.byte_start));
+            assert!(content.is_char_boundary(site.byte_end));
+        }
+        assert_eq!(
+            &content[sites[0].byte_start..sites[0].byte_end],
+            "[[Проект]]"
+        );
+        assert_eq!(&content[sites[1].byte_start..sites[1].byte_end], "[[б]]");
+    }
+
+    #[test]
+    fn link_sites_finds_several_links_on_one_line() {
+        let sites = link_sites("[[a]][[b]] [[ c ]]");
+        let raws: Vec<&str> = sites.iter().map(|site| site.raw.as_str()).collect();
+        assert_eq!(raws, vec!["a", "b", "c"]);
+        // Диапазон включает пробелы внутри скобок, а `raw` их не содержит.
+        assert_eq!(sites[2].byte_end - sites[2].byte_start, "[[ c ]]".len());
+    }
+
+    #[test]
+    fn unclosed_and_empty_links_are_not_sites() {
+        assert!(link_sites("текст [[без конца").is_empty());
+        assert!(link_sites("пусто [[ ]] и [[]]").is_empty());
+        // Незакрытая `[[` после закрытой ссылки не мешает первой.
+        assert_eq!(link_sites("[[a]] потом [[b").len(), 1);
+    }
+
+    #[test]
+    fn extract_links_is_the_raw_of_link_sites() {
+        for content in [
+            "",
+            "[[a]] [[б]] [[ в ]]",
+            "[[незакрытая",
+            "[[ ]] [[x]]",
+            "😀 [[эмодзи]] 😀",
+        ] {
+            let raws: Vec<String> = link_sites(content).into_iter().map(|s| s.raw).collect();
+            assert_eq!(extract_links(content), raws, "{content}");
+        }
+    }
+
+    #[test]
+    fn board_extension_is_kept_and_other_dots_get_typ() {
+        let source = Path::new("a/source.typ");
+        assert_eq!(
+            resolve_link_target(source, "схема.excalidraw"),
+            Some(PathBuf::from("a/схема.excalidraw"))
+        );
+        assert_eq!(
+            resolve_link_target(source, "глава.1"),
+            Some(PathBuf::from("a/глава.1.typ"))
+        );
+    }
+
+    #[test]
+    fn link_text_table_round_trips_through_resolve() {
+        let table: &[(&str, &str, &str)] = &[
+            // сосед
+            ("a/src.typ", "a/Проект.typ", "[[Проект]]"),
+            // другая папка
+            ("a/src.typ", "b/Проект.typ", "[[/b/Проект]]"),
+            // из корня в папку и обратно
+            ("src.typ", "docs/x.typ", "[[/docs/x]]"),
+            ("docs/src.typ", "x.typ", "[[/x]]"),
+            // корень
+            ("src.typ", "x.typ", "[[x]]"),
+            // доска сохраняет расширение
+            ("a/src.typ", "a/схема.excalidraw", "[[схема.excalidraw]]"),
+            ("a/src.typ", "b/схема.excalidraw", "[[/b/схема.excalidraw]]"),
+            // точка в имени
+            ("a/src.typ", "a/глава.1.typ", "[[глава.1]]"),
+        ];
+        for (source, target, expected) in table {
+            let text = link_text(Path::new(source), Path::new(target));
+            assert_eq!(text.as_deref(), Some(*expected), "{source} -> {target}");
+            let inner = &text.unwrap()[2..expected.len() - 2];
+            assert_eq!(
+                resolve_link_target(Path::new(source), inner),
+                Some(PathBuf::from(target))
+            );
+        }
+    }
+
+    #[test]
+    fn link_text_refuses_what_cannot_be_written() {
+        let source = Path::new("src.typ");
+        assert_eq!(link_text(source, Path::new("a]]b.typ")), None);
+        assert_eq!(link_text(source, Path::new("a/b]].typ")), None);
+        assert_eq!(link_text(source, Path::new(" пробел.typ")), None);
+        assert_eq!(link_text(source, Path::new("конец].typ")), None);
     }
 
     #[test]
