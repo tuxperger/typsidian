@@ -15,6 +15,7 @@ import {
   linksMentionsStart,
   linksMentionsStep,
   PreviewEngine,
+  SyntaxSession,
   WebBackend,
   workspaceApply,
   workspaceEmpty,
@@ -248,6 +249,19 @@ export function webVaultClient(
     elementSchema: async (id) => WebBackend.elementSchema(id),
     elementSchemaFor: async (template) => WebBackend.elementSchemaFor(template),
     elementAt: async (text, offset) => WebBackend.elementAt(text, offset),
+    // Фича 024: объект ядра на редактор. Своя память, не `WebBackend`, поэтому
+    // очередь вызовов wasm его не ждёт.
+    openHighlight: (text) => {
+      let session: SyntaxSession | null = new SyntaxSession(text);
+      return {
+        update: async (edits, length, windows) => session?.update(edits, length, windows),
+        updateNow: (edits, length, windows) => session?.update(edits, length, windows),
+        close: () => {
+          session?.free();
+          session = null;
+        },
+      };
+    },
     renderElement: async (request) => WebBackend.renderElement(request),
     planElementEdit: async (request) => WebBackend.planElementEdit(request),
     templateEvent: async (event) => WebBackend.templateEvent(event),

@@ -419,6 +419,25 @@ export function tauriVaultClient(
       (await invoke<ElementSpec | null>("element_schema_for", { template })) ?? undefined,
     elementAt: (text, offset) =>
       invoke<ElementAtResult>("element_at", { text, offset }),
+    // Фича 024: сессия живёт в состоянии оболочки под номером. Ответ IPC —
+    // массив чисел, интерфейсу нужен тот же `Uint32Array`, что на web.
+    openHighlight: (text) => {
+      const id = invoke<number>("syntax_session_open", { text });
+      return {
+        update: async (edits, length, windows) => {
+          const packed = await invoke<number[] | null>("syntax_session_update", {
+            id: await id,
+            edits,
+            length,
+            windows,
+          });
+          return packed === null ? undefined : Uint32Array.from(packed);
+        },
+        close: () => {
+          void id.then((session) => invoke("syntax_session_close", { id: session }));
+        },
+      };
+    },
     renderElement: (request) => invoke<RenderOutcome>("render_element", { request }),
     planElementEdit: (request) =>
       invoke<EditOutcome>("plan_element_edit", { request }),

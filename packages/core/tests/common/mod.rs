@@ -534,6 +534,7 @@ impl VaultBackend for MemoryVault {
 // контракта, оставив один таргет проверенным по устаревшему правилу.
 pub mod element_cases;
 pub mod export_cases;
+pub mod highlight_cases;
 pub mod install_cases;
 pub mod language_cases;
 pub mod links_cases;

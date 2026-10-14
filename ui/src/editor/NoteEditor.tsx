@@ -38,10 +38,17 @@ import { parseSnippet, type SnippetFieldState } from "./snippet.js";
 import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 import { useContextMenu } from "../menu/ContextMenu.js";
 import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
+import { typstHighlightFor } from "./highlight/typstHighlight.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 export interface NoteEditorProps {
   client: VaultClient;
+  /**
+   * Заметка Typst — по виду файла, который определило ядро (`FileKind::Note`),
+   * а не по расширению здесь (принцип I). Только ей нужна подсветка Typst
+   * (фича 024, FR-012).
+   */
+  typst?: boolean;
   /**
    * Документ на путь (фича 014): текст, чтение с диска и автосохранение
    * принадлежат ему, а не этому компоненту. Заметка в двух группах — один
@@ -138,6 +145,7 @@ export interface NoteEditorProps {
  */
 export function NoteEditor({
   client,
+  typst = false,
   document,
   name,
   tabId,
@@ -639,6 +647,7 @@ export function NoteEditor({
         document={document}
         tabId={tabId}
         ariaLabel={t("editor.contentLabel", { name })}
+        {...(typst ? { highlight: typstHighlightFor(client) } : {})}
         onCaretMove={onCaretMove}
         onSlashMenu={openInsertMenuAt}
         onContextMenu={(event) => {

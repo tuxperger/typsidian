@@ -2455,6 +2455,128 @@ input.ts-sources__url:focus {
   border-left-width: 2px;
 }
 
+/* ── Подсветка Typst (фича 024) ─────────────────────────────────────────────
+ * Роли считает ядро, классы ставит `editor/highlight/roles.ts`. Палитра —
+ * временный макет фичи (plan.md → Макет), research.md §7: только токены
+ * «Спецформы». Средние тона синего, зелёного и красного — смесь 600 и 100
+ * одного семейства: своих середин у этих семейств нет, а 600-е на тёмном
+ * полотне не дают 4.5:1 (SC-005). Полотно тёмное в любой теме (004), поэтому
+ * палитра одна и в `[data-theme]` не переопределяется. */
+.ts-editor {
+  --ts-syn-comment: var(--steel-500);
+  --ts-syn-punct: var(--steel-400);
+  --ts-syn-escape: color-mix(in srgb, var(--red-600), var(--red-100));
+  --ts-syn-heading-marker: var(--orange-500);
+  --ts-syn-heading: var(--steel-100);
+  --ts-syn-strong: var(--steel-100);
+  --ts-syn-list-marker: var(--orange-400);
+  --ts-syn-term: var(--steel-100);
+  --ts-syn-link: var(--steel-300);
+  --ts-syn-link-line: var(--steel-600);
+  --ts-syn-raw: var(--steel-300);
+  --ts-syn-raw-bg: var(--steel-900);
+  --ts-syn-label: var(--steel-400);
+  --ts-syn-math: color-mix(in srgb, var(--blue-600), var(--blue-100));
+  --ts-syn-keyword: var(--orange-400);
+  --ts-syn-constant: color-mix(in srgb, var(--green-600), var(--green-100));
+  --ts-syn-string: var(--hivis-400);
+  --ts-syn-function: var(--orange-200);
+  --ts-syn-arg: var(--steel-300);
+}
+
+/* Начертание от предков — раньше цветов ролей: маркер `=` внутри заголовка
+ * остаётся оранжевым, а не перекрашивается цветом заголовка. */
+.ts-editor .ts-syn-heading {
+  color: var(--ts-syn-heading);
+  font-weight: var(--weight-bold);
+}
+
+.ts-editor .ts-syn-strong {
+  color: var(--ts-syn-strong);
+  font-weight: var(--weight-bold);
+}
+
+.ts-editor .ts-syn-emph {
+  font-style: italic;
+}
+
+.ts-editor .ts-syn-comment {
+  color: var(--ts-syn-comment);
+  font-style: italic;
+}
+
+.ts-editor .ts-syn-punctuation,
+.ts-editor .ts-syn-operator,
+.ts-editor .ts-syn-math-operator,
+.ts-editor .ts-syn-markup-marker {
+  color: var(--ts-syn-punct);
+}
+
+.ts-editor .ts-syn-escape {
+  color: var(--ts-syn-escape);
+}
+
+.ts-editor .ts-syn-heading-marker {
+  color: var(--ts-syn-heading-marker);
+  font-weight: var(--weight-bold);
+}
+
+.ts-editor .ts-syn-list-marker {
+  color: var(--ts-syn-list-marker);
+}
+
+.ts-editor .ts-syn-list-term {
+  color: var(--ts-syn-term);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-editor .ts-syn-link {
+  color: var(--ts-syn-link);
+  text-decoration: underline;
+  text-decoration-color: var(--ts-syn-link-line);
+  text-underline-offset: 3px;
+}
+
+.ts-editor .ts-syn-raw {
+  color: var(--ts-syn-raw);
+  background: var(--ts-syn-raw-bg);
+}
+
+.ts-editor .ts-syn-label,
+.ts-editor .ts-syn-ref {
+  color: var(--ts-syn-label);
+}
+
+.ts-editor .ts-syn-math-ident,
+.ts-editor .ts-syn-math-delimiter {
+  color: var(--ts-syn-math);
+}
+
+.ts-editor .ts-syn-math-delimiter {
+  font-weight: var(--weight-bold);
+}
+
+.ts-editor .ts-syn-keyword {
+  color: var(--ts-syn-keyword);
+}
+
+.ts-editor .ts-syn-constant,
+.ts-editor .ts-syn-number {
+  color: var(--ts-syn-constant);
+}
+
+.ts-editor .ts-syn-string {
+  color: var(--ts-syn-string);
+}
+
+.ts-editor .ts-syn-function {
+  color: var(--ts-syn-function);
+}
+
+.ts-editor .ts-syn-arg-name {
+  color: var(--ts-syn-arg);
+}
+
 /* Поле вставленного сниппета (макет «Typsidian Вставка» → § Панель): активное
  * поле видно выделением, остальные — пунктиром, чтобы было понятно, что по ⇥
  * есть куда идти. */

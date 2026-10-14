@@ -10,6 +10,8 @@ import type {
   Embed,
   EmbedPlan,
   EmbedRef,
+  HighlightEdit,
+  HighlightWindow,
   FileKind,
   FileStamp,
   InsertionEdit,
@@ -71,6 +73,34 @@ import type {
 export interface MoveControl {
   onProgress?: (done: number, total: number) => void;
   signal?: AbortSignal;
+}
+
+/**
+ * Разобранный текст одного редактора в ядре (фича 024, contracts/core-highlight-api.md).
+ */
+export interface HighlightSession {
+  /**
+   * Правки редактора (UTF-16, каждая — в тексте после предыдущих) и раскраска
+   * окон одним вызовом: тройки `[from, to, role | flags << 8]`, роли —
+   * `editor/highlight/roles.ts`. `undefined` — сессия разошлась с редактором
+   * (`length` — длина текста после правок), её надо открыть заново.
+   */
+  update(
+    edits: HighlightEdit[],
+    length: number,
+    windows: HighlightWindow[],
+  ): Promise<Uint32Array | undefined>;
+  /**
+   * То же без ожидания — там, где ядро в том же потоке, что и редактор (web).
+   * Редактор зовёт его прямо в обновлении вида, и раскраска попадает в ту же
+   * транзакцию, что и набранный символ (SC-002). Нет — только `update`.
+   */
+  updateNow?: (
+    edits: HighlightEdit[],
+    length: number,
+    windows: HighlightWindow[],
+  ) => Uint32Array | undefined;
+  close(): void;
 }
 
 export interface VaultClient {
@@ -316,6 +346,11 @@ export interface VaultClient {
   elementSchemaFor(template: string): Promise<ElementSpec | undefined>;
   /** Элемент, непосредственно содержащий каретку (FR-006, FR-016). */
   elementAt(text: string, offset: number): Promise<ElementAtResult>;
+  /**
+   * Сессия подсветки Typst для одного редактора (фича 024): ядро держит
+   * разобранный текст и обновляет его правками. Закрывает сессию редактор.
+   */
+  openHighlight(text: string): HighlightSession;
   /** «Будет вставлено» (FR-004, FR-005). */
   renderElement(request: RenderRequest): Promise<RenderOutcome>;
   /** Точечные замены для правки на месте (FR-008, FR-009). */

@@ -21,6 +21,7 @@
 //! capabilities) добавляет оболочка — `apps/desktop` или `apps/mobile`.
 //! Почему именно так — в комментарии к [`builder`].
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1759,6 +1760,65 @@ fn element_at(text: String, offset: usize) -> typsidian_core::elements::ElementA
     typsidian_core::elements::element_at(&text, offset)
 }
 
+/// Сессии подсветки редакторов окна (фича 024, contracts/core-highlight-api.md).
+///
+/// То же, чем на web является объект `SyntaxSession`: разобранный текст одного
+/// редактора, который правки обновляют инкрементально. Отдельным состоянием,
+/// а не полем `Vault`: подсветка не читает vault и не должна ждать его
+/// блокировку. Сессию закрывает редактор; потерянная (окно перезагрузили) —
+/// это только память до закрытия окна.
+#[derive(Default)]
+pub struct HighlightSessions(
+    std::sync::Mutex<(
+        u32,
+        HashMap<u32, typsidian_core::highlight::HighlightSession>,
+    )>,
+);
+
+#[tauri::command]
+fn syntax_session_open(text: String, sessions: State<'_, HighlightSessions>) -> u32 {
+    let mut guard = sessions
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (next, map) = &mut *guard;
+    *next = next.wrapping_add(1);
+    map.insert(
+        *next,
+        typsidian_core::highlight::HighlightSession::new(text),
+    );
+    *next
+}
+
+/// Правки и раскраска окон одним обходом IPC; `None` — сессии нет или она
+/// разошлась с редактором, клиент откроет новую.
+#[tauri::command]
+fn syntax_session_update(
+    id: u32,
+    edits: Vec<typsidian_core::highlight::HighlightEdit>,
+    length: usize,
+    windows: Vec<typsidian_core::highlight::HighlightWindow>,
+    sessions: State<'_, HighlightSessions>,
+) -> Option<Vec<u32>> {
+    let mut guard = sessions
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = guard.1.get_mut(&id)?;
+    session
+        .update(&edits, length, &windows)
+        .map(|spans| spans.packed)
+}
+
+#[tauri::command]
+fn syntax_session_close(id: u32, sessions: State<'_, HighlightSessions>) {
+    let mut guard = sessions
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.1.remove(&id);
+}
+
 /// «Будет вставлено» (FR-004).
 #[tauri::command]
 fn render_element(
@@ -1831,6 +1891,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(Device::default())
         .manage(TemplatePreviews::default())
         .manage(Preview::default())
+        .manage(HighlightSessions::default())
         .invoke_handler(tauri::generate_handler![
             open_vault,
             browse_root,
@@ -1899,6 +1960,9 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             element_schema,
             element_schema_for,
             element_at,
+            syntax_session_open,
+            syntax_session_update,
+            syntax_session_close,
             render_element,
             plan_element_edit,
             template_event,

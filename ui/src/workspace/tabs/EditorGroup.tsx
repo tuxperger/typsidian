@@ -157,6 +157,7 @@ function NoteTab({
   return (
     <NoteEditor
       client={props.client}
+      typst={tab.kind === "Note"}
       document={document}
       name={basename(tab.path)}
       tabId={tab.id}

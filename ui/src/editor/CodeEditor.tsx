@@ -10,8 +10,6 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
-import { tags } from "@lezer/highlight";
 import type { TabId } from "../wasm-core/typsidian_core.js";
 import {
   insertSnippet,
@@ -35,9 +33,9 @@ import {
 // невозможны в принципе, второе — только подложкой из второго слоя текста,
 // которая разъезжается с вводом.
 //
-// Подсветка своя, а не готовый пакет: языкового режима Typst для CodeMirror
-// нет. Здесь ровно те категории, которые названы в handoff § Editor pane, —
-// не полный разбор языка, а раскраска, и притворяться разбором она не должна.
+// Подсветка приходит снаружи пропом `highlight` (фича 024): роли считает ядро
+// тем же разбором Typst, которым собирает заметку, а редактор только рисует
+// (`editor/highlight/typstHighlight.ts`).
 
 export interface CaretPosition {
   /** Нумерация с единицы — так же, как её показывает статус-бар. */
@@ -111,6 +109,12 @@ export interface CodeEditorProps {
   ariaLabel: string;
   /** Правый клик по тексту — собственное меню редактора (см. `NoteEditor`). */
   onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  /**
+   * Подсветка синтаксиса (фича 024). Не передана — текст без раскраски: так
+   * открываются файлы, которые не являются заметками Typst (FR-012). Ссылка
+   * должна быть стабильной — новая пересобирает расширение во всех видах.
+   */
+  highlight?: Extension;
   ref?: React.Ref<CodeEditorHandle>;
 }
 
@@ -133,6 +137,13 @@ const labelCompartment = new Compartment();
 function labelExtension(ariaLabel: string): Extension {
   return EditorView.contentAttributes.of({ "aria-label": ariaLabel });
 }
+
+/**
+ * Подсветка — в своём отсеке по той же причине, что и подпись: сохранённое
+ * состояние вкладки (014) должно узнавать конфигурацию, а замена расширения —
+ * транзакция, а не новый редактор.
+ */
+const highlightCompartment = new Compartment();
 
 /** Слушатель вида — один на все экземпляры, без замыканий над компонентом. */
 const viewListener: Extension = EditorView.updateListener.of((update) => {
@@ -174,6 +185,7 @@ function stateFor(
   text: string,
   entry: TabEditorEntry | null,
   ariaLabel: string,
+  highlight: Extension,
 ): EditorState {
   const saved = entry?.state ?? null;
   if (saved !== null && saved.doc.length === text.length && saved.doc.toString() === text) {
@@ -184,7 +196,11 @@ function stateFor(
   return EditorState.create({
     doc: text,
     selection: { anchor, head },
-    extensions: [...baseExtensions, labelCompartment.of(labelExtension(ariaLabel))],
+    extensions: [
+      ...baseExtensions,
+      labelCompartment.of(labelExtension(ariaLabel)),
+      highlightCompartment.of(highlight),
+    ],
   });
 }
 
@@ -197,6 +213,7 @@ export function CodeEditor({
   onFieldState,
   ariaLabel,
   onContextMenu,
+  highlight,
   ref,
 }: CodeEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -233,6 +250,8 @@ export function CodeEditor({
   onZoomRef.current = onZoom;
   const ariaLabelRef = useRef(ariaLabel);
   ariaLabelRef.current = ariaLabel;
+  const highlightRef = useRef<Extension>(highlight ?? []);
+  highlightRef.current = highlight ?? [];
 
   useEffect(() => {
     const host = hostRef.current;
@@ -241,13 +260,16 @@ export function CodeEditor({
     const entry = tabEditorStates.take(tabId);
     const view = new EditorView({
       parent: host,
-      state: stateFor(document.text(), entry, ariaLabelRef.current),
+      state: stateFor(document.text(), entry, ariaLabelRef.current, highlightRef.current),
     });
     viewRef.current = view;
     viewCallbacks.set(view, callbacks);
-    // Подпись могла смениться, пока состояние лежало в снимке.
+    // Подпись и подсветка могли смениться, пока состояние лежало в снимке.
     view.dispatch({
-      effects: labelCompartment.reconfigure(labelExtension(ariaLabelRef.current)),
+      effects: [
+        labelCompartment.reconfigure(labelExtension(ariaLabelRef.current)),
+        highlightCompartment.reconfigure(highlightRef.current),
+      ],
     });
     const disconnect = connectView(view, document);
     const unbindLive = tabEditorStates.bindLive(tabId, () => viewRef.current);
@@ -303,6 +325,12 @@ export function CodeEditor({
     });
   }, [ariaLabel]);
 
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: highlightCompartment.reconfigure(highlight ?? []),
+    });
+  }, [highlight]);
+
   // Ctrl/⌘ + колесо — кегль текста, как масштаб листа в предпросмотре.
   // Слушатель вешается вручную и непассивным: `onWheel` React ставит пассивным,
   // а пассивный обработчик не может отменить масштабирование всей страницы
@@ -327,140 +355,13 @@ export function CodeEditor({
 }
 
 /**
- * Раскраска по handoff § Editor pane.
- *
- * Цвета — ссылками на токены, а не литералами: правило проекта требует, чтобы
- * расхождение с дизайн-системой было построчным diff'ом. Исключение —
- * `#7fb3e0` для математики: этого оттенка в палитре «Спецформы» нет, он задан
- * в макете отдельным значением.
+ * Языковые данные Typst для команд редактора: `Mod-/` берёт отсюда маркеры
+ * комментария. Раньше их давал построчный `StreamLanguage`; раскраску теперь
+ * считает ядро (фича 024), а данные для команд остались здесь.
  */
-const typstHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "var(--orange-400)" },
-  { tag: tags.string, color: "var(--hivis-400)" },
-  { tag: tags.comment, color: "var(--steel-500)", fontStyle: "italic" },
-  { tag: tags.heading, color: "var(--steel-100)", fontWeight: "700" },
-  { tag: tags.labelName, color: "var(--steel-500)" },
-  { tag: tags.special(tags.variableName), color: "#7fb3e0" },
+const typstLanguageData: Extension = EditorState.languageData.of(() => [
+  { commentTokens: { line: "//", block: { open: "/*", close: "*/" } } },
 ]);
-
-/** Состояние построчного разбора: многострочны здесь комментарий и формула. */
-interface TypstState {
-  inComment: boolean;
-  inMath: boolean;
-}
-
-/**
- * Ключевые слова Typst, которые встречаются с решёткой. Список намеренно
- * короткий: он покрывает то, что видно в макете и в типичной заметке, а не
- * претендует на грамматику языка.
- */
-const KEYWORDS = new Set([
-  "import",
-  "include",
-  "set",
-  "show",
-  "let",
-  "figure",
-  "image",
-  "table",
-  "cite",
-  "ref",
-  "link",
-  "text",
-  "heading",
-  "align",
-  "grid",
-  "box",
-  "block",
-  "if",
-  "else",
-  "for",
-  "while",
-]);
-
-const typstLanguage = StreamLanguage.define<TypstState>({
-  name: "typst",
-  startState: () => ({ inComment: false, inMath: false }),
-
-  token(stream, state) {
-    if (state.inComment) {
-      if (stream.skipTo("*/")) {
-        stream.match("*/");
-        state.inComment = false;
-      } else stream.skipToEnd();
-      return "comment";
-    }
-
-    if (state.inMath) {
-      if (stream.eat("$")) {
-        state.inMath = false;
-        return "special";
-      }
-      stream.next();
-      return "special";
-    }
-
-    if (stream.eatSpace()) return null;
-
-    // Заголовок: «=» в начале строки, как в Typst.
-    if (stream.sol() && stream.match(/^=+\s/)) {
-      stream.skipToEnd();
-      return "heading";
-    }
-
-    if (stream.match("//")) {
-      stream.skipToEnd();
-      return "comment";
-    }
-
-    if (stream.match("/*")) {
-      state.inComment = true;
-      return "comment";
-    }
-
-    if (stream.eat('"')) {
-      // Экранированная кавычка строку не закрывает.
-      let escaped = false;
-      for (let ch = stream.next(); ch !== undefined; ch = stream.next()) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') break;
-      }
-      return "string";
-    }
-
-    if (stream.eat("$")) {
-      state.inMath = true;
-      return "special";
-    }
-
-    // Метка перекрёстной ссылки: <fig:thermogram>.
-    if (stream.match(/^<[^>\s]+>/)) return "labelName";
-
-    // Ссылка на метку: @fig:thermogram.
-    if (stream.match(/^@[\w:-]+/)) return "labelName";
-
-    // Вызов с решёткой: `#import`, `#set`, `#figure` — в Typst их обозначает
-    // сама решётка, поэтому проверять имя по списку незачем.
-    if (stream.eat("#")) {
-      stream.match(/^[a-zA-Z][\w-]*/);
-      return "keyword";
-    }
-
-    // Вложенный вызов без решётки — `image(...)` внутри `#figure(...)`.
-    // Здесь имя уже приходится сверять со списком: без разбора выражения
-    // отличить вызов от обычного слова с открывающей скобкой нечем.
-    const word = stream.match(/^[a-zA-Z][\w-]*/);
-    if (Array.isArray(word)) {
-      return KEYWORDS.has(word[0]) && stream.peek() === "(" ? "keyword" : null;
-    }
-
-    stream.next();
-    return null;
-  },
-
-  languageData: { commentTokens: { line: "//", block: { open: "/*", close: "*/" } } },
-});
 
 /** Общая часть конфигурации — считается один раз, а не на каждый монтаж. */
 const baseExtensions: Extension[] = [
@@ -480,7 +381,6 @@ const baseExtensions: Extension[] = [
   // Поля вставленного сниппета и переходы по ним (меню ⌘E). Внутри расширения
   // приоритет выше обычной раскладки, но только пока сниппет активен.
   snippetFields,
-  typstLanguage,
-  syntaxHighlighting(typstHighlight),
+  typstLanguageData,
   EditorView.lineWrapping,
 ];
