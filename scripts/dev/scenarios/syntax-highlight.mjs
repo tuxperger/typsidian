@@ -6,7 +6,8 @@
 //
 // Переменные окружения: HL_CONTRAST=1 — контраст ролей (SC-005); HL_PERF=1 —
 // заметка на 5 000 строк, задержка раскраски при наборе (SC-002) и цена
-// подсветки при открытии (SC-003).
+// подсветки при открытии (SC-003); HL_SPLIT=1 — смена темы и разделённый
+// редактор (quickstart §5).
 
 // Текст артборда «Редактор» — тот же, что в `packages/core/tests/common/highlight_cases.rs`.
 const SAMPLE = `// Глава 3. Результаты эксперимента
@@ -137,6 +138,75 @@ async function openNote(page, name) {
   await page.waitForElement(".ts-editor .cm-content", { timeout: 60000 });
   await page.waitFor(colored, { label: "раскраска", timeout: 30000 });
   await page.sleep(300);
+}
+
+// Раскраска `index`-го редактора на странице: пары «классы — текст» по
+// отрисованным строкам. Две половины разделения с одной заметкой должны дать
+// одно и то же.
+const PAINT_OF = `(index) => {
+  const editor = document.querySelectorAll(".ts-editor")[index];
+  if (!editor) return null;
+  const lines = [...editor.querySelectorAll(".cm-line")];
+  return JSON.stringify(lines.map((line) =>
+    [...line.querySelectorAll("[class*='ts-syn-']")].map((el) => [el.className, el.textContent])));
+}`;
+
+/** Смена темы и разделённый редактор (US4, quickstart §5). */
+async function themeAndSplit(page) {
+  let failures = 0;
+  const caret = `document.body.innerText.match(/Ln \\d+, Col \\d+/)?.[0] ?? null`;
+
+  // Тема — через панель настроек, как её меняет пользователь.
+  await page.click(".ts-editor .cm-content");
+  await page.press("Home", { ctrl: true });
+  await page.press("ArrowDown");
+  await page.press("ArrowDown");
+  await page.press("End");
+  const before = await page.evaluate(caret);
+  await page.click("text=Настройки");
+  await page.click("text=Внешний вид");
+  await page.waitForElement("select");
+  const next = await page.evaluate(`(() => {
+    const select = [...document.querySelectorAll("select")].find((el) => el.querySelector("option[value='dark']"));
+    if (!select) return null;
+    const value = select.value === "dark" ? "light" : "dark";
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return value;
+  })()`);
+  await page.sleep(300);
+  const theme = await page.evaluate(`document.documentElement.getAttribute("data-theme")`);
+  if (!check(page, next !== null && theme === next, `тема переключена на «${theme}»`)) failures += 1;
+  await page.press("Escape");
+  await page.sleep(300);
+  if (!(await page.evaluate(`Boolean(document.querySelector(".ts-editor .cm-content"))`))) {
+    await openNote(page, "Результаты");
+  }
+  failures += await rolesMatch(page, "после смены темы");
+  const after = await page.evaluate(caret);
+  if (!check(page, before !== null && after === before, `каретка на месте после смены темы (${before} → ${after})`)) failures += 1;
+
+  // Разделение (014): та же заметка в двух половинах, правка в левой.
+  await page.click("[aria-label='Разделить редактор']");
+  await page.waitFor(`document.querySelectorAll(".ts-editor .cm-content").length === 2`, { label: "вторая половина", timeout: 30000 });
+  await page.waitFor(`document.querySelectorAll(".ts-editor")[1].querySelector("[class*='ts-syn-']") !== null`, { label: "раскраска второй половины", timeout: 30000 });
+  await page.click(".ts-editor .cm-content");
+  await page.press("Home", { ctrl: true });
+  await page.type("#let x = (1, $a$) // правка\n");
+  await page.sleep(500);
+  const [left, right] = [await page.evaluate(`(${PAINT_OF})(0)`), await page.evaluate(`(${PAINT_OF})(1)`)];
+  const edited = left?.includes("правка") && left.includes("ts-syn-keyword");
+  // Высота половин разная — сравнивается общая отрисованная часть.
+  const [l, r] = [JSON.parse(left ?? "[]"), JSON.parse(right ?? "[]")];
+  const common = Math.min(l.length, r.length);
+  const line = l.slice(0, common).findIndex((spans, i) => JSON.stringify(spans) !== JSON.stringify(r[i]));
+  if (!check(page, edited && common >= 10 && line === -1, `обе половины раскрашены одинаково после правки в левой (${common} строк)`)) {
+    failures += 1;
+    page.log(`  строка ${line + 1}, строк ${l.length} / ${r.length}`);
+    page.log(`  левая:  ${JSON.stringify(l[line])}`);
+    page.log(`  правая: ${JSON.stringify(r[line])}`);
+  }
+  return failures;
 }
 
 /** Контраст каждой встреченной роли с фоном полотна и текущей строки (SC-005). */
@@ -299,6 +369,8 @@ export default async (page) => {
   await page.press("z", { ctrl: true });
 
   if (process.env.HL_CONTRAST === "1") failures += await contrast(page);
+
+  if (process.env.HL_SPLIT === "1") failures += await themeAndSplit(page);
 
   // FR-012: дерево и вкладки открывают в редакторе только заметки Typst
   // (`FileKind::Note`), а `typst` у `NoteEditor` ставится по тому же виду;
