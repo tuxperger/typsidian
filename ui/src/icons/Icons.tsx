@@ -42,7 +42,13 @@ export type IconName =
   | "data"
   | "tab"
   | "download"
-  | "check";
+  | "check"
+  | "play"
+  | "start"
+  | "caret"
+  | "down"
+  | "presenter"
+  | "fullscreen";
 
 /**
  * Спрайт монтируется один раз в корне приложения; иконки ссылаются на него
@@ -430,6 +436,59 @@ export function IconSprite(): React.JSX.Element {
             strokeLinejoin="round"
           />
           <line x1="20" y1="5" x2="20" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </symbol>
+
+        {/* Показ слайдов (фича 019, макет A1–A8): контуры макета в сетке 24. */}
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="M7.5 5.25v13.5l10.5-6.75z" fill="currentColor" />
+        </symbol>
+
+        <symbol id="i-start" viewBox="0 0 24 24">
+          <path d="M6 5.25v13.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M9.75 5.25v13.5l9.75-6.75z" fill="currentColor" />
+        </symbol>
+
+        <symbol id="i-caret" viewBox="0 0 24 24">
+          <path
+            d="M12 3.75v16.5M8.25 3.75h7.5M8.25 20.25h7.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </symbol>
+
+        <symbol id="i-down" viewBox="0 0 24 24">
+          <polyline
+            points="6 9 12 15 18 9"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </symbol>
+
+        <symbol id="i-presenter" viewBox="0 0 24 24">
+          <rect x="2.25" y="4.5" width="12" height="9" fill="none" stroke="currentColor" strokeWidth="2" />
+          <rect x="16.5" y="4.5" width="5.25" height="4.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path
+            d="M2.25 18h19.5M16.5 12.75h5.25"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </symbol>
+
+        <symbol id="i-fullscreen" viewBox="0 0 24 24">
+          <path
+            d="M3.75 9V3.75H9M15 3.75h5.25V9M20.25 15v5.25H15M9 20.25H3.75V15"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
         </symbol>
       </defs>
     </svg>

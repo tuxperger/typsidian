@@ -18,7 +18,7 @@ import type {
 import type { PreviewClient } from "../preview-client.js";
 import { Icon } from "../icons/Icons.js";
 import { PreviewPage } from "./PreviewPage.js";
-import { useCompiledDocument } from "./useCompiledDocument.js";
+import { useCompiledDocument, type PreviewState } from "./useCompiledDocument.js";
 import { describeInstallError } from "./describeInstallError.js";
 import { diagnosticText } from "../i18n/messages.js";
 import { useI18n, type Phrase } from "../i18n/index.js";
@@ -111,6 +111,12 @@ export interface PreviewPaneProps {
    * пересобирает заметку, когда один из них меняется (FR-020).
    */
   onDependencies?: ((paths: string[]) => void) | undefined;
+  /**
+   * Состояние сборки наверх — для показа слайдов (фича 019): ему нужны последний
+   * удачный документ, пометка «устарел» и замечания. Сборку по-прежнему ведёт
+   * только эта панель.
+   */
+  onBuild?: ((notePath: string, state: PreviewState) => void) | undefined;
 }
 
 
@@ -126,6 +132,7 @@ export function PreviewPane({
   onReveal,
   canReveal,
   onDependencies,
+  onBuild,
 }: PreviewPaneProps): React.JSX.Element {
   const { t } = useI18n();
   // Масштаб — дело показа, а не документа: сборка от него не зависит, поэтому
@@ -151,6 +158,11 @@ export function PreviewPane({
     scroller: previewRef,
     onDependencies,
   });
+  const onBuildRef = useRef(onBuild);
+  onBuildRef.current = onBuild;
+  useEffect(() => {
+    if (notePath !== null) onBuildRef.current?.(notePath, state);
+  }, [notePath, state]);
   const contextMenu = useContextMenu();
   const [installing, setInstalling] = useState<string | null>(null);
   const [installNote, setInstallNote] = useState<{

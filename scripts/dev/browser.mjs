@@ -230,6 +230,30 @@ function createPage(cdp, sessionId, log) {
         await send("Input.dispatchKeyEvent", { type, key, code, modifiers, windowsVirtualKeyCode });
       }
     },
+    /**
+     * Окно, которое открыло само приложение (`window.open`): ждёт цель, чей адрес
+     * содержит `urlPart`, и отдаёт её как ещё один `page` с теми же методами.
+     */
+    async popup(urlPart, { timeout = timeoutMs } = {}) {
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const { targetInfos } = await cdp.send("Target.getTargets");
+        const found = targetInfos.find((info) => info.type === "page" && info.url.includes(urlPart));
+        if (found) {
+          const { sessionId: popupSession } = await cdp.send("Target.attachToTarget", {
+            targetId: found.targetId,
+            flatten: true,
+          });
+          await cdp.send("Runtime.enable", {}, popupSession);
+          await cdp.send("Page.enable", {}, popupSession);
+          const popup = createPage(cdp, popupSession, log);
+          await popup.waitFor(`document.readyState === "complete"`, { label: "загрузка окна " + urlPart });
+          return popup;
+        }
+        if (Date.now() > deadline) throw new Error(`не дождался окна: ${urlPart}`);
+        await sleep(100);
+      }
+    },
     /** Скрипт, выполняемый в каждом новом документе (до кода страницы); действует после `reload`. */
     addInitScript: (source) => send("Page.addScriptToEvaluateOnNewDocument", { source }),
     /** Перезагрузка страницы и ожидание её готовности. */
