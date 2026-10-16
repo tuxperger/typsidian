@@ -1,4 +1,9 @@
 <resources>
     <string name="app_name">"Typsidian"</string>
     <string name="main_activity_title">"Typsidian"</string>
+    <!-- Ярлыки приложения (res/xml/shortcuts.xml, фича 022). -->
+    <string name="shortcut_today_short">Today</string>
+    <string name="shortcut_today_long">Daily note</string>
+    <string name="shortcut_capture_short">To inbox</string>
+    <string name="shortcut_capture_long">Quick capture to inbox</string>
 </resources>

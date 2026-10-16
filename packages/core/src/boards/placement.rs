@@ -107,7 +107,7 @@ pub fn markup_path(
 }
 
 /// Путь до `target` из папки `from`, обе — относительно корня vault.
-fn relative_to(from: &Path, target: &Path) -> String {
+pub(crate) fn relative_to(from: &Path, target: &Path) -> String {
     let from: Vec<_> = from.components().collect();
     let target: Vec<_> = target.components().collect();
     let shared = from

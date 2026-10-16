@@ -21,3 +21,5 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 typsidian-shell = { path = "../../../packages/shell" }
+# Приём «Поделиться» и ярлыков (фича 022); на хосте плагин собирается, но отвечает отказом.
+tauri-plugin-capture = { path = "plugins/capture" }

@@ -13,9 +13,10 @@
 
 /// Точка входа оболочки.
 ///
-/// Плагинов нет ни одного, и `tauri-plugin-dialog` — первый, которого нет
-/// намеренно: его `pick_folder` реализован только под desktop, а папку vault на
-/// Android выбирают обзором в самом окне поверх команд `browse_*`.
+/// Единственный плагин — локальный `capture` (фича 022): приём «Поделиться» и
+/// ярлыков Android. `tauri-plugin-dialog` отсутствует намеренно: его
+/// `pick_folder` реализован только под desktop, а папку vault на Android
+/// выбирают обзором в самом окне поверх команд `browse_*`.
 ///
 /// `main` здесь не участвует: приложение Android стартует из `MainActivity` и
 /// приходит сюда через JNI. Символ, который ищет загрузчик, создаёт
@@ -23,6 +24,7 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     typsidian_shell::builder()
+        .plugin(tauri_plugin_capture::init())
         .run(tauri::generate_context!())
         .expect("оболочка Typsidian должна запуститься");
 }

@@ -1,0 +1,18 @@
+[package]
+name = "tauri-plugin-capture"
+version = "0.1.0"
+edition = "2021"
+links = "tauri-plugin-capture"
+description = "Приём «Поделиться» и ярлыков на Android для Typsidian (фича 022)"
+
+# Локальный плагин оболочки Android. Бизнес-логики здесь нет (принцип I): Rust-часть
+# только пробрасывает команды в Kotlin-часть (`android/`), где живёт очередь
+# захватов. Запись в vault делает ядро, окно вызывает её само.
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

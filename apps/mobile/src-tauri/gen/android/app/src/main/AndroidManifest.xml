@@ -47,6 +47,29 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!-- Быстрый захват (фича 022): «Поделиться» текстом, ссылкой и
+                 картинкой из любого приложения. Разбирает плагин `capture`
+                 (plugins/capture/android), запись попадает в очередь на
+                 устройстве и пишется в vault, когда окно её подтвердит. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+
+            <!-- Ярлыки приложения «Сегодня» и «Во входящие» (res/xml/shortcuts.xml). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="typsidian" android:host="today" />
+                <data android:scheme="typsidian" android:host="capture" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <provider

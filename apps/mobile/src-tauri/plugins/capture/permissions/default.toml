@@ -1,0 +1,10 @@
+[default]
+description = "Очередь захватов «Поделиться», возврат в исходное приложение и события ярлыков"
+permissions = [
+  "allow-pending",
+  "allow-resolve",
+  "allow-return-to-source",
+  "allow-image",
+  "allow-register-listener",
+  "allow-remove-listener",
+]
