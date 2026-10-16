@@ -203,6 +203,7 @@ web_cases!(
     a_folder_cannot_enter_itself_or_any_descendant,
     a_cancelled_move_changes_nothing,
     incoming_relative_and_rooted_links_are_reported,
+    a_link_with_a_label_is_judged_by_its_target,
     own_relative_links_of_the_moved_note_are_reported,
     a_folder_gives_one_list_of_only_the_links_it_really_breaks,
     impact_refuses_what_the_move_would_refuse,

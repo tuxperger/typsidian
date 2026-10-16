@@ -166,3 +166,13 @@ fn planning_is_pure_and_strict() {
 fn link_text_round_trips_through_resolve() {
     cases::link_text_round_trips_through_resolve();
 }
+
+#[wasm_bindgen_test]
+fn a_label_is_split_from_the_target() {
+    cases::a_label_is_split_from_the_target();
+}
+
+#[wasm_bindgen_test]
+async fn a_link_with_a_label_points_at_the_target() {
+    cases::a_link_with_a_label_points_at_the_target().await;
+}

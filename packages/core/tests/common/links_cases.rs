@@ -793,3 +793,51 @@ pub fn link_text_round_trips_through_resolve() {
     }
     assert_eq!(link_text(Path::new("s.typ"), Path::new("a]]b.typ")), None);
 }
+
+// ── Ссылка с текстом `[[путь|текст]]` (фича 021, FR-005) ────────────────────
+
+/// `link_sites` делит запись по первой `|`: цель — в `raw`, текст — в `label`,
+/// диапазон охватывает всю запись; запись без текста и с пустым текстом даёт
+/// `label == None`, пустая цель ссылкой не считается.
+pub fn a_label_is_split_from_the_target() {
+    let text = "см. [[Альфа|тот самый]] и [[/b/в | с пробелами ]] и [[г|]] и [[|нет цели]]";
+    let sites = link_sites(text);
+    let seen: Vec<(&str, Option<&str>)> = sites
+        .iter()
+        .map(|site| (site.raw.as_str(), site.label.as_deref()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("Альфа", Some("тот самый")),
+            ("/b/в", Some("с пробелами")),
+            ("г", None)
+        ]
+    );
+    assert_eq!(
+        &text[sites[0].byte_start..sites[0].byte_end],
+        "[[Альфа|тот самый]]"
+    );
+    // Вторая `|` остаётся в тексте.
+    let site = &link_sites("[[а|б|в]]")[0];
+    assert_eq!(
+        (site.raw.as_str(), site.label.as_deref()),
+        ("а", Some("б|в"))
+    );
+}
+
+/// Связи, разрешение цели и «Связать» видят цель по `raw`: ссылка с текстом
+/// учитывается как обратная, а упоминание внутри текста ссылки — не упоминание.
+pub async fn a_link_with_a_label_points_at_the_target() {
+    let text = "см. [[/Проекты/Альфа|Проект Альфа]] тут";
+    let vault = MemoryVault::new()
+        .with_file(TARGET, "x")
+        .with_file("Б.typ", text);
+    let page = backlinks_page(&vault, TARGET, &[], 0, 50).await;
+    assert_eq!(paths(&page), ["Б.typ"]);
+    assert_eq!(
+        typsidian_core::graph::links_in(Path::new("Б.typ"), text),
+        [Path::new(TARGET)]
+    );
+    assert!(mentions_in_text(text, "Проект Альфа").is_empty());
+}

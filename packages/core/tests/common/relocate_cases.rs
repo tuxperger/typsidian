@@ -1088,3 +1088,29 @@ pub async fn undo_never_overwrites_what_appeared_in_the_old_place<E: Env>() {
     assert_eq!(env.disk().await, before);
     assert_eq!(before["B/x.typ"], "прежнее".as_bytes());
 }
+
+/// Фича 021, FR-005: ссылка `[[путь|текст]]` рвётся ровно по своей цели, текст
+/// на это не влияет; сам перенос текст ссылок не трогает.
+pub async fn a_link_with_a_label_is_judged_by_its_target<E: Env>() {
+    let mut env = E::open(&[
+        ("a.typ", "[[b|подпись]]".as_bytes()),
+        ("c.typ", "[[/b|ещё подпись]]".as_bytes()),
+        ("d.typ", "[[нет-такой|текст]]".as_bytes()),
+        ("b.typ", NOTE),
+        ("B/keep.typ", NOTE),
+    ])
+    .await;
+    assert_eq!(
+        broken_after(&mut env, "b.typ", "B").await,
+        ["a.typ", "c.typ"]
+    );
+    let outcome = env
+        .backend()
+        .move_entry(&mv("b.typ", "B"), &NoControl)
+        .await
+        .expect("перенос выполнен");
+    assert!(matches!(outcome, MoveOutcome::Done { .. }));
+    let disk = env.disk().await;
+    assert_eq!(disk["a.typ"], "[[b|подпись]]".as_bytes());
+    assert_eq!(disk["c.typ"], "[[/b|ещё подпись]]".as_bytes());
+}

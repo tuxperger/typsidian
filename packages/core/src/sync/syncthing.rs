@@ -276,9 +276,9 @@ pub fn devices(
             let name = config_devices
                 .as_array()
                 .and_then(|devices| {
-                    devices
-                        .iter()
-                        .find(|device| device.get("deviceID").and_then(Value::as_str) == Some(id))
+                    devices.iter().find(|device| {
+                        device.get("deviceID").and_then(Value::as_str) == Some(id.as_str())
+                    })
                 })
                 .and_then(|device| device.get("name").and_then(Value::as_str))
                 .filter(|name| !name.is_empty())

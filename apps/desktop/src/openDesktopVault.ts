@@ -43,3 +43,17 @@ export async function pickDesktopFolder(): Promise<string | null> {
   });
   return typeof selection === "string" ? selection : null;
 }
+
+/**
+ * Диалог ОС «выберите папку с заметками Obsidian» (фича 021). Тот же диалог,
+ * что и для vault, со своим заголовком; сам импорт открывает папку только для
+ * чтения командой `import_open_source`. `null` — закрыт без выбора.
+ */
+export async function pickDesktopImportFolder(): Promise<string | null> {
+  const selection = await openFolderDialog({
+    directory: true,
+    multiple: false,
+    title: currentI18n().t("import.pickTitle"),
+  });
+  return typeof selection === "string" ? selection : null;
+}
