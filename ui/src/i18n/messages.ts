@@ -53,6 +53,10 @@ export function message(t: Translate, m: AppMessage): string {
       return t("app.buildTimedOut", { seconds: m.seconds });
     case "VaultUnavailable":
       return t("app.vaultUnavailable");
+    case "SlidesEmptyDeck":
+      return t("app.slidesEmptyDeck");
+    case "CaptureRefused":
+      return t("app.captureRefused", { reason: t(`app.capture.${m.reason}`) });
     default: {
       const exhaustive: never = m;
       return exhaustive;

@@ -84,6 +84,10 @@ similar = "2"
 # Идентификатор устройства для модели хранителя истории (фича 011, research §4).
 # Версия 0.2 уже приезжает транзитивно; под wasm32 ей нужен `js` (ниже).
 getrandom = "0.2"
+# Импорт из Obsidian (фича 021, research.md §1, §5): разбор Markdown и перевод
+# формул LaTeX в Typst. Оба крейта — чистый Rust, без нативных библиотек.
+pulldown-cmark = { version = "0.13", default-features = false }
+mitex = "0.2.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Движок git на native (фича 011, research §1, §2). Без встроенных `https`/`ssh`:
@@ -147,6 +151,7 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
 ] }
 
+
 [dev-dependencies]
 tempfile = "3"
 # Сборка архива шаблона в тестах (фича 007): интеграционные тесты линкуются с
@@ -200,4 +205,27 @@ harness = false
 # research.md §9).
 [[bench]]
 name = "structure_scale"
+harness = false
+
+# Отбор по свойствам в vault из 10 000 заметок (фича 020, SC-001).
+[[bench]]
+name = "properties_scale"
+harness = false
+
+# Сбор `slides` на презентации из 100 страниц против сборки (фича 019, T030,
+# research.md §11). `test-support` приходит из dev-зависимости на сам крейт.
+[[bench]]
+name = "slides_scale"
+harness = false
+
+# Полный цикл импорта из Obsidian на 2 000 заметок (фича 021, T023, SC-004,
+# research.md §12).
+[[bench]]
+name = "import_scale"
+harness = false
+
+# Граф связей на 5 000 заметок и 15 000 связей (фича 025, T011, SC-001,
+# research.md §9).
+[[bench]]
+name = "graph_view"
 harness = false

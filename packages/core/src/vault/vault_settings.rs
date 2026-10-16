@@ -37,7 +37,8 @@ use serde_json::{Map, Value};
 use std::path::PathBuf;
 
 /// Настройки, принадлежащие vault (data-model.md «VaultOverrides»).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+// Без `Eq`: настройки графа (фича 025) хранят доли в `f64`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct VaultOverrides {
@@ -84,6 +85,16 @@ pub struct VaultOverrides {
     /// `None` — умолчание `export`. Хранится в нормальной форме
     /// [`crate::export::folder::validate_folder`]: части через `/`.
     pub export_folder: Option<String>,
+    /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
+    ///
+    /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
+    /// применяет [`crate::capture::capture_settings`].
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub capture: Option<crate::capture::CaptureOverrides>,
+    /// Настройки графа связей (фича 025, research.md §5). `None` - ключа `graph`
+    /// в файле нет, действуют умолчания [`GraphSettings::default`].
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub graph: Option<crate::graph::view::GraphSettings>,
 }
 
 /// Адрес архива, указанный пользователем для одного шаблона (фича 007, FR-004).
@@ -143,6 +154,12 @@ pub enum VaultSettingsError {
     /// Папка экспорта не годится (фича 009, FR-029). Файл не тронут.
     #[error("{problem}")]
     InvalidExportFolder {
+        problem: crate::export::folder::ExportFolderProblem,
+    },
+    /// Путь в настройках захвата не годится (фича 022, FR-010). Файл не тронут.
+    #[error("{problem}")]
+    InvalidCapture {
+        field: crate::capture::CaptureField,
         problem: crate::export::folder::ExportFolderProblem,
     },
 }
@@ -208,6 +225,17 @@ pub async fn write_vault_settings<B: VaultBackend>(
             .map_err(|problem| VaultSettingsError::InvalidExportFolder { problem })?;
         overrides.export_folder = Some(folder);
     }
+    // Пути захвата — в нормальной форме, пустое поле — «не задано» (022).
+    if let Some(capture) = overrides.capture.take() {
+        let capture = crate::capture::normalize_overrides(&capture)
+            .map_err(|(field, problem)| VaultSettingsError::InvalidCapture { field, problem })?;
+        overrides.capture = (!capture.is_empty()).then_some(capture);
+    }
+    // Настройки графа - в допустимых пределах (025).
+    overrides.graph = overrides
+        .graph
+        .take()
+        .map(crate::graph::view::GraphSettings::normalized);
     let overrides = &overrides;
 
     ensure_service_dir(backend).await?;
@@ -477,6 +505,8 @@ const SETTINGS_TABLE: &str = "settings";
 const TEMPLATES_TABLE: &str = "templates";
 const KEYBINDINGS_TABLE: &str = "keybindings";
 const EXPORT_TABLE: &str = "export";
+const CAPTURE_TABLE: &str = "capture";
+const GRAPH_TABLE: &str = "graph";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -490,6 +520,11 @@ struct FileShape {
     templates: TemplatesTable,
     #[serde(default)]
     export: ExportTable,
+    #[serde(default)]
+    capture: CaptureTable,
+    /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
+    #[serde(default)]
+    graph: Option<Value>,
     /// Имя команды → текстовая форма сочетания. `null` — сочетание снято.
     ///
     /// Объект, а не массив: файл читают глазами, и `"search": "Mod+Shift+F"`
@@ -502,6 +537,52 @@ struct FileShape {
 struct ExportTable {
     #[serde(default)]
     folder: Option<String>,
+}
+
+/// Таблица захвата (022). Значения читаются как `Value`, а не типизированно:
+/// поле неверного вида — «не задано», а не повод объявить весь файл
+/// нечитаемым.
+#[derive(Debug, Default, Deserialize)]
+struct CaptureTable {
+    #[serde(default)]
+    inbox: Option<Value>,
+    #[serde(default)]
+    daily_folder: Option<Value>,
+    #[serde(default)]
+    daily_template: Option<Value>,
+    #[serde(default)]
+    daily_name: Option<Value>,
+    #[serde(default)]
+    entry_style: Option<Value>,
+    #[serde(default)]
+    entry_time: Option<Value>,
+}
+
+impl CaptureTable {
+    fn into_overrides(self) -> Option<crate::capture::CaptureOverrides> {
+        use crate::capture::{self, CaptureOverrides, DailyName, EntryStyle};
+        let text = |value: Option<Value>| match value {
+            Some(Value::String(text)) => Some(text),
+            _ => None,
+        };
+        // Негодный путь отбрасывается молча, как папка экспорта: захват тогда
+        // идёт по умолчанию, а файл остаётся читаемым.
+        let overrides = CaptureOverrides {
+            inbox: text(self.inbox)
+                .and_then(|raw| capture::normalize_note_path(&raw).ok().flatten()),
+            daily_folder: text(self.daily_folder)
+                .and_then(|raw| capture::normalize_path(&raw).ok().flatten()),
+            daily_template: text(self.daily_template)
+                .and_then(|raw| capture::normalize_path(&raw).ok().flatten()),
+            daily_name: text(self.daily_name).and_then(|raw| DailyName::parse(&raw)),
+            entry_style: text(self.entry_style).and_then(|raw| EntryStyle::parse(&raw)),
+            entry_time: match self.entry_time {
+                Some(Value::Bool(flag)) => Some(flag),
+                _ => None,
+            },
+        };
+        (!overrides.is_empty()).then_some(overrides)
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -585,6 +666,8 @@ impl FileShape {
                 .export
                 .folder
                 .and_then(|raw| crate::export::folder::validate_folder(&raw).ok()),
+            capture: self.capture.into_overrides(),
+            graph: self.graph.as_ref().and_then(graph_from_value),
             auto_download_templates: self.templates.auto_download,
             template_sources: self
                 .templates
@@ -717,6 +800,59 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         overrides.export_folder.clone().map(Value::from),
     );
 
+    let capture = overrides.capture.clone().unwrap_or_default();
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "inbox",
+        capture.inbox.map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "daily_folder",
+        capture.daily_folder.map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "daily_template",
+        capture.daily_template.map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "daily_name",
+        capture.daily_name.map(|name| Value::from(name.as_str())),
+    );
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "entry_style",
+        capture.entry_style.map(|style| Value::from(style.as_str())),
+    );
+    set_or_remove(
+        &mut document,
+        CAPTURE_TABLE,
+        "entry_time",
+        capture.entry_time.map(Value::from),
+    );
+
+    // Граф связей (025): значения известных ключей перезаписываются, чужие
+    // ключи внутри таблицы остаются. `None` убирает только известные ключи.
+    match &overrides.graph {
+        Some(graph) => {
+            for (key, value) in graph_table(graph) {
+                set_or_remove(&mut document, GRAPH_TABLE, key, Some(value));
+            }
+        }
+        None => {
+            for key in GRAPH_KEYS {
+                remove_key(&mut document, GRAPH_TABLE, key);
+            }
+        }
+    }
+
     // Таблица сочетаний переписывается целиком, а не по ключу: запись здесь
     // всегда содержит полный список назначенного, и ключ, которого в нём нет,
     // означает возврат команды к умолчанию. Оставлять его в файле значило бы
@@ -743,11 +879,95 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, SETTINGS_TABLE);
     prune_empty_object(&mut document, TEMPLATES_TABLE);
     prune_empty_object(&mut document, EXPORT_TABLE);
+    prune_empty_object(&mut document, CAPTURE_TABLE);
+    prune_empty_object(&mut document, GRAPH_TABLE);
 
     let mut text =
         serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
     text.push('\n');
     text
+}
+
+/// Ключи таблицы `graph`, которые знает приложение.
+const GRAPH_KEYS: [&str; 9] = [
+    "filter",
+    "show_orphans",
+    "show_attachments",
+    "show_tags",
+    "arrows",
+    "groups",
+    "forces",
+    "label_zoom",
+    "node_size",
+];
+
+/// Настройки графа -> значения ключей таблицы `graph`.
+fn graph_table(graph: &crate::graph::view::GraphSettings) -> Vec<(&'static str, Value)> {
+    let mut forces = Map::new();
+    forces.insert("center".into(), Value::from(graph.forces.center));
+    forces.insert("repel".into(), Value::from(graph.forces.repel));
+    forces.insert("link".into(), Value::from(graph.forces.link));
+    forces.insert("distance".into(), Value::from(graph.forces.distance));
+    vec![
+        ("filter", Value::from(graph.filter.clone())),
+        ("show_orphans", Value::from(graph.show_orphans)),
+        ("show_attachments", Value::from(graph.show_attachments)),
+        ("show_tags", Value::from(graph.show_tags)),
+        ("arrows", Value::from(graph.arrows)),
+        (
+            "groups",
+            serde_json::to_value(&graph.groups).unwrap_or_else(|_| Value::Array(Vec::new())),
+        ),
+        ("forces", Value::Object(forces)),
+        ("label_zoom", Value::from(graph.label_zoom)),
+        ("node_size", Value::from(graph.node_size)),
+    ]
+}
+
+/// Разбор таблицы `graph` по полям: поле негодного вида читается как умолчание,
+/// группа с неизвестным цветом или пустым условием отбрасывается, числа
+/// приводятся к 0..=1 - одна испорченная строка не делает файл нечитаемым.
+/// `None` - таблицы нет или это не объект.
+fn graph_from_value(value: &Value) -> Option<crate::graph::view::GraphSettings> {
+    use crate::graph::view::{GraphForces, GraphGroup, GraphSettings};
+    let table = value.as_object()?;
+    let defaults = GraphSettings::default();
+    let flag =
+        |key: &str, fallback: bool| table.get(key).and_then(Value::as_bool).unwrap_or(fallback);
+    let number =
+        |source: Option<&Value>, fallback: f64| source.and_then(Value::as_f64).unwrap_or(fallback);
+    let forces = table.get("forces").and_then(Value::as_object);
+    let force = |key: &str, fallback: f64| number(forces.and_then(|f| f.get(key)), fallback);
+    let settings = GraphSettings {
+        filter: table
+            .get("filter")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        show_orphans: flag("show_orphans", defaults.show_orphans),
+        show_attachments: flag("show_attachments", defaults.show_attachments),
+        show_tags: flag("show_tags", defaults.show_tags),
+        arrows: flag("arrows", defaults.arrows),
+        groups: table
+            .get("groups")
+            .and_then(Value::as_array)
+            .map(|groups| {
+                groups
+                    .iter()
+                    .filter_map(|group| serde_json::from_value::<GraphGroup>(group.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        forces: GraphForces {
+            center: force("center", defaults.forces.center),
+            repel: force("repel", defaults.forces.repel),
+            link: force("link", defaults.forces.link),
+            distance: force("distance", defaults.forces.distance),
+        },
+        label_zoom: number(table.get("label_zoom"), defaults.label_zoom),
+        node_size: number(table.get("node_size"), defaults.node_size),
+    };
+    Some(settings.normalized())
 }
 
 /// Объект верхнего уровня по имени, создавая его при необходимости.
@@ -840,6 +1060,34 @@ mod tests {
             }],
             // Фича 009: папка экспорта — в круговой проверке «записал → прочитал».
             export_folder: Some("Выгрузка/2026".into()),
+            capture: Some(crate::capture::CaptureOverrides {
+                inbox: Some("Заметки/входящие.typ".into()),
+                daily_folder: Some("Дневник".into()),
+                daily_template: Some("templates/день.typ".into()),
+                daily_name: Some(crate::capture::DailyName::Dotted),
+                entry_style: Some(crate::capture::EntryStyle::Paragraph),
+                entry_time: Some(false),
+            }),
+            // Фича 025: граф связей; доли - степени двойки, круг точный.
+            graph: Some(crate::graph::view::GraphSettings {
+                filter: "папка:проекты".into(),
+                show_orphans: false,
+                show_attachments: true,
+                show_tags: true,
+                arrows: true,
+                groups: vec![crate::graph::view::GraphGroup {
+                    query: "тег:срочно".into(),
+                    color: crate::graph::view::GroupColor::Orange,
+                }],
+                forces: crate::graph::view::GraphForces {
+                    center: 0.25,
+                    repel: 0.75,
+                    link: 0.5,
+                    distance: 0.125,
+                },
+                label_zoom: 0.5,
+                node_size: 0.25,
+            }),
             keybindings: vec![
                 KeybindingEntry {
                     command: CommandId::CommandPalette,

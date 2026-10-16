@@ -15,6 +15,21 @@ import type {
 import type {
   AccessState,
   BacklinksPage,
+  VaultGraph,
+  CaptureOutcome,
+  CaptureSettings,
+  DailyDate,
+  DailyNeighbours,
+  LibraryStatus,
+  OpenDaily,
+  NoteProperties,
+  ParsedConditions,
+  PropertyKeyInfo,
+  PropertyValue,
+  ReindexOutcome,
+  SelectBlock,
+  SelectLibrary,
+  TextEdit,
   Board,
   BoardEvent,
   BoardWriteProfile,
@@ -31,6 +46,8 @@ import type {
   EmbedRef,
   FileKind,
   FileStamp,
+  ImportState,
+  ImportSurvey,
   InsertionEdit,
   EditOutcome,
   ElementAtResult,
@@ -52,6 +69,10 @@ import type {
   ResolvedBinding,
   SavedWorkspace,
   SearchResults,
+  ShowKeymap,
+  ShowState,
+  SlideLabel,
+  SlidePlace,
   SourceGroup,
   Template,
   TemplateEvent,
@@ -308,6 +329,7 @@ export function tauriVaultClient(
     // отмены у него нет (023 research.md §5).
     moveEntry: (request) => invoke<MoveOutcome>("move_entry", { request }),
     backlinks: (path) => invoke<Note[]>("backlinks", { path }),
+    graph: (request) => invoke<VaultGraph>("vault_graph", { request }),
     brokenLinks: (path) => invoke<string[]>("broken_links", { path }),
     accessState: () => invoke<AccessState>("access_state"),
     search: (query) => invoke<SearchResults>("search", { query }),
@@ -492,6 +514,113 @@ export function tauriVaultClient(
         invoke<SourceGroup[]>("links_mentions_in", { target, paths, openTexts }),
       linkMention: (request, editorText) =>
         invoke<LinkOutcome>("links_link_mention", { request, editorText }),
+    },
+
+    // ── Показ слайдов (фича 019) ──────────────────────────────────────
+    // Чистые функции ядра. Отсутствующая каретка уходит как `null`: поле
+    // `Option` в команде Tauri.
+    slides: {
+      start: (slides, caret, nowMs) =>
+        invoke<ShowState>("slides_start", { slides, caret: caret ?? null, nowMs }),
+      navigate: (state, slides, action) =>
+        invoke<ShowState>("slides_navigate", { state, slides, action }),
+      carry: (state, slides) => invoke<ShowState>("slides_carry", { state, slides }),
+      caret: async (slides, page) => {
+        const place = await invoke<SlidePlace | null>("slides_caret", { slides, page });
+        return place ?? undefined;
+      },
+      label: (slides, page) => invoke<SlideLabel>("slides_label", { slides, page }),
+      keymap: () => invoke<ShowKeymap>("slides_keymap"),
+    },
+
+    // ── Свойства заметок и выборки (фича 020) ─────────────────────────
+    // Команды Tauri 1:1 с функциями ядра. Нет значения ячейки приходит как
+    // `null` — клиенту нужен тот же `undefined`, что на web.
+    properties: {
+      read: (text) => invoke<NoteProperties>("properties_read", { text }),
+      edit: (text, change) => invoke<EditOutcome>("properties_edit", { text, change }),
+      selectBlocks: (text) => invoke<SelectBlock[]>("select_blocks", { text }),
+      selectImportEdits: (text) => invoke<TextEdit[]>("select_import_edits", { text }),
+      selectLibrary: () => invoke<SelectLibrary>("select_library"),
+      parseConditions: (text, knownKeys) =>
+        invoke<ParsedConditions>("search_parse_conditions", { text, knownKeys }),
+      select: async (selection) => {
+        const result = await invoke<{
+          rows: { path: string; cells: (PropertyValue | null)[] }[];
+          columns: string[];
+          truncated: boolean;
+          total: number;
+        }>("vault_select", { selection });
+        return {
+          ...result,
+          rows: result.rows.map((row) => ({
+            path: row.path,
+            cells: row.cells.map((cell) => cell ?? undefined),
+          })),
+        };
+      },
+      keys: () => invoke<PropertyKeyInfo[]>("vault_property_keys"),
+      current: () => invoke<boolean>("vault_properties_current"),
+      // Ход приходит событием, отмена — отдельной командой: замок vault между
+      // шагами оболочка отпускает сама.
+      reindex: async (control) => {
+        const unlisten = await listen<{ done: number; total: number }>(
+          "properties://reindex-progress",
+          (event) => control?.onProgress?.(event.payload.done, event.payload.total),
+        );
+        const onAbort = (): void => {
+          void invoke<void>("vault_cancel_reindex_properties").catch(() => undefined);
+        };
+        if (control?.signal?.aborted === true) onAbort();
+        control?.signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+          return await invoke<ReindexOutcome>("vault_reindex_properties");
+        } finally {
+          control?.signal?.removeEventListener("abort", onAbort);
+          unlisten();
+        }
+      },
+      ensureSelectLibrary: () => invoke<LibraryStatus>("vault_ensure_select_library"),
+      selectDigest: async (text) =>
+        (await invoke<string | null>("vault_select_digest", { text })) ?? undefined,
+    },
+
+    // ── Быстрый захват и ежедневные заметки (фича 022) ────────────────
+    // Команды Tauri 1:1 с функциями ядра, аргументы camelCase. Нет значения
+    // приходит как `null`; байты картинки идут числами JSON.
+    capture: {
+      settings: (overrides) => invoke<CaptureSettings>("capture_settings", { overrides }),
+      entry: (settings, capture, imagePath) =>
+        invoke<string>("capture_entry", { settings, capture, imagePath: imagePath ?? null }),
+      targetPath: async (settings, capture) =>
+        (await invoke<string | null>("capture_target_path", { settings, capture })) ?? undefined,
+      dailyPath: async (settings, date) =>
+        (await invoke<string | null>("daily_path", { settings, date })) ?? undefined,
+      dailyDateOf: async (settings, path) =>
+        (await invoke<DailyDate | null>("daily_date_of", { settings, path })) ?? undefined,
+      write: (capture, openBuffer, image) =>
+        invoke<CaptureOutcome>("capture_write", {
+          capture,
+          openBuffer: openBuffer ?? null,
+          image: image === undefined ? null : Array.from(image),
+        }),
+      openDaily: (date) => invoke<OpenDaily>("open_daily", { date }),
+      dailyNeighbours: (date) => invoke<DailyNeighbours>("daily_neighbours", { date }),
+    },
+
+    // ── Импорт из Obsidian (фича 021) ─────────────────────────────────
+    // Команды Tauri 1:1 с функциями ядра; источник держит оболочка, путь к нему
+    // передаётся один раз. Отказ — `OpenError` либо `ImportError`.
+    import: {
+      open: async (target) => {
+        if (target.kind !== "path") throw { kind: "NoSource" };
+        await invoke<void>("import_open_source", { path: target.path });
+      },
+      close: () => invoke<void>("import_close_source"),
+      survey: (job) => invoke<ImportSurvey>("import_survey", { job }),
+      begin: (job) => invoke<ImportState>("import_begin", { job }),
+      step: (state) => invoke<ImportState>("import_step", { state }),
+      finish: (state) => invoke<string>("import_finish", { state }),
     },
   };
 }

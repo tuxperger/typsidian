@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { NotePanelMode } from "../wasm-core/typsidian_core.js";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
-import type { NotePanelModeSpec } from "./modes.js";
+import type { NotePanelModeSpec, PanelModeId } from "./modes.js";
 
 // Оболочка колонки заметки (фича 013, макет «Typsidian Связи» 1a и 1c).
 //
@@ -14,8 +13,8 @@ import type { NotePanelModeSpec } from "./modes.js";
 
 export interface NotePanelProps {
   modes: readonly NotePanelModeSpec[];
-  active: NotePanelMode;
-  onSelect: (mode: NotePanelMode) => void;
+  active: PanelModeId;
+  onSelect: (mode: PanelModeId) => void;
   /**
    * `column` — колонка между деревом и редактором; `sheet` — шторка снизу на
    * скриме для узкого окна. Решает ширина окна, а не таргет.

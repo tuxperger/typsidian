@@ -55,7 +55,7 @@ pub enum ModePreference {
 }
 
 /// Режим колонки заметки (фича 013, research.md §12). Фича 015 добавила
-/// `Outline`, 017 добавит `Sources`; неизвестное значение из более новой версии
+/// `Outline`, 020 — `Properties`, 025 — `Graph`, 017 добавит `Sources`; неизвестное значение из более новой версии
 /// читается как умолчание ([`NotePanelState::lenient`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
@@ -66,6 +66,10 @@ pub enum NotePanelMode {
     Links,
     /// Оглавление заметки (фича 015): в файле - `"outline"`.
     Outline,
+    /// Свойства заметки (фича 020): в файле - `"properties"`.
+    Properties,
+    /// Локальный граф заметки (фича 025): в файле - `"graph"`.
+    Graph,
 }
 
 /// Состояние колонки заметки — свойство устройства (фича 013, FR-021).

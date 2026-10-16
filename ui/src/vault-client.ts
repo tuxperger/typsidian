@@ -4,6 +4,11 @@ import type {
   Board,
   BoardEvent,
   BoardWriteProfile,
+  Capture,
+  CaptureOutcome,
+  CaptureSettings,
+  DailyDate,
+  DailyNeighbours,
   CommandId,
   DiffLine,
   EditConflict,
@@ -12,6 +17,9 @@ import type {
   EmbedRef,
   HighlightEdit,
   HighlightWindow,
+  ImportJob,
+  ImportState,
+  ImportSurvey,
   FileKind,
   FileStamp,
   InsertionEdit,
@@ -32,15 +40,35 @@ import type {
   MoveOutcome,
   MoveRequest,
   MoveTarget,
+  NoteProperties,
+  OpenDaily,
+  ParsedConditions,
+  PropertyEdit,
+  PropertyKeyInfo,
+  ReindexOutcome,
+  LibraryStatus,
+  SelectBlock,
+  Selection,
+  SelectionResult,
+  SelectLibrary,
+  TextEdit,
   NameCheck,
   Note,
   OpenText,
   PreviewState,
   ResolvedBinding,
+  GraphRequest,
+  VaultGraph,
   SearchQuery,
   SearchResults,
   Shortcut,
   SavedWorkspace,
+  ShowAction,
+  ShowKeymap,
+  ShowState,
+  SlideLabel,
+  SlidePlace,
+  PageSlideInfo,
   SourceGroup,
   Template,
   TemplateEvent,
@@ -146,6 +174,8 @@ export interface VaultClient {
   moveEntry(request: MoveRequest, control?: MoveControl): Promise<MoveOutcome>;
 
   backlinks(path: string): Promise<Note[]>;
+  /** Граф связей vault одним вызовом ядра (фича 025). */
+  graph(request: GraphRequest): Promise<VaultGraph>;
   brokenLinks(path: string): Promise<string[]>;
   accessState(): Promise<AccessState>;
 
@@ -437,6 +467,123 @@ export interface VaultClient {
 
   /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
   readonly links: LinksClient;
+
+  // ── Показ слайдов (фича 019) ────────────────────────────────────────
+
+  /** Колода показа: чистые функции ядра над сведениями о страницах сборки. */
+  readonly slides: SlidesClient;
+
+  // ── Свойства заметок и выборки (фича 020) ───────────────────────────
+
+  /** Свойства: разбор и правка записи, отбор, блоки выборки, пересчёт индекса. */
+  readonly properties: PropertiesClient;
+
+  // ── Быстрый захват и ежедневные заметки (фича 022) ──────────────────
+
+  /** Захват, «Сегодня» и соседние дни: правила — в `packages/core/src/capture`. */
+  readonly capture: CaptureClient;
+
+  // ── Импорт из Obsidian (фича 021) ───────────────────────────────────
+
+  /** Пакетный импорт папки Markdown: источник только для чтения, шаги по одной заметке. */
+  readonly import: ImportClient;
+}
+
+/**
+ * Куда указывает выбранная исходная папка импорта: хендл браузера (web) либо
+ * путь (рабочий стол, Android). Оболочка выбирает папку своим жестом, а клиент
+ * vault открывает её тем способом, который у него есть.
+ */
+export type ImportSourceTarget =
+  | { kind: "handle"; handle: FileSystemDirectoryHandle }
+  | { kind: "path"; path: string };
+
+/**
+ * Импорт из Obsidian (фича 021, contracts/core-import-api.md).
+ *
+ * Перевод, имена, ссылки, журнал и отчёт — в ядре (`packages/core/src/import`).
+ * Клиент держит открытый источник и передаёт шаги через свою границу: wasm в том
+ * же процессе или команды Tauri. Ход пакета ведёт окно (`useImport`): звать
+ * `step`, пока `next < total`, уступая UI-потоку; отмена — перестать звать и
+ * вызвать `finish`. Отказ — значение `ImportError` из ядра (`{ kind }`).
+ */
+export interface ImportClient {
+  /** Открыть исходную папку только для чтения; прежняя закрывается. */
+  open(target: ImportSourceTarget, name: string): Promise<void>;
+  /** Закрыть источник (в конце пакета или при отказе от диалога). */
+  close(): Promise<void>;
+  /** C1, C4: что в источнике и можно ли продолжить прежний импорт. */
+  survey(job: ImportJob): Promise<ImportSurvey>;
+  /** План пакета; продолжение по журналу ядро находит само. */
+  begin(job: ImportJob): Promise<ImportState>;
+  /** Один файл. `SessionLost` — план потерян, нужен новый `begin`. */
+  step(state: ImportState): Promise<ImportState>;
+  /** Журнал и заметка отчёта; путь заметки. Зовётся и после отмены. */
+  finish(state: ImportState): Promise<string>;
+}
+
+/** Ход и отмена пересчёта индекса свойств (принцип X, фича 020). */
+export interface ReindexControl {
+  onProgress?: (done: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Свойства заметок и выборки (фича 020, contracts/core-properties-api.md).
+ *
+ * Разбор записи, её правка, отбор заметок и блоки `#select` — функции ядра
+ * (`packages/core/src/properties`). Клиент только передаёт вопрос через свою
+ * границу: wasm в том же процессе или команда Tauri.
+ */
+export interface PropertiesClient {
+  /** Свойства заметки по тексту (буфер редактора, а не файл). */
+  read(text: string): Promise<NoteProperties>;
+  /** План правки записи; отказ неоднозначной записи — `Refused` с `Properties`. */
+  edit(text: string, change: PropertyEdit): Promise<EditOutcome>;
+  /** Блоки `#select(…)` в тексте. */
+  selectBlocks(text: string): Promise<SelectBlock[]>;
+  /** Правка со строкой `#import` библиотеки выборки или пустой список. */
+  selectImportEdits(text: string): Promise<TextEdit[]>;
+  /** Эталонный файл библиотеки выборки. */
+  selectLibrary(): Promise<SelectLibrary>;
+  /** Условия из строки запроса (`тег:проект`) и остаток текста. */
+  parseConditions(text: string, knownKeys: string[]): Promise<ParsedConditions>;
+  /** Отбор заметок по выборке. */
+  select(selection: Selection): Promise<SelectionResult>;
+  /** Ключи свойств vault и виды их значений. */
+  keys(): Promise<PropertyKeyInfo[]>;
+  /** Построен ли индекс свойств по текущему формату. */
+  current(): Promise<boolean>;
+  /** Пакетный пересчёт индекса; отмена оставляет кэш согласованным. */
+  reindex(control?: ReindexControl): Promise<ReindexOutcome>;
+  /** Кладёт `.typsidian/lib/select.typ` в vault, если его нет. */
+  ensureSelectLibrary(): Promise<LibraryStatus>;
+  /** Отпечаток входов блоков заметки; `undefined` — блоков нет. */
+  selectDigest(text: string): Promise<string | undefined>;
+}
+
+/**
+ * Колода показа слайдов (фича 019, contracts/core-slides-api.md).
+ *
+ * Состояние показа держит окно редактора и передаёт его сюда вместе с
+ * действием: что значит «дальше», где граница колоды и какой слайд стоит под
+ * кареткой, решает ядро (`packages/core/src/slides`). Окно показа ядра не
+ * вызывает. Пустая колода — отказ `SlidesError` (`{ kind: "EmptyDeck" }`).
+ */
+export interface SlidesClient {
+  /** Начало показа: страница под кареткой (UTF-16) либо первая. */
+  start(
+    slides: PageSlideInfo[],
+    caret: number | undefined,
+    nowMs: number,
+  ): Promise<ShowState>;
+  navigate(state: ShowState, slides: PageSlideInfo[], action: ShowAction): Promise<ShowState>;
+  /** Перенос номера через пересборку (FR-007). */
+  carry(state: ShowState, slides: PageSlideInfo[]): Promise<ShowState>;
+  /** Место в заметке для страницы: куда поставить каретку на выходе. */
+  caret(slides: PageSlideInfo[], page: number): Promise<SlidePlace | undefined>;
+  label(slides: PageSlideInfo[], page: number): Promise<SlideLabel>;
+  keymap(): Promise<ShowKeymap>;
 }
 
 /**
@@ -499,4 +646,34 @@ export function createFlushRegistry(
       return (await unresolvedEditPaths()).length === 0;
     },
   };
+}
+
+/**
+ * Быстрый захват и ежедневные заметки (фича 022, contracts/core-capture-api.md).
+ *
+ * Вид записи, путь по дате, соседние дни и решение «правка буфера или запись
+ * файла» — функции ядра (`packages/core/src/capture`). Клиент только передаёт
+ * вопрос через свою границу. Настройки `open_daily`, `daily_neighbours` и
+ * `write` ядро читает из `vault.json` само: окно держит копию, которая может
+ * устареть. Чистые функции получают `CaptureSettings` из `settings`.
+ */
+export interface CaptureClient {
+  /** Действующие настройки: умолчания применены к перекрытиям vault. */
+  settings(overrides: VaultOverrides): Promise<CaptureSettings>;
+  /** Запись захвата словами Typst — образец в настройках и сама запись. */
+  entry(settings: CaptureSettings, capture: Capture, imagePath?: string): Promise<string>;
+  /** Заметка назначения захвата; `undefined` — путь не годится. */
+  targetPath(settings: CaptureSettings, capture: Capture): Promise<string | undefined>;
+  dailyPath(settings: CaptureSettings, date: DailyDate): Promise<string | undefined>;
+  /** Дата ежедневной заметки по пути; `undefined` — это не ежедневная заметка. */
+  dailyDateOf(settings: CaptureSettings, path: string): Promise<DailyDate | undefined>;
+  /**
+   * Записать захват. Заметка открыта в редакторе — передать её полный текст в
+   * `openBuffer`, ответ будет правкой буфера (`EditBuffer`); иначе ядро пишет
+   * файл (`Written`). Отказ — значение `Failed`, а не исключение.
+   */
+  write(capture: Capture, openBuffer?: string, image?: Uint8Array): Promise<CaptureOutcome>;
+  /** «Сегодня»: создаёт заметку по шаблону при отсутствии. Отказ — `DailyError`. */
+  openDaily(date: DailyDate): Promise<OpenDaily>;
+  dailyNeighbours(date: DailyDate): Promise<DailyNeighbours>;
 }

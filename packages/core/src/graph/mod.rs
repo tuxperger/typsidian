@@ -9,6 +9,11 @@
 
 use std::path::{Component, Path, PathBuf};
 
+pub mod view;
+
+#[cfg(target_arch = "wasm32")]
+pub mod web;
+
 /// Расширение файла заметки. Ссылка без расширения трактуется как ссылка на
 /// заметку — писать `[[заметка.typ]]` от пользователя не требуется.
 const NOTE_EXTENSION: &str = "typ";
@@ -16,8 +21,13 @@ const NOTE_EXTENSION: &str = "typ";
 /// Место ссылки `[[…]]` в тексте заметки (фича 013, research.md §2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkSite {
-    /// Цель как написана, без скобок, обрезанная по пробелам.
+    /// Цель как написана, без скобок и без `|текста`, обрезанная по пробелам.
+    /// Всё, что разбирает ссылки (индекс, связи, граф, перенос), видит цель
+    /// только по этому полю (фича 021, research.md §10).
     pub raw: String,
+    /// Отображаемый текст из записи `[[путь|текст]]`; `None`, если `|` нет или
+    /// после неё пусто.
+    pub label: Option<String>,
     /// Диапазон всей записи вместе со скобками `[[…]]`, в байтах текста.
     pub byte_start: usize,
     pub byte_end: usize,
@@ -28,6 +38,8 @@ pub struct LinkSite {
 /// Единственный разбор `[[…]]` в ядре: индекс ссылок и панель связей обязаны
 /// видеть одни и те же ссылки, поэтому [`extract_links`] — отображение этой
 /// функции. Запись без закрывающей `]]` и с пустой целью ссылкой не считается.
+/// Запись `[[путь|текст]]` делится по первой `|`: цель — `raw`, остаток —
+/// `label`.
 pub fn link_sites(content: &str) -> Vec<LinkSite> {
     let mut sites = Vec::new();
     let bytes = content.as_bytes();
@@ -35,11 +47,22 @@ pub fn link_sites(content: &str) -> Vec<LinkSite> {
     while i + 1 < bytes.len() {
         if bytes[i] == b'[' && bytes[i + 1] == b'[' {
             if let Some(end) = content[i + 2..].find("]]") {
-                let target = content[i + 2..i + 2 + end].trim();
+                let inner = &content[i + 2..i + 2 + end];
+                let (target, label) = match inner.split_once('|') {
+                    Some((target, label)) => {
+                        let label = label.trim();
+                        (
+                            target.trim(),
+                            (!label.is_empty()).then(|| label.to_string()),
+                        )
+                    }
+                    None => (inner.trim(), None),
+                };
                 let byte_end = i + 2 + end + 2;
                 if !target.is_empty() {
                     sites.push(LinkSite {
                         raw: target.to_string(),
+                        label,
                         byte_start: i,
                         byte_end,
                     });
@@ -181,6 +204,66 @@ pub fn links_in(source: &Path, content: &str) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Файлы, вставленные в заметку вызовом `#image("…")` с литеральным путём
+/// (фича 025, research.md §3): картинки и снимки досок 002.
+///
+/// Путь разрешается как в Typst: без `/` в начале — от папки заметки, с `/` —
+/// от корня vault. Разбор — парсером Typst, как в `elements::locate`: он
+/// знает скобки внутри строк и вложенность в `#figure(image(…))`. Вызов не с
+/// литералом (`image(bytes)`, переменная) и адрес с `://` пропускаются.
+/// Порядок первого появления сохраняется, дубли схлопываются.
+pub fn embeds_in(source: &Path, content: &str) -> Vec<PathBuf> {
+    use typst::syntax::{ast, parse, SyntaxKind, SyntaxNode};
+
+    // Дешёвый отсев: большинство заметок картинок не вставляют, а разбор
+    // Typst на каждую заметку при пересчёте vault не бесплатен.
+    if !content.contains("image") {
+        return Vec::new();
+    }
+    let root = parse(content);
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut stack: Vec<&SyntaxNode> = vec![&root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == SyntaxKind::FuncCall {
+            let mut children = node.children();
+            let is_image = children
+                .next()
+                .and_then(|callee| callee.cast::<ast::Ident>())
+                .is_some_and(|name| name.get() == "image");
+            let literal = is_image
+                .then(|| children.find(|child| child.kind() == SyntaxKind::Args))
+                .flatten()
+                .and_then(|args| args.children().find(|arg| arg.kind() == SyntaxKind::Str))
+                .and_then(|arg| arg.cast::<ast::Str>())
+                .map(|text| text.get().to_string());
+            if let Some(target) = literal.and_then(|raw| resolve_embed_target(source, &raw)) {
+                if !out.contains(&target) {
+                    out.push(target);
+                }
+            }
+        }
+        // Обход в глубину: дети кладутся в обратном порядке, чтобы порядок
+        // появления в тексте сохранился.
+        let before = stack.len();
+        stack.extend(node.children());
+        stack[before..].reverse();
+    }
+    out
+}
+
+/// Путь вставленного файла относительно корня vault; `None` — адрес не
+/// локальный или уводит за корень.
+fn resolve_embed_target(source: &Path, raw: &str) -> Option<PathBuf> {
+    let raw = raw.trim().replace('\\', "/");
+    if raw.is_empty() || raw.contains("://") {
+        return None;
+    }
+    match raw.strip_prefix('/') {
+        Some(rooted) => normalize(Path::new(rooted)),
+        None => normalize(&source.parent().unwrap_or_else(|| Path::new("")).join(&raw)),
+    }
 }
 
 #[cfg(test)]
@@ -350,5 +433,33 @@ mod tests {
             "[[target]] снова [[target]] и [[source]]",
         );
         assert_eq!(links, vec![PathBuf::from("notes/target.typ")]);
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn a_label_does_not_change_the_target_anywhere() {
+        let content = "см. [[Проект|тот самый]] и [[/a/б | с пробелами ]] и [[в|]]";
+        assert_eq!(extract_links(content), vec!["Проект", "/a/б", "в"]);
+        let sites = link_sites(content);
+        assert_eq!(sites[0].label.as_deref(), Some("тот самый"));
+        assert_eq!(sites[1].label.as_deref(), Some("с пробелами"));
+        assert_eq!(sites[2].label, None);
+        assert_eq!(
+            links_in(Path::new("src.typ"), content),
+            vec![
+                PathBuf::from("Проект.typ"),
+                PathBuf::from("a/б.typ"),
+                PathBuf::from("в.typ")
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_target_with_a_label_is_not_a_link() {
+        assert!(link_sites("[[|только текст]]").is_empty());
     }
 }

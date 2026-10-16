@@ -34,9 +34,13 @@ use typsidian_core::boards::{
     self, Board, BoardEvent, CreateBoardError, Embed, EmbedError, EmbedPlan, EmbedRef,
     ReadBoardError, SnapshotWriteError, WriteBoardError,
 };
+use typsidian_core::capture;
 use typsidian_core::export;
+use typsidian_core::graph::view as graph_view;
+use typsidian_core::import;
 use typsidian_core::links;
 use typsidian_core::preview::{self, CompiledDocument, SnapshotError};
+use typsidian_core::properties;
 use typsidian_core::settings::apply::{
     self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, RoutedChange, SettingsChange,
 };
@@ -51,14 +55,15 @@ use typsidian_core::settings::native::NativeStore;
 use typsidian_core::settings::store::{SettingsStore, StorageState, StoreCapabilities, StoreError};
 use typsidian_core::settings::vaults::{VaultId, VaultRecord};
 use typsidian_core::settings::Settings;
+use typsidian_core::slides;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::structure;
 use typsidian_core::templates::{
     self, NameCheck, PreviewState, ReadTemplateError, SaveTemplateError, TemplateLibraryView,
 };
 use typsidian_core::vault::backend::{
-    CreateError, DeleteError, OpenError, ReadError, RenameError, ResolveError, VaultBackend,
-    WriteError,
+    CreateError, DeleteError, OpenError, ReadError, ReadOnly, RenameError, ResolveError,
+    VaultBackend, WriteError,
 };
 use typsidian_core::vault::conflict::{DiffLine, EditConflict};
 use typsidian_core::vault::events::VaultEvent;
@@ -1506,6 +1511,94 @@ fn export_batch_view(state: export::BatchState) -> export::BatchView {
     export::batch::view(state)
 }
 
+// ── Импорт из Obsidian (фича 021) ───────────────────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::import`: правил здесь нет. Окно зовёт
+// `import_open_source` с путём из диалога выбора папки, затем `import_survey`,
+// `import_begin`, `import_step` (пока `next < total`, уступая интерфейсу между
+// шагами) и `import_finish`. План пакета живёт в ядре и между шагами не
+// пересылается; окно носит только `ImportState`.
+
+/// Папка-источник импорта, открытая только для чтения (FR-002, SC-005).
+///
+/// Отдельным состоянием, а не вторым `Vault`: источник не vault, у него нет
+/// слежения, кэша и служебной папки, а тип `ReadOnly` не даёт в него писать.
+#[derive(Default)]
+pub struct ImportSource(Mutex<Option<ReadOnly<NativeBackend>>>);
+
+/// Открывает выбранную диалогом папку как источник импорта. Ничего в ней не
+/// создаёт: ни `.typsidian/`, ни кэша.
+#[tauri::command]
+async fn import_open_source(state: State<'_, ImportSource>, path: String) -> Answer<(), OpenError> {
+    let backend = NativeBackend::open_read_only(Path::new(&path))?;
+    *state.0.lock().await = Some(ReadOnly::new(backend));
+    Ok(())
+}
+
+/// Закрывает источник (окно диалога закрыто или импорт окончен).
+#[tauri::command]
+async fn import_close_source(state: State<'_, ImportSource>) -> Answer<(), Failure<()>> {
+    *state.0.lock().await = None;
+    Ok(())
+}
+
+macro_rules! with_import_source {
+    ($state:expr, |$source:ident| $body:expr) => {{
+        let guard = $state.0.lock().await;
+        let Some($source) = guard.as_ref() else {
+            return Err(Failure::Core(import::ImportError::NoSource));
+        };
+        $body
+    }};
+}
+
+#[tauri::command]
+async fn import_survey(
+    vault: State<'_, Vault>,
+    source: State<'_, ImportSource>,
+    job: import::ImportJob,
+) -> Answer<import::ImportSurvey, Failure<import::ImportError>> {
+    with_import_source!(source, |source| with_vault!(vault, |backend| Ok(
+        import::survey(source, &*backend, &job).await
+    )))
+}
+
+#[tauri::command]
+async fn import_begin(
+    vault: State<'_, Vault>,
+    source: State<'_, ImportSource>,
+    job: import::ImportJob,
+) -> Answer<import::ImportState, Failure<import::ImportError>> {
+    with_import_source!(source, |source| with_vault!(vault, |backend| Ok(
+        import::import_begin(source, &*backend, &job).await
+    )))
+}
+
+#[tauri::command]
+async fn import_step(
+    vault: State<'_, Vault>,
+    source: State<'_, ImportSource>,
+    state: import::ImportState,
+) -> Answer<import::ImportState, Failure<import::ImportError>> {
+    with_import_source!(source, |source| with_vault!(vault, |backend| {
+        import::import_step(source, backend, state)
+            .await
+            .map_err(Failure::Core)
+    }))
+}
+
+#[tauri::command]
+async fn import_finish(
+    vault: State<'_, Vault>,
+    state: import::ImportState,
+) -> Answer<String, Failure<import::ImportError>> {
+    with_vault!(vault, |backend| {
+        import::import_finish(backend, &state)
+            .await
+            .map_err(Failure::Core)
+    })
+}
+
 // ── Связи заметки (фича 013) ────────────────────────────────────────────────
 //
 // Обёртки 1:1 над `typsidian_core::links`: правил здесь нет. Проход
@@ -1694,6 +1787,302 @@ fn preview_locate_heading(
 ) -> Option<preview::ResolvedAnchor> {
     let probe = structure::heading_probe(&outline, &key)?;
     preview::anchor::locate_heading(&runs, &probe)
+}
+
+// ── Свойства заметок и выборки (фича 020) ───────────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::properties`; правил здесь нет. Команды без
+// vault работают с текстом; остальные читают индекс открытого vault. Имена
+// аргументов — camelCase на стороне окна (`knownKeys`, `onProgress` как событие).
+
+/// Имя события хода пересчёта свойств: `{ done, total }`.
+const PROPERTIES_REINDEX_PROGRESS: &str = "properties://reindex-progress";
+
+/// Флаг отмены пересчёта свойств. Пересчёт идёт шагами, и между шагами vault
+/// отпускается, поэтому «отмени» дойдёт, а остальные команды не ждут конца.
+#[derive(Default)]
+pub struct PropertiesReindex(Arc<std::sync::atomic::AtomicBool>);
+
+#[tauri::command]
+fn properties_read(text: String) -> properties::NoteProperties {
+    properties::read(&text)
+}
+
+#[tauri::command]
+fn properties_edit(
+    text: String,
+    change: properties::PropertyEdit,
+) -> typsidian_core::elements::EditOutcome {
+    properties::edit(&text, &change)
+}
+
+#[tauri::command]
+fn select_blocks(text: String) -> Vec<properties::SelectBlock> {
+    properties::select_blocks(&text)
+}
+
+#[tauri::command]
+fn select_import_edits(text: String) -> Vec<typsidian_core::elements::TextEdit> {
+    properties::select_import_edits(&text)
+}
+
+#[tauri::command]
+fn select_library() -> properties::SelectLibrary {
+    properties::select_library()
+}
+
+#[tauri::command]
+fn search_parse_conditions(
+    text: String,
+    known_keys: Vec<String>,
+) -> typsidian_core::search::ParsedConditions {
+    typsidian_core::search::parse_conditions(&text, &known_keys)
+}
+
+#[tauri::command]
+async fn vault_select(
+    state: State<'_, Vault>,
+    selection: properties::Selection,
+) -> Answer<properties::SelectionResult, Failure<()>> {
+    with_vault!(state, |backend| Ok(properties::select_notes(
+        backend, &selection
+    )
+    .await))
+}
+
+/// Граф связей vault одним запросом (фича 025): узлы и связи с фильтром,
+/// группами и локальной выборкой. Обёртка 1:1 над `graph::view::vault_graph`.
+#[tauri::command]
+async fn vault_graph(
+    state: State<'_, Vault>,
+    request: graph_view::GraphRequest,
+) -> Answer<graph_view::VaultGraph, Failure<()>> {
+    with_vault!(state, |backend| Ok(graph_view::vault_graph(
+        backend, &request
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn vault_property_keys(
+    state: State<'_, Vault>,
+) -> Answer<Vec<properties::PropertyKeyInfo>, Failure<()>> {
+    with_vault!(
+        state,
+        |backend| Ok(properties::property_keys(backend).await)
+    )
+}
+
+#[tauri::command]
+async fn vault_properties_current(state: State<'_, Vault>) -> Answer<bool, Failure<()>> {
+    with_vault!(state, |backend| Ok(VaultBackend::properties_current(
+        backend
+    )
+    .await))
+}
+
+/// Пакетный пересчёт свойств с ходом (событие) и отменой
+/// (`vault_cancel_reindex_properties`). Идёт шагами: между ними замок vault
+/// отпускается, и набор текста с остальными командами не ждёт конца пересчёта.
+#[tauri::command]
+async fn vault_reindex_properties(
+    app: AppHandle,
+    state: State<'_, Vault>,
+    cancel: State<'_, PropertiesReindex>,
+) -> Answer<properties::ReindexOutcome, Failure<()>> {
+    use std::sync::atomic::Ordering;
+    cancel.0.store(false, Ordering::SeqCst);
+    let mut from = 0;
+    loop {
+        if cancel.0.load(Ordering::SeqCst) {
+            let total = with_vault!(state, |backend| Ok::<_, Failure<()>>(
+                backend
+                    .list()
+                    .await
+                    .iter()
+                    .filter(|note| note.kind == FileKind::Note)
+                    .count() as u32
+            ))?;
+            return Ok(properties::ReindexOutcome {
+                done: from,
+                total,
+                cancelled: true,
+            });
+        }
+        let step = with_vault!(state, |backend| Ok::<_, Failure<()>>(
+            properties::reindex_step(backend, from, properties::index::REINDEX_BATCH).await
+        ))?;
+        let _ = app.emit(
+            PROPERTIES_REINDEX_PROGRESS,
+            serde_json::json!({ "done": step.done, "total": step.total }),
+        );
+        if step.finished {
+            return Ok(properties::ReindexOutcome {
+                done: step.done,
+                total: step.total,
+                cancelled: false,
+            });
+        }
+        from = step.done;
+    }
+}
+
+#[tauri::command]
+fn vault_cancel_reindex_properties(cancel: State<'_, PropertiesReindex>) {
+    cancel.0.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[tauri::command]
+async fn vault_ensure_select_library(
+    state: State<'_, Vault>,
+) -> Answer<properties::LibraryStatus, Failure<WriteError>> {
+    with_vault!(state, |backend| properties::ensure_select_library(backend)
+        .await
+        .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn vault_select_digest(
+    state: State<'_, Vault>,
+    text: String,
+) -> Answer<Option<String>, Failure<()>> {
+    with_vault!(state, |backend| Ok(properties::inputs_digest(
+        backend, &text
+    )
+    .await))
+}
+
+// ── Показ слайдов (фича 019) ────────────────────────────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::slides`: правил и состояния оболочки здесь
+// нет, `ShowState` и сведения о страницах держит и передаёт окно. Имена
+// аргументов в `invoke` - camelCase (`nowMs`).
+
+#[tauri::command]
+fn slides_start(
+    slides: Vec<slides::PageSlideInfo>,
+    caret: Option<u32>,
+    now_ms: f64,
+) -> Result<slides::ShowState, slides::SlidesError> {
+    slides::start(&slides, caret, now_ms)
+}
+
+#[tauri::command]
+fn slides_navigate(
+    state: slides::ShowState,
+    slides: Vec<slides::PageSlideInfo>,
+    action: slides::ShowAction,
+) -> slides::ShowState {
+    slides::navigate(state, &slides, action)
+}
+
+#[tauri::command]
+fn slides_carry(
+    state: slides::ShowState,
+    slides: Vec<slides::PageSlideInfo>,
+) -> Result<slides::ShowState, slides::SlidesError> {
+    slides::carry(state, &slides)
+}
+
+#[tauri::command]
+fn slides_caret(slides: Vec<slides::PageSlideInfo>, page: u32) -> Option<slides::SlidePlace> {
+    slides::caret_at_page(&slides, page)
+}
+
+#[tauri::command]
+fn slides_label(slides: Vec<slides::PageSlideInfo>, page: u32) -> slides::SlideLabel {
+    slides::slide_label(&slides, page)
+}
+
+#[tauri::command]
+fn slides_keymap() -> slides::ShowKeymap {
+    slides::show_keymap()
+}
+
+// ── Быстрый захват и ежедневная заметка (фича 022) ──────────────────────────
+//
+// Обёртки 1:1 над `typsidian_core::capture`: правил здесь нет. Очередь захватов
+// Android живёт в плагине `capture`, не здесь. Имена аргументов в `invoke` -
+// camelCase (`openBuffer`, `imagePath`).
+
+#[tauri::command]
+fn capture_settings(overrides: VaultOverrides) -> capture::CaptureSettings {
+    capture::capture_settings(overrides.capture.as_ref())
+}
+
+#[tauri::command]
+fn capture_entry(
+    settings: capture::CaptureSettings,
+    capture: capture::Capture,
+    image_path: Option<String>,
+) -> String {
+    capture::entry(&settings, &capture, image_path.as_deref())
+}
+
+#[tauri::command]
+fn capture_target_path(
+    settings: capture::CaptureSettings,
+    capture: capture::Capture,
+) -> Option<String> {
+    capture::capture_target_path(&settings, &capture)
+}
+
+#[tauri::command]
+fn daily_path(settings: capture::CaptureSettings, date: capture::DailyDate) -> Option<String> {
+    capture::daily_path(&settings, &date)
+}
+
+#[tauri::command]
+fn daily_date_of(settings: capture::CaptureSettings, path: String) -> Option<capture::DailyDate> {
+    capture::daily_date_of(&settings, &path)
+}
+
+/// Дописывает захват в заметку назначения. `open_buffer` - текст заметки в
+/// редакторе, если она там открыта; `image` - байты картинки (массив чисел).
+#[tauri::command]
+async fn capture_write(
+    state: State<'_, Vault>,
+    capture: capture::Capture,
+    open_buffer: Option<String>,
+    image: Option<Vec<u8>>,
+) -> Answer<capture::CaptureOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(capture::capture_write(
+        backend,
+        &capture,
+        open_buffer.as_deref(),
+        image.as_deref()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn open_daily(
+    state: State<'_, Vault>,
+    date: capture::DailyDate,
+) -> Answer<capture::OpenDaily, Failure<capture::DailyError>> {
+    with_vault!(state, |backend| {
+        let overrides = vault_settings::read_vault_settings(backend)
+            .await
+            .unwrap_or_default();
+        let settings = capture::capture_settings(overrides.capture.as_ref());
+        capture::open_daily(backend, &settings, &date)
+            .await
+            .map_err(Failure::Core)
+    })
+}
+
+#[tauri::command]
+async fn daily_neighbours(
+    state: State<'_, Vault>,
+    date: capture::DailyDate,
+) -> Answer<capture::DailyNeighbours, Failure<()>> {
+    with_vault!(state, |backend| {
+        let overrides = vault_settings::read_vault_settings(backend)
+            .await
+            .unwrap_or_default();
+        let settings = capture::capture_settings(overrides.capture.as_ref());
+        Ok(capture::daily_neighbours(backend, &settings, &date).await)
+    })
 }
 
 #[tauri::command]
@@ -1888,6 +2277,8 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
 
     sync::manage(tauri::Builder::default())
         .manage(Vault::default())
+        .manage(ImportSource::default())
+        .manage(PropertiesReindex::default())
         .manage(Device::default())
         .manage(TemplatePreviews::default())
         .manage(Preview::default())
@@ -1979,6 +2370,12 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             export_batch_skip,
             export_batch_cancel,
             export_batch_view,
+            import_open_source,
+            import_close_source,
+            import_survey,
+            import_begin,
+            import_step,
+            import_finish,
             links_backlinks_page,
             links_mentions_availability,
             links_mentions_start,
@@ -1996,6 +2393,34 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             structure_outline_active,
             structure_outline_carry,
             preview_locate_heading,
+            slides_start,
+            slides_navigate,
+            slides_carry,
+            slides_caret,
+            slides_label,
+            slides_keymap,
+            capture_settings,
+            capture_entry,
+            capture_target_path,
+            daily_path,
+            daily_date_of,
+            capture_write,
+            open_daily,
+            daily_neighbours,
+            properties_read,
+            properties_edit,
+            select_blocks,
+            select_import_edits,
+            select_library,
+            search_parse_conditions,
+            vault_select,
+            vault_property_keys,
+            vault_graph,
+            vault_properties_current,
+            vault_reindex_properties,
+            vault_cancel_reindex_properties,
+            vault_ensure_select_library,
+            vault_select_digest,
             discard_edit,
             sync::sync_open,
             sync::sync_capabilities,

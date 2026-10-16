@@ -484,12 +484,12 @@ pub fn a_punctuation_shortcut_carries_the_key_code() {
 
 // ── Команда оглавления (фича 015, T007) ─────────────────────────────────────
 
-/// `toggle-outline` стоит последней, имя и умолчание зафиксированы, а `problem()`
+/// `toggle-outline` стоит третьей с конца, имя и умолчание зафиксированы, а `problem()`
 /// сочетание не отвергает; ни одна другая команда умолчания не делит.
 pub fn the_outline_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS.last(),
-        Some(&CommandId::ToggleOutline)
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 3],
+        CommandId::ToggleOutline
     );
     assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
     assert_eq!(
@@ -507,6 +507,54 @@ pub fn the_outline_command_has_its_name_and_default() {
         .unwrap();
     assert_eq!(binding.code, "KeyO");
     assert_eq!(binding.display, "Ctrl+Shift+O");
+    assert!(binding.conflicts_with.is_empty());
+}
+
+// ── Команда показа слайдов (фича 019, T007) ─────────────────────────────────
+
+/// `start-show` стоит предпоследней, имя и умолчание `Mod+Alt+P` зафиксированы,
+/// сочетание не отвергается и не делится ни с одной другой командой.
+pub fn the_start_show_command_has_its_name_and_default() {
+    assert_eq!(
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 2],
+        CommandId::StartShow
+    );
+    assert_eq!(CommandId::StartShow.as_str(), "start-show");
+    assert_eq!(CommandId::parse("start-show"), Some(CommandId::StartShow));
+    let shortcut = CommandId::StartShow.default_shortcut();
+    assert_eq!(shortcut.to_text(), "Mod+Alt+P");
+    assert_eq!(shortcut.problem(), None);
+
+    let resolved = keybindings::resolve(&[], false);
+    let binding = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::StartShow)
+        .unwrap();
+    assert_eq!(binding.code, "KeyP");
+    assert_eq!(binding.display, "Ctrl+Alt+P");
+    assert!(binding.is_default);
+    assert!(binding.conflicts_with.is_empty());
+}
+
+// ── Команда «Сегодня» (фича 022, T008) ───────────────────────────────────────
+
+/// `today` стоит последней, имя и свободное умолчание `Mod+Alt+J` зафиксированы,
+/// сочетание не отвергается и не делится ни с одной другой командой.
+pub fn the_today_command_has_its_name_and_default() {
+    assert_eq!(keybindings::COMMANDS.last(), Some(&CommandId::Today));
+    assert_eq!(CommandId::Today.as_str(), "today");
+    assert_eq!(CommandId::parse("today"), Some(CommandId::Today));
+    let shortcut = CommandId::Today.default_shortcut();
+    assert_eq!(shortcut.to_text(), "Mod+Alt+J");
+    assert_eq!(shortcut.problem(), None);
+
+    let resolved = keybindings::resolve(&[], false);
+    let binding = resolved
+        .iter()
+        .find(|binding| binding.command == CommandId::Today)
+        .unwrap();
+    assert_eq!(binding.code, "KeyJ");
+    assert_eq!(binding.display, "Ctrl+Alt+J");
     assert!(binding.conflicts_with.is_empty());
 }
 

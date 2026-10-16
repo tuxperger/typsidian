@@ -27,6 +27,7 @@ import { useVaultSettings } from "./useVaultSettings.js";
 import type { VaultClient } from "../vault-client.js";
 import type { PreviewClient } from "../preview-client.js";
 import { TemplatesSection } from "./TemplatesSection.js";
+import { CaptureSection } from "./CaptureSection.js";
 import { useShortcuts } from "../workspace/useShortcuts.js";
 import { useI18n, type MessageKey, type Phrase, type Translate } from "../i18n/index.js";
 
@@ -382,6 +383,20 @@ export function SettingsPanel({
           </section>
         )}
 
+        {section === "capture" && (
+          <section aria-label={t("capture.settings.title")}>
+            <div className="ts-settings__head">
+              <h2>{t("capture.settings.title")}</h2>
+              <span className="ts-settings__meta">
+                {vaultName === null
+                  ? t("settings.vaultNotOpen")
+                  : t("settings.folderSettings", { name: vaultName })}
+              </span>
+            </div>
+            <CaptureSection vaultSettings={vaultSettings} client={vaultClient} />
+          </section>
+        )}
+
         {section === "keybindings" && (
           <>
             <KeybindingsSection
@@ -445,6 +460,7 @@ export function SettingsPanel({
 const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
   { id: "vault", title: "settings.section.vault" },
   { id: "templates", title: "settings.section.templates" },
+  { id: "capture", title: "capture.settings.title" },
   { id: "sync", title: "sync.panel.title" },
   { id: "appearance", title: "settings.section.appearance" },
   { id: "keybindings", title: "settings.section.keybindings" },
@@ -455,6 +471,7 @@ const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
 export type SettingsSection =
   | "vault"
   | "templates"
+  | "capture"
   | "sync"
   | "appearance"
   | "keybindings"

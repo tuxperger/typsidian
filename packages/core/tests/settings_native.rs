@@ -1403,6 +1403,16 @@ fn note_panel_outline_mode_and_kinds_round_trip() {
 }
 
 #[test]
+fn note_panel_properties_mode_round_trips() {
+    note_panel::the_properties_mode_round_trips();
+}
+
+#[test]
+fn note_panel_graph_mode_round_trips() {
+    note_panel::the_graph_mode_round_trips();
+}
+
+#[test]
 fn note_panel_outline_state_json_shape() {
     note_panel::the_outline_state_json_shape();
 }
@@ -1424,6 +1434,18 @@ fn a_punctuation_shortcut_carries_the_key_code() {
 #[test]
 fn the_outline_command_has_its_name_and_default() {
     workspace_settings::the_outline_command_has_its_name_and_default();
+}
+
+// Фича 019 (T007).
+#[test]
+fn the_start_show_command_has_its_name_and_default() {
+    workspace_settings::the_start_show_command_has_its_name_and_default();
+}
+
+// Фича 022 (T008).
+#[test]
+fn the_today_command_has_its_name_and_default() {
+    workspace_settings::the_today_command_has_its_name_and_default();
 }
 
 #[test]

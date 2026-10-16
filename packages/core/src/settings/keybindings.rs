@@ -83,6 +83,10 @@ pub enum CommandId {
     NavigateForward,
     /// Показать или скрыть оглавление заметки (фича 015, research.md §12).
     ToggleOutline,
+    /// Показ заметки слайдами с текущего слайда (фича 019, research.md §12).
+    StartShow,
+    /// Открыть ежедневную заметку на сегодня (фича 022, FR-007).
+    Today,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -116,6 +120,8 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::NavigateBack,
     CommandId::NavigateForward,
     CommandId::ToggleOutline,
+    CommandId::StartShow,
+    CommandId::Today,
 ];
 
 impl CommandId {
@@ -148,6 +154,8 @@ impl CommandId {
             Self::NavigateBack => "navigate-back",
             Self::NavigateForward => "navigate-forward",
             Self::ToggleOutline => "toggle-outline",
+            Self::StartShow => "start-show",
+            Self::Today => "today",
         }
     }
 
@@ -211,6 +219,20 @@ impl CommandId {
             // даёт `KeyO` - сочетание работает и в кириллической раскладке. В
             // CodeMirror (`defaultKeymap`, `historyKeymap`) `Shift-Mod-o` не занято.
             Self::ToggleOutline => (true, false, "o"),
+            // Показ слайдов (фича 019, research.md §12): среди умолчаний с Alt
+            // заняты `s c h u g m w . , \ [ ]`, `p` свободна (без Alt она у
+            // экспорта в PDF, поэтому `Mod+P` не берётся). `Shortcut::code`
+            // даёт `KeyP` - сочетание работает и в кириллической раскладке.
+            // Команда запускает показ «с текущего слайда»; «с начала» и «с
+            // видом докладчика» - пункты меню кнопки и палитры.
+            Self::StartShow => (false, true, "p"),
+            // «Сегодня» (фича 022, research.md §8): понятия «команда без умолчания»
+            // в ядре нет, поэтому берётся свободное сочетание. Среди `Mod+Alt`
+            // заняты `s c h u g m w p . , \\ [ ]`; `j` (journal) свободна, не входит
+            // в зарезервированные клавиши и не отдана системе (`Ctrl+Alt+T`, `D`,
+            // `L` на Linux заняты терминалом, рабочим столом и блокировкой).
+            // `Shortcut::code` даёт `KeyJ`: работает и в кириллической раскладке.
+            Self::Today => (false, true, "j"),
         };
         Shortcut {
             mod_key: true,
@@ -818,9 +840,9 @@ mod tests {
 
     #[test]
     fn tab_commands_follow_the_note_panel_with_the_documented_defaults() {
-        // Семь команд вкладок стоят перед командами более поздних фич: самая
-        // последняя сейчас - `ToggleOutline` (фича 015).
-        let tail = &COMMANDS[COMMANDS.len() - 8..COMMANDS.len() - 1];
+        // Семь команд вкладок стоят перед командами более поздних фич: за ними
+        // идут `ToggleOutline` (фича 015), `StartShow` (фича 019) и `Today` (022).
+        let tail = &COMMANDS[COMMANDS.len() - 10..COMMANDS.len() - 3];
         let expected = [
             (CommandId::TabClose, "tab-close", "Mod+Alt+W"),
             (CommandId::TabNext, "tab-next", "Mod+Alt+."),
@@ -841,12 +863,41 @@ mod tests {
             assert_eq!(command.default_shortcut().to_text(), text);
         }
         // `ToggleNotePanel` остаётся на прежнем месте.
-        assert_eq!(COMMANDS[COMMANDS.len() - 9], CommandId::ToggleNotePanel);
+        assert_eq!(COMMANDS[COMMANDS.len() - 11], CommandId::ToggleNotePanel);
     }
 
     #[test]
-    fn the_outline_command_comes_last_with_its_default() {
-        assert_eq!(COMMANDS.last(), Some(&CommandId::ToggleOutline));
+    fn the_today_command_comes_last_with_its_default() {
+        // Фича 022: «Сегодня» — последняя команда, сочетание свободное.
+        assert_eq!(COMMANDS.last(), Some(&CommandId::Today));
+        assert_eq!(CommandId::Today.as_str(), "today");
+        assert_eq!(CommandId::parse("today"), Some(CommandId::Today));
+        let shortcut = CommandId::Today.default_shortcut();
+        assert_eq!(shortcut.to_text(), "Mod+Alt+J");
+        assert_eq!(shortcut.code(), Some("KeyJ".to_string()));
+        assert_eq!(shortcut.problem(), None);
+        let same: Vec<CommandId> = COMMANDS
+            .iter()
+            .copied()
+            .filter(|command| command.default_shortcut() == shortcut)
+            .collect();
+        assert_eq!(same, vec![CommandId::Today]);
+    }
+
+    #[test]
+    fn the_start_show_command_precedes_today_with_its_default() {
+        assert_eq!(COMMANDS[COMMANDS.len() - 2], CommandId::StartShow);
+        assert_eq!(CommandId::StartShow.as_str(), "start-show");
+        assert_eq!(CommandId::parse("start-show"), Some(CommandId::StartShow));
+        let shortcut = CommandId::StartShow.default_shortcut();
+        assert_eq!(shortcut.to_text(), "Mod+Alt+P");
+        assert_eq!(shortcut.code(), Some("KeyP".to_string()));
+        assert_eq!(shortcut.problem(), None);
+    }
+
+    #[test]
+    fn the_outline_command_keeps_its_default() {
+        assert_eq!(COMMANDS[COMMANDS.len() - 3], CommandId::ToggleOutline);
         assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
         assert_eq!(
             CommandId::parse("toggle-outline"),

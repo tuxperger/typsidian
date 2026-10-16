@@ -1,5 +1,10 @@
 import {
   buildTimeLimitMs,
+  captureEntry,
+  captureSettings,
+  captureTargetPath,
+  dailyDateOf,
+  dailyPath,
   exportBatchCancel,
   exportBatchNext,
   exportBatchRecord,
@@ -7,6 +12,11 @@ import {
   exportBatchStart,
   exportBatchView,
   exportCandidates,
+  importBegin,
+  importFinish,
+  ImportSource,
+  importStep,
+  importSurvey,
   linksBacklinksPage,
   linksLinkMention,
   linksMentionsAvailability,
@@ -15,6 +25,18 @@ import {
   linksMentionsStart,
   linksMentionsStep,
   PreviewEngine,
+  propertiesEdit,
+  propertiesRead,
+  searchParseConditions,
+  selectBlocks,
+  selectImportEdits,
+  selectLibrary,
+  slidesCaret,
+  slidesCarry,
+  slidesKeymap,
+  slidesLabel,
+  slidesNavigate,
+  slidesStart,
   SyntaxSession,
   WebBackend,
   workspaceApply,
@@ -39,6 +61,7 @@ import {
   type VaultOpenResult,
 } from "./vault-tree/useVault.js";
 import { basename } from "./paths.js";
+import { handleImportSource, type ImportSourcePicker } from "./import/import-source.js";
 
 // Реализация `VaultClient` для web: ядро в том же процессе, WASM
 // (`packages/core` → `wasm-pack --target web`).
@@ -47,6 +70,9 @@ import { basename } from "./paths.js";
 // не типом. Остальной общий UI работает через `VaultClient`, поэтому оболочка
 // рабочего стола не втягивает WASM в свою сборку: она этот модуль не импортирует
 // вовсе, а `import type` из `wasm-core` стирается компилятором.
+
+/** Заметок за один шаг пересчёта свойств (как `REINDEX_BATCH` ядра). */
+const PROPERTIES_BATCH = 50;
 
 /**
  * Интервал сверки с диском. У File System Access API нет подписки на изменения
@@ -103,6 +129,13 @@ export function webVaultClient(
    */
   let unresolvedSnapshot: string[] = [];
 
+  /** Открытая исходная папка импорта (фича 021); `null` — не открыта. */
+  let importSource: ImportSource | null = null;
+  const openedSource = (): ImportSource => {
+    if (importSource === null) throw { kind: "NoSource" };
+    return importSource;
+  };
+
   const withSnapshotRefresh =
     <T>(op: () => T | Promise<T>) =>
     async (): Promise<T> => {
@@ -145,6 +178,7 @@ export function webVaultClient(
     },
     delete: (path) => call(() => backend.delete(path)),
     backlinks: (path) => call(() => backend.backlinks(path)),
+    graph: (request) => call(() => backend.vaultGraph(request)),
     brokenLinks: (path) => call(() => backend.brokenLinks(path)),
     accessState: () => call(() => backend.accessState()),
     search: (query) => call(() => backend.search(query)),
@@ -309,6 +343,86 @@ export function webVaultClient(
         call(() => linksMentionsIn(backend, target, paths, openTexts)),
       linkMention: (request, editorText) =>
         call(() => linksLinkMention(backend, request, editorText)),
+    },
+
+    // ── Показ слайдов (фича 019) ──────────────────────────────────────
+    // Чистые функции ядра без backend: очередь вызовов им не нужна.
+    slides: {
+      start: async (slides, caret, nowMs) => slidesStart(slides, caret, nowMs),
+      navigate: async (state, slides, action) => slidesNavigate(state, slides, action),
+      carry: async (state, slides) => slidesCarry(state, slides),
+      caret: async (slides, page) => slidesCaret(slides, page),
+      label: async (slides, page) => slidesLabel(slides, page),
+      keymap: async () => slidesKeymap(),
+    },
+
+    // ── Свойства заметок и выборки (фича 020) ─────────────────────────
+    // Разбор и правка записи — чистые функции; отбор, индекс и библиотека
+    // выборки читают и пишут vault, то есть заимствуют backend.
+    properties: {
+      read: async (text) => propertiesRead(text),
+      edit: async (text, change) => propertiesEdit(text, change),
+      selectBlocks: async (text) => selectBlocks(text),
+      selectImportEdits: async (text) => selectImportEdits(text),
+      selectLibrary: async () => selectLibrary(),
+      parseConditions: async (text, knownKeys) => searchParseConditions(text, knownKeys),
+      select: (selection) => call(() => backend.vaultSelect(selection)),
+      keys: () => call(() => backend.vaultPropertyKeys()),
+      current: () => call(() => backend.vaultPropertiesCurrent()),
+      // Цикл по шагам ядра ведёт клиент: очередь вызовов wasm освобождается
+      // между шагами, и остальные команды не ждут весь пересчёт (принцип X).
+      reindex: async (control) => {
+        let from = 0;
+        let total = 0;
+        for (;;) {
+          if (control?.signal?.aborted === true) return { done: from, total, cancelled: true };
+          const step = await call(() =>
+            backend.vaultReindexPropertiesStep(from, PROPERTIES_BATCH),
+          );
+          control?.onProgress?.(step.done, step.total);
+          if (step.finished) return { done: step.done, total: step.total, cancelled: false };
+          from = step.done;
+          total = step.total;
+        }
+      },
+      ensureSelectLibrary: () => call(() => backend.vaultEnsureSelectLibrary()),
+      selectDigest: (text) => call(() => backend.vaultSelectDigest(text)),
+    },
+
+    // ── Быстрый захват и ежедневные заметки (фича 022) ────────────────
+    // Чистые функции ядра без backend; запись, «Сегодня» и соседние дни читают
+    // и пишут vault, то есть заимствуют backend.
+    capture: {
+      settings: async (overrides) => captureSettings(overrides),
+      entry: async (settings, capture, imagePath) =>
+        captureEntry(settings, capture, imagePath ?? null),
+      targetPath: async (settings, capture) => captureTargetPath(settings, capture),
+      dailyPath: async (settings, date) => dailyPath(settings, date),
+      dailyDateOf: async (settings, path) => dailyDateOf(settings, path),
+      write: (capture, openBuffer, image) =>
+        call(() => backend.captureWrite(capture, openBuffer ?? null, image ?? null)),
+      openDaily: (date) => call(() => backend.openDaily(date)),
+      dailyNeighbours: (date) => call(() => backend.dailyNeighbours(date)),
+    },
+
+    // ── Импорт из Obsidian (фича 021) ─────────────────────────────────
+    // Источник — отдельный объект ядра (`ImportSource`, только чтение); шаг
+    // заимствует его вместе с backend, поэтому идёт через `call`. Между шагами
+    // очередь свободна: правка другой заметки не ждёт весь импорт (принцип X).
+    import: {
+      open: async (target, name) => {
+        if (target.kind !== "handle") throw { kind: "NoSource" };
+        importSource?.free();
+        importSource = ImportSource.fromHandle(name, target.handle);
+      },
+      close: async () => {
+        importSource?.free();
+        importSource = null;
+      },
+      survey: (job) => call(() => importSurvey(openedSource(), backend, job)),
+      begin: (job) => call(() => importBegin(openedSource(), backend, job)),
+      step: (state) => call(() => importStep(openedSource(), backend, state)),
+      finish: (state) => call(() => importFinish(backend, state)),
     },
   };
 }
@@ -605,4 +719,33 @@ async function requestFolderPermission(handle: FileSystemDirectoryHandle): Promi
   ).requestPermission;
   if (!request) return "granted";
   return request.call(handle, { mode: "readwrite" });
+}
+
+/**
+ * Выбор исходной папки импорта в браузере (фича 021, FR-001): папка открывается
+ * только для чтения. Нет `showDirectoryPicker` — импорт недоступен (экран C5).
+ */
+export function webImportPicker(): ImportSourcePicker {
+  const showPicker = (): ((options: { mode: "read" }) => Promise<FileSystemDirectoryHandle>) | undefined =>
+    (
+      window as unknown as {
+        showDirectoryPicker?: (options: { mode: "read" }) => Promise<FileSystemDirectoryHandle>;
+      }
+    ).showDirectoryPicker;
+  return {
+    get available() {
+      return typeof window !== "undefined" && showPicker() !== undefined;
+    },
+    pick: async () => {
+      const picker = showPicker();
+      if (picker === undefined) return null;
+      try {
+        return handleImportSource(await picker.call(window, { mode: "read" }));
+      } catch (cause) {
+        // Закрытый диалог — отмена, а не отказ.
+        if (cause instanceof DOMException && cause.name === "AbortError") return null;
+        throw cause;
+      }
+    },
+  };
 }

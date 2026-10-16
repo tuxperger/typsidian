@@ -56,6 +56,10 @@ pub struct MemoryVault {
     /// Отпечатки, которые индекс «запомнил» раньше, чем файл изменили снаружи
     /// (фича 013): `list`/`list_folder` отдают их вместо настоящих.
     lagging: HashMap<PathBuf, typsidian_core::stamp::FileStamp>,
+    /// Первая запись по пути с `expected` отказывает конфликтом, а файл тем
+    /// временем становится этими байтами (фича 022): так проверяется повтор на
+    /// свежем тексте после правки «с другого устройства».
+    conflict_once: HashMap<PathBuf, Vec<u8>>,
 }
 
 impl MemoryVault {
@@ -72,6 +76,7 @@ impl MemoryVault {
             unsaved: Default::default(),
             writes: std::cell::RefCell::new(HashMap::new()),
             lagging: HashMap::new(),
+            conflict_once: HashMap::new(),
         }
     }
 
@@ -164,6 +169,14 @@ impl MemoryVault {
         if let Some(stamp) = self.stamp_of(path) {
             self.lagging.insert(PathBuf::from(path), stamp);
         }
+        self
+    }
+
+    /// Первая запись в файл провалится конфликтом, а файл станет `external`
+    /// (фича 022).
+    pub fn with_conflict_once(mut self, path: &str, external: impl Into<Vec<u8>>) -> Self {
+        self.conflict_once
+            .insert(PathBuf::from(path), external.into());
         self
     }
 
@@ -272,6 +285,36 @@ impl VaultBackend for MemoryVault {
         fonts
     }
 
+    /// Все файлы, кроме лежащих под скрытыми папками и скрытых самих (фича 021);
+    /// число скрытых записей — по их верхнему имени.
+    async fn list_source_files(&self) -> typsidian_core::vault::SourceListing {
+        let mut hidden = std::collections::BTreeSet::new();
+        let mut files: Vec<typsidian_core::vault::SourceFile> = Vec::new();
+        for (path, bytes) in self.files.borrow().iter() {
+            let mut prefix = PathBuf::new();
+            let mut is_hidden = false;
+            for component in path.components() {
+                prefix.push(component);
+                if component.as_os_str().to_string_lossy().starts_with('.') {
+                    hidden.insert(prefix.clone());
+                    is_hidden = true;
+                    break;
+                }
+            }
+            if !is_hidden {
+                files.push(typsidian_core::vault::SourceFile {
+                    path: path.clone(),
+                    size: bytes.len() as u64,
+                });
+            }
+        }
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        typsidian_core::vault::SourceListing {
+            files,
+            excluded: hidden.len() as u32,
+        }
+    }
+
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
         let mut copies: Vec<PathBuf> = self
             .files
@@ -369,6 +412,12 @@ impl VaultBackend for MemoryVault {
         // FR-025 было бы нечем — прав файловой системы на wasm32 не существует.
         if self.access_state != AccessState::ReadWrite {
             return Err(WriteError::AccessDenied);
+        }
+        if expected.is_some() {
+            if let Some(external) = self.conflict_once.remove(path) {
+                self.files.borrow_mut().insert(path.to_path_buf(), external);
+                return Err(WriteError::Conflict);
+            }
         }
         if self.check_expected {
             if let Some(expected) = &expected {
@@ -508,8 +557,12 @@ impl VaultBackend for MemoryVault {
         None
     }
 
+    /// Как настоящий реестр (`ConflictRegistry::unresolved_paths`): несохранённые
+    /// буферы — тоже «есть что терять», а не только конфликты.
     fn unresolved_edit_paths(&self) -> Vec<PathBuf> {
-        Vec::new()
+        let mut paths: Vec<PathBuf> = self.unsaved.iter().cloned().collect();
+        paths.sort();
+        paths
     }
 
     async fn conflict_diff(&self, _path: &Path) -> Vec<DiffLine> {
@@ -532,9 +585,12 @@ impl VaultBackend for MemoryVault {
 // сверялись с ОДНИМ набором ожиданий: в отличие от эталонного хэша досок, это
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
+pub mod capture_cases;
 pub mod element_cases;
 pub mod export_cases;
+pub mod graph_cases;
 pub mod highlight_cases;
+pub mod import_cases;
 pub mod install_cases;
 pub mod language_cases;
 pub mod links_cases;
@@ -543,8 +599,10 @@ pub mod note_panel_cases;
 pub mod package_cases;
 pub mod placement_cases;
 pub mod preview_cases;
+pub mod properties_cases;
 pub mod relocate_cases;
 pub mod search_cases;
+pub mod slides_cases;
 pub mod structure_cases;
 pub mod sync_cases;
 pub mod template_cases;

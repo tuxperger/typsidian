@@ -277,6 +277,44 @@ async fn walk_everything(
     }
 }
 
+/// Все файлы под папкой с размерами, кроме скрытых записей (фича 021): их
+/// число копится в `excluded`. Правило то же, что у `native::walk_source_files`
+/// (принцип II).
+async fn walk_source_files(
+    dir_handle: &JsValue,
+    prefix: PathBuf,
+    listing: &mut super::SourceListing,
+) -> Result<(), JsValue> {
+    let entries_iter = js_call0(dir_handle, "entries").await?;
+    loop {
+        let next_result = js_call0(&entries_iter, "next").await?;
+        if Reflect::get(&next_result, &JsValue::from_str("done"))?
+            .as_bool()
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
+        let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+        let name = Reflect::get(&value, &JsValue::from_str("0"))?
+            .as_string()
+            .unwrap_or_default();
+        let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
+        if is_excluded(&name) {
+            listing.excluded += 1;
+            continue;
+        }
+        let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
+            .as_string()
+            .unwrap_or_default();
+        let child = prefix.join(&name);
+        if kind == "directory" {
+            Box::pin(walk_source_files(&handle, child, listing)).await?;
+        } else if let Some((size, _)) = file_meta(&handle).await {
+            listing.files.push(super::SourceFile { path: child, size });
+        }
+    }
+}
+
 /// `removeEntry(name, { recursive: true })` на хендле папки.
 async fn remove_entry_recursive(parent: &JsValue, name: &str) -> Result<(), JsValue> {
     let remove_fn: js_sys::Function =
@@ -332,9 +370,9 @@ struct CopyReport {
 /// `on_progress(done, total)` и объект-флаг `{ cancelled: boolean }`: вызов
 /// ядра занят `&mut self`, второй вызов «отмени» в него не войдёт, поэтому
 /// интерфейс держит флаг у себя, а ядро читает его между файлами.
-struct JsMoveControl {
-    on_progress: Option<js_sys::Function>,
-    cancel: JsValue,
+pub(crate) struct JsMoveControl {
+    pub(crate) on_progress: Option<js_sys::Function>,
+    pub(crate) cancel: JsValue,
 }
 
 impl MoveControl for JsMoveControl {
@@ -397,6 +435,27 @@ pub struct WebBackend {
 
 // `JsValue` не Send/Sync, но wasm32 однопоточен — обёртка безопасна в этом контексте.
 unsafe impl Send for WebBackend {}
+
+impl WebBackend {
+    /// Папка-источник импорта (фича 021, FR-002): хендл читается, но служебное
+    /// место не заводится, индекс не строится, доступ — `ReadOnly`. Обычный
+    /// [`WebBackend::from_handle`] записал бы в папку `.typsidian/`.
+    pub(crate) fn for_reading(name: String, handle: JsValue) -> Self {
+        WebBackend {
+            root_path: PathBuf::from(name),
+            root_handle: handle,
+            access_state: AccessState::ReadOnly,
+            index: Index::new(),
+            cache: MemoryCache::new(),
+            conflicts: ConflictRegistry::new(),
+            events: VecDeque::new(),
+            board_write_profile: crate::boards::BoardWriteProfile::ReadWrite,
+            template_previews: crate::templates::PreviewCache::new(),
+            poll_snapshot: HashMap::new(),
+            service_dir_existed: true,
+        }
+    }
+}
 
 impl WebBackend {
     /// Единственный гейт записи для всех четырёх операций, названных в FR-036
@@ -706,6 +765,20 @@ impl VaultBackend for WebBackend {
         found
     }
 
+    async fn list_source_files(&self) -> super::SourceListing {
+        let mut listing = super::SourceListing::default();
+        if walk_source_files(&self.root_handle, PathBuf::new(), &mut listing)
+            .await
+            .is_err()
+        {
+            return super::SourceListing::default();
+        }
+        listing
+            .files
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        listing
+    }
+
     async fn list_fonts(&self) -> Vec<super::FontFile> {
         let mut found = Vec::new();
         if walk_directory_matching(
@@ -907,6 +980,15 @@ impl VaultBackend for WebBackend {
         }
         if self.find_handle(path).await.is_some() {
             return Err(CreateError::NameConflict);
+        }
+        // Принцип II: `NativeBackend::create` заводит недостающие папки
+        // (`create_dir_all`), значит и здесь. `write` папок не создаёт намеренно —
+        // паритет с `std::fs::write`, поэтому папка заводится до него.
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            self.ensure_folder(parent).await.map_err(|e| match e {
+                WriteError::Io | WriteError::Conflict => CreateError::Io,
+                WriteError::AccessDenied => CreateError::AccessDenied,
+            })?;
         }
         self.write(path, "", None).await.map_err(|e| match e {
             WriteError::Io | WriteError::Conflict => CreateError::Io,
@@ -1110,6 +1192,10 @@ impl VaultBackend for WebBackend {
                         .texts
                         .get(&change.to)
                         .map(|text| crate::graph::links_in(&change.to, text)),
+                    embeds: report
+                        .texts
+                        .get(&change.to)
+                        .map(|text| crate::graph::embeds_in(&change.to, text)),
                 })
                 .collect();
             self.cache.relocate(&cache_moves).await;
@@ -1156,6 +1242,40 @@ impl VaultBackend for WebBackend {
             .into_iter()
             .filter(|target| self.index.get(target).is_none())
             .collect()
+    }
+
+    async fn indexed_notes(&self) -> Vec<crate::properties::IndexedNote> {
+        let properties = self.cache.all_properties().await;
+        // В индексе web время изменения не хранится (отпечаток заметки
+        // сравнивается по хэшу), а опрос vault помнит `lastModified` файла.
+        crate::properties::index::join_notes(self.index.all(), properties, |note| {
+            self.poll_snapshot
+                .get(&note.path)
+                .map(|(_, modified)| *modified as i64)
+        })
+    }
+
+    async fn graph_source(&self) -> crate::graph::view::GraphSource {
+        crate::graph::view::GraphSource {
+            notes: self.indexed_notes().await,
+            boards: self
+                .index
+                .all()
+                .into_iter()
+                .filter(|note| note.kind == crate::vault::FileKind::Board)
+                .map(|note| crate::properties::IndexedNote::new(&note.path, &note.name, None))
+                .collect(),
+            links: self.cache.all_links().await,
+            embeds: self.cache.all_embeds().await,
+        }
+    }
+
+    async fn set_indexed_properties(
+        &mut self,
+        path: &Path,
+        entries: Vec<crate::properties::PropertyEntry>,
+    ) {
+        self.cache.set_properties(path, &entries).await;
     }
 
     fn poll_events(&mut self) -> Vec<VaultEvent> {

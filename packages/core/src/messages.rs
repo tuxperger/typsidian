@@ -15,6 +15,7 @@
 //! Для журналов и тестов у каждого сообщения есть [`AppMessage::log_text`] —
 //! текст, не зависящий от языка интерфейса (FR-031).
 
+use crate::capture::CaptureFailure;
 use crate::preview::packages::InstallError;
 use crate::preview::resolve::ResolveError;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,10 @@ pub enum AppMessage {
     BuildTimedOut { seconds: u32 },
     /// Папка vault недоступна во время сборки (005 FR-025).
     VaultUnavailable,
+    /// Показывать нечего: у сборки нет ни одной страницы (019, A5).
+    SlidesEmptyDeck,
+    /// Захват не записан; он остаётся в очереди (022 FR-005).
+    CaptureRefused { reason: CaptureFailure },
 }
 
 /// Почему связанный файл не прочитался. Зеркало [`ResolveError`] без шаблонов:
@@ -118,6 +123,23 @@ impl ResolveReason {
             ResolveReason::AccessDenied => "no read permission",
             ResolveReason::OutsideVault => "file is outside the vault",
             ResolveReason::TooLarge => "file exceeds the supported size",
+        }
+    }
+}
+
+impl CaptureFailure {
+    fn log_text(self) -> &'static str {
+        match self {
+            CaptureFailure::TooLarge => "the note would exceed the supported size",
+            CaptureFailure::ReadOnly => "the vault is read-only",
+            CaptureFailure::NoVault => "the vault is unavailable",
+            CaptureFailure::Conflict => "the note kept changing while saving",
+            CaptureFailure::UnsavedElsewhere => "the note has unsaved changes elsewhere",
+            CaptureFailure::TargetMissing => "the target note is gone",
+            CaptureFailure::InvalidTarget => "the target is not a note of the vault",
+            CaptureFailure::BadImage => "the image is missing or not supported",
+            CaptureFailure::Empty => "there is nothing to capture",
+            CaptureFailure::Io => "the disk refused the write",
         }
     }
 }
@@ -193,6 +215,10 @@ impl AppMessage {
             }
             AppMessage::VaultUnavailable => {
                 "the vault folder is unavailable; linked files were not read".to_owned()
+            }
+            AppMessage::SlidesEmptyDeck => "the document has no pages to show".to_owned(),
+            AppMessage::CaptureRefused { reason } => {
+                format!("the capture was not saved: {}", reason.log_text())
             }
         }
     }

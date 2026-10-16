@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NotePanelMode, NotePanelState } from "../wasm-core/typsidian_core.js";
+import type { PanelModeId } from "./modes.js";
 import type { DeviceSettingsClient } from "../settings/device-settings-client.js";
 import { changeOf } from "../settings/useSettings.js";
 
@@ -18,17 +19,17 @@ const DEFAULT_MODE: NotePanelMode = "links";
 
 export interface NotePanelStateHandle {
   shown: boolean;
-  mode: NotePanelMode;
+  mode: PanelModeId;
   mentionsExpanded: boolean;
   toggle: () => void;
   setShown: (shown: boolean) => void;
-  setMode: (mode: NotePanelMode) => void;
+  setMode: (mode: PanelModeId) => void;
   setMentionsExpanded: (expanded: boolean) => void;
 }
 
 interface Resolved {
   shown: boolean;
-  mode: NotePanelMode;
+  mode: PanelModeId;
   mentionsExpanded: boolean;
 }
 
@@ -102,7 +103,7 @@ export function useNotePanelState(
     ...state,
     toggle,
     setShown: useCallback((shown: boolean) => update({ shown }), [update]),
-    setMode: useCallback((mode: NotePanelMode) => update({ mode }), [update]),
+    setMode: useCallback((mode: PanelModeId) => update({ mode }), [update]),
     setMentionsExpanded: useCallback(
       (mentionsExpanded: boolean) => update({ mentionsExpanded }),
       [update],

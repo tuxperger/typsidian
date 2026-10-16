@@ -1,13 +1,17 @@
 pub mod boards;
+pub mod capture;
 pub mod elements;
 pub mod export;
 pub mod graph;
 pub mod highlight;
+pub mod import;
 pub mod links;
 pub mod messages;
 pub mod preview;
+pub mod properties;
 pub mod search;
 pub mod settings;
+pub mod slides;
 pub mod stamp;
 pub mod structure;
 pub mod sync;

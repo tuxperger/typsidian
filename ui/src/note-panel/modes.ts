@@ -9,9 +9,12 @@ import type { MessageKey } from "../i18n/index.js";
 // варианта в `NotePanelMode` ядра и ещё одного описания в списке, который
 // собирает `Workspace`.
 
+/** Режим колонки — значение ядра; «Свойства» (фича 020) переживают перезапуск, как прочие. */
+export type PanelModeId = NotePanelMode;
+
 export interface NotePanelModeSpec {
-  /** Идентификатор режима — тип ядра, он же значение `Settings.note_panel.mode`. */
-  id: NotePanelMode;
+  /** Идентификатор режима: тип ядра (значение `Settings.note_panel.mode`) или локальный. */
+  id: PanelModeId;
   /** Название в шапке колонки. */
   title: MessageKey;
   /** Счётчик активного режима в шапке («5 · 2»); `null` — счётчика нет. */

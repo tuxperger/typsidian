@@ -55,21 +55,26 @@ pub async fn facts_of<B: VaultBackend>(
     let mut notes = Vec::with_capacity(named.len());
     for path in named {
         let as_path = Path::new(&path);
-        let conflict = backend.pending_conflict(as_path).is_some()
-            || unresolved.iter().any(|known| known == as_path);
+        let pending = backend.pending_conflict(as_path).is_some();
         match indexed.iter().find(|note| note.path == as_path) {
+            // Файл на месте: конфликт — только неразрешённый. `unresolved` сюда
+            // не годится — в нём и любой несохранённый буфер (FR-037 001), и
+            // вкладка с правками мигала «конфликтом» до автосохранения (020 T026).
             Some(note) => notes.push(NoteFact {
                 unsaved: note.has_unsaved_edits || backend.has_unsaved_edits(as_path),
                 kind: note.kind,
-                conflict,
+                conflict: pending,
                 path,
             }),
-            None if conflict => notes.push(NoteFact {
-                kind: classify(as_path),
-                unsaved: true,
-                conflict,
-                path,
-            }),
+            // Файла нет, а правки остались — удаление с правками: конфликт.
+            None if pending || unresolved.iter().any(|known| known == as_path) => {
+                notes.push(NoteFact {
+                    kind: classify(as_path),
+                    unsaved: true,
+                    conflict: true,
+                    path,
+                })
+            }
             None => {}
         }
     }

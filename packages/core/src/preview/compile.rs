@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 use typst::foundations::Bytes;
 use typst::syntax::FileId;
+use typst::World;
 use typst_layout::PagedDocument;
 
 use super::anchor::{ResolvedAnchor, ScrollAnchor};
@@ -26,6 +27,8 @@ use super::resolve::{read_dependency, vault_path, ResolveError};
 use super::snapshot::{DependencySnapshot, SnapshotError};
 use super::world::PreviewWorld;
 use crate::messages::{AppMessage, FingerprintActual};
+use crate::slides::collect::collect as collect_slides;
+use crate::slides::PageSlideInfo;
 use crate::vault::backend::VaultBackend;
 
 /// Чем закончилась сборка (data-model.md «CompileOutcome»).
@@ -66,6 +69,11 @@ pub struct CompiledDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub anchor: Option<ResolvedAnchor>,
+    /// Сведения о страницах для показа слайдов (019): по записи на страницу, в
+    /// порядке `pages`. Собирается только при выводе в страницы; у сборки в
+    /// PDF и у неудавшейся пусто, как и `pages`.
+    #[serde(default)]
+    pub slides: Vec<PageSlideInfo>,
 }
 
 impl CompiledDocument {
@@ -94,7 +102,16 @@ pub fn compile_note(
     let main = DependencySnapshot::file_id(note_path)?;
     let mut snapshot = DependencySnapshot::new();
     snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
-    Ok(compile_with(main, note_path, snapshot, revision, fonts, &Render::Pages).0)
+    Ok(compile_with(
+        main,
+        note_path,
+        snapshot,
+        revision,
+        fonts,
+        &Render::Pages,
+        None,
+    )
+    .0)
 }
 
 /// Собирает заметку, догружая связанные файлы через vault (T014-T015).
@@ -218,6 +235,11 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
         }
     }
 
+    // Входы блоков выборки (фича 020, research.md §8): считаются по индексу
+    // свойств один раз на сборку. Предпросмотр и экспорт идут через этот цикл,
+    // поэтому PDF получает ровно те же строки, что и предпросмотр.
+    let inputs = crate::properties::compile_inputs(backend, source_text).await;
+
     // Причины отказов копятся между проходами: файл, который не прочитался,
     // на следующем проходе уже не запрашивается, а его имя обязано дойти до
     // пользователя названным (FR-021).
@@ -249,7 +271,15 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
     };
 
     loop {
-        let job = CompileJob::new(main, note_path, snapshot, revision, fonts.clone(), render);
+        let job = CompileJob::new(
+            main,
+            note_path,
+            snapshot,
+            revision,
+            fonts.clone(),
+            render,
+            inputs.as_deref(),
+        );
         let (document, pdf, mut returned) = match executor.run(job).await {
             Ok(output) => output.into_parts(),
             Err(reason) => return Ok((stopped(note_path, revision, reason), None, failures)),
@@ -297,7 +327,15 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
         }
 
         if !progressed {
-            let job = CompileJob::new(main, note_path, returned, revision, fonts, render);
+            let job = CompileJob::new(
+                main,
+                note_path,
+                returned,
+                revision,
+                fonts,
+                render,
+                inputs.as_deref(),
+            );
             let (document, pdf, returned) = match executor.run(job).await {
                 Ok(output) => output.into_parts(),
                 Err(reason) => return Ok((stopped(note_path, revision, reason), None, failures)),
@@ -674,6 +712,9 @@ pub struct CompileJob {
     pub(crate) revision: u64,
     pub(crate) fonts: FontSet,
     pub(crate) render: Render,
+    /// Значение `sys.inputs["typsidian-select"]` — JSON результатов блоков
+    /// выборки (фича 020); едет в воркер строкой вместе с заданием.
+    pub(crate) inputs: Option<String>,
 }
 
 impl CompileJob {
@@ -684,6 +725,7 @@ impl CompileJob {
         revision: u64,
         fonts: FontSet,
         render: &Render,
+        inputs: Option<&str>,
     ) -> Self {
         Self {
             main,
@@ -692,6 +734,7 @@ impl CompileJob {
             revision,
             fonts,
             render: render.clone(),
+            inputs: inputs.map(str::to_owned),
         }
     }
 
@@ -704,6 +747,7 @@ impl CompileJob {
             self.revision,
             self.fonts,
             &self.render,
+            self.inputs.as_deref(),
         );
         CompileOutput {
             document,
@@ -774,6 +818,7 @@ fn stopped(note_path: &str, revision: u64, reason: ExecutorError) -> CompiledDoc
         diagnostics,
         dependencies: Vec::new(),
         anchor: None,
+        slides: Vec::new(),
     }
 }
 
@@ -845,8 +890,9 @@ fn compile_with(
     revision: u64,
     fonts: FontSet,
     render: &Render,
+    inputs: Option<&str>,
 ) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
-    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts());
+    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts()).with_inputs(inputs);
     let compiled = typst::compile::<PagedDocument>(&world);
     // Кэш мемоизации компилятора между сборками сохраняется — на нём держится
     // скорость пересборки по мере набора (FR-008), — но без вытеснения он
@@ -860,8 +906,16 @@ fn compile_with(
         .map(|d| translate(&world, main, d))
         .collect();
 
+    let mut slides = Vec::new();
     let (outcome, pages, pdf) = match (compiled.output, render) {
-        (Ok(document), Render::Pages) => (CompileOutcome::Succeeded, render_pages(&document), None),
+        (Ok(document), Render::Pages) => {
+            // Сведения о слайдах берутся здесь, пока живы документ и мир
+            // (019, research.md §3).
+            if let Ok(source) = world.source(main) {
+                slides = collect_slides(&document, &world, main, source.text());
+            }
+            (CompileOutcome::Succeeded, render_pages(&document), None)
+        }
         // Вывод в PDF тоже может отказать: например, шрифт без нужных таблиц
         // или изображение, которое экспорт не умеет встроить. Такой отказ —
         // диагностика того же вида, что ошибка сборки, и файл тогда не пишется.
@@ -889,6 +943,7 @@ fn compile_with(
             diagnostics,
             dependencies: Vec::new(),
             anchor: None,
+            slides,
         },
         pdf,
         world.into_snapshot(),
@@ -982,4 +1037,30 @@ pub fn document_headings(
         })
         .collect();
     Some(found)
+}
+
+/// Время сбора сведений о слайдах на только что собранном документе
+/// (фича 019, T030, research.md §11).
+///
+/// Нужна только бенчу `slides_scale`: сам `collect` в crate закрыт, а замер
+/// «сборка без сбора» без флага в `compile_with` невозможен, поэтому сбор
+/// меряется отдельно на документе, собранном тем же путём. Поведение сборки не
+/// затрагивает. `None` - заметка не собралась.
+#[cfg(feature = "test-support")]
+pub fn time_slides_collect(
+    note_path: &str,
+    source_text: &str,
+    fonts: FontSet,
+) -> Option<std::time::Duration> {
+    let main = DependencySnapshot::file_id(note_path).ok()?;
+    let mut snapshot = DependencySnapshot::new();
+    snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
+    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts());
+    let document = typst::compile::<PagedDocument>(&world).output.ok()?;
+    let source = world.source(main).ok()?;
+    let started = std::time::Instant::now();
+    let info = collect_slides(&document, &world, main, source.text());
+    let elapsed = started.elapsed();
+    std::hint::black_box(info);
+    Some(elapsed)
 }

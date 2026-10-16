@@ -13,6 +13,18 @@ export const app = {
   "app.noteOutsideVault": (p: { path: string }) => `${p.path}: the note is outside the vault folder`,
   "app.buildTimedOut": (p: { seconds: number }) =>
     `The build was stopped: it ran longer than ${p.seconds} s. Check the document for an endless loop.`,
+  "app.slidesEmptyDeck": "There are no pages to show: the document is empty.",
+  "app.captureRefused": (p: { reason: string }) => `The capture was not saved: ${p.reason}. It stays in the queue.`,
+  "app.capture.tooLarge": "the note would exceed the supported size",
+  "app.capture.readOnly": "the vault is read-only",
+  "app.capture.noVault": "no vault is open or it is unavailable",
+  "app.capture.conflict": "the note kept changing while saving",
+  "app.capture.unsavedElsewhere": "the note has unsaved changes elsewhere",
+  "app.capture.targetMissing": "the chosen note no longer exists",
+  "app.capture.invalidTarget": "the target is not a note of the vault",
+  "app.capture.badImage": "the image is missing or its format is not supported",
+  "app.capture.empty": "there is nothing to capture",
+  "app.capture.io": "the disk refused the write",
   "app.vaultUnavailable":
     "The vault folder is unavailable: linked files and fonts were not read, so the view may be incomplete. The text in the editor is kept.",
   "app.resolve.notFound": "file not found",

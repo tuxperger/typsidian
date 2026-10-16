@@ -184,6 +184,34 @@ pub fn the_outline_mode_and_kinds_round_trip() {
     assert!(!back.outline_kinds.labels);
 }
 
+/// Режим «Свойства» (фича 020) переживает запись и чтение и пишется как `properties`.
+pub fn the_properties_mode_round_trips() {
+    let panel = NotePanelState {
+        shown: true,
+        mode: NotePanelMode::Properties,
+        ..NotePanelState::default()
+    };
+    let changed = SettingsChange::note_panel(panel).apply_to(&Settings::default());
+    let text = format::render("", &changed, &FolderRefs::new());
+    assert!(text.contains("\"properties\""), "{text}");
+    let back = format::parse(&text).unwrap().note_panel;
+    assert_eq!(back.mode, NotePanelMode::Properties);
+}
+
+/// Режим «Граф» (фича 025) переживает запись и чтение и пишется как `graph`.
+pub fn the_graph_mode_round_trips() {
+    let panel = NotePanelState {
+        shown: true,
+        mode: NotePanelMode::Graph,
+        ..NotePanelState::default()
+    };
+    let changed = SettingsChange::note_panel(panel).apply_to(&Settings::default());
+    let text = format::render("", &changed, &FolderRefs::new());
+    assert!(text.contains("\"graph\""), "{text}");
+    let back = format::parse(&text).unwrap().note_panel;
+    assert_eq!(back.mode, NotePanelMode::Graph);
+}
+
 /// Форма JSON — контракт с интерфейсом: режим `outline`, виды вложенной
 /// записью; умолчание видов не пишется, прежняя форма состояния не меняется.
 pub fn the_outline_state_json_shape() {

@@ -2,7 +2,9 @@ use crate::vault::backend::{
     valid_note_name, CreateError, DeleteError, OpenError, ReadError, RenameError, ResolveError,
     VaultBackend, WriteError,
 };
-use crate::vault::cache::{record_links, CacheMove, IndexCache, SqliteCache};
+use crate::vault::cache::{
+    record_derived, record_links, CacheMove, Derived, IndexCache, SqliteCache,
+};
 use crate::vault::conflict::{line_diff, ConflictRegistry, ConflictStatus, DiffLine, EditConflict};
 use crate::vault::events::{links_invalidated, wrap_bulk_if_needed, VaultEvent};
 use crate::vault::index::{FileStamp, Index, Note};
@@ -175,7 +177,7 @@ fn stamp_for(path: &Path) -> std::io::Result<FileStamp> {
 /// для индекса и исходящие ссылки для таблицы `links` (T085). Раздельные обходы
 /// «сначала метаданные, потом ссылки» стоили бы второго полного чтения vault на
 /// каждом открытии (SC-002).
-fn note_and_links_from_path(root: &Path, path: &Path) -> Option<(Note, Vec<PathBuf>)> {
+fn note_and_links_from_path(root: &Path, path: &Path) -> Option<(Note, Derived)> {
     let content = std::fs::read(path).ok()?;
     let metadata = std::fs::metadata(path).ok()?;
     let mtime_millis = metadata
@@ -185,7 +187,8 @@ fn note_and_links_from_path(root: &Path, path: &Path) -> Option<(Note, Vec<PathB
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     let rel = path.strip_prefix(root).ok()?.to_path_buf();
-    let links = crate::graph::links_in(&rel, &String::from_utf8_lossy(&content));
+    // Ссылки и свойства (фича 020) — из того же чтения файла.
+    let links = Derived::of(&rel, &String::from_utf8_lossy(&content));
     let stamp = FileStamp::from_content(mtime_millis, &content);
     Some((Note::new(rel, stamp), links))
 }
@@ -369,7 +372,7 @@ fn walk_conflict_copies(root: &Path) -> Vec<PathBuf> {
 /// весь оставшийся vault только ради того, чтобы отказать, бессмысленно, а на
 /// достаточно большой папке — ещё и долго. `limit: usize::MAX` отключает
 /// проверку (сверка уже открытого vault, где предел применён при открытии).
-fn walk(root: &Path, limit: usize) -> Result<Vec<(Note, Vec<PathBuf>)>, TooManyNotes> {
+fn walk(root: &Path, limit: usize) -> Result<Vec<(Note, Derived)>, TooManyNotes> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -449,6 +452,54 @@ fn exceeds_note_limit(root: &Path, limit: usize) -> bool {
         }
     }
     false
+}
+
+/// Все файлы папки с размерами, кроме скрытых записей (фича 021): их число
+/// возвращается отдельно. Символические ссылки не раскрываются. Порядок — по
+/// пути, чтобы план импорта не зависел от порядка `read_dir`.
+fn walk_source_files(root: &Path) -> crate::vault::SourceListing {
+    let mut listing = crate::vault::SourceListing::default();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                listing.excluded += 1;
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            if !file_type.is_file() {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            listing.files.push(crate::vault::SourceFile {
+                path: relative.to_path_buf(),
+                size: metadata.len(),
+            });
+        }
+    }
+    listing
+        .files
+        .sort_by(|left, right| left.path.cmp(&right.path));
+    listing
 }
 
 /// Шрифты vault по метаданным, без чтения содержимого (FR-027).
@@ -541,6 +592,37 @@ pub struct NativeBackend {
 }
 
 impl NativeBackend {
+    /// Открывает папку **только для чтения**, ничего в ней не создавая (фича
+    /// 021, FR-002, SC-005).
+    ///
+    /// В отличие от [`VaultBackend::open`] не заводит `.typsidian/`, файл кэша
+    /// и слежение за изменениями, не убирает прежний кэш и временные файлы и не
+    /// строит индекс: так открывается папка-источник импорта, которая vault
+    /// не является. Состояние доступа — `ReadOnly` всегда.
+    pub fn open_read_only(root_path: &Path) -> Result<Self, OpenError> {
+        if !root_path.exists() {
+            return Err(OpenError::NotFound);
+        }
+        if !root_path.is_dir() {
+            return Err(OpenError::NotADirectory);
+        }
+        if std::fs::read_dir(root_path).is_err() {
+            return Err(OpenError::AccessDenied);
+        }
+        Ok(Self {
+            root_path: root_path.to_path_buf(),
+            access_state: Arc::new(StdMutex::new(AccessState::ReadOnly)),
+            index: Arc::new(AsyncMutex::new(Index::new())),
+            cache: Arc::new(AsyncMutex::new(None)),
+            conflicts: Arc::new(StdMutex::new(ConflictRegistry::new())),
+            events: Arc::new(StdMutex::new(VecDeque::new())),
+            events_ready: Arc::new(tokio::sync::Notify::new()),
+            service_dir_existed: true,
+            _watcher: None,
+            _access_task: None,
+        })
+    }
+
     /// Кэш индекса внутри служебного места (фича 006, FR-020).
     fn cache_db_path(root: &Path) -> PathBuf {
         root.join(super::service_dir::cache_path())
@@ -677,7 +759,7 @@ impl NativeBackend {
                         RawChange::Deleted(_) => None,
                     })
                     .collect();
-                let stamped: HashMap<PathBuf, Option<(Note, Vec<PathBuf>)>> =
+                let stamped: HashMap<PathBuf, Option<(Note, Derived)>> =
                     tokio::task::spawn_blocking(move || {
                         to_stamp
                             .into_iter()
@@ -727,7 +809,7 @@ impl NativeBackend {
                             upsert_preserving_unsaved_edits(&mut idx, note.clone());
                             if let Some(c) = cache_guard.as_mut() {
                                 c.upsert_note(&note).await;
-                                c.set_links(&rel, &links).await;
+                                record_derived(c, &rel, &links).await;
                             }
                             if is_new {
                                 link_targets_touched.push(rel.clone());
@@ -787,7 +869,7 @@ impl NativeBackend {
                                 if let Some(c) = cache_guard.as_mut() {
                                     c.rename_note(&from_rel, &to_rel).await;
                                     c.upsert_note(&fresh).await;
-                                    c.set_links(&to_rel, &links).await;
+                                    record_derived(c, &to_rel, &links).await;
                                 }
                             } else if let Some(c) = cache_guard.as_mut() {
                                 c.rename_note(&from_rel, &to_rel).await;
@@ -1001,7 +1083,7 @@ impl NativeBackend {
                     upsert_preserving_unsaved_edits(&mut idx, note.clone());
                     if let Some(c) = cache_guard.as_mut() {
                         c.upsert_note(note).await;
-                        c.set_links(&note.path, links).await;
+                        record_derived(c, &note.path, links).await;
                     }
                     if is_new {
                         link_targets_touched.push(note.path.clone());
@@ -1096,9 +1178,16 @@ impl VaultBackend for NativeBackend {
         let mut cache = SqliteCache::open(&Self::cache_db_path(root_path))
             .await
             .ok();
+        // Кэш со свойствами другого формата (или без них — до фичи 020) не
+        // годится для быстрого пути: он выбрасывается, и холодный обход ниже
+        // наполняет ссылки и свойства заново (research.md §5).
+        let properties_ready = match &cache {
+            Some(c) => c.properties_current().await,
+            None => true,
+        };
         let cached_notes = match &cache {
-            Some(c) => c.load_notes().await,
-            None => Vec::new(),
+            Some(c) if properties_ready => c.load_notes().await,
+            _ => Vec::new(),
         };
 
         // SC-003: если валидный кэш уже есть, отдаём его немедленно и сверяем
@@ -1138,8 +1227,9 @@ impl VaultBackend for NativeBackend {
             if let Some(c) = cache.as_mut() {
                 for (note, links) in &found {
                     c.upsert_note(note).await;
-                    c.set_links(&note.path, links).await;
+                    record_derived(c, &note.path, links).await;
                 }
+                c.mark_properties_current().await;
             }
             found.into_iter().map(|(note, _)| note).collect()
         };
@@ -1189,6 +1279,10 @@ impl VaultBackend for NativeBackend {
 
     async fn list_fonts(&self) -> Vec<crate::vault::FontFile> {
         walk_fonts(&self.root_path)
+    }
+
+    async fn list_source_files(&self) -> crate::vault::SourceListing {
+        walk_source_files(&self.root_path)
     }
 
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
@@ -1546,17 +1640,22 @@ impl VaultBackend for NativeBackend {
                 .map(|change| {
                     // Ссылки пересчитываются из текста под новым путём; у доски
                     // содержимое не Typst, и её ссылки не трогаются.
-                    let links = (crate::vault::classify(&change.to)
-                        == crate::vault::FileKind::Note)
+                    let text = (crate::vault::classify(&change.to) == crate::vault::FileKind::Note)
                         .then(|| std::fs::read(root.join(&change.to)).ok())
                         .flatten()
-                        .map(|bytes| {
-                            crate::graph::links_in(&change.to, &String::from_utf8_lossy(&bytes))
-                        });
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+                    let links = text
+                        .as_deref()
+                        .map(|text| crate::graph::links_in(&change.to, text));
+                    // Вставленные файлы (фича 025) разрешаются от папки заметки.
+                    let embeds = text
+                        .as_deref()
+                        .map(|text| crate::graph::embeds_in(&change.to, text));
                     CacheMove {
                         from: change.from,
                         to: change.to,
                         links,
+                        embeds,
                     }
                 })
                 .collect()
@@ -1630,6 +1729,71 @@ impl VaultBackend for NativeBackend {
             .into_iter()
             .filter(|target| index.get(target).is_none())
             .collect()
+    }
+
+    async fn indexed_notes(&self) -> Vec<crate::properties::IndexedNote> {
+        let notes = self.index.lock().await.all();
+        let Some(properties) = ({
+            let guard = self.cache.lock().await;
+            match guard.as_ref() {
+                Some(cache) => Some(cache.all_properties().await),
+                None => None,
+            }
+        }) else {
+            // Кэш не открылся: индекса свойств нет, читаем заметки.
+            return crate::properties::index::scan_notes(self).await;
+        };
+        crate::properties::index::join_notes(notes, properties, |note| {
+            Some(note.stamp.mtime_millis)
+        })
+    }
+
+    async fn set_indexed_properties(
+        &mut self,
+        path: &Path,
+        entries: Vec<crate::properties::PropertyEntry>,
+    ) {
+        if let Some(cache) = self.cache.lock().await.as_mut() {
+            cache.set_properties(path, &entries).await;
+        }
+    }
+
+    async fn graph_source(&self) -> crate::graph::view::GraphSource {
+        use crate::graph::view::GraphSource;
+        let notes = self.indexed_notes().await;
+        let boards = self
+            .index
+            .lock()
+            .await
+            .all()
+            .into_iter()
+            .filter(|note| note.kind == crate::vault::FileKind::Board)
+            .map(|note| crate::properties::IndexedNote::new(&note.path, &note.name, None))
+            .collect();
+        let guard = self.cache.lock().await;
+        let Some(cache) = guard.as_ref() else {
+            drop(guard);
+            return crate::graph::view::scan_graph_source(self).await;
+        };
+        GraphSource {
+            notes,
+            boards,
+            links: cache.all_links().await,
+            embeds: cache.all_embeds().await,
+        }
+    }
+
+    async fn properties_current(&self) -> bool {
+        match self.cache.lock().await.as_ref() {
+            Some(cache) => cache.properties_current().await,
+            None => true,
+        }
+    }
+
+    async fn mark_properties_current(&mut self) {
+        if let Some(cache) = self.cache.lock().await.as_mut() {
+            cache.mark_properties_current().await;
+        }
     }
 
     fn poll_events(&mut self) -> Vec<VaultEvent> {

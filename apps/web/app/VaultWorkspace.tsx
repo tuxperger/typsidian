@@ -8,9 +8,11 @@ import {
   lastWebVault,
   openWebVault,
   openWebVaultById,
+  webImportPicker,
 } from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { webTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-web.js";
+import { createWebShowHost } from "@typsidian/ui/slides/show-channel-web.js";
 
 /**
  * Хранилище настроек устройства — `WebStore` поверх OPFS. Один объект на
@@ -20,6 +22,12 @@ const device = webDeviceSettings();
 
 /** Набор вкладок vault на устройстве (фича 014): тот же `WebStore`, что и у настроек. */
 const tabsStore = webTabsStore();
+
+/** Хозяин окон показа слайдов (фича 019): `window.open` + `BroadcastChannel`. */
+const showHost = createWebShowHost();
+
+/** Выбор исходной папки импорта из Obsidian (фича 021): `showDirectoryPicker` в режиме чтения. */
+const importPicker = webImportPicker();
 
 /**
  * Оболочка web-клиента (plan.md → Project Structure).
@@ -57,6 +65,10 @@ export function VaultWorkspace(): React.JSX.Element {
         device={device}
         // Набор вкладок и разделение переживают перезапуск (фича 014).
         tabsStore={tabsStore}
+        // Показ слайдов в отдельном окне, которое можно вынести на проектор (019).
+        showHost={showHost}
+        // Импорт из Obsidian (фича 021); без File System Access API диалог называет причину.
+        pickImportSource={importPicker}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

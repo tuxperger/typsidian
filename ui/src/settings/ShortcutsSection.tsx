@@ -40,6 +40,10 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   "navigate-forward": "workspace.tabs.forward",
   // Команда фичи 015 уже объявлена в ядре; её поведение в окне — 015 T020.
   "toggle-outline": "notePanel.outlineCommand",
+  // Фича 019: «с текущего слайда»; другие варианты запуска — пункты меню «Показ».
+  "start-show": "slides.menu.fromCurrent",
+  // Фича 022: открыть ежедневную заметку на сегодня.
+  today: "capture.command.today",
 };
 
 /**

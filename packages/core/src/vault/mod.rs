@@ -316,3 +316,22 @@ pub struct VaultInfo {
 // факте. Содержимое прежнего файла импортируется один раз при первом запуске
 // после обновления — см. `settings::native::NativeStore::open_in_with_legacy`,
 // — после чего файл удаляется.
+
+/// Файл папки-источника импорта (фича 021).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFile {
+    /// Путь относительно корня, с разделителями платформы.
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+/// Все файлы папки, которая vault не является, и число служебных записей,
+/// которые обход пропустил (фича 021, research.md §9).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceListing {
+    /// В порядке пути.
+    pub files: Vec<SourceFile>,
+    /// Скрытые записи (`.obsidian`, `.trash`, `.git`, `.DS_Store`): внутрь
+    /// не заходим и не считаем.
+    pub excluded: u32,
+}

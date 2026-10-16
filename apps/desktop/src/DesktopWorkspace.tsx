@@ -9,7 +9,13 @@ import {
 import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { tauriTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-tauri.js";
-import { openDesktopVault, pickDesktopFolder } from "./openDesktopVault.js";
+import { createTauriShowHost } from "@typsidian/ui/slides/show-channel-tauri.js";
+import { pathImportPicker } from "@typsidian/ui/import/import-source.js";
+import {
+  openDesktopVault,
+  pickDesktopFolder,
+  pickDesktopImportFolder,
+} from "./openDesktopVault.js";
 
 /**
  * Хранилище настроек устройства: `settings.json` в каталоге конфигурации ОС
@@ -26,6 +32,12 @@ const cloner = tauriVaultCloner(pickDesktopFolder, openVaultAt);
 
 /** Набор вкладок vault в `settings.json` устройства (фича 014). */
 const tabsStore = tauriTabsStore();
+
+/** Хозяин окон показа слайдов (фича 019): `WebviewWindow` + события Tauri. */
+const showHost = createTauriShowHost();
+
+/** Выбор папки Obsidian для импорта (фича 021): диалог ОС, дальше — путь. */
+const importPicker = pathImportPicker(pickDesktopImportFolder);
 
 /**
  * Оболочка рабочего стола (001 T112).
@@ -50,6 +62,9 @@ export function DesktopWorkspace(): React.JSX.Element {
         device={device}
         // Набор вкладок и разделение переживают перезапуск (фича 014).
         tabsStore={tabsStore}
+        showHost={showHost}
+        // Импорт из Obsidian (фича 021): папка выбирается диалогом ОС и открывается только для чтения.
+        pickImportSource={importPicker}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

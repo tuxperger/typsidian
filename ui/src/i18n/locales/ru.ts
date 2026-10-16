@@ -23,6 +23,10 @@ import { graph } from "./ru/graph.js";
 import { shell } from "./ru/shell.js";
 import { sync } from "./ru/sync.js";
 import { links } from "./ru/links.js";
+import { slides } from "./ru/slides.js";
+import { properties } from "./ru/properties.js";
+import { importing } from "./ru/import.js";
+import { capture } from "./ru/capture.js";
 
 export const ru: Catalog = {
   ...common,
@@ -44,4 +48,8 @@ export const ru: Catalog = {
   ...shell,
   ...sync,
   ...links,
+  ...slides,
+  ...properties,
+  ...importing,
+  ...capture,
 };

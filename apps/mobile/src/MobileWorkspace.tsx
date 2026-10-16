@@ -10,9 +10,19 @@ import {
 import { tauriVaultCloner } from "@typsidian/ui/sync/sync-client-tauri.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
 import { tauriTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-tauri.js";
+import { createInMemoryShowHost } from "@typsidian/ui/slides/show-channel.js";
+import { ShowOverlay } from "@typsidian/ui/slides/ShowOverlay.js";
+import { pathImportPicker } from "@typsidian/ui/import/import-source.js";
+import { createCaptureSource } from "./captureSource.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { lastMobileFolder, openMobileVault } from "./openMobileVault.js";
 import { useFolderPicker } from "./useFolderPicker.js";
+
+/**
+ * Один на процесс: у плагина `capture` одна очередь, и подписки окна не должны
+ * зависеть от перерисовок компонента.
+ */
+const captureSource = createCaptureSource();
 
 /**
  * Мобильная оболочка.
@@ -44,6 +54,11 @@ export function MobileWorkspace(): React.JSX.Element {
   const cloner = useMemo(() => tauriVaultCloner(picker.pick, openVaultAt), [picker.pick]);
   // Набор вкладок vault в `settings.json` устройства (фича 014).
   const tabsStore = useMemo(() => tauriTabsStore(), []);
+  // Показ слайдов (019): слой поверх рабочей области, хозяин и зритель в одном окне;
+  // вида докладчика нет (`supports.presenter = false`).
+  const show = useMemo(() => createInMemoryShowHost(), []);
+  // Импорт из Obsidian (фича 021): папку выбирает тот же обзор, что и для vault.
+  const importPicker = useMemo(() => pathImportPicker(picker.pick), [picker.pick]);
 
   // Откуда начать обзор: последний открытый vault (FR-007). Спрашивается на
   // монтировании, а не при открытии обзора, — чтобы список был готов к первому
@@ -71,6 +86,10 @@ export function MobileWorkspace(): React.JSX.Element {
         device={device}
         // Набор вкладок переживает перезапуск (фича 014).
         tabsStore={tabsStore}
+        showHost={show.host}
+        pickImportSource={importPicker}
+        // «Поделиться» и ярлыки Android приходят из плагина `capture` (фича 022).
+        captureSource={captureSource}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}
@@ -82,6 +101,7 @@ export function MobileWorkspace(): React.JSX.Element {
           />
         )}
       />
+      <ShowOverlay show={show} />
       {picker.isOpen && (
         <FolderPicker startAt={startAt} onChoose={picker.choose} onCancel={picker.cancel} />
       )}

@@ -993,6 +993,8 @@ pub async fn facts_of_reads_the_index() {
     assert_eq!(f.width_px, 1000);
     assert!(f.note("b.typ").is_none(), "отсутствующая не попадает");
     assert!(f.note("a.typ").unwrap().unsaved);
+    // Несохранённые правки — ещё не конфликт: вкладка не должна мигать
+    // «конфликтом» до автосохранения (020 T026).
     assert!(!f.note("a.typ").unwrap().conflict);
     assert_eq!(f.note("z.excalidraw").unwrap().kind, FileKind::Board);
 
@@ -1007,6 +1009,17 @@ pub async fn facts_of_reads_the_index() {
 
     let v = view_with(&vault, &s, 1000).await;
     assert_eq!(v.groups[0].tabs.iter().filter(|t| t.unsaved).count(), 1);
+    assert!(
+        v.groups[0].tabs.iter().all(|t| !t.conflict),
+        "ни одна вкладка не конфликтная"
+    );
+
+    // Файла нет, а правки остались (удаление с правками): это конфликт, и вкладка
+    // не пропадает из фактов (research.md §7 фичи 014).
+    let gone = MemoryVault::new().with_unsaved_edits("c.typ");
+    let f = facts_of(&gone, &opened(&["c.typ"]), None, 1000).await;
+    let fact = f.note("c.typ").expect("путь с правками без файла остаётся");
+    assert!(fact.conflict && fact.unsaved);
 }
 
 pub async fn restore_with_skips_missing_notes() {

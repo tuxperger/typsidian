@@ -29,10 +29,14 @@ import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.j
 
 import { defaultNewBoardName } from "../vault-tree/VaultTreeActions.js";
 import { Sidebar } from "../vault-tree/Sidebar.js";
-import type { OpenText, TextPlace, WorkspaceView } from "../wasm-core/typsidian_core.js";
+import type { Condition, OpenText, TextPlace, WorkspaceView } from "../wasm-core/typsidian_core.js";
 import { ExportCenter } from "../export/ExportCenter.js";
 import { ExportToast } from "../export/ExportToast.js";
 import { useExport } from "../export/useExport.js";
+import { ImportDialog } from "../import/ImportDialog.js";
+import { ImportProgress } from "../import/ImportProgress.js";
+import type { ImportSourcePicker } from "../import/import-source.js";
+import { useImport } from "../import/useImport.js";
 import type {
   CreateError,
   Note,
@@ -62,8 +66,13 @@ import { OpenNotesSheet } from "./tabs/OpenNotesSheet.js";
 import type { WorkspaceTabsStore } from "./tabs/tabs-store.js";
 import { useWindowWidth } from "./tabs/useWindowWidth.js";
 import { useWorkspaceTabs } from "./tabs/useWorkspaceTabs.js";
-import { GraphView } from "../graph/GraphView.js";
+import { GraphView, type GraphScope } from "../graph/GraphView.js";
+import { LocalGraphMode } from "../graph/LocalGraphMode.js";
+import { useGraphSettings } from "../graph/useGraphSettings.js";
 import { SearchOverlay } from "../search/SearchOverlay.js";
+import { PropertiesMode } from "../note-panel/properties/PropertiesMode.js";
+import { useNoteProperties } from "../note-panel/properties/useNoteProperties.js";
+import { usePropertiesWorkspace } from "../note-panel/properties/usePropertiesWorkspace.js";
 import { TemplateGallery } from "../templates/TemplateGallery.js";
 import { SaveAsTemplateDialog } from "../templates/SaveAsTemplateDialog.js";
 import { useTemplateLibrary } from "../templates/useTemplateLibrary.js";
@@ -90,9 +99,21 @@ import { useNarrowViewport } from "../note-panel/useNarrowViewport.js";
 import { useNotePanelState } from "../note-panel/useNotePanelState.js";
 import { LinksMode, type RevealPlace } from "../note-panel/links/LinksMode.js";
 import { useNoteLinks, type LinksChanges } from "../note-panel/links/useNoteLinks.js";
+import type { PreviewState } from "../preview/useCompiledDocument.js";
+import type { ShowHost } from "../slides/show-channel.js";
+import { ShowMenu } from "../slides/ShowMenu.js";
+import { useShowSession, type PreviewSnapshot } from "../slides/useShowSession.js";
+import type { CaptureSource } from "../capture/capture-source.js";
+import { CaptureSheet } from "../capture/CaptureSheet.js";
+import { DailyNav } from "../capture/DailyNav.js";
+import { useCapture } from "../capture/useCapture.js";
+import { useDailyNote } from "../capture/useDailyNote.js";
 
 /** Тексты заметок для связей, пока vault не открыт. */
 const NO_OPEN_TEXTS: readonly OpenText[] = [];
+
+/** Конец заметки: редактор прижимает строку и колонку к последним (фича 022). */
+const END_OF_NOTE: TextPlace = { line: 1_000_000_000, column: 1_000_000_000 };
 
 export interface WorkspaceProps {
   /**
@@ -175,6 +196,27 @@ export interface WorkspaceProps {
    * переживают перезапуск.
    */
   tabsStore?: WorkspaceTabsStore;
+  /**
+   * Показ слайдов (фича 019): хозяин канала окон показа. Приходит от оболочки по
+   * той же причине, что и `openVaultFolder`: окно показа — платформенное
+   * (`window.open` в web, `WebviewWindow` на рабочем столе, слой в памяти на
+   * Android). Не передан — кнопки «Показ» нет.
+   */
+  showHost?: ShowHost;
+  /**
+   * Выбор исходной папки импорта из Obsidian (фича 021, FR-001). Платформенный
+   * жест по той же причине, что и `openVaultFolder`: в браузере это
+   * `showDirectoryPicker` в режиме чтения, на рабочем столе и Android — диалог
+   * или обзор папок. Не передан — команды импорта нет; `available: false` —
+   * команда есть, а диалог называет причину.
+   */
+  pickImportSource?: ImportSourcePicker;
+  /**
+   * Приём «Поделиться» и ярлыков приложения (фича 022). Платформенный по той же
+   * причине, что и `showHost`: намерения Android недоступны ни из Rust, ни из JS.
+   * Не передан — приёма нет, а команды «Во входящие» и «Сегодня» работают везде.
+   */
+  captureSource?: CaptureSource;
 }
 
 /**
@@ -213,9 +255,12 @@ function WorkspaceView({
   cloneVault,
   device,
   tabsStore,
+  showHost,
+  pickImportSource,
+  captureSource,
 }: WorkspaceProps): React.JSX.Element {
   const contextMenu = useContextMenu();
-  const { t, tEn, formatNumber } = useI18n();
+  const { t, tEn, lang, formatNumber } = useI18n();
   const [operationError, setOperationError] = useState<VaultOperationError | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   // Экран 2 макета — отдельный вид, а не панель: граф занимает всё окно.
@@ -223,6 +268,12 @@ function WorkspaceView({
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Расширенный поиск (макет «Утилиты» § Поиск): ⌘⇧F и команда палитры.
   const [searchOpen, setSearchOpen] = useState(false);
+  // Условия по свойствам, с которыми открывается поиск (клик по тегу, фича 020).
+  const [searchConditions, setSearchConditions] = useState<Condition[]>([]);
+  // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
+  const [selectRequest, setSelectRequest] = useState<{ id: number; conditions: Condition[] } | null>(null);
+  // select.typ правили вручную и оставили как есть: предупреждение в колонке свойств.
+  const [libraryCustomized, setLibraryCustomized] = useState(false);
   // Галерея заготовок (макет «Утилиты» § Шаблоны, фича 003): ⌘⇧T и команда
   // палитры.
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -375,6 +426,12 @@ function WorkspaceView({
   // Android хранилища устройства нет).
   const vaultSettings = useVaultSettings(clientForConflicts);
   const shortcuts = useShortcuts(clientForConflicts, vaultSettings.overrides);
+
+  // Настройки графа (фича 025) общие для экрана графа и режима колонки: ключ `graph` в vault.json.
+  const graphSettings = useGraphSettings(vaultSettings.overrides, vaultSettings.setGraph);
+  const [graphScope, setGraphScope] = useState<GraphScope>("vault");
+  const [graphDepth, setGraphDepth] = useState(2);
+  const [columnDepth, setColumnDepth] = useState(1);
 
   // Размер шрифта редактора доходит до CodeMirror переменной на корне
   // документа. Применяется здесь, а не в панели настроек: панель платформенная
@@ -617,6 +674,28 @@ function WorkspaceView({
     return parts.length === 0 ? null : parts.join(" · ");
   }, [notePanelOpen, backlinkCount, mentionCount, t]);
 
+  // ── Свойства заметки и выборки (фича 020) ───────────────────────────────
+  const propertiesActive = notePanelOpen && notePanel.mode === "properties";
+  const noteProperties = useNoteProperties(
+    state.client?.properties ?? null,
+    openNotePath,
+    editorText,
+    view === "workspace" && propertiesActive,
+  );
+  const propertiesWorkspace = usePropertiesWorkspace({
+    client: state.client,
+    notePath: openNotePath,
+    text: editorText,
+    revision: linksRevision,
+    getEditorView,
+    onRebuild: () => setRebuildToken((token) => token + 1),
+  });
+  const pickTag = useCallback((tag: string) => {
+    setSearchConditions([{ kind: "TagHas", tag }]);
+    setNoteSheetOpen(false);
+    setSearchOpen(true);
+  }, []);
+
   // ── Синхронизация (фича 011) ─────────────────────────────────────────────
   //
   // Хук живёт здесь, а не в панели: индикатор виден и при закрытой панели, а
@@ -663,6 +742,15 @@ function WorkspaceView({
   const syncSnapshot = sync?.snapshot;
   const syncPush = sync?.push;
   const syncPull = sync?.pull;
+
+  // Импорт из Obsidian (фича 021). Снимок после него предлагается, если история
+  // включена (011): импортированное откатывается одним шагом.
+  const importer = useImport(state.client, pickImportSource);
+  const importSnapshot = syncOverview?.history.kind === "Local" ? syncSnapshot : undefined;
+  const importTakeSnapshot = useMemo(
+    () => (importSnapshot === undefined ? null : (message: string) => importSnapshot(null, message)),
+    [importSnapshot],
+  );
 
   // Возврат версии открытой заметки — правкой редактора, чтобы её отменял
   // обычный `Ctrl+Z` (FR-011). Для файла, не открытого в редакторе, версию
@@ -746,6 +834,15 @@ function WorkspaceView({
   // отказ уйти с недописанной делает хук вкладок.
   const openEntry = useCallback((next: Note) => void openTab(next.path), [openTab]);
 
+  // Щелчок по узлу графа (фича 025): открыть заметку или доску и вернуться к рабочей области.
+  const openPathFromGraph = useCallback(
+    (path: string) => {
+      void openTab(path);
+      setView("workspace");
+    },
+    [openTab],
+  );
+
   // Перенос в дереве (фича 023, FR-020): открытый файл остаётся открытым под
   // новым путём. Вкладки и документы переезжают сами — по событиям
   // `NoteRenamed`, которые ядро шлёт на каждый перенесённый файл (фича 014:
@@ -776,6 +873,42 @@ function WorkspaceView({
     [state.notes, openTab],
   );
 
+  // Показ слайдов (фича 019). Состоянием показа владеет это окно: сборку
+  // открытой заметки ему отдаёт панель предпросмотра (`onBuild`), каретку —
+  // редактор, выход ставит каретку на показанный слайд тем же `revealPlace`,
+  // что переход к ошибке.
+  const [previewBuild, setPreviewBuild] = useState<PreviewSnapshot | null>(null);
+  const noteBuild = useCallback((notePath: string, buildState: PreviewState) => {
+    setPreviewBuild({ notePath, state: buildState });
+  }, []);
+  // Окно показа не открылось (блокировщик): тост с «Открыть ещё раз».
+  const [showBlocked, setShowBlocked] = useState<{ retry: () => void } | null>(null);
+  const showSession = useShowSession({
+    host: showHost ?? null,
+    slides: state.client?.slides ?? null,
+    notePath: openNotePath,
+    preview: previewBuild,
+    caret: () => getEditorView?.()?.state.selection.main.head,
+    locale: lang,
+    reveal: (place) => {
+      window.focus();
+      revealPlace(place);
+    },
+    focusEditor: () => {
+      window.focus();
+      window.setTimeout(() => getEditorView?.()?.focus(), 0);
+    },
+    onBlocked: (retry) => setShowBlocked({ retry }),
+  });
+  const startShowSession = showSession.start;
+  const startShow = useCallback(
+    (from: "caret" | "first", withPresenter: boolean) => {
+      setShowBlocked(null);
+      void startShowSession(from, withPresenter);
+    },
+    [startShowSession],
+  );
+
   // Перейти можно только к файлу, который редактор открывает, — то есть к
   // заметке из индекса vault.
   const canRevealPath = useCallback(
@@ -803,6 +936,44 @@ function WorkspaceView({
           />
         ),
       },
+      {
+        id: "properties",
+        title: "properties.mode",
+        badge: null,
+        render: () => (
+          <PropertiesMode
+            key={activePath ?? ""}
+            hasTarget={active !== null && !isBoardOpen}
+            note={activeNote}
+            properties={noteProperties.properties}
+            readOnly={state.accessState === "readOnly"}
+            libraryCustomized={libraryCustomized}
+            onEdit={propertiesWorkspace.applyEdit}
+            onReveal={revealPlace}
+            onPickTag={pickTag}
+          />
+        ),
+      },
+      {
+        id: "graph",
+        title: "graph.panelMode",
+        badge: null,
+        render: () => (
+          <LocalGraphMode
+            client={state.client}
+            currentPath={activePath}
+            settings={graphSettings.settings}
+            depth={columnDepth}
+            onDepthChange={setColumnDepth}
+            onOpenPath={openPathFromGraph}
+            onOpenAll={() => {
+              setGraphScope("local");
+              setGraphDepth(columnDepth);
+              setView("graph");
+            }}
+          />
+        ),
+      },
     ],
     [
       linksBadge,
@@ -813,6 +984,16 @@ function WorkspaceView({
       notePanel.mentionsExpanded,
       notePanel.setMentionsExpanded,
       revealPlace,
+      activeNote,
+      isBoardOpen,
+      noteProperties.properties,
+      libraryCustomized,
+      propertiesWorkspace.applyEdit,
+      pickTag,
+      state.client,
+      graphSettings.settings,
+      columnDepth,
+      openPathFromGraph,
     ],
   );
 
@@ -851,8 +1032,134 @@ function WorkspaceView({
    */
   const openPath = useCallback(async (path: string) => openTab(path), [openTab]);
 
+  // Отчёт импорта (фича 021) записан ядром, но список заметок узнаёт о нём по
+  // событию чуть позже: открытие ждёт его появления (до 3 с), иначе вкладка не откроется.
+  const notesRef = useRef(state.notes);
+  notesRef.current = state.notes;
+  const openImportReport = useCallback(
+    async (path: string) => {
+      for (
+        let waited = 0;
+        waited < 30 && !notesRef.current.some((note) => note.path === path);
+        waited += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await openPath(path);
+    },
+    [openPath],
+  );
+
   /** Переход от вставки в тексте к её доске на полотне (FR-025). */
   const openBoard = useCallback((boardPath: string) => void openTab(boardPath), [openTab]);
+
+  // ── Быстрый захват и «Сегодня» (фича 022) ────────────────────────────────
+  //
+  // Правила — в ядре; здесь только открытие заметки, правка буфера открытой
+  // заметки и показ листа. «Сегодня» и «Во входящие» работают во всех оболочках,
+  // приём «Поделиться» — только если оболочка дала `captureSource`.
+  // Каретка в конец и фокус редактору. Свежесозданная заметка приходит событиями
+  // vault уже после открытия, и редактор успевает пересоздаться: поэтому
+  // просьба живёт недолго и исполняется на каждый новый редактор этой заметки.
+  const [endFocus, setEndFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (endFocus === null) return undefined;
+    const timer = window.setTimeout(() => setEndFocus(null), 1500);
+    return () => window.clearTimeout(timer);
+  }, [endFocus]);
+  const activeRead = activeSnapshot.read;
+  const getEditorViewRef = useRef(getEditorView);
+  getEditorViewRef.current = getEditorView;
+  useEffect(() => {
+    if (endFocus === null || endFocus !== openNotePath || activeRead !== "ready") return undefined;
+    const settle = (): void => {
+      const view = getEditorViewRef.current?.() ?? null;
+      if (view === null || view.hasFocus) return;
+      view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+      view.focus();
+    };
+    settle();
+    const interval = window.setInterval(settle, 80);
+    // Пользователь взялся за мышь или клавиатуру сам — больше не вмешиваемся.
+    const release = (): void => setEndFocus(null);
+    window.addEventListener("pointerdown", release, true);
+    window.addEventListener("keydown", release, true);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("pointerdown", release, true);
+      window.removeEventListener("keydown", release, true);
+    };
+  }, [endFocus, openNotePath, activeRead]);
+  const openAtEnd = useCallback(
+    async (path: string) => {
+      setEndFocus(path);
+      setExportOpen(false);
+      setNoteSheetOpen(false);
+      setView("workspace");
+      await openTab(path, END_OF_NOTE);
+    },
+    [openTab],
+  );
+  const daily = useDailyNote({
+    client: state.client,
+    overrides: vaultSettings.overrides,
+    activePath: openNotePath,
+    revision: linksRevision,
+    openAtEnd,
+    onCreated: () => void refresh(),
+    notify: contextMenu.notify,
+    t,
+  });
+  const recentNotes = useMemo(
+    () => [
+      ...new Set(
+        (layout?.groups ?? [])
+          .flatMap((group) => group.tabs)
+          .filter((tab) => tab.kind !== "Board")
+          .map((tab) => tab.path),
+      ),
+    ],
+    [layout],
+  );
+  const capture = useCapture({
+    client: state.client,
+    vaultOpening: state.isLoading,
+    source: captureSource,
+    openTextOf: (path) => {
+      const document = registry?.get(path);
+      return document !== undefined && document.snapshot().read === "ready"
+        ? document.text()
+        : undefined;
+    },
+    applyEdit: async (path, edit, expected) => {
+      const document = registry?.get(path);
+      if (document === undefined || document.text() !== expected) return false;
+      const view = path === openNotePath ? (getEditorView?.() ?? null) : null;
+      if (view !== null && view.state.doc.toString() === expected) {
+        // Открытая в редакторе заметка получает захват правкой, которую можно
+        // отменить, а сохраняется обычным автосохранением (FR-004).
+        view.dispatch({
+          changes: { from: edit.from, to: edit.to, insert: edit.insert },
+          userEvent: "input",
+        });
+      } else {
+        document.replace(`${expected.slice(0, edit.from)}${edit.insert}${expected.slice(edit.to)}`, false);
+      }
+      await document.flush();
+      return true;
+    },
+    recent: recentNotes,
+    onWritten: () => void refresh(),
+    onToday: () => void daily.openToday(),
+  });
+  const dailyPosition = daily.position;
+  const dailyOpenToday = daily.openToday;
+  const dailyOpenPrevious = daily.openPrevious;
+  const dailyOpenNext = daily.openNext;
+  const openManualCapture = capture.openManual;
+  const captureSheet = capture.sheet !== null && (
+    <CaptureSheet model={capture.sheet} vaultName={state.client?.rootName ?? null} />
+  );
 
   /**
    * Создать доску, когда вставлять пока нечего (US2 AS2). Создание идёт тем же
@@ -1043,6 +1350,14 @@ function WorkspaceView({
       } else if (shortcuts.matches("export-center", event)) {
         event.preventDefault();
         setExportOpen((open) => !open);
+      } else if (shortcuts.matches("today", event)) {
+        // Фича 022: ежедневная заметка на сегодня.
+        event.preventDefault();
+        void daily.openToday();
+      } else if (showHost !== undefined && shortcuts.matches("start-show", event)) {
+        // Показ слайдов (019): «с текущего слайда» у открытой заметки.
+        event.preventDefault();
+        if (view === "workspace" && openNotePath !== null) startShow("caret", false);
       } else if (syncClient !== null && shortcuts.matches("sync-open-panel", event)) {
         event.preventDefault();
         setSyncPanel((open) => (open === null ? { focus: null } : null));
@@ -1079,6 +1394,10 @@ function WorkspaceView({
     syncPush,
     syncPull,
     openNotePath,
+    daily.openToday,
+    showHost,
+    startShow,
+    view,
   ]);
 
   /**
@@ -1164,6 +1483,68 @@ function WorkspaceView({
         meta: shortcuts.displayOf("element-params"),
         run: () => setParamsRequest((request) => request + 1),
       });
+    }
+    // Фича 019. Показ слайдов — только у открытой заметки Typst и там, где
+    // оболочка умеет открывать окно показа.
+    if (view === "workspace" && openNotePath !== null && showHost !== undefined) {
+      items.push(
+        {
+          id: "show-current",
+          ...titled("slides.command.fromCurrent"),
+          icon: "play",
+          meta: shortcuts.displayOf("start-show"),
+          run: () => startShow("caret", false),
+        },
+        {
+          id: "show-first",
+          ...titled("slides.command.fromStart"),
+          icon: "start",
+          run: () => startShow("first", false),
+        },
+      );
+      if (showHost.supports.presenter) {
+        items.push({
+          id: "show-presenter",
+          ...titled("slides.command.withPresenter"),
+          icon: "presenter",
+          run: () => startShow("caret", true),
+        });
+      }
+    }
+    // Фича 022. «Сегодня» и «Во входящие» — во всех оболочках; соседние дни —
+    // у открытой ежедневной заметки, и только в ту сторону, где заметка есть.
+    if (state.client !== null) {
+      items.push(
+        {
+          id: "capture-today",
+          ...titled("capture.command.today"),
+          icon: "page",
+          meta: shortcuts.displayOf("today"),
+          run: () => void dailyOpenToday(),
+        },
+        {
+          id: "capture-inbox",
+          ...titled("capture.command.inbox"),
+          icon: "plus",
+          run: openManualCapture,
+        },
+      );
+      if (view === "workspace" && dailyPosition?.previous != null) {
+        items.push({
+          id: "daily-previous",
+          ...titled("capture.command.previousDay"),
+          icon: "chevron",
+          run: () => void dailyOpenPrevious(),
+        });
+      }
+      if (view === "workspace" && dailyPosition?.next != null) {
+        items.push({
+          id: "daily-next",
+          ...titled("capture.command.nextDay"),
+          icon: "chevron",
+          run: () => void dailyOpenNext(),
+        });
+      }
     }
     // Фича 014. Команды вкладок: каждая доступна, только если ядро говорит, что
     // действие возможно (FR-020); без сочетания по умолчанию — «закрыть остальные»,
@@ -1297,6 +1678,16 @@ function WorkspaceView({
         run: () => setExportOpen(true),
       });
     }
+    // Фича 021. Команда видна и там, где папку выбрать нельзя: диалог называет
+    // причину (C5). Нужен открытый vault и не идущий сейчас импорт.
+    if (importer.offered && state.client !== null) {
+      items.push({
+        id: "import-obsidian",
+        ...titled("import.command"),
+        icon: "folder",
+        run: importer.openDialog,
+      });
+    }
     // Фича 011. Команды синхронизации — пока vault открыт с ней. Обмен и
     // история заметки предлагаются только там, где они возможны: мёртвая
     // строка в палитре хуже её отсутствия; почему действие недоступно,
@@ -1388,12 +1779,22 @@ function WorkspaceView({
     sidebarHidden,
     showSidebar,
     exportCurrent,
+    showHost,
+    startShow,
     syncClient,
     syncOverview,
     syncSnapshot,
     syncPush,
     syncPull,
     openClone,
+    importer.offered,
+    importer.openDialog,
+    state.client,
+    dailyPosition,
+    dailyOpenToday,
+    dailyOpenPrevious,
+    dailyOpenNext,
+    openManualCapture,
     t,
     tEn,
   ]);
@@ -1414,21 +1815,27 @@ function WorkspaceView({
 
   if (!state.client) {
     return (
-      <main className="ts-welcome">
-        <h1 className="ts-welcome__mark">
-          <span className="ts-wordmark__slash">/</span>typsidian
-        </h1>
-        <p>{t("workspace.welcome")}</p>
-        <OpenVault
-          isLoading={state.isLoading}
-          error={state.error}
-          onOpen={openVault}
-          last={offered}
-          {...(offered ? { onOpenLast: () => void openVaultWith(offered.open) } : {})}
-          onClone={openClone ?? undefined}
-        />
-        {cloneDialog}
-      </main>
+      <>
+        <main className="ts-welcome">
+          <h1 className="ts-welcome__mark">
+            <span className="ts-wordmark__slash">/</span>typsidian
+          </h1>
+          <p>{t("workspace.welcome")}</p>
+          <OpenVault
+            isLoading={state.isLoading}
+            error={state.error}
+            onOpen={openVault}
+            last={offered}
+            {...(offered ? { onOpenLast: () => void openVaultWith(offered.open) } : {})}
+            onClone={openClone ?? undefined}
+          />
+          {cloneDialog}
+        </main>
+        {/* Лист захвата без vault (макет D3) стоит рядом с экраном приветствия, а не
+            внутри: стили приветствия окрасили бы его текст. */}
+        {captureSheet !== false && <IconSprite />}
+        {captureSheet}
+      </>
     );
   }
 
@@ -1577,6 +1984,24 @@ function WorkspaceView({
             </button>
           )}
 
+          {/* Ход импорта из Obsidian, свёрнутый из карточки (021, C2). */}
+          {importer.run !== null && importer.running && importer.run.minimized && (
+            <button
+              type="button"
+              className="ts-export-pill"
+              title={t("import.progress.expand")}
+              onClick={importer.toggleMinimized}
+            >
+              <span className="ts-hazard" aria-hidden="true">
+                <span className="ts-hazard__fill" />
+              </span>
+              {t("import.pill", {
+                done: importer.run.state?.next ?? 0,
+                total: importer.run.state?.total ?? 0,
+              })}
+            </button>
+          )}
+
           {/* Индикатор синхронизации (011 FR-035): в шапке, а не в статус-баре
               редактора — того нет при открытой доске и в графе, а состояние
               обмена должно быть видно всегда. */}
@@ -1605,6 +2030,21 @@ function WorkspaceView({
               <Icon name="tab" size={14} />
               {formatNumber(layout.tab_count)}
             </button>
+          )}
+
+          {/* «Сегодня» и ‹ › у ежедневной заметки (022, макет D4). */}
+          {view === "workspace" && (
+            <DailyNav daily={daily} todayShortcut={shortcuts.displayOf("today")} />
+          )}
+
+          {/* Показ слайдов (019, макет A1): только у открытой заметки Typst. */}
+          {view === "workspace" && showHost !== undefined && openNotePath !== null && (
+            <ShowMenu
+              canPresent={showHost.supports.presenter}
+              shortcut={shortcuts.displayOf("start-show")}
+              active={showSession.active}
+              onStart={startShow}
+            />
           )}
 
           {/* Колонка заметки (013): на узком окне кнопка подписана названием
@@ -1683,6 +2123,30 @@ function WorkspaceView({
         />
         <BulkChangeIndicator active={state.bulkChangeDepth > 0} />
         <ErrorBanner error={operationError} onDismiss={() => setOperationError(null)} />
+        {showBlocked !== null && (
+          <div role="alert">
+            <p>{t("slides.blocked")}</p>
+            <button
+              type="button"
+              className="ts-btn"
+              onClick={() => {
+                const { retry } = showBlocked;
+                setShowBlocked(null);
+                retry();
+              }}
+            >
+              {t("slides.reopen")}
+            </button>
+            <button
+              type="button"
+              className="ts-btn ts-btn--ghost"
+              aria-label={t("slides.dismiss")}
+              onClick={() => setShowBlocked(null)}
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        )}
         {exporter.last !== null && (
           <ExportToast
             result={exporter.last}
@@ -1696,12 +2160,13 @@ function WorkspaceView({
       {view === "graph" ? (
         <GraphView
           client={state.client}
-          notes={state.notes}
           currentPath={activePath}
-          onOpenNote={(note) => {
-            openEntry(note);
-            setView("workspace");
-          }}
+          settings={graphSettings}
+          scope={graphScope}
+          onScopeChange={setGraphScope}
+          depth={graphDepth}
+          onDepthChange={setGraphDepth}
+          onOpenPath={openPathFromGraph}
           onBack={toggleView}
         />
       ) : (
@@ -1789,6 +2254,8 @@ function WorkspaceView({
               fontSize: editorFontSize,
               shortcuts,
               paramsRequest,
+              selectRequest,
+              onLibraryStatus: (status) => setLibraryCustomized(status === "Customized"),
             }}
             linksSummary={linksSummary ?? undefined}
             solo={!showPreview}
@@ -1840,6 +2307,8 @@ function WorkspaceView({
                 onReveal={revealPlace}
                 canReveal={canRevealPath}
                 onDependencies={notePreviewDependencies}
+                // Фича 019: показ слайдов следит за сборкой этой заметки.
+                onBuild={showHost === undefined ? undefined : noteBuild}
               />
             )}
           </>
@@ -1879,16 +2348,39 @@ function WorkspaceView({
         />
       )}
 
+      {propertiesWorkspace.reindex !== null && (
+        <div className="ts-reindex" role="status">
+          <span>
+            {t("properties.reindex.running", {
+              done: formatNumber(propertiesWorkspace.reindex.done),
+              total: formatNumber(propertiesWorkspace.reindex.total),
+            })}
+          </span>
+          <button type="button" className="ts-btn ts-btn--quiet" onClick={propertiesWorkspace.cancelReindex}>
+            {t("properties.reindex.cancel")}
+          </button>
+        </div>
+      )}
+
       {searchOpen && (
         <SearchOverlay
           client={state.client}
           currentNote={activeNote}
+          initialConditions={searchConditions}
+          onInsertSelection={(conditions) => {
+            setSearchOpen(false);
+            setSearchConditions([]);
+            setSelectRequest((current) => ({ id: (current?.id ?? 0) + 1, conditions }));
+          }}
           onOpenNote={(path) => {
             const note = state.notes.find((entry) => entry.path === path);
             if (note) openEntry(note);
             setView("workspace");
           }}
-          onClose={() => setSearchOpen(false)}
+          onClose={() => {
+            setSearchOpen(false);
+            setSearchConditions([]);
+          }}
         />
       )}
 
@@ -1904,6 +2396,24 @@ function WorkspaceView({
             setShowSettings(true);
           }}
           onReveal={revealPlace}
+        />
+      )}
+
+      {importer.dialogOpen && <ImportDialog control={importer} />}
+
+      {captureSheet}
+
+      {importer.run !== null && (
+        <ImportProgress
+          run={importer.run}
+          onCancel={importer.cancel}
+          onToggleMinimized={importer.toggleMinimized}
+          onDismiss={importer.dismissRun}
+          onOpenReport={(path) => {
+            importer.dismissRun();
+            void openImportReport(path);
+          }}
+          takeSnapshot={importTakeSnapshot}
         />
       )}
 

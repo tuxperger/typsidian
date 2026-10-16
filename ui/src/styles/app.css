@@ -2265,114 +2265,485 @@ input.ts-sources__url:focus {
   color: var(--steel-600);
 }
 
-/* ── Граф связей (handoff § Screens 2) ───────────────────────────────────── */
+/* ── Граф связей (фича 025, макет G1–G5) ─────────────────────────────────── */
 
 .ts-graph {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--steel-950);
 }
 
-.ts-graph__bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 0 0 var(--ts-header-h);
-  height: var(--ts-header-h);
-  padding: 0 var(--space-4);
-  border-bottom: var(--border-width) solid var(--border-default);
-}
-
-.ts-graph__title {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-sm);
-  color: var(--steel-200);
-}
-
-.ts-graph__count {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--steel-600);
-}
-
-.ts-graph__filter {
-  width: 220px;
-  height: 28px;
-}
-
-.ts-graph__legend {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--steel-500);
-}
-
-.ts-graph__legend span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.ts-graph__legend i {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-full);
+.ts-graph__stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
 }
 
 .ts-graph__canvas {
-  flex: 1;
-  min-height: 0;
   position: relative;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  /* Перетаскивание холста — курсор обязан об этом говорить до нажатия. */
-  cursor: grab;
-  touch-action: none;
+  background: radial-gradient(circle at 50% 45%, var(--steel-900) 0, var(--steel-950) 70%);
 }
 
-.ts-graph__canvas[data-panning="true"] {
-  cursor: grabbing;
-}
-
-.ts-graph__canvas svg {
+.ts-graph__surface {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+  cursor: grab;
 }
 
-.ts-graph__node {
+.ts-graph__surface[data-cursor="node"] {
   cursor: pointer;
 }
 
-.ts-graph__node:focus-visible {
-  outline: var(--border-width-thick) solid var(--focus-ring);
+.ts-graph__surface[data-cursor="drag"] {
+  cursor: grabbing;
 }
 
-/* Узлы и подписи, не прошедшие фильтр, гаснут, а не исчезают: пропажа половины
- * графа читалась бы как потеря связей. */
-.ts-graph__dim {
-  opacity: 0.22;
-}
-
-.ts-graph__label {
+.ts-graph__top {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
   pointer-events: none;
-  user-select: none;
+}
+
+.ts-graph__top > * {
+  pointer-events: auto;
+}
+
+.ts-graph__seg,
+.ts-graph__depth {
+  display: inline-flex;
+  align-items: center;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-graph__seg button,
+.ts-graph__depth button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--steel-400);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-graph__seg button:hover,
+.ts-graph__depth button:hover {
+  color: var(--steel-100);
+}
+
+.ts-graph__seg button[aria-pressed="true"] {
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+.ts-graph__depth {
+  gap: 2px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+}
+
+.ts-graph__depth button {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+}
+
+.ts-graph__depth button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--orange-500) 18%, transparent);
+  color: var(--orange-400);
+}
+
+.ts-graph__seg button:focus-visible,
+.ts-graph__depth button:focus-visible,
+.ts-graph__zoom button:focus-visible,
+.ts-graph__icon:focus-visible,
+.ts-graph__swatch:focus-visible,
+.ts-graph__link:focus-visible,
+.ts-graph__input:focus-visible,
+.ts-graph__slider input:focus-visible,
+.ts-graph__sheet-toggle:focus-visible {
+  outline: var(--border-width-thick) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ts-graph__count {
+  margin-left: auto;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--steel-950) 80%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-graph__zoom {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: grid;
+  gap: 2px;
+}
+
+.ts-graph__zoom button {
+  width: 28px;
+  height: 28px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+  color: var(--steel-300);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.ts-graph__zoom button:hover {
+  border-color: var(--orange-500);
+  color: var(--orange-400);
+}
+
+.ts-graph__sheet-toggle {
+  display: none;
 }
 
 .ts-graph__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   padding: var(--space-6);
   text-align: center;
-  color: var(--steel-500);
+  color: var(--steel-400);
+  font-size: var(--text-sm);
+}
+
+.ts-graph__empty > div {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  max-width: 36ch;
+}
+
+.ts-graph__empty b {
+  color: var(--steel-100);
+  font-weight: var(--weight-semibold);
+}
+
+/* Список узлов для чтения с экрана: вне потока и невидим, но доступен Tab. */
+.ts-graph__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  list-style: none;
+}
+
+.ts-graph__side {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  border-left: var(--border-width) solid var(--border-default);
+  background: color-mix(in srgb, var(--steel-950) 80%, black);
+}
+
+.ts-graph__panel {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-3);
   font-size: var(--text-xs);
+  color: var(--steel-300);
+}
+
+.ts-graph__sec {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-graph__sec--last {
+  border-bottom: 0;
+}
+
+.ts-graph__sec h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--steel-500);
+}
+
+.ts-graph__input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+  color: var(--steel-100);
+  font: inherit;
+}
+
+.ts-graph__input--code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ts-graph__toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--steel-200);
+}
+
+.ts-graph__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--orange-400);
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.ts-graph__link:hover {
+  text-decoration: underline;
+}
+
+.ts-graph__group {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ts-graph__group[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.ts-graph__group-row {
+  display: grid;
+  grid-template-columns: 14px 14px minmax(0, 1fr) 18px 18px 18px;
+  gap: 4px;
+  align-items: center;
+}
+
+.ts-graph__grip {
+  cursor: grab;
+  color: var(--steel-600);
+  text-align: center;
+  user-select: none;
+}
+
+.ts-graph__icon {
+  width: 18px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-400);
+  cursor: pointer;
+}
+
+.ts-graph__icon:hover:not(:disabled) {
+  color: var(--orange-400);
+}
+
+.ts-graph__icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.ts-graph__swatch {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--steel-400);
+  cursor: pointer;
+}
+
+.ts-graph__swatch[data-color="orange"] {
+  background: var(--orange-500);
+}
+
+.ts-graph__swatch[data-color="blue"] {
+  background: var(--blue-600);
+}
+
+.ts-graph__swatch[data-color="green"] {
+  background: var(--green-600);
+}
+
+.ts-graph__swatch[data-color="amber"] {
+  background: var(--amber-600);
+}
+
+.ts-graph__swatch[data-color="red"] {
+  background: var(--red-600);
+}
+
+.ts-graph__swatch[data-color="hivis"] {
+  background: var(--hivis-500);
+}
+
+.ts-graph__swatch[data-color="steel"] {
+  background: var(--steel-300);
+}
+
+.ts-graph__swatch[aria-checked="true"] {
+  box-shadow: 0 0 0 2px var(--steel-950), 0 0 0 3px var(--steel-100);
+}
+
+.ts-graph__palette {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-1) 18px;
+}
+
+.ts-graph__slider {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--steel-200);
+}
+
+.ts-graph__slider > span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.ts-graph__slider small {
+  font-family: var(--font-mono);
+  color: var(--steel-500);
+}
+
+.ts-graph__slider input {
+  width: 100%;
+  accent-color: var(--orange-500);
+}
+
+.ts-graph__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--steel-500);
+}
+
+.ts-graph__foot [data-state="failed"] {
+  color: var(--red-600);
+}
+
+.ts-graph__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--steel-200);
+}
+
+/* Режим колонки заметки «Граф» (макет G3). */
+.ts-graph-mode {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.ts-graph-mode__canvas {
+  position: relative;
+  height: 240px;
+  overflow: hidden;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-950);
+}
+
+.ts-graph-mode .ts-graph__depth {
+  justify-self: start;
+}
+
+.ts-graph-mode__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+/* Узкий экран: панель — шторка снизу (макет G5). */
+@media (max-width: 760px) {
+  .ts-graph__stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ts-graph__side {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 60%;
+    z-index: 2;
+    border-left: 0;
+    border-top: var(--border-width) solid var(--border-strong);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--steel-900);
+    transform: translateY(100%);
+    visibility: hidden;
+  }
+
+  .ts-graph__side[data-open="true"] {
+    transform: none;
+    visibility: visible;
+    padding-bottom: 44px;
+  }
+
+  .ts-graph__stage {
+    position: relative;
+  }
+
+  .ts-graph__sheet-toggle {
+    position: absolute;
+    left: var(--space-3);
+    bottom: var(--space-3);
+    display: inline-flex;
+    z-index: 3;
+  }
+
+  .ts-graph__zoom {
+    bottom: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ts-graph__side {
+    transition: transform 160ms ease, visibility 160ms;
+  }
 }
 
 /* ── Редактор кода: CodeMirror (handoff § Editor pane) ───────────────────── */
@@ -6746,4 +7117,1573 @@ button.ts-diagnostics__place:focus-visible {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── Показ слайдов (фича 019; макет A1–A8) ───────────────────────────────── */
+
+:root {
+  /* Поле вокруг слайда в показе: темнее фона приложения (макет: steel-950 на 60 %
+   * в чёрный). */
+  --ts-show-ground: color-mix(in srgb, var(--steel-950) 60%, black);
+  --ts-show-hud-bg: color-mix(in srgb, var(--steel-950) 88%, transparent);
+  --ts-show-scrim: color-mix(in srgb, var(--ts-show-ground) 55%, transparent);
+  --ts-thumb-w: 44px;
+  --ts-show-btn-h: 28px;
+}
+
+/* ── Кнопка «Показ» с меню (A1) ── */
+
+.ts-showmenu {
+  position: relative;
+}
+
+.ts-showmenu__split {
+  display: inline-flex;
+  border: var(--border-width) solid var(--accent);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ts-showmenu__split .ts-btn {
+  height: 26px;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--orange-400);
+}
+
+.ts-showmenu__split .ts-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.ts-showmenu__split .ts-btn + .ts-btn {
+  padding: 0 6px;
+  border-left: var(--border-width) solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.ts-showmenu__menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  width: 300px;
+  max-width: calc(100vw - var(--space-6));
+  display: grid;
+  padding: var(--space-1);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.ts-showmenu__item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-200);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-showmenu__item:hover,
+.ts-showmenu__item:focus-visible {
+  background: var(--steel-800);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.ts-showmenu__item:focus-visible {
+  box-shadow: inset 0 0 0 var(--border-width-thick) var(--focus-ring);
+}
+
+.ts-showmenu__label small {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.ts-showmenu__key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ── Страница-слайд ── */
+
+html.ts-show-document,
+html.ts-show-document body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--ts-show-ground);
+}
+
+.ts-slide-frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.ts-slide {
+  position: relative;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.ts-slide__paint {
+  position: absolute;
+  inset: 0;
+}
+
+.ts-slide__paint > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Окно показа (A2–A6) ── */
+
+.ts-show {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--ts-show-ground);
+  color: var(--steel-200);
+  user-select: none;
+}
+
+.ts-show__stage {
+  flex: 1 1 0;
+}
+
+.ts-show__hud {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - var(--space-4));
+  padding: var(--space-1);
+  background: var(--ts-show-hud-bg);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+  transition: opacity 160ms ease;
+}
+
+/* Прячется бездействием, но не из-под клавиатуры: фокус внутри держит панель. */
+.ts-show__hud--hidden:not(:focus-within) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ts-show__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ts-show-btn-h);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-300);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.ts-show__btn:hover {
+  background: var(--steel-800);
+  color: var(--text-primary);
+}
+
+.ts-show__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border-strong);
+}
+
+.ts-show__counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.ts-show__counter i {
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+.ts-show__banner {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - var(--space-6));
+  padding: 6px var(--space-3);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--steel-200);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.ts-show__banner-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ts-show__banner-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber-600);
+}
+
+.ts-show__banner--info .ts-show__banner-dot {
+  background: var(--info);
+}
+
+.ts-show__banner-action {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--orange-400);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-show__banner-action:hover {
+  color: var(--orange-200);
+  text-decoration: underline;
+}
+
+.ts-show__goto {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--ts-show-scrim);
+}
+
+.ts-show__goto-box {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  padding: var(--space-4) var(--space-6);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.ts-show__goto-num {
+  min-width: 3ch;
+  padding: 0 var(--space-2) var(--space-1);
+  border-bottom: var(--border-width-thick) solid var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  line-height: 1.2;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.ts-show__goto-box small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* A5: показывать нечего. */
+.ts-show--empty {
+  align-items: center;
+  justify-content: center;
+}
+
+.ts-show__empty {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  max-width: 46ch;
+  padding: var(--space-6);
+  text-align: center;
+  user-select: text;
+}
+
+.ts-show__empty-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.ts-show__empty-body {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.ts-show__diag {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-left: var(--border-width-thick) solid var(--danger);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ts-show__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+/* ── Телефон: зоны касания и полоса «Выйти» (A8) ── */
+
+.ts-show-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+}
+
+.ts-show--touch {
+  touch-action: pan-y;
+}
+
+.ts-show__zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ts-show__zone--prev {
+  left: 0;
+  width: 30%;
+}
+
+.ts-show__zone--menu {
+  left: 30%;
+  width: 40%;
+}
+
+.ts-show__zone--next {
+  right: 0;
+  width: 30%;
+}
+
+.ts-show__zone:focus-visible {
+  outline-offset: calc(var(--space-1) * -1);
+}
+
+.ts-show__topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: linear-gradient(var(--steel-950), transparent);
+}
+
+.ts-show__topbar .ts-show__counter {
+  margin-left: auto;
+}
+
+/* ── Вид докладчика (A7) ── */
+
+.ts-presenter {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--space-4);
+  background: var(--steel-950);
+  color: var(--steel-200);
+}
+
+.ts-presenter__top {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.ts-presenter__clock {
+  display: grid;
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.ts-presenter__clock small {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ts-presenter__clock--elapsed {
+  color: var(--orange-400);
+}
+
+.ts-presenter__counter {
+  font-size: var(--text-md);
+}
+
+.ts-presenter__stale {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.ts-presenter__current,
+.ts-presenter__side {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+}
+
+.ts-presenter__current {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.ts-presenter__side {
+  grid-template-rows: auto minmax(0, 0.7fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.ts-presenter__lbl {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ts-presenter__slide {
+  min-width: 0;
+  min-height: 0;
+}
+
+.ts-presenter__slide--current .ts-slide {
+  box-shadow: 0 0 0 var(--border-width-thick) var(--orange-500);
+}
+
+.ts-presenter__notes {
+  min-height: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+  color: var(--steel-100);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.ts-presenter__notes p {
+  margin: 0 0 var(--space-2);
+}
+
+.ts-presenter__bottom {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-presenter__strip {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  overflow-x: auto;
+}
+
+.ts-presenter__thumb {
+  display: block;
+  flex: none;
+  width: var(--ts-thumb-w);
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: var(--paper);
+  opacity: 0.35;
+  cursor: pointer;
+}
+
+.ts-presenter__thumb--done {
+  opacity: 0.6;
+}
+
+.ts-presenter__thumb:hover {
+  opacity: 0.85;
+}
+
+.ts-presenter__thumb--current {
+  opacity: 1;
+  outline: var(--border-width-thick) solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Узкое окно: колонки складываются, окно прокручивается. */
+@media (max-width: 900px) {
+  .ts-presenter {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .ts-presenter__slide {
+    height: 52vw;
+  }
+
+  .ts-presenter__current,
+  .ts-presenter__side {
+    grid-template-rows: auto;
+  }
+
+  .ts-presenter__notes {
+    min-height: 8em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-show__hud {
+    transition: none;
+  }
+}
+
+html.ts-presenter-document,
+html.ts-presenter-document body {
+  background: var(--steel-950);
+}
+
+/* Слайды в виде докладчика прижаты к началу ячейки, как в макете A7. */
+.ts-presenter__slide .ts-slide-frame {
+  place-items: start;
+}
+
+/* Узкое окно показа: подписи кнопок прячутся, подсказки переносятся. */
+@media (max-width: 520px) {
+  .ts-show__btn-label,
+  .ts-show__step {
+    display: none;
+  }
+
+  .ts-show__banner {
+    white-space: normal;
+  }
+}
+
+/* ── Свойства заметок и выборки (фича 020) ───────────────────────────────
+ *
+ * Макет 020, B1–B4: режим «Свойства» колонки заметки (`.ts-props*`), фишки
+ * условий в поиске (`.ts-search-cond*`), поля формы блока выборки
+ * (`.ts-select-form*`) и плашка пересчёта индекса (`.ts-reindex`). */
+
+.ts-props {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding: var(--space-3);
+}
+
+.ts-props__list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ts-props__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(48px, 84px) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 30px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.ts-props__row:hover,
+.ts-props__row:focus-within {
+  background: var(--steel-900);
+}
+
+.ts-props__glyph {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.ts-props__key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.ts-props__value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  min-width: 0;
+  color: var(--text-primary);
+  /* Место под кнопку удаления, чтобы она не налезала на значение. */
+  padding-right: var(--space-5);
+}
+
+.ts-props__row--builtin .ts-props__value {
+  padding-right: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ts-props__value--muted {
+  color: var(--text-muted);
+}
+
+.ts-props__input {
+  height: 26px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ts-props__input--chip {
+  width: 96px;
+  height: 22px;
+  border-radius: var(--radius-full);
+}
+
+.ts-props__check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.ts-props__remove {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+}
+
+.ts-props__row:hover .ts-props__remove,
+.ts-props__row:focus-within .ts-props__remove,
+.ts-props__remove:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .ts-props__remove {
+    opacity: 1;
+  }
+}
+
+.ts-props__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border: var(--border-width) solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--orange-400);
+  font-size: 11px;
+}
+
+.ts-props__chip--add {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ts-props__chip--add:hover {
+  color: var(--text-primary);
+}
+
+.ts-props__chipbtn,
+.ts-props__chipx {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+button.ts-props__chipbtn,
+.ts-props__chipx {
+  cursor: pointer;
+}
+
+.ts-props__chipx {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+}
+
+.ts-props__chipx:hover {
+  opacity: 1;
+}
+
+.ts-props__unknown {
+  display: grid;
+  min-width: 0;
+}
+
+.ts-props__code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.ts-props__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ts-props__add {
+  justify-self: start;
+  color: var(--text-muted);
+}
+
+.ts-props__newform {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+}
+
+.ts-props__newactions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.ts-props__sub {
+  margin-top: var(--space-2);
+}
+
+.ts-props__foot {
+  margin: var(--space-2) 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Плашка B2: запись не разбирается, форма выключена. */
+.ts-props__warn {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid color-mix(in srgb, var(--warning) 50%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  font-size: var(--text-xs);
+  color: var(--steel-200);
+}
+
+.ts-props__warn b {
+  color: var(--warning);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-props__warn .ts-btn {
+  justify-self: start;
+}
+
+.ts-props__warn--plain {
+  margin: 0;
+}
+
+/* Фишки условий в поиске (B3). */
+.ts-search-cond {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-search-cond__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-800);
+  color: var(--steel-200);
+  font-size: var(--text-xs);
+}
+
+.ts-search-cond__name {
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.ts-search-cond__x {
+  display: inline-flex;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ts-search-cond__x:hover {
+  color: var(--text-primary);
+}
+
+.ts-search-cond__select {
+  margin-left: auto;
+}
+
+/* Поля формы блока выборки (B4). */
+.ts-select-form__conds,
+.ts-select-form__cols,
+.ts-select-form__order {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ts-select-form__cols {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ts-select-form__order {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.ts-select-form__cond {
+  display: grid;
+  grid-template-columns: minmax(72px, 110px) minmax(0, 1fr) auto;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.ts-select-form__cmp {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ts-select-form__wide {
+  width: 100%;
+  min-width: 0;
+}
+
+.ts-select-form__add {
+  justify-self: start;
+  color: var(--text-muted);
+}
+
+.ts-select-form__count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  .ts-select-form__cond {
+    grid-template-columns: 1fr auto;
+  }
+
+  .ts-select-form__cond > select {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Пересчёт индекса свойств: фоновый, с отменой (принцип X). */
+.ts-reindex {
+  position: fixed;
+  left: var(--space-4);
+  bottom: calc(var(--ts-bar-h) + var(--space-3));
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  box-shadow: var(--shadow-lg);
+  color: var(--steel-200);
+  font-size: var(--text-xs);
+}
+
+/* ── Импорт из Obsidian (фича 021; макет — артборды C1–C5) ─────────────────── */
+
+.ts-import {
+  width: min(560px, 92vw);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.ts-import .ts-dialog__head,
+.ts-import .ts-dialog__foot {
+  margin: 0;
+}
+
+.ts-import__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-import__path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px var(--space-2);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  color: var(--steel-200);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-import__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-import__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  min-height: 1.5em;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  color: var(--steel-400);
+  font-size: var(--text-xs);
+}
+
+.ts-import__facts:empty {
+  display: none;
+}
+
+.ts-import__facts b {
+  color: var(--steel-100);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-import__note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  color: var(--steel-300);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+.ts-import__note--warn {
+  border-left: 2px solid var(--warning);
+}
+
+.ts-import__choices {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ts-import__choices > legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.ts-import__choice {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: var(--space-2);
+  align-items: start;
+  color: var(--steel-200);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.ts-import__choice > input {
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.ts-import__choice small {
+  display: block;
+  color: var(--steel-500);
+  font-size: 11px;
+}
+
+/* Карточка хода: в углу рабочей области, как у пакетного экспорта (C2). */
+.ts-import-card {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-4);
+  z-index: 45;
+  display: grid;
+  gap: var(--space-2);
+  width: 320px;
+  max-width: calc(100% - 2 * var(--space-3));
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  box-shadow: var(--shadow-lg);
+  color: var(--steel-300);
+  font-size: var(--text-xs);
+}
+
+.ts-import-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.ts-import-card__head > b {
+  color: var(--steel-100);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.ts-import-card__count {
+  margin-left: auto;
+  color: var(--steel-400);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-import-card__bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--steel-800);
+}
+
+.ts-import-card__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.ts-import-card__current {
+  overflow: hidden;
+  color: var(--steel-500);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-import-card__tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--steel-400);
+  font-size: 11px;
+}
+
+.ts-import-card__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+}
+
+.ts-import-card__dot--clean {
+  background: var(--success);
+}
+
+.ts-import-card__dot--lossy {
+  background: var(--warning);
+}
+
+.ts-import-card__dot--skipped {
+  background: var(--steel-500);
+}
+
+.ts-import-card__dot--resumed {
+  background: var(--info);
+}
+
+.ts-import-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-import-card__problems {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ts-import-card__problems ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ts-import-card__problems li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--warning);
+}
+
+.ts-import-card__source,
+.ts-import-card__reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-import-card__source {
+  color: var(--steel-200);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ts-import-card__reason {
+  color: var(--steel-500);
+  font-size: 11px;
+}
+
+.ts-import-card__offer {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+@media (max-width: 720px) {
+  .ts-import-card {
+    left: var(--space-3);
+    width: auto;
+  }
+}
+
+/* ── Быстрый захват и ежедневные заметки (фича 022, макет D1–D6) ─────────── */
+
+/* Лист захвата: поверх рабочей области, прижат к низу. На узком окне — во всю
+ * ширину, на широком — той же шириной по центру. */
+.ts-capture__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(11, 13, 15, 0.55);
+}
+
+.ts-capture {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  z-index: 101;
+  width: min(100%, 440px);
+  max-height: 92vh;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 10px var(--space-4) var(--space-4);
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--shadow-xl);
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+}
+
+.ts-capture__grab {
+  justify-self: center;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--steel-600);
+}
+
+.ts-capture__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-capture__title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-100);
+}
+
+.ts-capture__vault {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-capture__head .ts-btn {
+  flex: 0 0 auto;
+}
+
+.ts-capture__vault + .ts-btn {
+  margin-left: 0;
+}
+
+.ts-capture__title + .ts-btn {
+  margin-left: auto;
+}
+
+.ts-capture__what {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.ts-capture__what b {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--steel-100);
+  overflow-wrap: anywhere;
+}
+
+.ts-capture__what-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.ts-capture__what small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--steel-500);
+}
+
+.ts-capture__thumb {
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ts-capture__thumb img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+}
+
+.ts-capture__thumb figcaption {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--steel-500);
+}
+
+.ts-capture__text,
+.ts-capture__note {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--steel-100);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.ts-capture__text {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.ts-capture__text::placeholder,
+.ts-capture__note::placeholder {
+  color: var(--steel-500);
+}
+
+.ts-capture__text:focus,
+.ts-capture__note:focus {
+  outline: none;
+  border-color: var(--orange-500);
+}
+
+.ts-capture__warn {
+  display: grid;
+  gap: var(--space-1);
+  padding: 8px 10px;
+  color: var(--steel-200);
+  background: color-mix(in srgb, var(--amber-600) 10%, transparent);
+  border: var(--border-width) solid color-mix(in srgb, var(--amber-600) 50%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.ts-capture__warn strong {
+  color: var(--amber-600);
+}
+
+.ts-capture__dest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+/* Переключатель «входящие / сегодня / недавние» и вида записи в настройках. */
+.ts-capture__seg {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--steel-300);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ts-capture__seg:hover {
+  border-color: var(--steel-500);
+  color: var(--steel-100);
+}
+
+.ts-capture__seg[aria-pressed="true"],
+.ts-capture__seg[data-active="true"] {
+  border-color: var(--orange-500);
+  background: color-mix(in srgb, var(--orange-500) 16%, transparent);
+  color: var(--orange-400);
+}
+
+.ts-capture__seg:focus-visible,
+.ts-daily__today:focus-visible,
+.ts-daily__step:focus-visible {
+  outline: 2px solid var(--orange-400);
+  outline-offset: 2px;
+}
+
+.ts-capture__seg--select {
+  max-width: 100%;
+  background: var(--steel-900);
+}
+
+.ts-capture__actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.ts-capture__primary {
+  width: 100%;
+  height: 40px;
+  justify-content: center;
+  font-size: var(--text-sm);
+}
+
+.ts-capture__hint {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--steel-500);
+  overflow-wrap: anywhere;
+}
+
+/* «Сегодня» и ‹ › в шапке (D4). */
+.ts-daily {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ts-daily__date {
+  min-width: 0;
+  padding: 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--steel-200);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ts-daily__step:disabled {
+  opacity: 0.4;
+}
+
+/* Настройки захвата (D6). */
+.ts-capture-settings__input {
+  flex: 0 0 min(260px, 50%);
+  width: min(260px, 50%);
+}
+
+.ts-capture-settings__segs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.ts-capture-settings__sample {
+  display: grid;
+  gap: var(--space-1);
+  padding: 10px 0;
+}
+
+.ts-capture-settings__line {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--steel-950);
+  border: var(--border-width) dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-300);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .ts-daily__date {
+    max-width: 22ch;
+  }
+
+  .ts-capture-settings__input {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  label.ts-capture-settings__row,
+  .ts-capture-settings .ts-srow {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ts-capture,
+  .ts-capture__seg {
+    transition: none;
+  }
+}
+
+/* Дата между ‹ › нужна там, где шапке хватает места: на среднем окне остаются
+ * кнопки и название соседа в подсказке. */
+@media (min-width: 721px) and (max-width: 1600px) {
+  .ts-daily__date {
+    display: none;
+  }
+}
+
+.ts-daily__today,
+.ts-daily__step {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Лист захвата стоит и рядом с экраном приветствия: выравнивание и цвета ему
+ * заданы самим, а не унаследованы. */
+.ts-capture {
+  text-align: left;
+}
+
+.ts-capture__warn span {
+  color: var(--steel-200);
 }

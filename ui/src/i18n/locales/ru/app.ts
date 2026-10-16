@@ -13,6 +13,18 @@ export const app: Translation<typeof en> = {
   "app.noteOutsideVault": (p) => `${p.path}: заметка вне папки vault`,
   "app.buildTimedOut": (p) =>
     `Сборка остановлена: она шла дольше ${p.seconds} с. Проверьте, нет ли в документе бесконечного цикла.`,
+  "app.slidesEmptyDeck": "Показывать нечего: в документе нет страниц.",
+  "app.captureRefused": (p) => `Захват не сохранён: ${p.reason}. Он остаётся в очереди.`,
+  "app.capture.tooLarge": "заметка стала бы больше поддерживаемого размера",
+  "app.capture.readOnly": "vault только для чтения",
+  "app.capture.noVault": "vault не выбран или недоступен",
+  "app.capture.conflict": "заметку меняли во время сохранения",
+  "app.capture.unsavedElsewhere": "у заметки есть несохранённые правки в другом месте",
+  "app.capture.targetMissing": "выбранной заметки больше нет",
+  "app.capture.invalidTarget": "назначение — не заметка vault",
+  "app.capture.badImage": "картинки нет или её формат не поддерживается",
+  "app.capture.empty": "захватывать нечего",
+  "app.capture.io": "диск отказал в записи",
   "app.vaultUnavailable":
     "Папка vault недоступна: связанные файлы и шрифты не прочитаны, вид может быть неполным. Текст в редакторе сохранён.",
   "app.resolve.notFound": "файл не найден",

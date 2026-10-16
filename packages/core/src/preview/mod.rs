@@ -44,7 +44,7 @@ pub use compile::{
     BUILD_TIME_LIMIT_SECS,
 };
 #[cfg(feature = "test-support")]
-pub use compile::{document_headings, DocumentHeading};
+pub use compile::{document_headings, time_slides_collect, DocumentHeading};
 pub use diagnostics::{Diagnostic, DiagnosticLocation, DiagnosticSeverity};
 pub use fonts::FontSet;
 pub use pages::{render_pages, RenderedPage};

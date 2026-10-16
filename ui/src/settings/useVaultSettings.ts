@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { VaultClient } from "../vault-client.js";
-import type { Phrase, Translate } from "../i18n/index.js";
+import type { MessageKey, Phrase, Translate } from "../i18n/index.js";
 import type {
   AssetsPlacement,
+  CaptureOverrides,
+  GraphSettings,
   CommandId,
   SettingsChange,
   Shortcut,
@@ -48,6 +50,15 @@ export interface VaultSettingsState {
    * папка отклоняется с причиной, и прежнее значение остаётся (FR-029).
    */
   setExportFolder: (folder: string | null) => Promise<boolean>;
+  /**
+   * Настройки захвата и ежедневных заметок (фича 022, FR-010): таблица
+   * `capture` целиком. Годность путей и нормальную форму проверяет ядро при
+   * записи: негодный путь отклоняется с причиной, прежнее значение остаётся.
+   * Пустые поля ядро читает как «не задано».
+   */
+  setCapture: (capture: CaptureOverrides) => Promise<boolean>;
+  /** Настройки графа связей (фича 025): таблица `graph` целиком, чужие ключи ядро не трогает. */
+  setGraph: (graph: GraphSettings) => Promise<boolean>;
   /**
    * Применяет к перекрытиям vault набор изменений, который ядро направило сюда
    * (фича 006, FR-029).
@@ -150,6 +161,25 @@ export function useVaultSettings(
       return written;
     },
     [overrides, write, reload],
+  );
+
+  const setCapture = useCallback(
+    async (capture: CaptureOverrides) => {
+      if (overrides === null) return false;
+      const written = await write({ ...overrides, capture });
+      // Пути хранятся в нормальной форме: показать надо записанное.
+      if (written) await reload();
+      return written;
+    },
+    [overrides, write, reload],
+  );
+
+  const setGraph = useCallback(
+    async (graph: GraphSettings) => {
+      if (overrides === null) return false;
+      return write({ ...overrides, graph });
+    },
+    [overrides, write],
   );
 
   const setTemplateSources = useCallback(
@@ -265,6 +295,8 @@ export function useVaultSettings(
     setAutoDownloadTemplates,
     setTemplateSources,
     setExportFolder,
+    setCapture,
+    setGraph,
     applyChange,
     setEditorFontSize,
     markSection,
@@ -324,11 +356,31 @@ function describe(cause: unknown): Phrase {
             problem: describeExportFolderProblem(t, problem),
           });
       }
+      case "InvalidCapture": {
+        const failure = cause as { field?: string; problem?: { kind?: string } };
+        return (t) =>
+          t("capture.settings.invalid", {
+            field: t(captureFieldTitle(failure.field)),
+            problem: describeExportFolderProblem(t, failure.problem?.kind),
+          });
+      }
       default:
         break;
     }
   }
   return (t) => t("settings.vaultStore.failed");
+}
+
+/** Подпись поля настроек захвата, которое ядро назвало негодным (фича 022). */
+function captureFieldTitle(field: string | undefined): MessageKey {
+  switch (field) {
+    case "dailyFolder":
+      return "capture.settings.dailyFolder";
+    case "dailyTemplate":
+      return "capture.settings.dailyTemplate";
+    default:
+      return "capture.settings.inbox";
+  }
 }
 
 /** Почему папка экспорта не годится — словами (009 FR-029). */

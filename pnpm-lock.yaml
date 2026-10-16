@@ -121,15 +121,15 @@ importers:
       '@excalidraw/excalidraw':
         specifier: 0.18.1
         version: 0.18.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@lezer/highlight':
-        specifier: ^1.2.3
-        version: 1.2.5
       '@tauri-apps/api':
         specifier: ^2.9.0
         version: 2.12.1
       buffer:
         specifier: 6.0.3
         version: 6.0.3
+      d3-force:
+        specifier: ^3.0.0
+        version: 3.0.0
       isomorphic-git:
         specifier: 1.42.6
         version: 1.42.6
@@ -140,6 +140,9 @@ importers:
         specifier: ^19.2.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@types/d3-force':
+        specifier: ^3.0.10
+        version: 3.0.10
       '@types/react':
         specifier: ^19.2.0
         version: 19.3.0
