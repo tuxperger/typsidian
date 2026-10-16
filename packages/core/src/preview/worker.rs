@@ -71,6 +71,9 @@ struct JobHeader {
     files: Vec<FileKey>,
     /// Идентификатор PDF; `None` — нужны страницы.
     pdf_ident: Option<String>,
+    /// Входы блоков выборки (фича 020): JSON-строка для `sys.inputs`.
+    #[serde(default)]
+    inputs: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -115,6 +118,7 @@ fn encode_job(job: &CompileJob, builtin_fonts: usize) -> Result<JsValue, JsValue
             Render::Pages => None,
             Render::Pdf(meta) => Some(meta.ident.clone()),
         },
+        inputs: job.inputs.clone(),
     };
     let files = bytes_array(
         ids.iter()
@@ -172,6 +176,7 @@ pub fn run_compile_job(message: JsValue) -> Result<JsValue, JsValue> {
         revision: header.revision,
         fonts,
         render,
+        inputs: header.inputs,
     }
     .run_inline();
 

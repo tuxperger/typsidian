@@ -108,6 +108,21 @@ pub(crate) fn literal_matches(kind: &ParamKind, node: &SyntaxNode) -> bool {
             node.kind() == SyntaxKind::None || literal_matches(inner, node)
         }
         ParamKind::Expression => false,
+        // Поля блока выборки: литерал годится, если ядро свойств его читает.
+        ParamKind::Conditions | ParamKind::Order | ParamKind::Columns => {
+            crate::properties::select::form_plain(kind, node).is_some()
+        }
+    }
+}
+
+/// Значение для поля формы с учётом вида: поля блока выборки отдают JSON, а не
+/// исходный текст.
+pub(crate) fn plain_for(kind: &ParamKind, node: &SyntaxNode, source: &str) -> String {
+    match base_kind(kind) {
+        ParamKind::Conditions | ParamKind::Order | ParamKind::Columns => {
+            crate::properties::select::form_plain(kind, node).unwrap_or_else(|| source.to_string())
+        }
+        _ => plain_of(node, source),
     }
 }
 
@@ -176,6 +191,9 @@ pub(crate) fn field_source(
                 match base_kind(&param.kind) {
                     ParamKind::String if !math => quote(plain),
                     ParamKind::Content if !math => format!("[{plain}]"),
+                    ParamKind::Conditions | ParamKind::Order | ParamKind::Columns if !math => {
+                        crate::properties::select::form_source(&param.kind, plain)?
+                    }
                     _ => plain.trim().to_string(),
                 }
             }

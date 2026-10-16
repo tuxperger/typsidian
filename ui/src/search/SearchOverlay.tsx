@@ -2,14 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  Condition,
   Note,
+  PropertyKeyInfo,
   SearchQuery,
   SearchResults,
+  SelectionResult,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { Icon } from "../icons/Icons.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
+import { conditionParts, valueText } from "../note-panel/properties/conditions.js";
 
 // Экран расширенного поиска (макет «Typsidian Утилиты» § Поиск).
 //
@@ -24,6 +28,10 @@ export interface SearchOverlayProps {
   /** Заметка, открытая в редакторе: она предлагается чипу «ссылается на …». */
   currentNote: Note | null;
   onOpenNote: (path: string) => void;
+  /** Условия по свойствам, с которыми поиск открыт (клик по тегу, фича 020). */
+  initialConditions?: Condition[];
+  /** Mod+Enter: вставить условия блоком выборки (макет B3). */
+  onInsertSelection?: (conditions: Condition[]) => void;
   onClose: () => void;
 }
 
@@ -37,6 +45,8 @@ export function SearchOverlay({
   client,
   currentNote,
   onOpenNote,
+  initialConditions = [],
+  onInsertSelection,
   onClose,
 }: SearchOverlayProps): React.JSX.Element {
   const [text, setText] = useState("");
@@ -48,6 +58,11 @@ export function SearchOverlay({
   const [error, setError] = useState<Phrase | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(0);
+  // Условия по свойствам (фича 020): фишки над результатами, все сразу.
+  const [conditions, setConditions] = useState<Condition[]>(initialConditions);
+  const [selection, setSelection] = useState<SelectionResult | null>(null);
+  const [knownKeys, setKnownKeys] = useState<string[]>([]);
+  const { lang } = useI18n();
 
   useDismissOnEscape(onClose);
   const { t } = useI18n();
@@ -70,14 +85,36 @@ export function SearchOverlay({
       regex,
       case_sensitive: caseSensitive,
       links_to: linksTo ?? undefined,
+      ...(conditions.length > 0 ? { properties: conditions } : {}),
       mode,
     };
     if (!text.trim() && linksTo === null) {
       setResults(null);
       setError(null);
-      setBusy(false);
+      if (conditions.length === 0) {
+        setSelection(null);
+        setBusy(false);
+        return;
+      }
+      // Только условия по свойствам: отбор без текстового поиска (B3).
+      const mineSelect = ++revision.current;
+      setBusy(true);
+      void client.properties
+        .select({ conditions, columns: ["название", "изменена"], limit: 500, view: "Table" }) // i18n-ignore: имена столбцов ядра
+        .then((found) => {
+          if (mineSelect !== revision.current) return;
+          setSelection(found);
+          setSelected(0);
+        })
+        .catch((cause: unknown) => {
+          if (mineSelect === revision.current) setError(() => reasonOf(cause));
+        })
+        .finally(() => {
+          if (mineSelect === revision.current) setBusy(false);
+        });
       return;
     }
+    setSelection(null);
 
     const mine = ++revision.current;
     setBusy(true);
@@ -102,14 +139,40 @@ export function SearchOverlay({
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [client, text, regex, caseSensitive, linksTo, mode]);
+  }, [client, text, regex, caseSensitive, linksTo, mode, conditions]);
+
+  // Ключи свойств vault - чтобы `статус:` в строке понималось как свойство.
+  useEffect(() => {
+    let stale = false;
+    void client.properties
+      .keys()
+      .then((keys: PropertyKeyInfo[]) => !stale && setKnownKeys(keys.map((info) => info.key)))
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+  }, [client]);
+
+  /** Условия из набранной строки уходят в фишки; остаток остаётся текстом. */
+  const takeConditions = async (source: string): Promise<boolean> => {
+    const parsed = await client.properties.parseConditions(source, knownKeys);
+    if (parsed.conditions.length === 0) return false;
+    setConditions((current) => [...current, ...parsed.conditions]);
+    setText(parsed.text);
+    return true;
+  };
 
   const rows = useMemo<Row[]>(
     () =>
-      (results?.groups ?? []).flatMap((group) =>
-        group.hits.map((hit) => ({ path: hit.path, name: hit.name })),
-      ),
-    [results],
+      selection !== null
+        ? selection.rows.map((row) => ({
+            path: row.path,
+            name: row.cells[0] === undefined ? row.path : valueText(lang, row.cells[0]),
+          }))
+        : (results?.groups ?? []).flatMap((group) =>
+            group.hits.map((hit) => ({ path: hit.path, name: hit.name })),
+          ),
+    [results, selection, lang],
   );
 
   const open = (path: string) => {
@@ -120,6 +183,20 @@ export function SearchOverlay({
   const onKeyDown = (event: React.KeyboardEvent) => {
     // Escape закрывает поиск откуда угодно, а не только из поля ввода, —
     // `useDismissOnEscape` слушает окно.
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && conditions.length > 0) {
+      event.preventDefault();
+      onInsertSelection?.(conditions);
+      return;
+    }
+    if (event.key === "Enter" && text.trim() !== "" && !event.nativeEvent.isComposing) {
+      // `тег:проект` + Enter: условие становится фишкой, а не уходит в поиск.
+      event.preventDefault();
+      void takeConditions(text).then((taken) => {
+        const row = rows[selected];
+        if (!taken && row) open(row.path);
+      });
+      return;
+    }
     if (rows.length === 0) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -146,8 +223,13 @@ export function SearchOverlay({
             ref={inputRef}
             className="ts-search__input"
             value={text}
-            placeholder={t("search.placeholder")}
-            onChange={(event) => setText(event.target.value)}
+            placeholder={t("properties.search.hint")}
+            onChange={(event) => {
+              const next = event.target.value;
+              setText(next);
+              // Слово `ключ:значение`, законченное пробелом, ядро превращает в условие.
+              if (next.endsWith(" ") && next.includes(":")) void takeConditions(next);
+            }}
             aria-label={t("search.inputLabel")}
           />
           <button
@@ -179,6 +261,39 @@ export function SearchOverlay({
             <Icon name="x" size={14} />
           </button>
         </div>
+
+        {/* Условия по свойствам (фича 020, макет B3): фишки, все должны выполняться. */}
+        {conditions.length > 0 && (
+          <div className="ts-search-cond" role="group" aria-label={t("properties.search.conditions")}>
+            {conditions.map((condition, index) => {
+              const parts = conditionParts(t, lang, condition);
+              return (
+                <span key={index} className="ts-search-cond__chip">
+                  <b className="ts-search-cond__name">{parts.name}</b>
+                  <span>{parts.text}</span>
+                  <button
+                    type="button"
+                    className="ts-search-cond__x"
+                    aria-label={t("properties.cond.remove", { name: parts.name })}
+                    onClick={() => setConditions((current) => current.filter((_, at) => at !== index))}
+                  >
+                    <Icon name="x" size={9} />
+                  </button>
+                </span>
+              );
+            })}
+            {onInsertSelection !== undefined && (
+              <button
+                type="button"
+                className="ts-btn ts-btn--quiet ts-search-cond__select"
+                aria-label={t("properties.search.asSelectLabel")}
+                onClick={() => onInsertSelection(conditions)}
+              >
+                {t("properties.search.asSelect")}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Фильтры. В макете их шесть видов; здесь только те, под которыми
             есть данные ядра, — ссылки. Тегов и полей заголовка модель vault не
@@ -240,7 +355,50 @@ export function SearchOverlay({
             <p className="ts-search__empty">{t("search.nothingFound")}</p>
           )}
 
-          {error === null && results === null && !busy && (
+          {error === null && selection !== null && (
+            <div className="ts-search__group">
+              <div className="ts-search__group-head">
+                <Icon name="tag" size={12} />
+                {t("properties.search.count", { count: selection.total })}
+                {selection.truncated && (
+                  <span className="ts-search__group-meta">
+                    {t("properties.search.truncated", {
+                      shown: selection.rows.length,
+                      total: selection.total,
+                    })}
+                  </span>
+                )}
+              </div>
+              {selection.rows.length === 0 && !busy && (
+                <p className="ts-search__empty">{t("properties.search.empty")}</p>
+              )}
+              {selection.rows.map((row, index) => (
+                <div
+                  key={row.path}
+                  className={
+                    index === selected ? "ts-search__hit ts-search__hit--active" : "ts-search__hit"
+                  }
+                  role="button"
+                  tabIndex={-1}
+                  aria-selected={index === selected}
+                  onClick={() => open(row.path)}
+                >
+                  <div className="ts-search__hit-head">
+                    <Icon name="file" size={12} />
+                    <span className="ts-search__hit-name">
+                      {row.cells[0] === undefined ? row.path : valueText(lang, row.cells[0])}
+                    </span>
+                    <span className="ts-search__hit-meta">{row.path}</span>
+                    {row.cells[1] !== undefined && (
+                      <span className="ts-search__hit-meta">{valueText(lang, row.cells[1])}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {error === null && results === null && selection === null && !busy && (
             <p className="ts-search__empty">{t("search.emptyHint")}</p>
           )}
 

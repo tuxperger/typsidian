@@ -29,6 +29,8 @@ export type SharedEditorProps = Pick<
   | "fontSize"
   | "shortcuts"
   | "paramsRequest"
+  | "selectRequest"
+  | "onLibraryStatus"
 >;
 
 export interface EditorGroupProps {

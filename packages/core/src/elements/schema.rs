@@ -127,6 +127,13 @@ pub enum ParamKind {
     /// Поле «как есть»: тип, который форма не рисует виджетом (массивы,
     /// словари, функции, обводки) — исходный текст Typst.
     Expression,
+    /// Условия отбора блока выборки (фича 020). Значение поля — JSON списка
+    /// [`crate::properties::Condition`]; запись Typst строит ядро.
+    Conditions,
+    /// Порядок блока выборки: JSON `null` или [`crate::properties::SortKey`].
+    Order,
+    /// Столбцы блока выборки: JSON списка имён.
+    Columns,
 }
 
 /// Параметр элемента (data-model.md «ParamSpec»).
@@ -336,6 +343,11 @@ fn build(key: &str) -> Option<ElementSpec> {
                     ..param
                 })
                 .collect()
+        }
+        // `select` — функция библиотеки vault, а не встроенная: описания Typst
+        // у неё нет, схему задаёт ядро свойств (фича 020).
+        None if path == "select" && syntax == ElementSyntax::Call => {
+            crate::properties::select::form_params()
         }
         None => params_of(path, syntax)?,
     };

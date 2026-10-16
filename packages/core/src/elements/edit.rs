@@ -42,6 +42,11 @@ pub enum PlanEditError {
     Unavailable { reason: UnavailableReason },
     /// Значения полей не годятся (FR-015).
     Invalid { errors: Vec<FieldError> },
+    /// Запись свойств заметки не разбирается однозначно, форма её не правит
+    /// (фича 020, FR-004).
+    Properties {
+        problem: crate::properties::PropertiesProblem,
+    },
 }
 
 /// Точечные замены для правки на месте. Поля, которых форма не прислала, не

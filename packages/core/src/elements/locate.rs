@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use typst::syntax::{parse, LinkedNode, Side, SyntaxKind, SyntaxNode};
 
 use super::schema::{inner_param_of, key_for, raw_spec, ElementSpec, ElementSyntax, ParamSpec};
-use super::values::{has_error, literal_matches, plain_of, quote, ParamValue};
+use super::values::{has_error, literal_matches, plain_for, quote, ParamValue};
 use super::{byte_at, utf16_at};
 
 /// Найденный в тексте элемент (data-model.md «ParsedElement»).
@@ -656,7 +656,7 @@ fn value_of(
     let single = (parts.len() == 1).then(|| parts[0].get());
     let expression = math || single.is_none_or(|node| !literal_matches(&param.kind, node));
     let plain = match single {
-        Some(node) if !math => plain_of(node, &source),
+        Some(node) if !math => plain_for(&param.kind, node, &source),
         _ => source.clone(),
     };
     ByteValue {

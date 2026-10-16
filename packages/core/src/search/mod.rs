@@ -14,16 +14,18 @@
 //! возвращает строку уже разрезанной на куски, а UI просто оборачивает
 //! помеченные.
 //!
-//! # Чего здесь нет
+//! # Условия по свойствам (фича 020)
 //!
-//! Фильтров по тегам и полям заголовка (`#эксперимент`, `status=draft` в
-//! макете): ни того, ни другого понятия в модели vault не существует —
-//! `vault::index::Note` их не несёт, и в спецификациях фич 001…007 они не
-//! описаны. Выдумать разбор «тега» поверх синтаксиса Typst, где `#` начинает
-//! код, — это решение уровня спеки, а не реализации.
+//! Теги и поля заметок появились с фичей 020: условия по ним лежат в
+//! [`SearchQuery::properties`], отбирает их тот же код, что и блоки выборки
+//! ([`crate::properties::query`]), по индексу — без чтения файлов.
+//! [`parse_conditions`] превращает набранное `тег:проект статус:черновик` в
+//! эти условия: интерфейс не разбирает синтаксис запроса сам (принцип I).
 
 use serde::{Deserialize, Serialize};
 
+use crate::properties::query::{matches_all, CompareOp, Condition, DateRange, Ymd};
+use crate::properties::{now_ms, valid_date, PropertyValue};
 use crate::vault::backend::VaultBackend;
 use crate::vault::FileKind;
 
@@ -67,6 +69,11 @@ pub struct SearchQuery {
     /// Путь заметки, на которую найденная обязана ссылаться (чип «ссылается
     /// на …»). Считается по тем же ссылкам, что и обратные ссылки фичи 001.
     pub links_to: Option<String>,
+    /// Условия по свойствам заметок (фича 020): теги, поля, папка, даты. Все
+    /// вместе — одно условие в смысле [`FilterMode`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub properties: Vec<Condition>,
     pub mode: FilterMode,
 }
 
@@ -76,7 +83,7 @@ impl SearchQuery {
     /// Пустой запрос не означает «вся папка»: показать все заметки — это
     /// дерево слева, а не поиск.
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty() && self.links_to.is_none()
+        self.text.trim().is_empty() && self.links_to.is_none() && self.properties.is_empty()
     }
 }
 
@@ -183,6 +190,22 @@ pub async fn search<B: VaultBackend>(
         None => None,
     };
 
+    // Условия по свойствам считаются один раз по индексу: файлы не читаются.
+    let by_properties: Option<std::collections::HashSet<String>> = if query.properties.is_empty() {
+        None
+    } else {
+        let now = now_ms();
+        Some(
+            backend
+                .indexed_notes()
+                .await
+                .into_iter()
+                .filter(|note| matches_all(note, &query.properties, now))
+                .map(|note| note.path)
+                .collect(),
+        )
+    };
+
     let mut hits: Vec<SearchHit> = Vec::new();
     let mut total_matches = 0usize;
     let mut truncated = false;
@@ -211,7 +234,10 @@ pub async fn search<B: VaultBackend>(
         };
 
         let has_text = text_hit.as_ref().map(|found| found.matches > 0);
-        if !keep(has_text, links_ok, query.mode) {
+        let properties_ok = by_properties
+            .as_ref()
+            .map(|paths| paths.contains(&path.replace('\\', "/")));
+        if !keep(has_text, links_ok, properties_ok, query.mode) {
             continue;
         }
 
@@ -240,10 +266,171 @@ pub async fn search<B: VaultBackend>(
 ///
 /// `None` означает «условие не задано» и в обоих режимах не участвует: при
 /// «И» оно не может отказать, при «ИЛИ» — не может разрешить.
-fn keep(text: Option<bool>, links: Option<bool>, mode: FilterMode) -> bool {
+fn keep(
+    text: Option<bool>,
+    links: Option<bool>,
+    properties: Option<bool>,
+    mode: FilterMode,
+) -> bool {
     match mode {
-        FilterMode::And => text.unwrap_or(true) && links.unwrap_or(true),
-        FilterMode::Or => text.unwrap_or(false) || links.unwrap_or(false),
+        FilterMode::And => {
+            text.unwrap_or(true) && links.unwrap_or(true) && properties.unwrap_or(true)
+        }
+        FilterMode::Or => {
+            text.unwrap_or(false) || links.unwrap_or(false) || properties.unwrap_or(false)
+        }
+    }
+}
+
+/// Строка запроса после выделения условий по свойствам.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct ParsedConditions {
+    /// Что осталось от строки: обычный текст поиска.
+    pub text: String,
+    pub conditions: Vec<Condition>,
+}
+
+/// Разделяет строку на слова по пробелам; слово в двойных кавычках (целиком или
+/// после `ключ:`) может содержать пробелы.
+fn words(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for ch in text.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                current.push(ch);
+            }
+            ch if ch.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            ch => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+fn unquote(value: &str) -> String {
+    value
+        .strip_prefix('"')
+        .map(|rest| rest.strip_suffix('"').unwrap_or(rest))
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn parse_date(text: &str) -> Option<Ymd> {
+    let mut parts = text.split('-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let day: u8 = parts.next()?.parse().ok()?;
+    (parts.next().is_none() && valid_date(year, month, day)).then_some(Ymd { year, month, day })
+}
+
+/// `N` суток либо `ГГГГ-ММ-ДД..ГГГГ-ММ-ДД`.
+fn parse_range(text: &str) -> Option<DateRange> {
+    if let Some((from, to)) = text.split_once("..") {
+        return Some(DateRange::Between {
+            from: parse_date(from)?,
+            to: parse_date(to)?,
+        });
+    }
+    text.parse::<u32>()
+        .ok()
+        .map(|days| DateRange::LastDays { days })
+}
+
+/// Значение поля: дата, число, флажок или текст.
+fn parse_value(text: &str) -> PropertyValue {
+    let text = unquote(text);
+    if let Some(date) = parse_date(&text) {
+        return PropertyValue::Date {
+            year: date.year,
+            month: date.month,
+            day: date.day,
+        };
+    }
+    match text.as_str() {
+        "true" | "да" => return PropertyValue::Flag { value: true },
+        "false" | "нет" => return PropertyValue::Flag { value: false },
+        _ => {}
+    }
+    match text.parse::<f64>() {
+        Ok(value) if value.is_finite() => PropertyValue::Number { value },
+        _ => PropertyValue::Text { value: text },
+    }
+}
+
+/// Выделяет из набранной строки условия по свойствам.
+///
+/// Понимаются слова: `тег:X` (`tag:`), `папка:X` (`folder:`), `изменена:N` и
+/// `изменена:ГГГГ-ММ-ДД..ГГГГ-ММ-ДД` (`modified:`; так же `создана:`), а для
+/// ключей из `known_keys` — `ключ:значение`, `ключ:>значение` (также `<`,
+/// `>=`, `<=`, `!=`) и `ключ:*` («задано»). Всё остальное, в том числе
+/// `время:10:30` с неизвестным ключом, остаётся обычным текстом поиска.
+pub fn parse_conditions(text: &str, known_keys: &[String]) -> ParsedConditions {
+    let mut rest: Vec<String> = Vec::new();
+    let mut conditions: Vec<Condition> = Vec::new();
+    for word in words(text) {
+        let parsed = word
+            .split_once(':')
+            .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+            .and_then(|(key, value)| parse_word(key, value, known_keys));
+        match parsed {
+            Some(condition) => conditions.push(condition),
+            None => rest.push(word),
+        }
+    }
+    ParsedConditions {
+        text: rest.join(" "),
+        conditions,
+    }
+}
+
+fn parse_word(key: &str, value: &str, known_keys: &[String]) -> Option<Condition> {
+    match key {
+        "тег" | "tag" => Some(Condition::TagHas {
+            tag: unquote(value),
+        }),
+        "папка" | "folder" => Some(Condition::Folder {
+            folder: unquote(value),
+        }),
+        "изменена" | "modified" => Some(Condition::Modified {
+            range: parse_range(value)?,
+        }),
+        "создана" | "created" => Some(Condition::Created {
+            range: parse_range(value)?,
+        }),
+        key if known_keys.iter().any(|known| known == key) => {
+            if value == "*" {
+                return Some(Condition::Exists {
+                    key: key.to_string(),
+                });
+            }
+            let (op, raw) = [
+                (">=", CompareOp::Ge),
+                ("<=", CompareOp::Le),
+                ("!=", CompareOp::Ne),
+                (">", CompareOp::Gt),
+                ("<", CompareOp::Lt),
+            ]
+            .into_iter()
+            .find_map(|(prefix, op)| value.strip_prefix(prefix).map(|raw| (op, raw)))
+            .unwrap_or((CompareOp::Eq, value));
+            (!raw.is_empty()).then(|| Condition::Compare {
+                key: key.to_string(),
+                op,
+                value: parse_value(raw),
+            })
+        }
+        _ => None,
     }
 }
 

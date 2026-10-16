@@ -12,11 +12,13 @@ import type {
   ParamSpec,
   ParamValue,
   ParsedElement,
+  PropertyKeyInfo,
   PlanEditError,
   TextEdit,
 } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { describeUnavailable } from "./useElementAtCaret.js";
+import { ColumnsField, ConditionsField, OrderField, SelectCount } from "./SelectFields.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 // Форма параметров элемента Typst (фича 008, макет «Typsidian Вставка» →
@@ -27,6 +29,9 @@ import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 // которую отдаёт ядро (FR-001a). Решений о языке здесь нет вовсе (принцип I):
 // кавычки, скобки, проверку значений, текст «Будет вставлено» и план правки
 // делает ядро; форма держит набранное и показывает ответ.
+
+/** Ключ схемы блока выборки в ядре (фича 020, research.md §15). */
+export const SELECT_ELEMENT_ID = "call:select";
 
 export type ParamFormMode =
   | { kind: "insert" }
@@ -81,6 +86,7 @@ export function ParamForm({
   const parsed = mode.kind === "edit" ? mode.parsed : null;
   const params = spec.params ?? [];
   const labelPrefix = spec.label?.prefix ?? null;
+  const isSelect = spec.id === SELECT_ELEMENT_ID;
 
   // Вложенный элемент (изображение в рисунке) показывается своими полями, если
   // ядро его разобрало — при вставке по `initial_inner`, при правке по `inner`.
@@ -97,11 +103,27 @@ export function ParamForm({
       }
       all.push({ name: param.name, param });
     }
+    // Блок выборки: все пять полей на виду (макет B4), «всех параметров» нет.
+    if (isSelect) return { main: all, rest: [] };
     return {
       main: all.filter((def) => def.param.main),
       rest: all.filter((def) => !def.param.main),
     };
-  }, [params, showInner, spec.inner]);
+  }, [params, showInner, spec.inner, isSelect]);
+
+  // Ключи свойств vault — подсказки полей выборки (макет B4).
+  const [propertyKeys, setPropertyKeys] = useState<PropertyKeyInfo[]>([]);
+  useEffect(() => {
+    if (!isSelect) return;
+    let stale = false;
+    void client.properties
+      .keys()
+      .then((keys) => !stale && setPropertyKeys(keys))
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+  }, [client, isSelect]);
 
   const [fields, setFields] = useState<Record<string, FieldState>>(() =>
     initialFields(parsed ? parsed.values : (spec.initial ?? [])),
@@ -232,6 +254,8 @@ export function ParamForm({
     <ParamField
       key={def.name}
       def={def}
+      isSelect={isSelect}
+      keys={propertyKeys}
       state={fields[def.name]}
       problem={errorOf(def.name)}
       autoFocus={def.name === firstField}
@@ -317,6 +341,10 @@ export function ParamForm({
           </p>
         )}
 
+        {isSelect && (
+          <SelectCount client={client} conditions={fields["where"]?.text ?? "[]"} />
+        )}
+
         <div className="ts-params__output">
           <span className="ts-eyebrow">{editing ? t("insert.form.willReplace") : t("insert.form.willInsert")}</span>
           <pre className="ts-insert__code">{preview}</pre>
@@ -344,8 +372,12 @@ function ParamField({
   state,
   problem,
   autoFocus,
+  isSelect,
+  keys,
   onChange,
 }: {
+  isSelect: boolean;
+  keys: PropertyKeyInfo[];
   def: FieldDef;
   state: FieldState | undefined;
   problem: FieldProblem | undefined;
@@ -361,8 +393,15 @@ function ParamField({
   const bad = problem !== undefined;
   const inputClass = `ts-field__input${expression ? " ts-field__input--code" : ""}${bad ? " ts-field__input--bad" : ""}`;
 
+  const change = (value: string): void => onChange(name, value, false);
   let control: React.JSX.Element;
-  if (!expression && (base.type === "choice" || base.type === "bool")) {
+  if (base.type === "conditions") {
+    control = <ConditionsField value={text || "[]"} keys={keys} onChange={change} />;
+  } else if (base.type === "order") {
+    control = <OrderField value={text || "null"} keys={keys} onChange={change} />;
+  } else if (base.type === "columns") {
+    control = <ColumnsField value={text || "[]"} keys={keys} onChange={change} />;
+  } else if (!expression && (base.type === "choice" || base.type === "bool")) {
     const options =
       base.type === "bool"
         ? [
@@ -402,12 +441,14 @@ function ParamField({
     );
   }
 
+  const customLabel = isSelect ? selectFieldLabel(t, name) : null;
+  const Wrapper = isCustomKind(base) ? "div" : "label";
   return (
-    <label className="ts-field">
+    <Wrapper className="ts-field">
       {/* Подсказка — первый абзац справочника Typst: подпись поля — имя
           параметра, и что он делает, объясняет сам Typst. */}
       <span className="ts-field__label" title={param.docs || undefined}>
-        {param.title}
+        {customLabel ?? param.title}
         {param.required && !param.variadic && <span className="ts-field__req"> *</span>}
       </span>
       {control}
@@ -421,7 +462,7 @@ function ParamField({
           {describeProblem(t, problem)}
         </span>
       )}
-    </label>
+    </Wrapper>
   );
 }
 
@@ -455,7 +496,11 @@ function wrappers(kind: ParamKind): string[] {
  */
 function plainKind(kind: ParamKind): boolean {
   const base = baseKind(kind);
-  return base.type === "string" || base.type === "content";
+  return (
+    base.type === "string" ||
+    base.type === "content" ||
+    isCustomKind(base)
+  );
 }
 
 function splitLabel(
@@ -523,5 +568,30 @@ function describeRefusal(error: PlanEditError): Phrase {
       return (t) => describeUnavailable(t, error.reason);
     case "Invalid":
       return () => "";
+    case "Properties":
+      return (t) => t("properties.refused");
+  }
+}
+
+/** Поля выборки, значение которых — JSON структуры (фича 020, research.md §15). */
+function isCustomKind(kind: ParamKind): boolean {
+  return kind.type === "conditions" || kind.type === "order" || kind.type === "columns";
+}
+
+/** Подпись поля блока выборки на языке интерфейса (макет B4). */
+function selectFieldLabel(t: Translate, name: string): string | null {
+  switch (name) {
+    case "where":
+      return t("properties.select.field.where");
+    case "sort":
+      return t("properties.select.field.sort");
+    case "columns":
+      return t("properties.select.field.columns");
+    case "limit":
+      return t("properties.select.field.limit");
+    case "view":
+      return t("properties.select.field.view");
+    default:
+      return null;
   }
 }

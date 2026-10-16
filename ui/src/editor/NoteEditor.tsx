@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type {
+  Condition,
   ElementSpec,
+  LibraryStatus,
   ReadError,
   TabId,
   TextEdit,
@@ -29,7 +31,7 @@ import type { NoteDocument, NoteSaveState } from "./noteDocument.js";
 import { useDocumentSnapshot } from "./useNoteDocument.js";
 import { InsertPanel, useInsertPanelVisible } from "./InsertPanel.js";
 import { elementById, type LocalizedElement } from "./typstElements.js";
-import { ParamForm, type ParamFormMode } from "./ParamForm.js";
+import { ParamForm, SELECT_ELEMENT_ID, type ParamFormMode } from "./ParamForm.js";
 import {
   describeUnavailable,
   useElementAtCaret,
@@ -117,6 +119,13 @@ export interface NoteEditorProps {
    */
   paramsRequest?: number;
   /**
+   * Запрос «вставить выборку» извне - из поиска по Mod+Enter (фича 020, B3):
+   * новый `id` открывает форму блока с этими условиями.
+   */
+  selectRequest?: { id: number; conditions: Condition[] } | null;
+  /** Итог записи библиотеки выборки: `Customized` - предупреждение в колонке свойств. */
+  onLibraryStatus?: (status: LibraryStatus) => void;
+  /**
    * Связи открытой заметки одной строкой для статус-бара («5 ссылок · 2
    * упоминания»). Не передан — сегмента нет: он показывается только при
    * показанной колонке заметки.
@@ -162,6 +171,8 @@ export function NoteEditor({
   fontSize,
   shortcuts,
   paramsRequest = 0,
+  selectRequest = null,
+  onLibraryStatus,
   linksSummary,
   tabsSummary,
 }: NoteEditorProps): React.JSX.Element {
@@ -250,12 +261,59 @@ export function NoteEditor({
   );
 
   /**
+   * Форма блока выборки (фича 020, B4). Схему отдаёт ядро по ключу
+   * `call:select`; условия поиска, если есть, становятся начальным значением
+   * поля «условия».
+   */
+  const openSelectForm = useCallback(
+    async (conditions?: Condition[]) => {
+      const spec = await client.elementSchema(SELECT_ELEMENT_ID);
+      if (!spec) return;
+      setInsertMenu(null);
+      const initial =
+        conditions !== undefined && conditions.length > 0
+          ? [
+              {
+                name: "where",
+                source: "",
+                plain: JSON.stringify(conditions),
+                expression: false,
+                from: 0,
+                to: 0,
+              },
+            ]
+          : (spec.initial ?? []);
+      const withColumns = [
+        ...initial,
+        {
+          name: "columns",
+          source: "",
+          plain: JSON.stringify(["название"]), // i18n-ignore: имя столбца ядра
+          expression: false,
+          from: 0,
+          to: 0,
+        },
+      ];
+      setParamForm({
+        spec: { ...spec, initial: withColumns },
+        title: elementById(t, "select")?.name ?? spec.typst,
+        mode: { kind: "insert" },
+        block: true,
+      });
+    },
+    [client, t],
+  );
+  /**
    * Вставка элемента из меню или с панели. Элемент, у которого ядро велит
    * открыть форму (contracts § «Когда форма»), идёт через неё; остальные —
    * сниппетом, как раньше (FR-003).
    */
   const insertElement = useCallback(
     async (request: InsertRequest) => {
+      if (request.id === "select") {
+        void openSelectForm();
+        return;
+      }
       setInsertMenu(null);
       // Какой это элемент и какие у него параметры, ядро узнаёт по самому
       // шаблону — разбором Typst, а не по списку в ядре.
@@ -276,7 +334,7 @@ export function NoteEditor({
       // бы двумя путями сразу.
       applyTemplate(request.template, request.block);
     },
-    [applyTemplate, client, t],
+    [applyTemplate, client, t, openSelectForm],
   );
 
   /** Текст заметки сейчас — форме, чтобы ядро сверяло элемент и метки. */
@@ -362,6 +420,68 @@ export function NoteEditor({
     setParamForm(null);
     view.focus();
   }, []);
+
+
+
+  const lastSelectRequest = useRef(selectRequest?.id ?? 0);
+  useEffect(() => {
+    if (selectRequest === null || selectRequest.id === lastSelectRequest.current) return;
+    lastSelectRequest.current = selectRequest.id;
+    if (active) void openSelectForm(selectRequest.conditions);
+  }, [selectRequest, openSelectForm, active]);
+
+  /**
+   * Вставка блока выборки: библиотека `select.typ` кладётся в vault, текст
+   * блока вставляется там же, где курсор, и одной транзакцией добавляется
+   * строка `#import` (research.md §10). Отказ записи библиотеки не вставляет
+   * блок, который не соберётся.
+   */
+  const insertSelectBlock = useCallback(
+    async (text: string) => {
+      const view = editorRef.current?.view();
+      if (!view) return;
+      try {
+        onLibraryStatus?.(await client.properties.ensureSelectLibrary());
+      } catch {
+        setParamForm(null);
+        contextMenu.notify(t("properties.libraryFailed"));
+        return;
+      }
+      const doc = view.state.doc.toString();
+      const imports = await client.properties.selectImportEdits(doc);
+      const range = view.state.selection.main;
+      let from = slashAt.current ?? range.from;
+      let to = slashAt.current === null ? range.to : Math.max(range.to, from + 1);
+      slashAt.current = null;
+      // Запись свойств остаётся первым элементом заметки, а `#import` идёт сразу за
+      // ней: блок встаёт не выше этой шапки, иначе `select` был бы вызван до импорта.
+      const props = await client.properties.read(doc);
+      let floor = imports.reduce((end, edit) => Math.max(end, edit.to), 0);
+      if (props.record !== undefined) {
+        const recordLine = view.state.doc.lineAt(Math.min(props.record.to, doc.length));
+        floor = Math.max(floor, Math.min(recordLine.to + 1, doc.length));
+      }
+      const clamped = from < floor;
+      if (clamped) {
+        from = floor;
+        to = floor;
+      }
+      const lineStart = view.state.doc.lineAt(Math.min(from, doc.length)).from;
+      const needsBreak = !clamped && view.state.sliceDoc(lineStart, from).trim() !== "";
+      const insert = needsBreak ? `\n${text}\n` : `${text}\n`;
+      view.dispatch({
+        changes: [
+          ...imports.map((edit) => ({ from: edit.from, to: edit.to, insert: edit.insert })),
+          { from, to, insert },
+        ],
+        userEvent: "input",
+        scrollIntoView: true,
+      });
+      setParamForm(null);
+      view.focus();
+    },
+    [client, contextMenu, t, onLibraryStatus],
+  );
 
   // Запрос из палитры команд (FR-006): счётчик сменился — открыть «Параметры».
   // Реагирует только активная вкладка: при двух группах форма не откроется дважды.
@@ -697,7 +817,11 @@ export function NoteEditor({
           title={paramForm.title}
           mode={paramForm.mode}
           noteText={noteText}
-          onInsert={(text) => insertRendered(text, paramForm.block)}
+          onInsert={(text) =>
+            paramForm.spec.id === SELECT_ELEMENT_ID
+              ? void insertSelectBlock(text)
+              : insertRendered(text, paramForm.block)
+          }
           onApply={applyEdits}
           onCancel={closeForm}
         />

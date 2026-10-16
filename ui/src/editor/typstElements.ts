@@ -697,6 +697,14 @@ export const TYPST_ELEMENTS: TypstElement[] = [
     icon: "data",
     keywords: "lorem",
   },
+  // Блок выборки (фича 020): форму открывает NoteEditor, не сниппет.
+  {
+    id: "select",
+    category: "data",
+    icon: "data",
+    keywords: "select query table tags properties",
+    block: true,
+  },
 
   {
     id: "wiki-link",
