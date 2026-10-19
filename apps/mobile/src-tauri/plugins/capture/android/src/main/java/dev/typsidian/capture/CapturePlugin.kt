@@ -33,7 +33,7 @@ class FileArgs {
 /**
  * Очередь захватов «Поделиться» и ярлыки приложения (фича 022).
  *
- * Принимает `ACTION_SEND` (`text/plain`, `image/*`) и `ACTION_VIEW` с адресом
+ * Принимает `ACTION_SEND` (`text/plain`, картинки `image/…`) и `ACTION_VIEW` с адресом
  * `typsidian://today` и `typsidian://capture`. Захват сразу превращается в файл
  * `filesDir/captures/pending/<uuid>.json` — ровно той формы, что `Capture` ядра
  * (`packages/core/src/capture`), — и лежит там, пока окно не вызовет `resolve`
