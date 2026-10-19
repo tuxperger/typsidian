@@ -8,6 +8,10 @@
 // Снимки: каталог из переменной TABS_SHOTS (по умолчанию /tmp). Сценарий падает
 // на первом несошедшемся условии; замеры печатает строками «замер: …».
 const shots = process.env.TABS_SHOTS ?? "/tmp";
+// Бюджеты времени (SC-001, SC-002) проверяются только на рабочей сборке
+// (`next build` + `next start`): dev-сборка React вдвое-втрое медленнее, и
+// там замеры только печатаются (T064).
+const budgets = process.env.TABS_BUDGETS === "1";
 
 const OPFS = `
   window.__opfs = {
@@ -117,6 +121,8 @@ export default async (page) => {
     await o.write("Заметки/План.typ", "= План заметок\\n");
     await o.write("Схема стенда.excalidraw", JSON.stringify({ type: "excalidraw", version: 2, source: "typsidian", elements: [], appState: {}, files: {} }));
     for (let i = 1; i <= 12; i += 1) await o.write("Пачка/Заметка " + String(i).padStart(2, "0") + ".typ", "= Заметка " + i + "\\n");
+    // Замер на 50 вкладках (quickstart.md §6, SC-002).
+    for (let i = 1; i <= 50; i += 1) await o.write("Много/Лист " + String(i).padStart(2, "0") + ".typ", "= Лист " + i + "\\n");
   })()`);
 
   await page.click("text=Открыть vault");
@@ -374,4 +380,205 @@ export default async (page) => {
   expect(page, (await phoneNav())[1] === false, "«Назад» в шапке вернул «Введение», «Вперёд» стала доступна");
   await page.shot(shots + "/1c-phone.png");
   await page.viewport(1440, 813);
+  await page.waitFor(`document.querySelectorAll('.ts-tabs').length >= 1`, { timeout: 8000, label: "полоса вкладок после телефона" });
+
+  // ── Колонка заметки следует за активной вкладкой (013, FR-009, T069) ─────
+  // Оглавление показывает заголовки активной заметки — по первому из них
+  // видно, за какой заметкой идёт колонка.
+  const outlineHead = () => page.evaluate(`document.querySelector('.ts-outline__tree [role=treeitem] .ts-outline__text')?.textContent ?? null`);
+  const outlineIs = (head, label) =>
+    page.waitFor(`document.querySelector('.ts-outline__tree [role=treeitem] .ts-outline__text')?.textContent === ${JSON.stringify(head)}`, { timeout: 8000, label: "оглавление «" + head + "» " + label });
+  const tabByTitle = (title, strip = 0) =>
+    `[...[...document.querySelectorAll('.ts-tabs')][${strip}].querySelectorAll('.ts-tab')].find((tab) => tab.querySelector('.ts-tab__title').textContent === ${JSON.stringify(title)})`;
+
+  await openTree(page, "Лист 03");
+  await page.click('.ts-egroup[data-focused="true"] .cm-content');
+  // Команда — переключатель (скрыта → показать, другой режим → оглавление,
+  // уже оглавление → скрыть), поэтому жмём, пока дерево не появится.
+  for (let i = 0; i < 3 && !(await page.evaluate(`Boolean(document.querySelector('.ts-outline__tree'))`)); i += 1) {
+    await page.press("O", { ctrl: true, shift: true, code: "KeyO" });
+    await page.waitForElement(".ts-outline__tree", { timeout: 2000 }).catch(() => {});
+  }
+  await outlineIs("Лист 3", "у открытой заметки");
+  await openTree(page, "Результаты");
+  await outlineIs("Результаты", "после открытия вкладки");
+  await page.evaluate(`${tabByTitle("Лист 03")}.click()`);
+  await outlineIs("Лист 3", "после переключения вкладки");
+  expect(page, true, "оглавление следует за переключением вкладки");
+
+  await page.press("\\", { ...R.mod, code: "Backslash" });
+  await page.waitFor(`document.querySelectorAll('.ts-tabs').length === 2`, { timeout: 8000, label: "две группы для колонки" });
+  await openTree(page, "План", 0);
+  await outlineIs("План диссертации", "у группы с фокусом");
+  await page.click('.ts-groups__cell:nth-child(1) .cm-content');
+  await outlineIs("Лист 3", "после смены группы");
+  expect(page, true, "оглавление следует за сменой группы");
+  await page.click('.ts-groups__cell:nth-child(3) .cm-content');
+  await outlineIs("План диссертации", "при возврате во вторую группу");
+  await page.click(`.ts-tabs[data-slot="Second"] ${backButton}`);
+  await outlineIs("Лист 3", "после «Назад»");
+  expect(page, true, "оглавление следует за «Назад»");
+  await openTree(page, "Результаты");
+  await outlineIs("Результаты", "перед закрытием");
+  await page.click('.ts-tabs[data-slot="Second"] .ts-tab--on .ts-tab__close');
+  await page.waitFor(`document.querySelector('.ts-tabs[data-slot="Second"] .ts-tab--on .ts-tab__title')?.textContent !== 'Результаты'`, { timeout: 8000, label: "вкладка закрыта" });
+  const afterClose = await activeTitle(page, 1);
+  const headOf = { "Лист 03": "Лист 3", "План": "План диссертации", "Результаты": "Результаты" };
+  await outlineIs(headOf[afterClose] ?? afterClose, "после закрытия вкладки");
+  expect(page, true, "оглавление следует за закрытием вкладки (" + (await outlineHead()) + ")");
+  for (let i = 0; i < 20 && (await stripCount()) === 2; i += 1) {
+    await page.click('.ts-tabs[data-slot="Second"] .ts-tab__close');
+    await page.sleep(400);
+  }
+
+  // ── Замеры (quickstart.md §6, T064) ──────────────────────────────────────
+  /** От щелчка по вкладке до редактора с её текстом, готового к набору (SC-001). */
+  const switchMs = (title, head) =>
+    page.evaluate(`new Promise((resolve) => {
+      const tab = ${tabByTitle(title)};
+      const started = performance.now();
+      tab.click();
+      const ready = () => {
+        const editor = document.querySelector('.ts-egroup[data-focused="true"] .cm-content');
+        const on = document.querySelector('.ts-tabs[data-focused="true"] .ts-tab--on .ts-tab__title')?.textContent;
+        if (on === ${JSON.stringify(title)} && editor?.getAttribute('contenteditable') === 'true' && editor.textContent.includes(${JSON.stringify(head)})) resolve(performance.now() - started);
+        else requestAnimationFrame(ready);
+      };
+      ready();
+    })`);
+  /** Задержка ввода: от `beforeinput` до кадра после правки DOM редактора, медиана (SC-002). */
+  const typingMs = async (count) => {
+    await page.click('.ts-egroup[data-focused="true"] .cm-content');
+    await page.press("End", { ctrl: true });
+    await page.evaluate(`(() => {
+      window.__lat = [];
+      let started = null;
+      window.__latIn = () => { started = performance.now(); };
+      document.addEventListener('beforeinput', window.__latIn, true);
+      const content = document.querySelector('.ts-egroup[data-focused="true"] .cm-content');
+      window.__latObs = new MutationObserver(() => {
+        if (started === null) return;
+        const at = started;
+        started = null;
+        requestAnimationFrame(() => window.__lat.push(performance.now() - at));
+      });
+      window.__latObs.observe(content, { childList: true, subtree: true, characterData: true });
+    })()`);
+    await page.sleep(300);
+    const before = await calls(page);
+    for (let i = 0; i < count; i += 1) {
+      await page.type("ж");
+      await page.sleep(40);
+    }
+    await page.sleep(200);
+    const samples = await page.evaluate(`(() => {
+      document.removeEventListener('beforeinput', window.__latIn, true);
+      window.__latObs.disconnect();
+      return JSON.stringify(window.__lat);
+    })()`).then((json) => JSON.parse(json));
+    samples.sort((a, b) => a - b);
+    const median = samples.length === 0 ? null : samples[Math.floor(samples.length / 2)];
+    const after = await calls(page);
+    return { median, apply: after.workspaceApply - before.workspaceApply, view: after.workspaceView - before.workspaceView };
+  };
+
+  await openTree(page, "Введение");
+  await openTree(page, "Результаты");
+  const switches = [];
+  for (let i = 0; i < 12; i += 1) {
+    const [title, head] = i % 2 === 0 ? ["Введение", "Введение"] : ["Результаты", "Результаты"];
+    switches.push(await switchMs(title, head));
+    await page.sleep(200);
+  }
+  // Во время сборки предпросмотра: правка запускает сборку, переключение сразу за ней.
+  await page.click('.ts-egroup[data-focused="true"] .cm-content');
+  await page.type(" сборка");
+  const duringBuild = await switchMs("Введение", "Введение");
+  page.log("  замер: переключение вкладки, мс = " + switches.map((ms) => ms.toFixed(1)).join(" / ") + "; во время сборки — " + duringBuild.toFixed(1));
+  if (budgets) expect(page, Math.max(...switches, duringBuild) <= 100, "SC-001: переключение на открытую вкладку ≤100 мс");
+
+  // Одна вкладка против пятидесяти: остальные закрываются, затем открываются листы.
+  await page.evaluate(`(() => { const tab = ${tabByTitle("Введение")}; tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })); })()`);
+  await page.click("text=Закрыть остальные");
+  await page.waitFor(`document.querySelectorAll('.ts-tab').length === 1`, { timeout: 8000, label: "одна вкладка" });
+  const one = await typingMs(30);
+  for (let i = 1; i <= 49; i += 1) await openTree(page, "Лист " + String(i).padStart(2, "0"));
+  expect(page, (await page.evaluate(`document.querySelectorAll('.ts-tab').length`)) === 50, "открыто 50 вкладок");
+  const fifty = await typingMs(30);
+  page.log(`  замер: задержка ввода, мс (медиана) = ${one.median?.toFixed(1)} при 1 вкладке, ${fifty.median?.toFixed(1)} при 50`);
+  page.log(`  замер: вызовы модели вкладок за 30 знаков — workspaceApply ${one.apply}/${fifty.apply}, workspaceView ${one.view}/${fifty.view} (1/50 вкладок)`);
+  // Одно обращение за серию допустимо — первая правка помечает вкладку
+  // несохранённой; с числом знаков и вкладок оно расти не должно.
+  expect(page, [one, fifty].every((run) => run.apply === 0 && run.view <= 1), "FR-027: набор текста не обращается к модели вкладок на каждый знак");
+  const switchFifty = await switchMs("Лист 01", "Лист 1");
+  page.log("  замер: переключение при 50 вкладках, мс = " + switchFifty.toFixed(1));
+  if (budgets) {
+    // Допуск 1 мс сверх 10 %: медиана — единицы миллисекунд, и 10 % от неё
+    // меньше разрешения таймера и разброса между прогонами.
+    expect(page, fifty.median <= one.median * 1.1 + 1, "SC-002: при 50 вкладках ввод не медленнее чем на 10 %");
+    expect(page, switchFifty <= 100, "FR-027: переключение при 50 вкладках ≤100 мс");
+  }
+
+  // ── US4: перезапуск (quickstart.md §5, T063) ─────────────────────────────
+  await page.evaluate(`(() => { const tab = ${tabByTitle("Лист 01")}; tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })); })()`);
+  await page.click("text=Закрыть остальные");
+  await page.waitFor(`document.querySelectorAll('.ts-tab').length === 1`, { timeout: 8000, label: "одна вкладка перед набором" });
+  await openTree(page, "Введение");
+  await page.press("\\", { ...R.mod, code: "Backslash" });
+  await page.waitFor(`document.querySelectorAll('.ts-tabs').length === 2`, { timeout: 8000, label: "две группы перед перезапуском" });
+  await openTree(page, "План", 0);
+  await openTree(page, "Лист 02");
+  const snapshot = async () => ({
+    first: await titles(page, 0),
+    second: await titles(page, 1),
+    active: [await activeTitle(page, 0), await activeTitle(page, 1)],
+    focused: await focusedSlot(),
+  });
+  const before = await snapshot();
+  expect(page, before.first.length + before.second.length === 5, "пять вкладок в двух группах: " + JSON.stringify(before));
+  await page.sleep(1500); // запись набора — после паузы 400 мс
+  const reopen = async () => {
+    await page.click("text=Открыть vault").catch(() => {});
+    await page.waitForElement("text=Введение", { timeout: 30000 });
+  };
+  await page.reload();
+  await reopen();
+  await page.waitFor(`document.querySelectorAll('.ts-tabs').length === 2`, { timeout: 15000, label: "две группы после перезагрузки" });
+  const after = await snapshot();
+  expect(page, JSON.stringify(after) === JSON.stringify(before), "SC-003: вкладки, порядок, группы и активные восстановлены " + JSON.stringify(after));
+
+  // Заметка удалена, пока приложение закрыто: её вкладки нет, сообщений нет (FR-023).
+  await page.evaluate(`location.href = '/__typsidian-none'`);
+  await page.waitFor(`location.pathname === '/__typsidian-none' && document.readyState === 'complete'`, { timeout: 15000, label: "страница без приложения" });
+  await page.evaluate(OPFS + "true");
+  await page.evaluate(`window.__opfs.remove("Много/Лист 02.typ")`);
+  await page.evaluate(`location.href = '/'`);
+  await page.waitFor(`location.pathname === '/' && document.readyState === 'complete'`, { timeout: 15000, label: "приложение снова" });
+  await reopen();
+  await page.waitFor(`document.querySelectorAll('.ts-tab').length >= 4`, { timeout: 15000, label: "вкладки восстановлены" });
+  const pruned = await snapshot();
+  expect(page, ![...pruned.first, ...pruned.second].includes("Лист 02") && pruned.first.length + pruned.second.length === 4, "удалённая заметка пропущена, остальные на месте " + JSON.stringify(pruned));
+  const alerts = await page.evaluate(`[...document.querySelectorAll('[role=alert], [role=alertdialog], .ts-tab-refused')].map((el) => el.textContent.trim()).filter(Boolean).join(' | ')`);
+  expect(page, alerts === "", "сообщений о пропущенной вкладке нет" + (alerts ? ": " + alerts : ""));
+
+  // Испорченный ключ `workspaces` в настройках устройства: vault открывается без вкладок.
+  await page.evaluate(`location.href = '/__typsidian-none'`);
+  await page.waitFor(`location.pathname === '/__typsidian-none' && document.readyState === 'complete'`, { timeout: 15000, label: "страница без приложения" });
+  const spoiled = await page.evaluate(`(async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('settings.json');
+    const settings = JSON.parse(await (await handle.getFile()).text());
+    if (!('workspaces' in settings)) return false;
+    settings.workspaces = 'испорчено';
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(settings, null, 2));
+    await writable.close();
+    return true;
+  })()`);
+  expect(page, spoiled === true, "ключ workspaces найден и испорчен");
+  await page.evaluate(`location.href = '/'`);
+  await page.waitFor(`location.pathname === '/' && document.readyState === 'complete'`, { timeout: 15000, label: "приложение снова" });
+  await reopen();
+  await page.sleep(1500);
+  expect(page, (await page.evaluate(`document.querySelectorAll('.ts-tab').length`)) === 0, "испорченный набор: vault открыт без вкладок");
 };

@@ -114,7 +114,9 @@ export function useShortcuts(
     [byCommand],
   );
 
-  return { bindings, matches, displayOf };
+  // Один объект, пока сочетания те же: его получают `memo`-компоненты (полоса
+  // вкладок, T070), и новый объект на каждую отрисовку их бы перерисовывал.
+  return useMemo(() => ({ bindings, matches, displayOf }), [bindings, matches, displayOf]);
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { GroupSlot, TabId, TabView } from "../../wasm-core/typsidian_core.js";
 import { Icon } from "../../icons/Icons.js";
 import { useContextMenu, type ContextMenuItem } from "../../menu/ContextMenu.js";
@@ -57,7 +57,14 @@ interface DragState {
   index: number;
 }
 
-export function TabStrip(props: TabStripProps): React.JSX.Element {
+/**
+ * Полоса вкладок группы. `memo`: рабочая область перерисовывается на каждый
+ * набранный знак, полосе это не нужно — её пропы при наборе не меняются
+ * (колбэки постоянны, см. `EditorGroup`; FR-027, T070).
+ */
+export const TabStrip = memo(TabStripView);
+
+function TabStripView(props: TabStripProps): React.JSX.Element {
   const {
     slot,
     tabs,

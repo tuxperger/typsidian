@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useRef } from "react";
 import type { GroupView, TabView, WorkspaceView } from "../../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../../vault-client.js";
 import { BoardTab } from "../../boards/BoardTab.js";
@@ -63,6 +64,29 @@ export function EditorGroup(props: EditorGroupProps): React.JSX.Element {
   const { t } = useI18n();
   const activeTab = group.tabs.find((tab) => tab.id === group.active);
 
+  // Колбэки полосы постоянны: правка заметки перерисовывает рабочую область на
+  // каждый знак, и полоса (`memo`) без них перерисовывалась бы вместе с ней —
+  // при 50 вкладках это заметно на наборе (FR-027, T070). Вызывают они
+  // последние `tabs` и обработчики из ссылки.
+  const latest = useRef({ tabs, onToggleSplit: props.onToggleSplit, onMoveToOther: props.onMoveToOther });
+  latest.current = { tabs, onToggleSplit: props.onToggleSplit, onMoveToOther: props.onMoveToOther };
+  const stripHandlers = useMemo(
+    () => ({
+      onActivate: (tab: number) => void latest.current.tabs.activate(tab),
+      onClose: (tab: number) => void latest.current.tabs.close(tab),
+      onCloseOthers: (tab: number) => void latest.current.tabs.closeOthers(tab),
+      onBack: () => void latest.current.tabs.dispatch({ kind: "Back" }),
+      onForward: () => void latest.current.tabs.dispatch({ kind: "Forward" }),
+      onCycle: (direction: "Next" | "Previous") =>
+        void latest.current.tabs.dispatch({ kind: "Cycle", direction }),
+      onToggleSplit: (tab: number) => latest.current.onToggleSplit(tab),
+      onMoveToOther: (tab: number) => latest.current.onMoveToOther(tab),
+      onMove: (tab: number, slot: GroupView["slot"], index: number) =>
+        void latest.current.tabs.dispatch({ kind: "Move", tab, group: slot, index }),
+    }),
+    [],
+  );
+
   return (
     <section
       className="ts-egroup"
@@ -70,11 +94,15 @@ export function EditorGroup(props: EditorGroupProps): React.JSX.Element {
       data-slot={group.slot}
       aria-label={t("workspace.tabs.groupLabel", { group: group.slot === "First" ? 1 : 2 })}
       // Каретка перешла в эту группу (US3 AS4): модель узнаёт об этом по фокусу.
+      // Без проверки `focused`: она по последней отрисовке, и щелчок сюда, пока
+      // не применён переход в другую группу, иначе потерялся бы — фокус остался
+      // бы там (T071). Действия модель упорядочивает, повтор для группы с
+      // фокусом её не меняет.
       onFocusCapture={() => {
-        if (split && !focused) void tabs.dispatch({ kind: "FocusGroup", group: group.slot });
+        if (split) void tabs.dispatch({ kind: "FocusGroup", group: group.slot });
       }}
       onPointerDownCapture={() => {
-        if (split && !focused) void tabs.dispatch({ kind: "FocusGroup", group: group.slot });
+        if (split) void tabs.dispatch({ kind: "FocusGroup", group: group.slot });
       }}
     >
       {!hideStrip && (
@@ -91,17 +119,7 @@ export function EditorGroup(props: EditorGroupProps): React.JSX.Element {
           canUnsplit={view.can_unsplit}
           canMoveToOther={view.can_move_to_other}
           shortcuts={shortcuts}
-          onActivate={(tab) => void tabs.activate(tab)}
-          onClose={(tab) => void tabs.close(tab)}
-          onCloseOthers={(tab) => void tabs.closeOthers(tab)}
-          onBack={() => void tabs.dispatch({ kind: "Back" })}
-          onForward={() => void tabs.dispatch({ kind: "Forward" })}
-          onCycle={(direction) => void tabs.dispatch({ kind: "Cycle", direction })}
-          onToggleSplit={props.onToggleSplit}
-          onMoveToOther={props.onMoveToOther}
-          onMove={(tab, slot, index) =>
-            void tabs.dispatch({ kind: "Move", tab, group: slot, index })
-          }
+          {...stripHandlers}
         />
       )}
 
