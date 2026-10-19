@@ -150,6 +150,11 @@ const measureDrag = async (page, id, label) => {
 };
 
 export default async (page) => {
+  // Диагностический зонд холста (`tsProbe`, `data-moving`, `data-draws`, `data-hover-ms`)
+  // продукт выставляет только при этом флаге; init-скрипт сохраняет его после перезагрузки.
+  const PROBE = "window.__TYPSIDIAN_GRAPH_PROBE = true";
+  await page.addInitScript(PROBE);
+  await page.evaluate(PROBE);
   await page.evaluate(OPFS + "true");
   let names = [];
   const t0 = Date.now();

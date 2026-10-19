@@ -482,11 +482,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     }
     if (hot === null && current >= 0 && !zoomLabels) label(current, true);
 
-    canvas.dataset["moving"] = String(p.layout.moving.current);
-    canvas.dataset["draws"] = String(Number(canvas.dataset["draws"] ?? "0") + 1);
-    if (s.hoverEventAt > 0) {
-      canvas.dataset["hoverMs"] = Math.max(0, performance.now() - s.hoverEventAt).toFixed(1);
-      s.hoverEventAt = 0;
+    if (probeEnabled()) {
+      canvas.dataset["moving"] = String(p.layout.moving.current);
+      canvas.dataset["draws"] = String(Number(canvas.dataset["draws"] ?? "0") + 1);
+      if (s.hoverEventAt > 0) {
+        canvas.dataset["hoverMs"] = Math.max(0, performance.now() - s.hoverEventAt).toFixed(1);
+        s.hoverEventAt = 0;
+      }
     }
     if (animating || s.drag !== null) requestDraw();
   }, []);
@@ -737,10 +739,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
   };
 
   // Зонд для сценариев проверки (scripts/dev/scenarios/graph.mjs): экранное
-  // положение узла и число перерисовок. Продукт на него не опирается.
+  // положение узла и число перерисовок. Продукт на него не опирается и без
+  // флага сценария его не выставляет.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas === null) return;
+    if (canvas === null || !probeEnabled()) return;
     const s = state.current;
     (canvas as HTMLCanvasElement & { tsProbe?: unknown }).tsProbe = {
       nodeAt: (index: number): [number, number] => [s.sx[index] ?? 0, s.sy[index] ?? 0],
@@ -764,6 +767,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     />
   );
 });
+
+/** Диагностический зонд включает только сценарий проверки, выставив флаг до открытия графа. */
+function probeEnabled(): boolean {
+  return (globalThis as { __TYPSIDIAN_GRAPH_PROBE?: boolean }).__TYPSIDIAN_GRAPH_PROBE === true;
+}
 
 /** Вид, в который целиком помещается облако положений. */
 function fitView(pos: Float32Array, n: number, width: number, height: number): View {

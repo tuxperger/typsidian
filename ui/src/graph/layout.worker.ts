@@ -6,7 +6,6 @@
 
 import {
   forceLink,
-  forceManyBody,
   forceSimulation,
   forceX,
   forceY,
@@ -15,6 +14,7 @@ import {
   type SimulationNodeDatum,
 } from "d3-force";
 import type { FromWorker, LayoutForces, ToWorker } from "./layout-protocol.js";
+import { forceRepel, type RepelForce } from "./repel-force.js";
 
 interface WorkerScope {
   onmessage: ((event: MessageEvent<ToWorker>) => void) | null;
@@ -69,7 +69,7 @@ function remember(): void {
 
 function applyForces(): void {
   if (sim === null) return;
-  const many = sim.force("charge") as ReturnType<typeof forceManyBody<Body>> | undefined;
+  const many = sim.force("charge") as RepelForce<Body> | undefined;
   many?.strength(repelStrength());
   const link = sim.force("link") as ReturnType<typeof forceLink<Body, Tie>> | undefined;
   link?.distance(linkDistance()).strength((tie) => {
@@ -201,7 +201,7 @@ function setGraph(message: Extract<ToWorker, { type: "setGraph" }>): void {
   sim = forceSimulation<Body>(bodies)
     .alphaDecay(bodies.length > 2000 ? 0.05 : 0.03)
     .velocityDecay(0.4)
-    .force("charge", forceManyBody<Body>().theta(1.1).distanceMax(300))
+    .force("charge", forceRepel<Body>().theta(1.1).distanceMax(300))
     .force("link", forceLink<Body, Tie>(ties).iterations(1))
     .force("x", forceX<Body>(0))
     .force("y", forceY<Body>(0))
