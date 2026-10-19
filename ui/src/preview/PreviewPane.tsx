@@ -11,6 +11,7 @@ import {
   type SetStateAction,
 } from "react";
 import type {
+  Outline,
   Diagnostic,
   DiagnosticLocation,
   VaultOverrides,
@@ -19,6 +20,7 @@ import type { PreviewClient } from "../preview-client.js";
 import { Icon } from "../icons/Icons.js";
 import { PreviewPage } from "./PreviewPage.js";
 import { useCompiledDocument, type PreviewState } from "./useCompiledDocument.js";
+import { useScrollAnchor } from "./useScrollAnchor.js";
 import { describeInstallError } from "./describeInstallError.js";
 import { diagnosticText } from "../i18n/messages.js";
 import { useI18n, type Phrase } from "../i18n/index.js";
@@ -117,6 +119,20 @@ export interface PreviewPaneProps {
    * только эта панель.
    */
   onBuild?: ((notePath: string, state: PreviewState) => void) | undefined;
+  /**
+   * Показать заголовок пункта оглавления (фича 015, FR-004). Новый `seq` —
+   * новый запрос; где заголовок в документе, ищет ядро по текстовому слою.
+   * Не нашлось или документа нет — предпросмотр не двигается.
+   */
+  headingRequest?: HeadingRequest | null;
+}
+
+/** Запрос «показать заголовок» от оглавления. */
+export interface HeadingRequest {
+  notePath: string;
+  outline: Outline;
+  key: string;
+  seq: number;
 }
 
 
@@ -133,6 +149,7 @@ export function PreviewPane({
   canReveal,
   onDependencies,
   onBuild,
+  headingRequest = null,
 }: PreviewPaneProps): React.JSX.Element {
   const { t } = useI18n();
   // Масштаб — дело показа, а не документа: сборка от него не зависит, поэтому
@@ -158,6 +175,34 @@ export function PreviewPane({
     scroller: previewRef,
     onDependencies,
   });
+  // Переход из оглавления (фича 015): тот же механизм прокрутки к прогону, что
+  // удерживает место при пересборке. Документ — последний показанный: ждать
+  // свежей сборки переход не должен (FR-004 «в пределах возможностей 005»).
+  const headingAnchor = useScrollAnchor(previewRef);
+  const shownRef = useRef(state.shown);
+  shownRef.current = state.shown;
+  const headingSeq = headingRequest?.seq ?? 0;
+  useEffect(() => {
+    const document = shownRef.current;
+    if (headingRequest === null || client === null || document === null) return undefined;
+    if (headingRequest.notePath !== notePath) return undefined;
+    let stale = false;
+    void client
+      .locateHeading(
+        document.pages.map((page) => page.text_runs),
+        headingRequest.outline,
+        headingRequest.key,
+      )
+      .then((resolved) => {
+        if (!stale && resolved !== null) headingAnchor.restore(resolved, 0);
+      })
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+    // Запрос — по номеру: тот же пункт, выбранный дважды, прокручивает дважды.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headingSeq]);
   const onBuildRef = useRef(onBuild);
   onBuildRef.current = onBuild;
   useEffect(() => {

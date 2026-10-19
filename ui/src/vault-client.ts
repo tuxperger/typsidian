@@ -42,6 +42,9 @@ import type {
   MoveTarget,
   NoteProperties,
   OpenDaily,
+  Outline,
+  OutlineRequest,
+  OutlineView,
   ParsedConditions,
   PropertyEdit,
   PropertyKeyInfo,
@@ -376,6 +379,17 @@ export interface VaultClient {
   elementSchemaFor(template: string): Promise<ElementSpec | undefined>;
   /** Элемент, непосредственно содержащий каретку (FR-006, FR-016). */
   elementAt(text: string, offset: number): Promise<ElementAtResult>;
+  /**
+   * Оглавление заметки (фича 015, contracts/frontend-outline.md). Что считать
+   * заголовком, какие строки видны, какой раздел текущий и как свёрнутость
+   * переживает правку, решает ядро (`structure`); клиент только передаёт
+   * вопрос. `Outline` держит окно и возвращает при каждом вопросе.
+   */
+  outline(text: string): Promise<Outline>;
+  outlineView(outline: Outline, request: OutlineRequest): Promise<OutlineView>;
+  /** Ключ текущего раздела; `null` — каретка выше первого заголовка или скрыта. */
+  outlineActive(outline: Outline, request: OutlineRequest): Promise<string | null>;
+  outlineCarry(prev: Outline, next: Outline, collapsed: string[]): Promise<string[]>;
   /**
    * Сессия подсветки Typst для одного редактора (фича 024): ядро держит
    * разобранный текст и обновляет его правками. Закрывает сессию редактор.

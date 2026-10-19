@@ -7,7 +7,10 @@ import type {
   ExportReport,
   InstalledTemplate,
   InstallReport,
+  Outline,
+  ResolvedAnchor,
   ScrollAnchor,
+  TextRun,
   VaultOverrides,
 } from "./wasm-core/typsidian_core.js";
 
@@ -103,6 +106,13 @@ export interface PreviewClient {
 
   /** Строки Центра экспорта: те же записи, что у дерева (FR-010, FR-011). */
   exportCandidates(overrides: VaultOverrides): Promise<ExportCandidate[]>;
+
+  /**
+   * Где в собранном документе заголовок пункта оглавления (фича 015, FR-004):
+   * поиск по текстовому слою страниц. `null` — не нашёлся, предпросмотр не
+   * двигается. Сборку не запускает.
+   */
+  locateHeading(runs: TextRun[][], outline: Outline, key: string): Promise<ResolvedAnchor | null>;
 
   /**
    * Переходы пакета — чистые функции ядра (research.md §5). Значение пакета

@@ -34,6 +34,7 @@ import { slides } from "./en/slides.js";
 import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
+import { outline } from "./en/outline.js";
 
 export const en = {
   ...common,
@@ -59,6 +60,7 @@ export const en = {
   ...properties,
   ...importing,
   ...capture,
+  ...outline,
 } as const;
 
 /** Набор переводов одного языка: те же ключи и те же параметры, что у эталона. */

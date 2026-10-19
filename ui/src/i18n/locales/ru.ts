@@ -27,6 +27,7 @@ import { slides } from "./ru/slides.js";
 import { properties } from "./ru/properties.js";
 import { importing } from "./ru/import.js";
 import { capture } from "./ru/capture.js";
+import { outline } from "./ru/outline.js";
 
 export const ru: Catalog = {
   ...common,
@@ -52,4 +53,5 @@ export const ru: Catalog = {
   ...properties,
   ...importing,
   ...capture,
+  ...outline,
 };

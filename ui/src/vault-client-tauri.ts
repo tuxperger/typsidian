@@ -65,7 +65,10 @@ import type {
   MoveTarget,
   NameCheck,
   Note,
+  Outline,
+  OutlineView,
   PreviewState,
+  ResolvedAnchor,
   ResolvedBinding,
   SavedWorkspace,
   SearchResults,
@@ -248,6 +251,9 @@ function tauriPreviewClient(): PreviewClient {
       invoke<ExportReport>("export_pdf", { notePath, text, overrides }),
     exportCandidates: (overrides) =>
       invoke<ExportCandidate[]>("export_candidates", { overrides }),
+    // Фича 015: без состояния оболочки — прогоны страниц приходят из окна.
+    locateHeading: (runs, outline, key) =>
+      invoke<ResolvedAnchor | null>("preview_locate_heading", { runs, outline, key }),
     exportBatch: {
       start: (paths, stopOnError, overrides) =>
         invoke<BatchState>("export_batch_start", { paths, stopOnError, overrides }),
@@ -441,6 +447,14 @@ export function tauriVaultClient(
       (await invoke<ElementSpec | null>("element_schema_for", { template })) ?? undefined,
     elementAt: (text, offset) =>
       invoke<ElementAtResult>("element_at", { text, offset }),
+    // Фича 015: команды без состояния оболочки, `Outline` держит окно.
+    outline: (text) => invoke<Outline>("structure_outline", { text }),
+    outlineView: (outline, request) =>
+      invoke<OutlineView>("structure_outline_view", { outline, request }),
+    outlineActive: (outline, request) =>
+      invoke<string | null>("structure_outline_active", { outline, request }),
+    outlineCarry: (prev, next, collapsed) =>
+      invoke<string[]>("structure_outline_carry", { prev, next, collapsed }),
     // Фича 024: сессия живёт в состоянии оболочки под номером. Ответ IPC —
     // массив чисел, интерфейсу нужен тот же `Uint32Array`, что на web.
     openHighlight: (text) => {

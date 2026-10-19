@@ -32,6 +32,11 @@
   --border-subtle: var(--steel-800);
   --border-default: var(--steel-800);
   --border-strong: var(--steel-700);
+
+  /* Браузеру тоже надо сказать, что поверхность тёмная: раскрытый `<select>`,
+   * подсказки `<datalist>` и полосы прокрутки он рисует сам и без этого берёт
+   * светлую системную тему — белое поле со светлым текстом из наших правил. */
+  color-scheme: dark;
 }
 
 *,
@@ -1110,6 +1115,15 @@ input.ts-sources__url:focus {
   color: var(--steel-200);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+/* Пункты раскрытого списка. Firefox красит их по правилам страницы, а цвет
+ * текста наследуется от `select` — без своего фона он светлый на белом. */
+.ts-app option,
+.ts-sheet option,
+.ts-welcome option {
+  background: var(--steel-900);
+  color: var(--steel-200);
 }
 
 /* ── Контекстное меню дерева ─────────────────────────────────────────────── */
@@ -5011,6 +5025,22 @@ input.ts-sources__url:focus {
   text-overflow: ellipsis;
 }
 
+/* Отметка у отмечаемого пункта: рамка 12px, отмеченный — залит оранжевым. */
+.ts-ctxmenu__check {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-right: calc(var(--space-2) - var(--space-4));
+  border: var(--border-width) solid var(--steel-600);
+  border-radius: var(--radius-sm);
+}
+
+.ts-ctxmenu__item[aria-checked="true"] .ts-ctxmenu__check {
+  border-color: var(--orange-500);
+  background: var(--orange-500);
+  box-shadow: inset 0 0 0 2px var(--steel-900);
+}
+
 .ts-ctxmenu__key {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -6160,10 +6190,24 @@ button.ts-diagnostics__place:focus-visible {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  /* Четыре режима (013, 015, 020, 025) в 248px не помещаются: переключатель
+   * прокручивается вбок, а не наезжает на счётчик. */
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ts-notepanel__modes::-webkit-scrollbar {
+  display: none;
+}
+
+.ts-notepanel__head > .ts-notepanel__tag {
+  flex: none;
 }
 
 /* Название режима: кнопка, выглядящая как подпись `.ts-eyebrow`. */
 .ts-notepanel__mode {
+  flex: none;
   padding: 0;
   border: 0;
   background: none;
@@ -6257,6 +6301,240 @@ button.ts-diagnostics__place:focus-visible {
 
 .ts-notepanel__grab:hover::before {
   background: var(--steel-500);
+}
+
+/* ── Боковая шторка колонки (фича 015, макет «Оглавление» 1b) ───────────────
+ * Средняя ширина `.ts-body` (720–1100px): та же колонка панелью 280px справа
+ * поверх редактора, на скриме под шапкой — как у шторки снизу. */
+.ts-notepanel-drawer {
+  position: absolute;
+  inset: var(--ts-header-h) 0 0 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(20, 23, 26, 0.6);
+}
+
+.ts-notepanel-drawer__panel {
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100%;
+  border-right: 0;
+  border-left: var(--border-width) solid var(--border-strong);
+  box-shadow: var(--shadow-xl);
+}
+
+.ts-notepanel-drawer__panel:focus {
+  outline: none;
+}
+
+.ts-notepanel-drawer__esc {
+  background: none;
+  cursor: pointer;
+}
+
+.ts-notepanel-drawer__esc:hover {
+  border-color: var(--steel-500);
+  color: var(--steel-300);
+}
+
+.ts-notepanel-drawer__foot {
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--border-width) solid var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Режим «Структура» (фича 015, макет «Оглавление» 1a–1c) ─────────────── */
+
+.ts-outline {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  font-size: 11.5px;
+}
+
+.ts-outline__bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--ts-notepanel-bg);
+}
+
+.ts-outline__bar--end {
+  justify-content: flex-end;
+}
+
+.ts-outline__filter {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-200);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.ts-outline__filter:focus-visible {
+  outline: none;
+  border-color: var(--orange-500);
+}
+
+/* Кнопка меню видов: три точки маской, без иконки-шрифта. */
+.ts-outline__kinds {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: radial-gradient(circle, var(--steel-500) 1.5px, transparent 2px) 0 50% / 5px 5px
+    repeat-x content-box;
+  cursor: pointer;
+}
+
+.ts-outline__kinds:hover,
+.ts-outline__kinds:focus-visible {
+  border-color: var(--steel-700);
+  outline: none;
+}
+
+.ts-outline__tree {
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+}
+
+.ts-outline__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  /* Отступ по уровню (макет 1a): текст уровня 2 — на 26px, 3 — на 40px,
+   * дальше +14px; 18px — шеврон и зазор перед текстом. */
+  padding: 0 var(--space-3) 0 max(0px, calc(8px + (var(--ts-outline-level, 1) - 2) * 14px));
+  color: var(--steel-400);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ts-outline__row:hover {
+  background: color-mix(in srgb, var(--steel-900) 60%, transparent);
+  color: var(--steel-200);
+}
+
+.ts-outline__row:focus-visible {
+  outline: var(--border-width) solid var(--orange-500);
+  outline-offset: -1px;
+}
+
+.ts-outline__row--active,
+.ts-outline__row--active:hover {
+  background: var(--steel-900);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+  color: var(--steel-100);
+}
+
+.ts-outline__row--dimmed {
+  opacity: 0.45;
+}
+
+.ts-outline__row--mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* Шеврон занимает 14px и у строк без вложенных — тексты одного уровня
+ * стоят ровно. */
+.ts-outline__chevron {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--steel-500);
+  cursor: pointer;
+}
+
+.ts-outline__chevron::before {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 5px;
+  margin: 3px auto 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.ts-outline__chevron--closed::before {
+  margin-top: 4px;
+  transform: rotate(-45deg);
+}
+
+.ts-outline__chevron--none::before {
+  content: none;
+}
+
+.ts-outline__chevron:hover {
+  color: var(--steel-200);
+}
+
+.ts-outline__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ts-outline__row--whole .ts-outline__text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ts-outline__prefix {
+  color: var(--steel-500);
+}
+
+.ts-outline__label {
+  color: var(--orange-400);
+}
+
+.ts-outline__label--side {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ts-outline__match {
+  background: color-mix(in srgb, var(--orange-500) 35%, transparent);
+  color: var(--steel-100);
+}
+
+.ts-outline__empty {
+  margin: 0;
+  padding: var(--space-5);
+  color: var(--steel-500);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 /* ── Режим «Связи» ─────────────────────────────────────────────────────── */

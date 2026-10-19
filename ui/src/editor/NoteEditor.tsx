@@ -97,6 +97,13 @@ export interface NoteEditorProps {
    * сообщает об этом вместо того, чтобы предлагать неработающую кнопку.
    */
   onEditorReady?: (getView: (() => EditorView | null) | null) => void;
+  /**
+   * Каретка активной вкладки сдвинулась — смещение в кодовых единицах UTF-16
+   * (фича 015: текущий раздел оглавления). Зовётся из слушателя обновления
+   * редактора, поэтому получатель только запоминает значение, а работу
+   * откладывает на свой таймер.
+   */
+  onCaretOffset?: (offset: number) => void;
   /** Сохранить открытую заметку как заготовку (фича 003, US2). */
   onSaveAsTemplate?: (content: string) => void;
   /**
@@ -167,6 +174,7 @@ export function NoteEditor({
   onOpenBoard,
   onCreateBoard,
   onEditorReady,
+  onCaretOffset,
   onSaveAsTemplate,
   fontSize,
   shortcuts,
@@ -188,9 +196,14 @@ export function NoteEditor({
   // свежее значение без ожидания рендера, поэтому и ref, и state.
   const caretRef = useRef<CaretPosition>({ line: 1, column: 1, offset: 0 });
   const [caret, setCaret] = useState<CaretPosition>({ line: 1, column: 1, offset: 0 });
+  // Наружу — только каретка активной вкладки: соседняя группа разделения
+  // оглавлению не указ. Через ref, чтобы `onCaretMove` оставался стабильным.
+  const caretSink = useRef<((offset: number) => void) | undefined>(undefined);
+  caretSink.current = active ? onCaretOffset : undefined;
   const onCaretMove = useCallback((next: CaretPosition) => {
     caretRef.current = next;
     setCaret(next);
+    caretSink.current?.(next.offset);
   }, []);
 
   // Меню вставки элементов Typst (⌘E). Открытое меню помнит, где была каретка

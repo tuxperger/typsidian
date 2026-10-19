@@ -29,7 +29,13 @@ import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.j
 
 import { defaultNewBoardName } from "../vault-tree/VaultTreeActions.js";
 import { Sidebar } from "../vault-tree/Sidebar.js";
-import type { Condition, OpenText, TextPlace, WorkspaceView } from "../wasm-core/typsidian_core.js";
+import type {
+  Condition,
+  OpenText,
+  OutlineRow as OutlineRowView,
+  TextPlace,
+  WorkspaceView,
+} from "../wasm-core/typsidian_core.js";
 import { ExportCenter } from "../export/ExportCenter.js";
 import { ExportToast } from "../export/ExportToast.js";
 import { useExport } from "../export/useExport.js";
@@ -97,6 +103,10 @@ import { NotePanel } from "../note-panel/NotePanel.js";
 import type { NotePanelModeSpec } from "../note-panel/modes.js";
 import { useNarrowViewport } from "../note-panel/useNarrowViewport.js";
 import { useNotePanelState } from "../note-panel/useNotePanelState.js";
+import { NotePanelDrawer, useBodyBelow } from "../note-panel/NotePanelDrawer.js";
+import { OutlineMode, type OutlineTarget } from "../note-panel/OutlineMode.js";
+import { useOutline } from "../note-panel/useOutline.js";
+import type { HeadingRequest } from "../preview/PreviewPane.js";
 import { LinksMode, type RevealPlace } from "../note-panel/links/LinksMode.js";
 import { useNoteLinks, type LinksChanges } from "../note-panel/links/useNoteLinks.js";
 import type { PreviewState } from "../preview/useCompiledDocument.js";
@@ -293,17 +303,6 @@ function WorkspaceView({
   // счётчика и открывает форму для элемента под кареткой.
   const [paramsRequest, setParamsRequest] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
-  // Колонка заметки (фича 013): состояние лежит в настройках устройства. На узком
-  // окне вместо колонки — шторка; открыта ли она, не сохраняется (research.md §12).
-  const notePanel = useNotePanelState(device);
-  const narrow = useNarrowViewport();
-  const [noteSheetOpen, setNoteSheetOpen] = useState(false);
-  const notePanelOpen = narrow ? noteSheetOpen : notePanel.shown;
-  const toggleNotePanel = useCallback(() => {
-    if (narrow) setNoteSheetOpen((open) => !open);
-    else notePanel.toggle();
-  }, [narrow, notePanel.toggle]);
-  const closeNoteSheet = useCallback(() => setNoteSheetOpen(false), []);
   // Доски во вкладках: как их дописать при закрытии вкладки и чья запись не удалась.
   const boardControllers = useMemo(() => new BoardControllers(), []);
   // Открыта ли шторка «Открытые заметки» (телефон, фича 014).
@@ -412,6 +411,43 @@ function WorkspaceView({
   // Размеры колонок. Значения по умолчанию — из макета; двигает их
   // пользователь границами между колонками.
   const panes = usePaneLayout();
+  // Колонка заметки (фича 013): состояние лежит в настройках устройства. На узком
+  // окне вместо колонки — шторка снизу, на средней ширине `.ts-body` — боковая
+  // шторка (фича 015, research.md §11); открыта ли шторка, не сохраняется
+  // (013 research.md §12). Обе шторки делят один признак «открыта».
+  const notePanel = useNotePanelState(device);
+  const narrow = useNarrowViewport();
+  const drawer = useBodyBelow(panes.bodyRef) && !narrow;
+  const [noteSheetOpen, setNoteSheetOpen] = useState(false);
+  const notePanelOpen = narrow || drawer ? noteSheetOpen : notePanel.shown;
+  const toggleNotePanel = useCallback(() => {
+    if (narrow || drawer) setNoteSheetOpen((open) => !open);
+    else notePanel.toggle();
+  }, [narrow, drawer, notePanel.toggle]);
+  const closeNoteSheet = useCallback(() => setNoteSheetOpen(false), []);
+  // «Оглавление» (фича 015, research.md §12): скрыта — показать в режиме
+  // «Структура»; показана в другом режиме — переключить; показана в нём —
+  // скрыть. Шторку команда открывает и закрывает так же.
+  const notePanelMode = notePanel.mode;
+  const { setMode: setNotePanelMode, setShown: setNotePanelShown } = notePanel;
+  const notePanelShown = notePanel.shown;
+  const toggleOutline = useCallback(() => {
+    if (narrow || drawer) {
+      if (noteSheetOpen && notePanelMode === "outline") {
+        setNoteSheetOpen(false);
+      } else {
+        setNotePanelMode("outline");
+        setNoteSheetOpen(true);
+      }
+    } else if (!notePanelShown) {
+      setNotePanelMode("outline");
+      setNotePanelShown(true);
+    } else if (notePanelMode !== "outline") {
+      setNotePanelMode("outline");
+    } else {
+      setNotePanelShown(false);
+    }
+  }, [narrow, drawer, noteSheetOpen, notePanelMode, notePanelShown, setNotePanelMode, setNotePanelShown]);
   // Показать скрытое дерево из команды палитры (фича 023). Через ref: функция
   // раскладки новая на каждую отрисовку, а список команд от неё зависеть не
   // должен.
@@ -674,6 +710,42 @@ function WorkspaceView({
     return parts.length === 0 ? null : parts.join(" · ");
   }, [notePanelOpen, backlinkCount, mentionCount, t]);
 
+  // ── Оглавление заметки (фича 015) ──────────────────────────────────────
+  //
+  // Разбор идёт, только пока режим «Структура» виден (SC-004): скрытая колонка
+  // ядро не зовёт. Оглавление есть только у заметки Typst (FR-012).
+  const outlineShown = view === "workspace" && notePanelOpen && notePanel.mode === "outline";
+  const outlineNotePath = active?.kind === "Note" ? openNotePath : null;
+  const outlineKinds = notePanel.outlineKinds;
+  const noteOutline = useOutline({
+    client: state.client,
+    notePath: outlineNotePath,
+    text: editorText,
+    kinds: outlineKinds,
+    enabled: outlineShown,
+  });
+  const outlineTarget: OutlineTarget =
+    active === null
+      ? "none"
+      : isBoardOpen
+        ? "board"
+        : typeof activeSnapshot.read === "object" && activeSnapshot.read.kind === "TooLarge"
+          ? "tooLarge"
+          : outlineNotePath !== null
+            ? "note"
+            : "none";
+  const outlineCounts = noteOutline.view?.counts ?? null;
+  const outlineBadge = useMemo(() => {
+    if (outlineCounts === null) return null;
+    const parts = [formatNumber(outlineCounts.headings)];
+    if (outlineKinds.figures ?? false) {
+      parts.push(formatNumber(outlineCounts.figures + outlineCounts.tables));
+    }
+    if (outlineKinds.labels ?? false) parts.push(formatNumber(outlineCounts.labels));
+    return parts.join(" · ");
+  }, [outlineCounts, outlineKinds, formatNumber]);
+  const [headingRequest, setHeadingRequest] = useState<HeadingRequest | null>(null);
+
   // ── Свойства заметки и выборки (фича 020) ───────────────────────────────
   const propertiesActive = notePanelOpen && notePanel.mode === "properties";
   const noteProperties = useNoteProperties(
@@ -916,6 +988,41 @@ function WorkspaceView({
     [state.notes],
   );
 
+  // Переход к пункту оглавления (FR-003, FR-004): каретка — тем же переходом,
+  // что к ошибке, синхронно с жестом; предпросмотр догоняет отдельно и не
+  // задерживает каретку. Из шторки `revealPlace` её закрывает.
+  const focusEditor = useCallback(() => {
+    getEditorView?.()?.focus();
+  }, [getEditorView]);
+  const outlineValue = noteOutline.outline;
+  const jumpToOutlineRow = useCallback(
+    (row: OutlineRowView) => {
+      if (outlineNotePath === null) return;
+      revealPlace({ path: outlineNotePath, line: row.place.line, column: row.place.column });
+      if (outlineValue !== null && row.kind === "Heading") {
+        const notePath = outlineNotePath;
+        setHeadingRequest((previous) => ({
+          notePath,
+          outline: outlineValue,
+          key: row.key,
+          seq: (previous?.seq ?? 0) + 1,
+        }));
+      }
+    },
+    [outlineNotePath, outlineValue, revealPlace],
+  );
+  const closeNoteDrawer = useCallback(() => {
+    setNoteSheetOpen(false);
+    focusEditor();
+  }, [focusEditor]);
+  const outlineFilter = noteOutline.filter;
+  const setOutlineFilter = noteOutline.setFilter;
+  const escapeNoteDrawer = useCallback(() => {
+    // Непустой фильтр Escape сперва очищает (макет 1b), шторку — следующий.
+    if (notePanelMode === "outline" && outlineFilter !== "") setOutlineFilter("");
+    else closeNoteDrawer();
+  }, [notePanelMode, outlineFilter, setOutlineFilter, closeNoteDrawer]);
+
   const noteModes = useMemo<NotePanelModeSpec[]>(
     () => [
       {
@@ -933,6 +1040,22 @@ function WorkspaceView({
             mentionsExpanded={notePanel.mentionsExpanded}
             onMentionsExpanded={notePanel.setMentionsExpanded}
             onReveal={revealPlace}
+          />
+        ),
+      },
+      {
+        id: "outline",
+        title: "outline.mode",
+        badge: outlineBadge,
+        render: () => (
+          <OutlineMode
+            target={outlineTarget}
+            outline={noteOutline}
+            kinds={outlineKinds}
+            onKinds={notePanel.setOutlineKinds}
+            onJump={jumpToOutlineRow}
+            onFocusEditor={focusEditor}
+            focusFilter={narrow || drawer}
           />
         ),
       },
@@ -994,6 +1117,15 @@ function WorkspaceView({
       graphSettings.settings,
       columnDepth,
       openPathFromGraph,
+      outlineBadge,
+      outlineTarget,
+      noteOutline,
+      outlineKinds,
+      notePanel.setOutlineKinds,
+      jumpToOutlineRow,
+      focusEditor,
+      narrow,
+      drawer,
     ],
   );
 
@@ -1318,6 +1450,9 @@ function WorkspaceView({
       } else if (shortcuts.matches("toggle-note-panel", event)) {
         event.preventDefault();
         toggleNotePanel();
+      } else if (shortcuts.matches("toggle-outline", event)) {
+        event.preventDefault();
+        toggleOutline();
       } else if (shortcuts.matches("tab-close", event)) {
         event.preventDefault();
         tabCommands.close();
@@ -1387,6 +1522,7 @@ function WorkspaceView({
     shortcuts,
     toggleView,
     toggleNotePanel,
+    toggleOutline,
     tabCommands,
     exportCurrent,
     syncClient,
@@ -1482,6 +1618,17 @@ function WorkspaceView({
         icon: "terminal",
         meta: shortcuts.displayOf("element-params"),
         run: () => setParamsRequest((request) => request + 1),
+      });
+    }
+    // Фича 015. Оглавление — только у открытой заметки Typst: у доски и
+    // прочих файлов его нет (FR-012).
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push({
+        id: "toggle-outline",
+        ...titled("outline.button"),
+        icon: "list",
+        meta: shortcuts.displayOf("toggle-outline"),
+        run: toggleOutline,
       });
     }
     // Фича 019. Показ слайдов — только у открытой заметки Typst и там, где
@@ -1768,6 +1915,8 @@ function WorkspaceView({
     view,
     toggleView,
     toggleNotePanel,
+    toggleOutline,
+    outlineNotePath,
     createBoard,
     settings,
     shortcuts,
@@ -2047,6 +2196,19 @@ function WorkspaceView({
             />
           )}
 
+          {/* Оглавление (015, макет 1a): та же колонка в режиме «Структура». */}
+          {view === "workspace" && (
+            <button
+              type="button"
+              className="ts-btn"
+              aria-pressed={outlineShown}
+              title={hintWith(t("outline.button"), shortcuts.displayOf("toggle-outline"))}
+              onClick={toggleOutline}
+            >
+              {t("outline.button")}
+            </button>
+          )}
+
           {/* Колонка заметки (013): на узком окне кнопка подписана названием
               активного режима и открывает шторку. */}
           {view === "workspace" && (
@@ -2220,7 +2382,7 @@ function WorkspaceView({
         {/* Колонка заметки (013): между деревом и редактором, а при открытой
             доске — рядом с контейнером полотна, в его DOM не входя. На узком
             окне вместо неё шторка (ниже). */}
-        {!narrow && notePanel.shown && (
+        {!narrow && !drawer && notePanel.shown && (
           <NotePanel
             modes={noteModes}
             active={notePanel.mode}
@@ -2250,6 +2412,7 @@ function WorkspaceView({
               onOpenBoard: openBoard,
               onCreateBoard: () => void createBoard(),
               onEditorReady: editorReady,
+              onCaretOffset: noteOutline.noticeCaret,
               onSaveAsTemplate: setSavingTemplate,
               fontSize: editorFontSize,
               shortcuts,
@@ -2309,11 +2472,23 @@ function WorkspaceView({
                 onDependencies={notePreviewDependencies}
                 // Фича 019: показ слайдов следит за сборкой этой заметки.
                 onBuild={showHost === undefined ? undefined : noteBuild}
+                // Фича 015: переход из оглавления доводит и предпросмотр.
+                headingRequest={headingRequest}
               />
             )}
           </>
         )}
       </div>
+      )}
+
+      {drawer && noteSheetOpen && view === "workspace" && (
+        <NotePanelDrawer
+          modes={noteModes}
+          active={notePanel.mode}
+          onSelect={notePanel.setMode}
+          onClose={closeNoteDrawer}
+          onEscape={escapeNoteDrawer}
+        />
       )}
 
       {narrow && noteSheetOpen && view === "workspace" && (

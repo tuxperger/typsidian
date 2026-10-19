@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NotePanelMode, NotePanelState } from "../wasm-core/typsidian_core.js";
+import type { NotePanelMode, NotePanelState, OutlineKinds } from "../wasm-core/typsidian_core.js";
 import type { PanelModeId } from "./modes.js";
 import type { DeviceSettingsClient } from "../settings/device-settings-client.js";
 import { changeOf } from "../settings/useSettings.js";
@@ -16,21 +16,27 @@ export const NOTE_PANEL_PERSIST_DEBOUNCE_MS = 400;
 
 /** Умолчания совпадают с ядром (`NotePanelState::default`): колонка скрыта, упоминания свёрнуты. */
 const DEFAULT_MODE: NotePanelMode = "links";
+/** Оглавление по умолчанию показывает только заголовки. */
+const NO_KINDS: OutlineKinds = { figures: false, labels: false };
 
 export interface NotePanelStateHandle {
   shown: boolean;
   mode: PanelModeId;
   mentionsExpanded: boolean;
+  /** Виды пунктов оглавления кроме заголовков (фича 015, FR-010). */
+  outlineKinds: OutlineKinds;
   toggle: () => void;
   setShown: (shown: boolean) => void;
   setMode: (mode: PanelModeId) => void;
   setMentionsExpanded: (expanded: boolean) => void;
+  setOutlineKinds: (kinds: OutlineKinds) => void;
 }
 
 interface Resolved {
   shown: boolean;
   mode: PanelModeId;
   mentionsExpanded: boolean;
+  outlineKinds: OutlineKinds;
 }
 
 function resolved(state: NotePanelState | undefined): Resolved {
@@ -38,6 +44,7 @@ function resolved(state: NotePanelState | undefined): Resolved {
     shown: state?.shown ?? false,
     mode: state?.mode ?? DEFAULT_MODE,
     mentionsExpanded: state?.mentions_expanded ?? false,
+    outlineKinds: state?.outline_kinds ?? NO_KINDS,
   };
 }
 
@@ -81,6 +88,7 @@ export function useNotePanelState(
         shown: state.shown,
         mode: state.mode,
         mentions_expanded: state.mentionsExpanded,
+        outline_kinds: state.outlineKinds,
       };
       // Отказ записи не ломает окно: состояние уже применено, потеряется
       // только его память.
@@ -106,6 +114,10 @@ export function useNotePanelState(
     setMode: useCallback((mode: PanelModeId) => update({ mode }), [update]),
     setMentionsExpanded: useCallback(
       (mentionsExpanded: boolean) => update({ mentionsExpanded }),
+      [update],
+    ),
+    setOutlineKinds: useCallback(
+      (outlineKinds: OutlineKinds) => update({ outlineKinds }),
       [update],
     ),
   };

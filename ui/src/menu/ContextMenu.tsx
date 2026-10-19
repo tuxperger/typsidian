@@ -36,6 +36,8 @@ export type ContextMenuItem =
       disabled?: boolean;
       /** Разрушительное действие — красным. */
       danger?: boolean;
+      /** Отмечаемый пункт (`menuitemcheckbox`); `undefined` — обычное действие. */
+      checked?: boolean;
       run: () => void | Promise<void>;
     }
   | { kind: "separator" };
@@ -255,7 +257,8 @@ function MenuLayer({
           <button
             key={`${index}:${item.label}`}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            {...(item.checked === undefined ? {} : { "aria-checked": item.checked })}
             className={
               item.danger ? "ts-ctxmenu__item ts-ctxmenu__item--danger" : "ts-ctxmenu__item"
             }
@@ -268,6 +271,9 @@ function MenuLayer({
               void item.run();
             }}
           >
+            {item.checked !== undefined && (
+              <span className="ts-ctxmenu__check" aria-hidden="true" />
+            )}
             <span className="ts-ctxmenu__label">{item.label}</span>
             {item.shortcut && <span className="ts-ctxmenu__key">{item.shortcut}</span>}
           </button>
@@ -280,7 +286,9 @@ function MenuLayer({
 function enabledItems(root: HTMLElement | null): HTMLButtonElement[] {
   if (!root) return [];
   return Array.from(
-    root.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)'),
+    root.querySelectorAll<HTMLButtonElement>(
+      'button[role="menuitem"]:not(:disabled), button[role="menuitemcheckbox"]:not(:disabled)',
+    ),
   );
 }
 

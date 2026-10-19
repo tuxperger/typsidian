@@ -24,7 +24,12 @@ import {
   linksMentionsIn,
   linksMentionsStart,
   linksMentionsStep,
+  noteOutline,
+  noteOutlineActive,
+  noteOutlineCarry,
+  noteOutlineView,
   PreviewEngine,
+  previewLocateHeading,
   propertiesEdit,
   propertiesRead,
   searchParseConditions,
@@ -283,6 +288,11 @@ export function webVaultClient(
     elementSchema: async (id) => WebBackend.elementSchema(id),
     elementSchemaFor: async (template) => WebBackend.elementSchemaFor(template),
     elementAt: async (text, offset) => WebBackend.elementAt(text, offset),
+    // Фича 015: свободные функции ядра — без очереди вызовов, как `elementAt`.
+    outline: async (text) => noteOutline(text),
+    outlineView: async (outline, request) => noteOutlineView(outline, request),
+    outlineActive: async (outline, request) => noteOutlineActive(outline, request) ?? null,
+    outlineCarry: async (prev, next, collapsed) => noteOutlineCarry(prev, next, collapsed),
     // Фича 024: объект ядра на редактор. Своя память, не `WebBackend`, поэтому
     // очередь вызовов wasm его не ждёт.
     openHighlight: (text) => {
@@ -482,6 +492,8 @@ function webPreviewClient(
       call(() => engine.exportPdf(backend, notePath, text, overrides)),
     exportCandidates: (overrides) =>
       call(() => exportCandidates(backend, overrides)),
+    // Фича 015: свободная функция, vault не трогает — мимо очереди.
+    locateHeading: async (runs, outline, key) => previewLocateHeading(runs, outline, key) ?? null,
     // Переходы пакета не трогают vault — вызываются напрямую, мимо очереди:
     // иначе отмена ждала бы окончания сборки текущей заметки в очереди.
     exportBatch: {

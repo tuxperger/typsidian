@@ -25,6 +25,7 @@ export type SharedEditorProps = Pick<
   | "onOpenBoard"
   | "onCreateBoard"
   | "onEditorReady"
+  | "onCaretOffset"
   | "onSaveAsTemplate"
   | "fontSize"
   | "shortcuts"
