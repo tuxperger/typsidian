@@ -3,6 +3,7 @@ import type { VaultClient } from "../vault-client.js";
 import type { MessageKey, Phrase, Translate } from "../i18n/index.js";
 import type {
   AssetsPlacement,
+  AttachmentsPlacement,
   CaptureOverrides,
   GraphSettings,
   CommandId,
@@ -59,6 +60,14 @@ export interface VaultSettingsState {
   setCapture: (capture: CaptureOverrides) => Promise<boolean>;
   /** Настройки графа связей (фича 025): таблица `graph` целиком, чужие ключи ядро не трогает. */
   setGraph: (graph: GraphSettings) => Promise<boolean>;
+  /**
+   * Размещение и папка вложений (фича 016, FR-016…FR-018). `undefined` в поле —
+   * умолчание. Негодное название ядро отклоняет с причиной, прежнее остаётся.
+   */
+  setAttachments: (next: {
+    placement: AttachmentsPlacement | undefined;
+    folder: string | undefined;
+  }) => Promise<boolean>;
   /**
    * Применяет к перекрытиям vault набор изменений, который ядро направило сюда
    * (фича 006, FR-029).
@@ -168,6 +177,27 @@ export function useVaultSettings(
       if (overrides === null) return false;
       const written = await write({ ...overrides, capture });
       // Пути хранятся в нормальной форме: показать надо записанное.
+      if (written) await reload();
+      return written;
+    },
+    [overrides, write, reload],
+  );
+
+  const setAttachments = useCallback(
+    async (next: { placement: AttachmentsPlacement | undefined; folder: string | undefined }) => {
+      if (overrides === null) return false;
+      // Умолчание — отсутствие ключа, а не `undefined` в нём.
+      const {
+        attachments_placement: _placement,
+        attachments_folder: _folder,
+        ...rest
+      } = overrides;
+      const written = await write({
+        ...rest,
+        ...(next.placement !== undefined ? { attachments_placement: next.placement } : {}),
+        ...(next.folder !== undefined ? { attachments_folder: next.folder } : {}),
+      });
+      // Название хранится в нормальной форме — показать записанное.
       if (written) await reload();
       return written;
     },
@@ -297,6 +327,7 @@ export function useVaultSettings(
     setExportFolder,
     setCapture,
     setGraph,
+    setAttachments,
     applyChange,
     setEditorFontSize,
     markSection,
@@ -356,6 +387,13 @@ function describe(cause: unknown): Phrase {
             problem: describeExportFolderProblem(t, problem),
           });
       }
+      case "InvalidAttachmentsFolder": {
+        const problem = (cause as { problem?: { kind?: string } }).problem?.kind;
+        return (t) =>
+          t("settings.attachments.invalid", {
+            problem: describeAttachmentsFolderProblem(t, problem),
+          });
+      }
       case "InvalidCapture": {
         const failure = cause as { field?: string; problem?: { kind?: string } };
         return (t) =>
@@ -394,6 +432,22 @@ function describeExportFolderProblem(t: Translate, kind: string | undefined): st
       return t("settings.exportFolder.leavesVault");
     case "ServiceFolder":
       return t("settings.exportFolder.serviceFolder");
+    default:
+      return t("settings.exportFolder.invalid");
+  }
+}
+
+/** Почему название папки вложений не годится — словами (016 FR-018). */
+function describeAttachmentsFolderProblem(t: Translate, kind: string | undefined): string {
+  switch (kind) {
+    case "Empty":
+      return t("settings.attachments.empty");
+    case "Absolute":
+      return t("settings.attachments.absolute");
+    case "LeavesVault":
+      return t("settings.attachments.leavesVault");
+    case "ServiceFolder":
+      return t("settings.attachments.serviceFolder");
     default:
       return t("settings.exportFolder.invalid");
   }

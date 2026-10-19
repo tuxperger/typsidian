@@ -63,6 +63,23 @@ export function MobileWorkspace(): React.JSX.Element {
   // Откуда начать обзор: последний открытый vault (FR-007). Спрашивается на
   // монтировании, а не при открытии обзора, — чтобы список был готов к первому
   // кадру, а не появлялся после него.
+  // Источники изображений (фича 016, research.md §2): галерея есть всегда,
+  // камера — если устройство её перечисляет. Разрешение для этого не нужно.
+  const [imageSources, setImageSources] = useState({ camera: false, gallery: true });
+  useEffect(() => {
+    let alive = true;
+    void navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((devices) => {
+        const camera = devices.some((device) => device.kind === "videoinput");
+        if (alive) setImageSources({ camera, gallery: true });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const [startAt, setStartAt] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +107,7 @@ export function MobileWorkspace(): React.JSX.Element {
         pickImportSource={importPicker}
         // «Поделиться» и ярлыки Android приходят из плагина `capture` (фича 022).
         captureSource={captureSource}
+        imageSources={imageSources}
         settings={(client, reopen, preview, extras) => (
           <SettingsPanel
             device={device}

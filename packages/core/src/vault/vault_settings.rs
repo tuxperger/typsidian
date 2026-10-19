@@ -85,6 +85,13 @@ pub struct VaultOverrides {
     /// `None` — умолчание `export`. Хранится в нормальной форме
     /// [`crate::export::folder::validate_folder`]: части через `/`.
     pub export_folder: Option<String>,
+    /// Где лежат новые вложения (фича 016, FR-016). `None` — рядом с заметкой.
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub attachments_placement: Option<crate::attachments::AttachmentsPlacement>,
+    /// Название папки вложений (FR-016, FR-018). `None` — `attachments`.
+    /// Хранится в нормальной форме [`crate::attachments::folder::validate_folder`].
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub attachments_folder: Option<String>,
     /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
     ///
     /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
@@ -156,6 +163,11 @@ pub enum VaultSettingsError {
     InvalidExportFolder {
         problem: crate::export::folder::ExportFolderProblem,
     },
+    /// Название папки вложений не годится (фича 016, FR-018). Файл не тронут.
+    #[error("{problem}")]
+    InvalidAttachmentsFolder {
+        problem: crate::attachments::AttachmentsFolderProblem,
+    },
     /// Путь в настройках захвата не годится (фича 022, FR-010). Файл не тронут.
     #[error("{problem}")]
     InvalidCapture {
@@ -224,6 +236,12 @@ pub async fn write_vault_settings<B: VaultBackend>(
         let folder = crate::export::folder::validate_folder(&raw)
             .map_err(|problem| VaultSettingsError::InvalidExportFolder { problem })?;
         overrides.export_folder = Some(folder);
+    }
+    // Папка вложений — та же нормальная форма (016 FR-018).
+    if let Some(raw) = overrides.attachments_folder.take() {
+        let folder = crate::attachments::folder::validate_folder(&raw)
+            .map_err(|problem| VaultSettingsError::InvalidAttachmentsFolder { problem })?;
+        overrides.attachments_folder = Some(folder);
     }
     // Пути захвата — в нормальной форме, пустое поле — «не задано» (022).
     if let Some(capture) = overrides.capture.take() {
@@ -507,6 +525,7 @@ const KEYBINDINGS_TABLE: &str = "keybindings";
 const EXPORT_TABLE: &str = "export";
 const CAPTURE_TABLE: &str = "capture";
 const GRAPH_TABLE: &str = "graph";
+const ATTACHMENTS_TABLE: &str = "attachments";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -522,6 +541,8 @@ struct FileShape {
     export: ExportTable,
     #[serde(default)]
     capture: CaptureTable,
+    #[serde(default)]
+    attachments: AttachmentsTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -537,6 +558,16 @@ struct FileShape {
 struct ExportTable {
     #[serde(default)]
     folder: Option<String>,
+}
+
+/// Таблица вложений (016). Значения как `Value`: неверное — «не задано», а
+/// не повод объявить файл нечитаемым, как у таблицы захвата.
+#[derive(Debug, Default, Deserialize)]
+struct AttachmentsTable {
+    #[serde(default)]
+    placement: Option<Value>,
+    #[serde(default)]
+    folder: Option<Value>,
 }
 
 /// Таблица захвата (022). Значения читаются как `Value`, а не типизированно:
@@ -666,6 +697,15 @@ impl FileShape {
                 .export
                 .folder
                 .and_then(|raw| crate::export::folder::validate_folder(&raw).ok()),
+            // Негодные значения отбрасываются молча, как папка экспорта.
+            attachments_placement: self
+                .attachments
+                .placement
+                .and_then(|value| serde_json::from_value(value).ok()),
+            attachments_folder: match self.attachments.folder {
+                Some(Value::String(raw)) => crate::attachments::folder::validate_folder(&raw).ok(),
+                _ => None,
+            },
             capture: self.capture.into_overrides(),
             graph: self.graph.as_ref().and_then(graph_from_value),
             auto_download_templates: self.templates.auto_download,
@@ -798,6 +838,22 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         EXPORT_TABLE,
         "folder",
         overrides.export_folder.clone().map(Value::from),
+    );
+
+    // Вложения (016): чужие ключи таблицы остаются, известные — по значению.
+    set_or_remove(
+        &mut document,
+        ATTACHMENTS_TABLE,
+        "placement",
+        overrides
+            .attachments_placement
+            .and_then(|placement| serde_json::to_value(placement).ok()),
+    );
+    set_or_remove(
+        &mut document,
+        ATTACHMENTS_TABLE,
+        "folder",
+        overrides.attachments_folder.clone().map(Value::from),
     );
 
     let capture = overrides.capture.clone().unwrap_or_default();
@@ -1060,6 +1116,9 @@ mod tests {
             }],
             // Фича 009: папка экспорта — в круговой проверке «записал → прочитал».
             export_folder: Some("Выгрузка/2026".into()),
+            // Фича 016: размещение и папка вложений.
+            attachments_placement: Some(crate::attachments::AttachmentsPlacement::VaultFolder),
+            attachments_folder: Some("файлы/картинки".into()),
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

@@ -60,6 +60,9 @@ pub struct MemoryVault {
     /// временем становится этими байтами (фича 022): так проверяется повтор на
     /// свежем тексте после правки «с другого устройства».
     conflict_once: HashMap<PathBuf, Vec<u8>>,
+    /// Пути, запись байтов по которым отказывает `Io` (фича 016): так
+    /// проверяется, что отказ не оставляет файла и текст не меняется (FR-014).
+    write_failures: std::collections::HashSet<PathBuf>,
 }
 
 impl MemoryVault {
@@ -77,6 +80,7 @@ impl MemoryVault {
             writes: std::cell::RefCell::new(HashMap::new()),
             lagging: HashMap::new(),
             conflict_once: HashMap::new(),
+            write_failures: Default::default(),
         }
     }
 
@@ -140,6 +144,12 @@ impl MemoryVault {
     }
 
     /// Vault, папка которого стала недоступна (отмонтирована, отозван доступ).
+    /// Запись байтов по этому пути отказывает `Io` (фича 016, FR-014).
+    pub fn with_write_failure(mut self, path: &str) -> Self {
+        self.write_failures.insert(PathBuf::from(path));
+        self
+    }
+
     pub fn unavailable(mut self) -> Self {
         self.access_state = AccessState::Unavailable;
         self
@@ -315,6 +325,29 @@ impl VaultBackend for MemoryVault {
         }
     }
 
+    /// Изображения среди положенных файлов (фича 016) — по тем же правилам, что
+    /// у настоящих backend: весь vault без скрытых, либо одна папка без вложенных.
+    async fn list_images(&self, folder: Option<&Path>) -> Vec<typsidian_core::vault::ImageFile> {
+        let mut images: Vec<typsidian_core::vault::ImageFile> = self
+            .files
+            .borrow()
+            .iter()
+            .filter(|(path, _)| typsidian_core::vault::is_image_file(path))
+            .filter(|(path, _)| match folder {
+                None => !path
+                    .components()
+                    .any(|part| part.as_os_str().to_string_lossy().starts_with('.')),
+                Some(folder) => path.parent() == Some(folder),
+            })
+            .map(|(path, bytes)| typsidian_core::vault::ImageFile {
+                path: path.clone(),
+                size: bytes.len() as u64,
+            })
+            .collect();
+        images.sort_by(|left, right| left.path.cmp(&right.path));
+        images
+    }
+
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
         let mut copies: Vec<PathBuf> = self
             .files
@@ -389,6 +422,13 @@ impl VaultBackend for MemoryVault {
     }
 
     async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        // Чтение без предела — такое же чтение: счётчик обязан его видеть
+        // (изображения сборка читает так с фичи 016).
+        *self
+            .reads
+            .borrow_mut()
+            .entry(path.to_path_buf())
+            .or_insert(0) += 1;
         // «Слишком большой» файл здесь — обычный файл с объявленным отказом
         // `TooLarge`: чтение без предела отдаёт его содержимое.
         match self.failures.get(path) {
@@ -441,6 +481,10 @@ impl VaultBackend for MemoryVault {
     async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
         if self.access_state != AccessState::ReadWrite {
             return Err(WriteError::AccessDenied);
+        }
+        // Как атомарная запись настоящих backend: при отказе файла нет вовсе.
+        if self.write_failures.contains(path) {
+            return Err(WriteError::Io);
         }
         self.files
             .borrow_mut()
@@ -585,6 +629,7 @@ impl VaultBackend for MemoryVault {
 // сверялись с ОДНИМ набором ожиданий: в отличие от эталонного хэша досок, это
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
+pub mod attachment_cases;
 pub mod capture_cases;
 pub mod element_cases;
 pub mod export_cases;

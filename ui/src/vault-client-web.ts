@@ -1,4 +1,13 @@
 import {
+  attachmentsBatchCancel,
+  attachmentsBatchConfirm,
+  attachmentsBatchNext,
+  attachmentsBatchSourceFailed,
+  attachmentsBatchStart,
+  attachmentsBatchStore,
+  attachmentsBatchView,
+  attachmentsPlanMarkup,
+  attachmentsValidateFolder,
   buildTimeLimitMs,
   captureEntry,
   captureSettings,
@@ -426,6 +435,24 @@ export function webVaultClient(
         call(() => backend.captureWrite(capture, openBuffer ?? null, image ?? null)),
       openDaily: (date) => call(() => backend.openDaily(date)),
       dailyNeighbours: (date) => call(() => backend.dailyNeighbours(date)),
+    },
+
+    // ── Вложения (фича 016) ───────────────────────────────────────────
+    // Начало и запись трогают vault — через очередь; чистые переходы пачки —
+    // мимо неё, иначе отмена ждала бы записи чужого вызова.
+    attachments: {
+      start: (overrides, notePath, items, moment) =>
+        call(() => attachmentsBatchStart(backend, overrides, notePath, items, moment)),
+      next: async (state) => attachmentsBatchNext(state),
+      confirm: async (state, index, accept) => attachmentsBatchConfirm(state, index, accept),
+      store: (state, index, bytes) =>
+        call(() => attachmentsBatchStore(backend, state, index, bytes)),
+      sourceFailed: async (state, index) => attachmentsBatchSourceFailed(state, index),
+      cancel: async (state) => attachmentsBatchCancel(state),
+      view: async (state) => attachmentsBatchView(state),
+      planMarkup: async (textLength, point, before, after, paths, block) =>
+        attachmentsPlanMarkup(textLength, point, before, after, paths, block),
+      validateFolder: async (raw) => attachmentsValidateFolder(raw),
     },
 
     // ── Импорт из Obsidian (фича 021) ─────────────────────────────────

@@ -817,3 +817,118 @@ fn classification_matches_native_on_the_same_paths() {
     assert!(!FileKind::Snapshot.is_listed());
     assert!(!FileKind::Other.is_listed());
 }
+
+// ---------------------------------------------------------------------------
+// Фича 016 — изображения vault для сопоставления вложений (T009)
+// ---------------------------------------------------------------------------
+
+/// Двойник каталога с вложенными папками: пары «путь через `/` — содержимое».
+fn mock_tree(files: &[(&str, &str)]) -> JsValue {
+    let pairs: String = files
+        .iter()
+        .map(|(path, content)| format!("[{:?},{:?}]", path, content))
+        .collect::<Vec<_>>()
+        .join(",");
+    let source = format!(
+        r#"(function() {{
+            function makeDir(name) {{
+                const children = new Map();
+                return {{
+                    kind: "directory",
+                    name,
+                    children,
+                    async queryPermission() {{ return {{ state: "granted" }}; }},
+                    entries() {{
+                        const list = [...children.entries()];
+                        let i = 0;
+                        return {{ async next() {{
+                            if (i >= list.length) return {{ done: true }};
+                            return {{ done: false, value: list[i++] }};
+                        }} }};
+                    }},
+                    async getDirectoryHandle(n, opts) {{
+                        const hit = children.get(n);
+                        if (hit && hit.kind === "directory") return hit;
+                        if (hit || !(opts && opts.create)) throw new Error("not found");
+                        const made = makeDir(n);
+                        children.set(n, made);
+                        return made;
+                    }},
+                    async getFileHandle(n) {{
+                        const hit = children.get(n);
+                        if (!hit || hit.kind !== "file") throw new Error("not found");
+                        return hit;
+                    }},
+                }};
+            }}
+            function makeFile(name, content) {{
+                return {{
+                    kind: "file",
+                    name,
+                    async getFile() {{
+                        return {{
+                            size: new TextEncoder().encode(content).length,
+                            lastModified: 0,
+                            async text() {{ return content; }},
+                        }};
+                    }},
+                }};
+            }}
+            const root = makeDir("vault");
+            for (const [path, content] of [{pairs}]) {{
+                const parts = path.split("/");
+                let dir = root;
+                for (const part of parts.slice(0, -1)) {{
+                    if (!dir.children.has(part)) dir.children.set(part, makeDir(part));
+                    dir = dir.children.get(part);
+                }}
+                const name = parts[parts.length - 1];
+                dir.children.set(name, makeFile(name, content));
+            }}
+            return root;
+        }})()"#
+    );
+    js_sys::eval(&source).expect("двойник дерева должен собираться")
+}
+
+#[wasm_bindgen_test]
+async fn list_images_walks_the_vault_or_one_folder_like_the_native_backend() {
+    use std::path::{Path, PathBuf};
+    use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::ImageFile;
+
+    let dir = mock_tree(&[
+        ("a.png", "png"),
+        ("Папка/b.JPG", "jpeg"),
+        ("Папка/вложено/c.svg", "<svg>"),
+        ("Папка/note.typ", "= Заметка"),
+        ("Папка/.attachments/f.gif", "GIF89a"),
+        (".hidden/d.png", "скрыто"),
+        (".typsidian/e.png", "служебное"),
+    ]);
+    let backend = WebBackend::from_handle("vault".into(), dir).await.unwrap();
+    let image = |path: &str, size: u64| ImageFile {
+        path: PathBuf::from(path),
+        size,
+    };
+
+    assert_eq!(
+        backend.list_images(None).await,
+        vec![
+            image("a.png", 3),
+            image("Папка/b.JPG", 4),
+            image("Папка/вложено/c.svg", 5),
+        ]
+    );
+    assert_eq!(
+        backend.list_images(Some(Path::new("Папка"))).await,
+        vec![image("Папка/b.JPG", 4)]
+    );
+    assert_eq!(
+        backend
+            .list_images(Some(Path::new("Папка/.attachments")))
+            .await,
+        vec![image("Папка/.attachments/f.gif", 6)]
+    );
+    assert!(backend.list_images(Some(Path::new("нет"))).await.is_empty());
+}

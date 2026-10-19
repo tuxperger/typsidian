@@ -30,6 +30,7 @@ mod sync;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
+use typsidian_core::attachments;
 use typsidian_core::boards::{
     self, Board, BoardEvent, CreateBoardError, Embed, EmbedError, EmbedPlan, EmbedRef,
     ReadBoardError, SnapshotWriteError, WriteBoardError,
@@ -1511,6 +1512,131 @@ fn export_batch_view(state: export::BatchState) -> export::BatchView {
     export::batch::view(state)
 }
 
+// ── Вложения (фича 016) ─────────────────────────────────────────────────────
+//
+// Как у пакета экспорта, значение пачки держит окно; оболочка только вызывает
+// чистые переходы ядра. Запись файла — единственная команда с сырым телом:
+// байты в аргументах JSON выросли бы в 3–4 раза (research.md §11).
+
+#[tauri::command]
+async fn attachments_batch_start(
+    state: State<'_, Vault>,
+    overrides: VaultOverrides,
+    note_path: String,
+    items: Vec<attachments::IncomingItem>,
+    moment: attachments::InsertMoment,
+) -> Answer<attachments::AttachmentBatchState, Failure<()>> {
+    with_vault!(state, |backend| Ok(attachments::batch::start(
+        &*backend, &overrides, &note_path, items, moment
+    )
+    .await))
+}
+
+#[tauri::command]
+fn attachments_batch_next(
+    state: attachments::AttachmentBatchState,
+) -> attachments::AttachmentBatchStep {
+    attachments::batch::step(state)
+}
+
+#[tauri::command]
+fn attachments_batch_confirm(
+    state: attachments::AttachmentBatchState,
+    index: u32,
+    accept: bool,
+) -> attachments::AttachmentBatchState {
+    attachments::batch::confirm(state, index, accept)
+}
+
+#[tauri::command]
+fn attachments_batch_source_failed(
+    state: attachments::AttachmentBatchState,
+    index: u32,
+) -> attachments::AttachmentBatchState {
+    attachments::batch::source_failed(state, index)
+}
+
+#[tauri::command]
+fn attachments_batch_cancel(
+    state: attachments::AttachmentBatchState,
+) -> attachments::AttachmentBatchState {
+    attachments::batch::cancel(state)
+}
+
+#[tauri::command]
+fn attachments_batch_view(
+    state: attachments::AttachmentBatchState,
+) -> attachments::AttachmentBatchView {
+    attachments::batch::view(state)
+}
+
+#[tauri::command]
+fn attachments_plan_markup(
+    text_length: usize,
+    point: typsidian_core::templates::InsertionPoint,
+    before: String,
+    after: String,
+    paths: Vec<String>,
+    block: bool,
+) -> Option<typsidian_core::templates::InsertionEdit> {
+    attachments::plan_markup(text_length, &point, &before, &after, &paths, block)
+}
+
+#[tauri::command]
+fn attachments_validate_folder(
+    raw: String,
+) -> Result<String, attachments::AttachmentsFolderProblem> {
+    attachments::validate_folder(&raw)
+}
+
+/// Почему тело `attachments_batch_store` не разобрано. Состояние у окна
+/// остаётся прежним: команда отказала, ничего не записав.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind")]
+pub enum StoreBodyProblem {
+    /// Тело не сырое, короче заголовка или длины JSON.
+    Truncated,
+    /// JSON `{state, index}` не разбирается.
+    Malformed,
+}
+
+#[derive(serde::Deserialize)]
+struct StoreBodyHead {
+    state: attachments::AttachmentBatchState,
+    index: u32,
+}
+
+/// Разбирает тело записи: `u32` little-endian — длина JSON, JSON
+/// `{"state", "index"}`, затем байты файла до конца тела.
+fn parse_store_body(
+    body: &[u8],
+) -> Result<(attachments::AttachmentBatchState, u32, &[u8]), StoreBodyProblem> {
+    let header: [u8; 4] = body
+        .get(..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(StoreBodyProblem::Truncated)?;
+    let length = u32::from_le_bytes(header) as usize;
+    let json = body.get(4..4 + length).ok_or(StoreBodyProblem::Truncated)?;
+    let head: StoreBodyHead =
+        serde_json::from_slice(json).map_err(|_| StoreBodyProblem::Malformed)?;
+    Ok((head.state, head.index, &body[4 + length..]))
+}
+
+#[tauri::command]
+async fn attachments_batch_store(
+    state: State<'_, Vault>,
+    request: tauri::ipc::Request<'_>,
+) -> Answer<attachments::AttachmentBatchState, Failure<StoreBodyProblem>> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err(Failure::Core(StoreBodyProblem::Truncated));
+    };
+    let (batch, index, bytes) = parse_store_body(body).map_err(Failure::Core)?;
+    with_vault!(state, |backend| Ok(attachments::batch::store(
+        backend, batch, index, bytes
+    )
+    .await))
+}
+
 // ── Импорт из Obsidian (фича 021) ───────────────────────────────────────────
 //
 // Обёртки 1:1 над `typsidian_core::import`: правил здесь нет. Окно зовёт
@@ -2365,6 +2491,15 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             export_pdf,
             export_candidates,
             export_batch_start,
+            attachments_batch_start,
+            attachments_batch_next,
+            attachments_batch_confirm,
+            attachments_batch_store,
+            attachments_batch_source_failed,
+            attachments_batch_cancel,
+            attachments_batch_view,
+            attachments_plan_markup,
+            attachments_validate_folder,
             export_batch_next,
             export_batch_record,
             export_batch_skip,
@@ -2461,4 +2596,62 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             sync::sync_tick,
             sync::sync_clone_vault,
         ])
+}
+
+#[cfg(test)]
+mod attachments_body_tests {
+    use super::*;
+
+    fn state() -> attachments::AttachmentBatchState {
+        attachments::AttachmentBatchState {
+            note_path: "Глава.typ".into(),
+            target_folder: "attachments".into(),
+            items: Vec::new(),
+            moment: attachments::InsertMoment {
+                year: 2026,
+                month: 10,
+                day: 10,
+                hour: 14,
+                minute: 23,
+                second: 5,
+            },
+            phase: attachments::AttachmentBatchPhase::Running,
+            excluded_by: Vec::new(),
+            known: Vec::new(),
+        }
+    }
+
+    fn body(json: &[u8], bytes: &[u8]) -> Vec<u8> {
+        let mut out = (json.len() as u32).to_le_bytes().to_vec();
+        out.extend_from_slice(json);
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    #[test]
+    fn the_body_carries_state_index_and_bytes() {
+        let json =
+            serde_json::to_vec(&serde_json::json!({ "state": state(), "index": 3 })).unwrap();
+        let raw = body(&json, &[0x89, b'P', b'N', b'G']);
+        let (parsed, index, bytes) = parse_store_body(&raw).unwrap();
+        assert_eq!(parsed, state());
+        assert_eq!(index, 3);
+        assert_eq!(bytes, &[0x89, b'P', b'N', b'G']);
+    }
+
+    #[test]
+    fn a_short_or_malformed_body_is_refused() {
+        assert_eq!(
+            parse_store_body(&[1, 0]).err(),
+            Some(StoreBodyProblem::Truncated)
+        );
+        assert_eq!(
+            parse_store_body(&body(b"{}", b"")[..5]).err(),
+            Some(StoreBodyProblem::Truncated)
+        );
+        assert_eq!(
+            parse_store_body(&body(b"{\"state\": 1}", b"x")).err(),
+            Some(StoreBodyProblem::Malformed)
+        );
+    }
 }

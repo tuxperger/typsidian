@@ -86,6 +86,22 @@ export const settings: Translation<typeof en> = {
   "settings.exportFolder.leavesVault": "путь не может содержать «..» и «.».",
   "settings.exportFolder.serviceFolder": "служебную папку .typsidian нельзя сделать папкой экспорта.",
   "settings.exportFolder.invalid": "путь не годится.",
+  "settings.attachments.title": "Вложения",
+  "settings.attachments.intro": "Куда ложатся картинки, вставленные или перетащенные в заметку.",
+  "settings.attachments.nextToNote": "Рядом с заметкой",
+  "settings.attachments.nextToNoteHint": "подпапка в папке заметки:",
+  "settings.attachments.vaultFolder": "Одна папка vault",
+  "settings.attachments.vaultFolderHint": "одна папка от корня vault:",
+  "settings.attachments.folder": "Название папки",
+  "settings.attachments.exampleFolder": "Диссертация",
+  "settings.attachments.exampleFile": "схема.png",
+  "settings.attachments.owned":
+    "Настройка хранится вместе с vault и действует на всех устройствах. Прежние вложения остаются на местах.",
+  "settings.attachments.invalid": (p) => `Папка вложений не сохранена: ${p.problem}`,
+  "settings.attachments.empty": "укажите папку.",
+  "settings.attachments.absolute": "папка должна лежать внутри vault — укажите путь от его корня.",
+  "settings.attachments.leavesVault": "путь не может содержать «..» и «.».",
+  "settings.attachments.serviceFolder": "служебная папка .typsidian не может хранить вложения.",
 
   "settings.shortcuts.label": "Команды Typsidian",
   "settings.shortcuts.hint":

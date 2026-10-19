@@ -38,6 +38,12 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import { ExportCenter } from "../export/ExportCenter.js";
 import { ExportToast } from "../export/ExportToast.js";
+import { useAttachments } from "../attachments/useAttachments.js";
+import { AttachmentNotices } from "../attachments/AttachmentNotices.js";
+import { LargeImageDialog } from "../attachments/LargeImageDialog.js";
+import { InsertImageSheet, type ImageSources } from "../attachments/InsertImageSheet.js";
+import { pickFiles, type PickSource } from "../attachments/pickFiles.js";
+import { IgnoreEditor } from "../sync/IgnoreEditor.js";
 import { useExport } from "../export/useExport.js";
 import { ImportDialog } from "../import/ImportDialog.js";
 import { ImportProgress } from "../import/ImportProgress.js";
@@ -97,7 +103,7 @@ import {
   type VaultCloner,
 } from "../sync/sync-client.js";
 import { useSync, type SyncControl } from "../sync/useSync.js";
-import type { SyncError } from "../wasm-core/typsidian_core.js";
+import type { IgnoreFile, SyncError } from "../wasm-core/typsidian_core.js";
 import type { DeviceSettingsClient } from "../settings/device-settings-client.js";
 import { NotePanel } from "../note-panel/NotePanel.js";
 import type { NotePanelModeSpec } from "../note-panel/modes.js";
@@ -214,6 +220,12 @@ export interface WorkspaceProps {
    */
   showHost?: ShowHost;
   /**
+   * Источники изображений оболочки (фича 016, research.md §2): камера и
+   * галерея есть только на телефоне. Умолчание — ни одного: «Вставить
+   * изображение…» тогда сразу открывает выбор файлов.
+   */
+  imageSources?: ImageSources;
+  /**
    * Выбор исходной папки импорта из Obsidian (фича 021, FR-001). Платформенный
    * жест по той же причине, что и `openVaultFolder`: в браузере это
    * `showDirectoryPicker` в режиме чтения, на рабочем столе и Android — диалог
@@ -256,6 +268,8 @@ export function Workspace(props: WorkspaceProps): React.JSX.Element {
     </ContextMenuProvider>
   );
 }
+const NO_IMAGE_SOURCES: ImageSources = { camera: false, gallery: false };
+
 
 function WorkspaceView({
   openVaultFolder,
@@ -266,6 +280,7 @@ function WorkspaceView({
   device,
   tabsStore,
   showHost,
+  imageSources = NO_IMAGE_SOURCES,
   pickImportSource,
   captureSource,
 }: WorkspaceProps): React.JSX.Element {
@@ -634,6 +649,41 @@ function WorkspaceView({
   const activeSnapshot = useDocumentSnapshot(activeDocument);
   const editorText =
     activeDocument !== null && activeDocument.path === openNotePath ? activeSnapshot.text : "";
+
+  // Вложения (фича 016): пачка живёт здесь — у неё одна очередь на окно, а
+  // принимают файлы редакторы всех групп.
+  const attachments = useAttachments(
+    state.client,
+    vaultSettings.overrides,
+    openNotePath,
+    getEditorView,
+  );
+  const [imageSheetOpen, setImageSheetOpen] = useState(false);
+  const [rulesFile, setRulesFile] = useState<IgnoreFile | null>(null);
+  const { insertAtCaret: insertImagesAtCaret } = attachments;
+  const pickImages = useCallback(
+    (source: PickSource) => {
+      void pickFiles(source).then((files) =>
+        insertImagesAtCaret(files, source === "camera" ? "Camera" : "File"),
+      );
+    },
+    [insertImagesAtCaret],
+  );
+  // «Вставить изображение…» (FR-004): на телефоне — шторка источников, в
+  // остальных оболочках — сразу выбор файлов.
+  const insertImage = useCallback(() => {
+    if (openNotePath === null) return;
+    if (imageSources.camera || imageSources.gallery) setImageSheetOpen(true);
+    else pickImages("files");
+  }, [openNotePath, imageSources, pickImages]);
+  const noteAttachments = useMemo(
+    () => ({
+      insert: attachments.insert,
+      linkDropped: attachments.linkDropped,
+      pickAndInsert: insertImage,
+    }),
+    [attachments.insert, attachments.linkDropped, insertImage],
+  );
 
   // Экспорт в PDF (фича 009). Компилятор — тот же, что у предпросмотра: иначе
   // заметка собиралась бы в одной колонке и не собиралась в файле.
@@ -1485,6 +1535,10 @@ function WorkspaceView({
       } else if (shortcuts.matches("export-center", event)) {
         event.preventDefault();
         setExportOpen((open) => !open);
+      } else if (shortcuts.matches("insert-image", event)) {
+        // Фича 016: изображение из файла к каретке открытой заметки.
+        event.preventDefault();
+        insertImage();
       } else if (shortcuts.matches("today", event)) {
         // Фича 022: ежедневная заметка на сегодня.
         event.preventDefault();
@@ -1531,6 +1585,7 @@ function WorkspaceView({
     syncPull,
     openNotePath,
     daily.openToday,
+    insertImage,
     showHost,
     startShow,
     view,
@@ -1657,6 +1712,17 @@ function WorkspaceView({
           run: () => startShow("caret", true),
         });
       }
+    }
+    // Фича 016. «Вставить изображение…» — у открытой заметки Typst; в vault
+    // только на чтение пачка отвечает отказом с причиной (FR-024).
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push({
+        id: "insert-image",
+        ...titled("attachments.command.insertImage"),
+        icon: "plus",
+        meta: shortcuts.displayOf("insert-image"),
+        run: insertImage,
+      });
     }
     // Фича 022. «Сегодня» и «Во входящие» — во всех оболочках; соседние дни —
     // у открытой ежедневной заметки, и только в ту сторону, где заметка есть.
@@ -1912,6 +1978,7 @@ function WorkspaceView({
     }
     return items;
   }, [
+    insertImage,
     view,
     toggleView,
     toggleNotePanel,
@@ -2309,6 +2376,14 @@ function WorkspaceView({
             </button>
           </div>
         )}
+        {attachments.notice !== null && (
+          <AttachmentNotices
+            notice={attachments.notice}
+            onCancel={attachments.cancel}
+            onDismiss={attachments.dismiss}
+            onOpenRules={sync === null ? null : setRulesFile}
+          />
+        )}
         {exporter.last !== null && (
           <ExportToast
             result={exporter.last}
@@ -2419,8 +2494,14 @@ function WorkspaceView({
               paramsRequest,
               selectRequest,
               onLibraryStatus: (status) => setLibraryCustomized(status === "Customized"),
+              attachments: noteAttachments,
             }}
             linksSummary={linksSummary ?? undefined}
+            attachmentStatus={
+              attachments.lastInserted === null
+                ? undefined
+                : t("attachments.status.inserted", { name: attachments.lastInserted })
+            }
             solo={!showPreview}
           />
         ) : (
@@ -2672,6 +2753,19 @@ function WorkspaceView({
           focus={syncPanel.focus}
           onOpenFileHistory={openFileHistory}
           onClose={() => setSyncPanel(null)}
+        />
+      )}
+      {sync !== null && rulesFile !== null && (
+        <IgnoreEditor sync={sync} file={rulesFile} onClose={() => setRulesFile(null)} />
+      )}
+      {attachments.large !== null && (
+        <LargeImageDialog request={attachments.large} onAnswer={attachments.answerLarge} />
+      )}
+      {imageSheetOpen && (
+        <InsertImageSheet
+          sources={imageSources}
+          onPick={pickImages}
+          onClose={() => setImageSheetOpen(false)}
         />
       )}
       {sync !== null && fileHistoryPath !== null && (

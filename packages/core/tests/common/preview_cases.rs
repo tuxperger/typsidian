@@ -60,6 +60,35 @@ pub async fn a_two_level_import_and_an_image_build_with_the_note() {
     );
 }
 
+/// Фича 016 (research.md §13): изображение больше предела размера заметки
+/// собирается в предпросмотре, а `.typ` сверх предела по-прежнему отклоняется.
+/// «Слишком большой» файл двойника — объявленный отказ `TooLarge` обычного
+/// чтения; чтение без предела отдаёт его содержимое.
+pub async fn a_large_image_builds_while_a_large_typ_is_still_refused() {
+    use typsidian_core::vault::backend::ReadError;
+    let vault = MemoryVault::new()
+        .with_file("attachments/большое.svg", SVG)
+        .with_failure("attachments/большое.svg", ReadError::TooLarge)
+        .with_file("огромное.typ", "#let x = 1\n")
+        .with_failure("огромное.typ", ReadError::TooLarge);
+
+    let doc = build(
+        &vault,
+        "#image(\"attachments/большое.svg\", width: 1cm)\n",
+        1,
+    )
+    .await;
+    assert_eq!(
+        doc.outcome,
+        CompileOutcome::Succeeded,
+        "{:?}",
+        doc.diagnostics
+    );
+
+    let doc = build(&vault, "#import \"огромное.typ\": x\n", 2).await;
+    assert_eq!(doc.outcome, CompileOutcome::Failed);
+}
+
 /// FR-021: недостающий файл — тоже зависимость: его появление меняет
 /// результат, и следить нужно именно за ним.
 pub async fn a_missing_file_is_a_dependency_too() {

@@ -44,6 +44,8 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   "start-show": "slides.menu.fromCurrent",
   // Фича 022: открыть ежедневную заметку на сегодня.
   today: "capture.command.today",
+  // Фича 016: изображение из файла к каретке.
+  "insert-image": "attachments.command.insertImage",
 };
 
 /**

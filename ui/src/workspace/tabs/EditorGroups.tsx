@@ -31,6 +31,8 @@ export interface EditorGroupsProps {
   shortcuts: ShortcutsState;
   editor: SharedEditorProps;
   linksSummary: string | undefined;
+  /** «вставлено: …» после одиночной вставки вложения (фича 016). */
+  attachmentStatus?: string | undefined;
   /** Класс контейнера: без колонки предпросмотра группы занимают всё место. */
   solo: boolean;
 }
@@ -142,6 +144,7 @@ export function EditorGroups(props: EditorGroupsProps): React.JSX.Element {
               editor={props.editor}
               linksSummary={props.linksSummary}
               tabsSummary={summary}
+              attachmentStatus={props.attachmentStatus}
               onToggleSplit={toggleSplit}
               onMoveToOther={moveToOther}
             />

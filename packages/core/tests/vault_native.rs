@@ -1741,3 +1741,48 @@ async fn vault_settings_apply_at_once_and_an_outside_edit_raises_no_event() {
         Some(22)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Фича 016 — изображения vault для сопоставления вложений (T008)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_images_walks_the_vault_or_one_folder_like_the_web_backend() {
+    use typsidian_core::vault::ImageFile;
+    let dir = TempDir::new().unwrap();
+    write_note(dir.path(), "a.png", "png");
+    write_note(dir.path(), "Папка/b.JPG", "jpeg");
+    write_note(dir.path(), "Папка/вложено/c.svg", "<svg>");
+    write_note(dir.path(), "Папка/note.typ", "= Заметка");
+    write_note(dir.path(), "Папка/.attachments/f.gif", "GIF89a");
+    write_note(dir.path(), ".hidden/d.png", "скрыто");
+    write_note(dir.path(), ".typsidian/e.png", "служебное");
+    let backend = NativeBackend::open(dir.path()).await.unwrap();
+    let image = |path: &str, size: u64| ImageFile {
+        path: PathBuf::from(path),
+        size,
+    };
+
+    assert_eq!(
+        backend.list_images(None).await,
+        vec![
+            image("a.png", 3),
+            image("Папка/b.JPG", 4),
+            image("Папка/вложено/c.svg", 5),
+        ],
+        "весь vault: скрытые папки и служебное место пропущены, регистр расширения не важен"
+    );
+    assert_eq!(
+        backend.list_images(Some(Path::new("Папка"))).await,
+        vec![image("Папка/b.JPG", 4)],
+        "одна папка без вложенных"
+    );
+    assert_eq!(
+        backend
+            .list_images(Some(Path::new("Папка/.attachments")))
+            .await,
+        vec![image("Папка/.attachments/f.gif", 6)],
+        "скрытая папка, названная явно, читается"
+    );
+    assert!(backend.list_images(Some(Path::new("нет"))).await.is_empty());
+}

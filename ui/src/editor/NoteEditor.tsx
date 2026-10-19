@@ -41,7 +41,20 @@ import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl
 import { useContextMenu } from "../menu/ContextMenu.js";
 import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
 import { typstHighlightFor } from "./highlight/typstHighlight.js";
+import {
+  attachmentExtension,
+  type AttachmentDrop,
+  type AttachmentPort,
+} from "../attachments/editorExtension.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
+
+/** Порт пачки вложений из рабочей области (фича 016). */
+export interface NoteAttachments {
+  insert(files: File[], drop: AttachmentDrop, notePath: string): void;
+  linkDropped(): void;
+  /** «Изображение из файла…» — выбор файлов и вставка к каретке. */
+  pickAndInsert(): void;
+}
 
 export interface NoteEditorProps {
   client: VaultClient;
@@ -144,6 +157,13 @@ export interface NoteEditorProps {
    * свой, а в макете один на окно (research.md §14).
    */
   tabsSummary?: string;
+  /**
+   * Вложения (фича 016): вставка из буфера и перетаскиванием. Ставится только
+   * заметке Typst — у доски и прочих файлов поведение вставки прежнее (FR-024).
+   */
+  attachments?: NoteAttachments;
+  /** «вставлено: <имя>» после одиночной вставки — редактору с кареткой (макет 1a). */
+  attachmentStatus?: string;
 }
 
 /**
@@ -183,6 +203,8 @@ export function NoteEditor({
   onLibraryStatus,
   linksSummary,
   tabsSummary,
+  attachments,
+  attachmentStatus,
 }: NoteEditorProps): React.JSX.Element {
   const { t } = useI18n();
   const snapshot = useDocumentSnapshot(document);
@@ -229,6 +251,22 @@ export function NoteEditor({
   // Где курсор среди полей вставленного сниппета — подсказка в статус-баре.
   const [fieldState, setFieldState] = useState<SnippetFieldState | null>(null);
   const contextMenu = useContextMenu();
+
+  // Вложения (фича 016): порт по ссылке — расширение создаётся один раз на
+  // редактор, а путь заметки и обработчики меняются.
+  const attachmentPort = useRef<AttachmentPort | null>(null);
+  attachmentPort.current =
+    typst && attachments !== undefined
+      ? {
+          onFiles: (files, drop) => attachments.insert(files, drop, document.path),
+          onLinkDropped: () => attachments.linkDropped(),
+          indicatorLabel: (count, line) => t("attachments.drop.indicator", { count, line }),
+        }
+      : null;
+  const attachmentExtensions = useMemo(
+    () => attachmentExtension(() => attachmentPort.current),
+    [],
+  );
 
   const openInsertMenu = useCallback(() => {
     slashAt.current = null;
@@ -781,6 +819,7 @@ export function NoteEditor({
         tabId={tabId}
         ariaLabel={t("editor.contentLabel", { name })}
         {...(typst ? { highlight: typstHighlightFor(client) } : {})}
+        {...(typst && attachments !== undefined ? { extensions: attachmentExtensions } : {})}
         onCaretMove={onCaretMove}
         onSlashMenu={openInsertMenuAt}
         onContextMenu={(event) => {
@@ -816,6 +855,9 @@ export function NoteEditor({
           anchor={insertMenu.anchor}
           onInsert={(request) => void insertElement(request)}
           onClose={closeInsertMenu}
+          {...(typst && attachments !== undefined
+            ? { onInsertImageFile: () => attachments.pickAndInsert() }
+            : {})}
         />
       )}
 
@@ -889,6 +931,9 @@ export function NoteEditor({
           </span>
         )}
         <SaveIndicator state={snapshot.save} />
+        {attachmentStatus !== undefined && (
+          <span className="ts-attach-status">{attachmentStatus}</span>
+        )}
         <span className="ts-spacer" />
 
         {linksSummary !== undefined && <span>{linksSummary}</span>}

@@ -124,3 +124,13 @@ async fn the_export_folder_is_validated_and_normalized() {
 async fn a_bad_export_folder_in_the_file_is_dropped() {
     cases::a_bad_export_folder_in_the_file_is_dropped().await;
 }
+
+#[tokio::test]
+async fn the_attachments_settings_are_validated_and_survive_a_round_trip() {
+    cases::the_attachments_settings_are_validated_and_survive_a_round_trip().await;
+}
+
+#[tokio::test]
+async fn bad_attachments_values_are_dropped_and_unknown_keys_kept() {
+    cases::bad_attachments_values_are_dropped_and_unknown_keys_kept().await;
+}

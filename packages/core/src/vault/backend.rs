@@ -222,6 +222,17 @@ pub trait VaultBackend: Sized {
         Vec::new()
     }
 
+    /// Изображения в vault — для сопоставления вложений по содержимому (фича
+    /// 016, research.md §7). `None` — весь vault, по правилам обхода шрифтов
+    /// (скрытые папки и символические ссылки пропускаются); `Some(folder)` —
+    /// файлы одной папки без вложенных, включая скрытую. Читаются только
+    /// метаданные; порядок — по пути.
+    ///
+    /// Умолчание — пусто: двойникам, которым вложения не нужны, обход незачем.
+    async fn list_images(&self, _folder: Option<&Path>) -> Vec<crate::vault::ImageFile> {
+        Vec::new()
+    }
+
     /// Проходит ли путь через символическую ссылку-каталог (фича 011, T068).
     ///
     /// Запись по относительному пути обязана оставаться внутри vault, но
@@ -520,6 +531,10 @@ impl<B: VaultBackend> VaultBackend for ReadOnly<B> {
 
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
         self.inner.list_conflict_copies().await
+    }
+
+    async fn list_images(&self, folder: Option<&Path>) -> Vec<crate::vault::ImageFile> {
+        self.inner.list_images(folder).await
     }
 
     async fn crosses_symlink(&self, path: &Path) -> bool {

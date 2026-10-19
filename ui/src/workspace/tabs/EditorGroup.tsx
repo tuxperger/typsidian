@@ -33,6 +33,7 @@ export type SharedEditorProps = Pick<
   | "paramsRequest"
   | "selectRequest"
   | "onLibraryStatus"
+  | "attachments"
 >;
 
 export interface EditorGroupProps {
@@ -55,6 +56,8 @@ export interface EditorGroupProps {
   /** Связи и сводка вкладок — только редактору группы с кареткой. */
   linksSummary: string | undefined;
   tabsSummary: string | undefined;
+  /** «вставлено: …» после одиночной вставки вложения (фича 016). */
+  attachmentStatus?: string | undefined;
   onToggleSplit(tab: number): void;
   onMoveToOther(tab: number): void;
 }
@@ -189,6 +192,9 @@ function NoteTab({
       {...props.editor}
       {...(focused && props.linksSummary !== undefined ? { linksSummary: props.linksSummary } : {})}
       {...(focused && props.tabsSummary !== undefined ? { tabsSummary: props.tabsSummary } : {})}
+      {...(focused && props.attachmentStatus !== undefined
+        ? { attachmentStatus: props.attachmentStatus }
+        : {})}
     />
   );
 }

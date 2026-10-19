@@ -115,6 +115,11 @@ export interface CodeEditorProps {
    * должна быть стабильной — новая пересобирает расширение во всех видах.
    */
   highlight?: Extension;
+  /**
+   * Расширения владельца редактора: вставка вложений (фича 016) — только у
+   * заметки Typst. Меняются транзакцией, редактор не пересоздаётся.
+   */
+  extensions?: Extension;
   ref?: React.Ref<CodeEditorHandle>;
 }
 
@@ -144,6 +149,12 @@ function labelExtension(ariaLabel: string): Extension {
  * транзакция, а не новый редактор.
  */
 const highlightCompartment = new Compartment();
+
+/**
+ * Расширения, которые ставит владелец редактора (вложения 016 — только у
+ * заметки Typst). Свой отсек: замена — транзакция, а не новый редактор.
+ */
+const extraCompartment = new Compartment();
 
 /** Слушатель вида — один на все экземпляры, без замыканий над компонентом. */
 const viewListener: Extension = EditorView.updateListener.of((update) => {
@@ -186,6 +197,7 @@ function stateFor(
   entry: TabEditorEntry | null,
   ariaLabel: string,
   highlight: Extension,
+  extra: Extension,
 ): EditorState {
   const saved = entry?.state ?? null;
   if (saved !== null && saved.doc.length === text.length && saved.doc.toString() === text) {
@@ -200,6 +212,7 @@ function stateFor(
       ...baseExtensions,
       labelCompartment.of(labelExtension(ariaLabel)),
       highlightCompartment.of(highlight),
+      extraCompartment.of(extra),
     ],
   });
 }
@@ -214,6 +227,7 @@ export function CodeEditor({
   ariaLabel,
   onContextMenu,
   highlight,
+  extensions,
   ref,
 }: CodeEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -252,6 +266,8 @@ export function CodeEditor({
   ariaLabelRef.current = ariaLabel;
   const highlightRef = useRef<Extension>(highlight ?? []);
   highlightRef.current = highlight ?? [];
+  const extensionsRef = useRef<Extension>(extensions ?? []);
+  extensionsRef.current = extensions ?? [];
 
   useEffect(() => {
     const host = hostRef.current;
@@ -260,7 +276,13 @@ export function CodeEditor({
     const entry = tabEditorStates.take(tabId);
     const view = new EditorView({
       parent: host,
-      state: stateFor(document.text(), entry, ariaLabelRef.current, highlightRef.current),
+      state: stateFor(
+        document.text(),
+        entry,
+        ariaLabelRef.current,
+        highlightRef.current,
+        extensionsRef.current,
+      ),
     });
     viewRef.current = view;
     viewCallbacks.set(view, callbacks);
@@ -269,6 +291,7 @@ export function CodeEditor({
       effects: [
         labelCompartment.reconfigure(labelExtension(ariaLabelRef.current)),
         highlightCompartment.reconfigure(highlightRef.current),
+        extraCompartment.reconfigure(extensionsRef.current),
       ],
     });
     const disconnect = connectView(view, document);
@@ -330,6 +353,12 @@ export function CodeEditor({
       effects: highlightCompartment.reconfigure(highlight ?? []),
     });
   }, [highlight]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: extraCompartment.reconfigure(extensions ?? []),
+    });
+  }, [extensions]);
 
   // Ctrl/⌘ + колесо — кегль текста, как масштаб листа в предпросмотре.
   // Слушатель вешается вручную и непассивным: `onWheel` React ставит пассивным,

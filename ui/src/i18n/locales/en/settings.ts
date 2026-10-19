@@ -88,6 +88,22 @@ export const settings = {
   "settings.exportFolder.leavesVault": "the path can’t contain “..” or “.”.",
   "settings.exportFolder.serviceFolder": "the .typsidian service folder can’t be the export folder.",
   "settings.exportFolder.invalid": "the path isn’t valid.",
+  "settings.attachments.title": "Attachments",
+  "settings.attachments.intro": "Where images pasted or dropped into a note are put.",
+  "settings.attachments.nextToNote": "Next to the note",
+  "settings.attachments.nextToNoteHint": "a subfolder in the note’s folder:",
+  "settings.attachments.vaultFolder": "One vault folder",
+  "settings.attachments.vaultFolderHint": "one folder from the vault root:",
+  "settings.attachments.folder": "Folder name",
+  "settings.attachments.exampleFolder": "Thesis",
+  "settings.attachments.exampleFile": "diagram.png",
+  "settings.attachments.owned":
+    "The setting is stored with the vault and applies on every device. Existing attachments stay where they are.",
+  "settings.attachments.invalid": (p: { problem: string }) => `The attachments folder wasn’t saved: ${p.problem}`,
+  "settings.attachments.empty": "specify a folder.",
+  "settings.attachments.absolute": "the folder must be inside the vault — give a path from its root.",
+  "settings.attachments.leavesVault": "the path can’t contain “..” or “.”.",
+  "settings.attachments.serviceFolder": "the .typsidian service folder can’t hold attachments.",
 
   "settings.shortcuts.label": "Typsidian commands",
   "settings.shortcuts.hint":

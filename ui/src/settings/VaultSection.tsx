@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useI18n, type MessageKey } from "../i18n/index.js";
+import { AttachmentsSettings } from "../attachments/AttachmentsSettings.js";
 import type {
   AssetsPlacement,
+  AttachmentsPlacement,
   VaultRecord,
 } from "../wasm-core/typsidian_core.js";
 
@@ -63,6 +65,16 @@ export interface VaultSectionProps {
   exportFolder?: string | null;
   /** Записать папку; `false` — ядро отклонило значение (FR-029). */
   onChangeExportFolder?: (folder: string | null) => Promise<boolean>;
+
+  /**
+   * Вложения (фича 016, FR-016…FR-018) — уже с умолчаниями. `null` — vault не
+   * открыт.
+   */
+  attachments?: { placement: AttachmentsPlacement; folder: string } | null;
+  onChangeAttachments?: (next: {
+    placement: AttachmentsPlacement | undefined;
+    folder: string | undefined;
+  }) => Promise<boolean>;
 }
 
 /**
@@ -91,6 +103,8 @@ export function VaultSection({
   sections = [],
   exportFolder = null,
   onChangeExportFolder,
+  attachments = null,
+  onChangeAttachments,
   onCloneVault = null,
 }: VaultSectionProps): React.JSX.Element {
   const { t } = useI18n();
@@ -260,6 +274,15 @@ export function VaultSection({
             />
           </label>
         </fieldset>
+      )}
+
+      {attachments !== null && onChangeAttachments && (
+        <AttachmentsSettings
+          placement={attachments.placement}
+          folder={attachments.folder}
+          onChange={onChangeAttachments}
+          error={errorMessage}
+        />
       )}
     </section>
   );

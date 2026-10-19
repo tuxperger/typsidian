@@ -449,6 +449,80 @@ pub async fn a_bad_export_folder_in_the_file_is_dropped() {
     assert!(read.theme.is_some());
 }
 
+// ── Вложения (фича 016, T017) ───────────────────────────────────────────────
+
+/// Размещение и папка вложений записываются и читаются; негодное название
+/// отклоняется до записи, и файл не тронут (FR-017, FR-018).
+pub async fn the_attachments_settings_are_validated_and_survive_a_round_trip() {
+    use typsidian_core::attachments::{AttachmentsFolderProblem, AttachmentsPlacement};
+
+    let mut vault = MemoryVault::new();
+    let good = VaultOverrides {
+        attachments_placement: Some(AttachmentsPlacement::VaultFolder),
+        attachments_folder: Some(" файлы\\картинки/ ".to_string()),
+        ..VaultOverrides::default()
+    };
+    write_vault_settings(&mut vault, &good)
+        .await
+        .expect("годная папка записывается");
+    let stored = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(
+        stored.attachments_placement,
+        Some(AttachmentsPlacement::VaultFolder)
+    );
+    assert_eq!(stored.attachments_folder.as_deref(), Some("файлы/картинки"));
+    let text = String::from_utf8(vault.bytes_of(SETTINGS_PATH).unwrap()).unwrap();
+    assert!(text.contains("\"vault-folder\""), "{text}");
+
+    let before = vault.bytes_of(SETTINGS_PATH);
+    for (raw, problem) in [
+        ("../вне", AttachmentsFolderProblem::LeavesVault),
+        ("/abs", AttachmentsFolderProblem::Absolute),
+        (".typsidian/x", AttachmentsFolderProblem::ServiceFolder),
+        ("", AttachmentsFolderProblem::Empty),
+    ] {
+        let bad = VaultOverrides {
+            attachments_folder: Some(raw.to_string()),
+            ..VaultOverrides::default()
+        };
+        assert_eq!(
+            write_vault_settings(&mut vault, &bad).await,
+            Err(VaultSettingsError::InvalidAttachmentsFolder { problem }),
+            "{raw:?}"
+        );
+    }
+    assert_eq!(vault.bytes_of(SETTINGS_PATH), before, "файл не тронут");
+}
+
+/// Негодные значения в файле отбрасываются молча, неизвестные ключи таблицы
+/// `attachments` переживают запись из панели.
+pub async fn bad_attachments_values_are_dropped_and_unknown_keys_kept() {
+    let mut vault = MemoryVault::new().with_file(
+        SETTINGS_PATH,
+        r#"{"attachments": {"placement": "под-кроватью", "folder": "../../etc", "своё": 1}, "settings": {"theme": "dark"}}"#,
+    );
+    let read = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(read.attachments_placement, None);
+    assert_eq!(read.attachments_folder, None);
+    assert!(read.theme.is_some(), "остальные настройки читаются");
+
+    let next = VaultOverrides {
+        attachments_folder: Some("файлы".to_string()),
+        ..read
+    };
+    write_vault_settings(&mut vault, &next).await.unwrap();
+    let text = String::from_utf8(vault.bytes_of(SETTINGS_PATH).unwrap()).unwrap();
+    assert!(text.contains("\"своё\""), "чужой ключ сохранён: {text}");
+    assert_eq!(
+        read_vault_settings(&vault)
+            .await
+            .unwrap()
+            .attachments_folder
+            .as_deref(),
+        Some("файлы")
+    );
+}
+
 // ── Сочетания со знаками (фича 014, T004) ───────────────────────────────────
 
 /// Сочетание со знаком несёт имя физической клавиши в `ResolvedBinding.code`:
@@ -484,11 +558,12 @@ pub fn a_punctuation_shortcut_carries_the_key_code() {
 
 // ── Команда оглавления (фича 015, T007) ─────────────────────────────────────
 
-/// `toggle-outline` стоит третьей с конца, имя и умолчание зафиксированы, а `problem()`
+/// `toggle-outline` стоит четвёртой с конца (за ней 019, 022 и 016), имя и
+/// умолчание зафиксированы, а `problem()`
 /// сочетание не отвергает; ни одна другая команда умолчания не делит.
 pub fn the_outline_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 3],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 4],
         CommandId::ToggleOutline
     );
     assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
@@ -512,11 +587,11 @@ pub fn the_outline_command_has_its_name_and_default() {
 
 // ── Команда показа слайдов (фича 019, T007) ─────────────────────────────────
 
-/// `start-show` стоит предпоследней, имя и умолчание `Mod+Alt+P` зафиксированы,
+/// `start-show` стоит третьей с конца, имя и умолчание `Mod+Alt+P` зафиксированы,
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_start_show_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 2],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 3],
         CommandId::StartShow
     );
     assert_eq!(CommandId::StartShow.as_str(), "start-show");
@@ -538,10 +613,14 @@ pub fn the_start_show_command_has_its_name_and_default() {
 
 // ── Команда «Сегодня» (фича 022, T008) ───────────────────────────────────────
 
-/// `today` стоит последней, имя и свободное умолчание `Mod+Alt+J` зафиксированы,
+/// `today` стоит предпоследней (за ней `insert-image` фичи 016), имя и
+/// свободное умолчание `Mod+Alt+J` зафиксированы,
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_today_command_has_its_name_and_default() {
-    assert_eq!(keybindings::COMMANDS.last(), Some(&CommandId::Today));
+    assert_eq!(
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 2],
+        CommandId::Today
+    );
     assert_eq!(CommandId::Today.as_str(), "today");
     assert_eq!(CommandId::parse("today"), Some(CommandId::Today));
     let shortcut = CommandId::Today.default_shortcut();

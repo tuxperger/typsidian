@@ -125,6 +125,14 @@ pub async fn read_dependency<B: VaultBackend>(
         }
     };
 
-    let bytes = backend.read_bytes(&path).await?;
+    // Изображение читается без предела размера заметки (фича 016, research.md
+    // §13): предел защищает редактор от заметки на десятки мегабайт, а к
+    // картинке применялся по совпадению — вставленная после подтверждения
+    // картинка на 34 МБ обязана показаться (FR-008).
+    let bytes = if crate::vault::is_image_file(&path) {
+        backend.read_bytes_any_size(&path).await?
+    } else {
+        backend.read_bytes(&path).await?
+    };
     Ok(Bytes::new(bytes))
 }

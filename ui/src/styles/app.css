@@ -8965,3 +8965,224 @@ button.ts-props__chipbtn,
 .ts-capture__warn span {
   color: var(--steel-200);
 }
+
+/* ── Вложения (фича 016, макет «Typsidian Вложения» 1a–1c) ───────────────── */
+
+/* Панели в ряду уведомлений: прогресс, итог, предупреждение, отказ (1b). */
+.ts-notices > .ts-attach-panel {
+  align-items: flex-start;
+}
+
+.ts-notices > .ts-attach-panel--live {
+  border-left-color: var(--orange-500);
+}
+
+.ts-notices > .ts-attach-panel--warn {
+  border-left-color: var(--warning);
+}
+
+.ts-notices > .ts-attach-panel--err {
+  border-left-color: var(--danger);
+}
+
+.ts-attach-panel__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.ts-attach-panel__body > strong {
+  color: var(--steel-100);
+  font-weight: var(--weight-semibold);
+}
+
+.ts-attach-panel__path {
+  font-family: var(--font-mono);
+  color: var(--steel-400);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-attach-panel__note {
+  color: var(--steel-500);
+}
+
+.ts-attach-panel__list {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  color: var(--steel-400);
+}
+
+.ts-attach-panel__list:empty {
+  display: none;
+}
+
+.ts-attach-panel__bad {
+  color: var(--danger);
+}
+
+/* Индикатор места броска (1a): линия на границе строки и тег под ней. */
+.ts-attach-drop {
+  position: relative;
+  height: 0;
+  border-top: 2px solid var(--orange-500);
+  pointer-events: none;
+}
+
+.ts-attach-drop__tag {
+  position: absolute;
+  top: var(--space-1);
+  left: 0;
+  z-index: 2;
+  padding: 1px var(--space-2);
+  background: var(--orange-500);
+  color: var(--steel-950);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.cm-editor.ts-attach-dragging {
+  box-shadow: inset 0 0 0 1px var(--orange-500);
+}
+
+/* Строка «вставлено: …» в статус-баре (1a). */
+.ts-attach-status {
+  color: var(--success);
+  font-family: var(--font-mono);
+}
+
+/* Подтверждение большого изображения (1b). */
+.ts-attach-large {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(420px, 90vw);
+}
+
+.ts-attach-large p {
+  margin: 0;
+}
+
+.ts-attach-large__name,
+.ts-attach-large__path {
+  font-family: var(--font-mono);
+}
+
+.ts-attach-large__path {
+  color: var(--steel-400);
+}
+
+.ts-attach-large__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Пункт меню вставки «Изображение из файла…». */
+.ts-attach-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-top: var(--border-width) solid var(--border-default);
+  background: transparent;
+  color: var(--steel-300);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-attach-menu-item:hover,
+.ts-attach-menu-item:focus-visible {
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+/* Раздел «Вложения» настроек vault (1c). */
+.ts-attach-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ts-attach-settings__intro,
+.ts-attach-settings__owned {
+  margin: 0;
+  color: var(--steel-400);
+}
+
+.ts-attach-settings__option,
+.ts-attach-settings__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.ts-attach-settings__title {
+  color: var(--steel-100);
+}
+
+.ts-attach-settings__hint {
+  flex-basis: 100%;
+  padding-left: var(--space-5);
+  color: var(--steel-400);
+}
+
+.ts-attach-settings__field input {
+  min-width: 0;
+  flex: 1;
+}
+
+.ts-attach-settings__field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.ts-attach-settings__error {
+  margin: 0;
+  color: var(--danger);
+}
+
+/* Шторка источников на телефоне (1c). */
+.ts-attach-sheet {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  background: var(--steel-900);
+  border-top: var(--border-width) solid var(--border-strong);
+  box-shadow: var(--shadow-xl), 0 0 0 100vmax rgba(20, 23, 26, 0.6);
+}
+
+.ts-attach-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.ts-attach-sheet__action {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-top: var(--border-width) solid var(--border-default);
+  background: transparent;
+  color: var(--steel-100);
+  font: inherit;
+  text-align: left;
+}

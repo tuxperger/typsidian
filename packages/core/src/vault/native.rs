@@ -506,6 +506,81 @@ fn walk_source_files(root: &Path) -> crate::vault::SourceListing {
 ///
 /// Правила обхода те же, что у [`walk`]: скрытые каталоги и символические
 /// ссылки пропускаются. Порядок — по пути, чтобы набор шрифтов, а с ним и выбор
+/// Изображения vault (фича 016): тот же обход, что у шрифтов, — скрытые папки
+/// и символические ссылки пропускаются, читаются только метаданные.
+fn walk_images(root: &Path) -> Vec<crate::vault::ImageFile> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            push_image(root, &path, &entry, &mut found);
+        }
+    }
+    found.sort_by(|left, right| left.path.cmp(&right.path));
+    found
+}
+
+/// Изображения одной папки без вложенных (фича 016). Папка может быть скрытой
+/// (`.attachments`): её назвал пользователь, и скрытость тут не правило обхода.
+fn images_in_folder(root: &Path, folder: &Path) -> Vec<crate::vault::ImageFile> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root.join(folder)) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_file() {
+            push_image(root, &entry.path(), &entry, &mut found);
+        }
+    }
+    found.sort_by(|left, right| left.path.cmp(&right.path));
+    found
+}
+
+fn push_image(
+    root: &Path,
+    path: &Path,
+    entry: &std::fs::DirEntry,
+    found: &mut Vec<crate::vault::ImageFile>,
+) {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return;
+    };
+    if !crate::vault::is_image_file(relative) {
+        return;
+    }
+    let Ok(metadata) = entry.metadata() else {
+        return;
+    };
+    if !metadata.is_file() {
+        return;
+    }
+    found.push(crate::vault::ImageFile {
+        path: relative.to_path_buf(),
+        size: metadata.len(),
+    });
+}
+
 /// начертания при совпадении имён, не зависел от порядка `read_dir`.
 fn walk_fonts(root: &Path) -> Vec<crate::vault::FontFile> {
     let mut found = Vec::new();
@@ -1287,6 +1362,13 @@ impl VaultBackend for NativeBackend {
 
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
         walk_conflict_copies(&self.root_path)
+    }
+
+    async fn list_images(&self, folder: Option<&Path>) -> Vec<crate::vault::ImageFile> {
+        match folder {
+            None => walk_images(&self.root_path),
+            Some(folder) => images_in_folder(&self.root_path, folder),
+        }
     }
 
     async fn crosses_symlink(&self, path: &Path) -> bool {

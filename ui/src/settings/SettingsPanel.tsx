@@ -352,6 +352,15 @@ export function SettingsPanel({
                 : null
             }
             onChangeExportFolder={vaultSettings.setExportFolder}
+            attachments={
+              vaultSettings.overrides
+                ? {
+                    placement: vaultSettings.overrides.attachments_placement ?? "next-to-note",
+                    folder: vaultSettings.overrides.attachments_folder ?? "attachments",
+                  }
+                : null
+            }
+            onChangeAttachments={vaultSettings.setAttachments}
             onCloneVault={onCloneVault}
           />
         )}

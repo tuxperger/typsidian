@@ -151,6 +151,39 @@ pub fn is_font_file(path: &Path) -> bool {
             })
 }
 
+/// Расширения изображений, которые вставка вложений (фича 016) сопоставляет и
+/// предпросмотр читает без предела размера заметки. Вид входящего файла
+/// определяется по содержимому (`attachments::kind::sniff`); расширение здесь —
+/// только отбор кандидатов на диске.
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
+
+/// Изображение в vault — для сопоставления вложений по содержимому (фича 016,
+/// research.md §7). Только метаданные: байты читаются, лишь когда размер
+/// совпал.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct ImageFile {
+    /// Путь относительно корня vault.
+    #[cfg_attr(target_arch = "wasm32", tsify(type = "string"))]
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+/// Файл изображения в vault (фича 016): по расширению без учёта регистра, вне
+/// служебного места. Снимки досок сюда входят — это тоже картинки vault.
+pub fn is_image_file(path: &Path) -> bool {
+    classify(path) != FileKind::Service
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                IMAGE_EXTENSIONS
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+}
+
 /// Шрифт, найденный в vault, с дешёвым отпечатком `{size, modified}`.
 ///
 /// Отпечаток — не хэш содержимого, и это намеренно: шрифты весят мегабайты, а
@@ -334,4 +367,28 @@ pub struct SourceListing {
     /// Скрытые записи (`.obsidian`, `.trash`, `.git`, `.DS_Store`): внутрь
     /// не заходим и не считаем.
     pub excluded: u32,
+}
+
+#[cfg(test)]
+mod image_file_tests {
+    use super::*;
+
+    #[test]
+    fn image_extensions_are_recognised_regardless_of_case() {
+        for path in ["a.png", "b/c.JPG", "d.jpeg", "e.Gif", "f.webp", "g.SVG"] {
+            assert!(is_image_file(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn other_files_and_the_service_folder_are_not_images() {
+        for path in ["a.typ", "b.pdf", "c.heic", "noext", ".typsidian/x.png"] {
+            assert!(!is_image_file(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn board_snapshots_are_images_too() {
+        assert!(is_image_file(Path::new("Доска.assets/снимок.svg")));
+    }
 }

@@ -262,13 +262,15 @@ async fn missing_image_is_named_with_its_reason_and_does_not_spin_the_loop() {
 
 #[tokio::test]
 async fn unreadable_dependency_reports_its_own_reason_not_a_generic_failure() {
-    let vault = MemoryVault::new().with_failure("битая.svg", ReadError::TooLarge);
+    // Текстовый файл, а не картинка: изображения с фичи 016 читаются без
+    // предела размера, а у прочих связанных файлов он остался.
+    let vault = MemoryVault::new().with_failure("битая.txt", ReadError::TooLarge);
 
     let doc = compile_note_resolved(
         &vault,
         &PackageCache::new(),
         MAIN,
-        "#image(\"битая.svg\")\n",
+        "#read(\"битая.txt\")\n",
         1,
         FontSet::builtin(),
     )
@@ -279,7 +281,7 @@ async fn unreadable_dependency_reports_its_own_reason_not_a_generic_failure() {
     let described = doc.diagnostics.iter().any(|d| {
         d.app
             == Some(AppMessage::DependencyUnreadable {
-                path: "битая.svg".to_string(),
+                path: "битая.txt".to_string(),
                 reason: ResolveReason::TooLarge,
             })
     });
@@ -807,4 +809,9 @@ async fn the_dependency_mark_follows_the_files() {
 #[tokio::test]
 async fn a_linked_file_is_read_once_until_it_changes() {
     common::preview_cases::a_linked_file_is_read_once_until_it_changes().await;
+}
+
+#[tokio::test]
+async fn a_large_image_builds_while_a_large_typ_is_still_refused() {
+    common::preview_cases::a_large_image_builds_while_a_large_typ_is_still_refused().await;
 }

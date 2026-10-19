@@ -72,6 +72,11 @@ export interface InsertMenuProps {
   anchor: CaretAnchor | null;
   onInsert: (request: InsertRequest) => void;
   onClose: () => void;
+  /**
+   * «Изображение из файла…» (фича 016, FR-004): выбор файлов и вставка к
+   * каретке. Нет — пункта нет (не заметка Typst).
+   */
+  onInsertImageFile?: () => void;
 }
 
 type Mode = "elements" | "symbols";
@@ -85,6 +90,7 @@ export function InsertMenu({
   anchor,
   onInsert,
   onClose,
+  onInsertImageFile,
 }: InsertMenuProps): React.JSX.Element {
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>("elements");
@@ -483,6 +489,20 @@ export function InsertMenu({
             <span className="ts-insert__chosen-code">{t("insert.menu.noSymbol")}</span>
           )}
         </div>
+      )}
+
+      {mode === "elements" && onInsertImageFile !== undefined && (
+        <button
+          type="button"
+          className="ts-insert__file ts-attach-menu-item"
+          onClick={() => {
+            onClose();
+            onInsertImageFile();
+          }}
+        >
+          <Icon name="plus" size={12} />
+          {t("attachments.insertMenu.fromFile")}
+        </button>
       )}
 
       <div className="ts-insert__hints">

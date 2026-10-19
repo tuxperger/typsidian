@@ -104,6 +104,37 @@ async fn walk_directory_matching(
     Ok(())
 }
 
+/// Изображения одной папки без вложенных (фича 016, `list_images`): файлы
+/// `dir`, у которых путь `prefix/имя` — изображение.
+async fn collect_folder_files(
+    dir: &JsValue,
+    prefix: &Path,
+    out: &mut Vec<(PathBuf, JsValue)>,
+) -> Result<(), WalkAbort> {
+    let entries_iter = js_call0(dir, "entries").await?;
+    loop {
+        let next_result = js_call0(&entries_iter, "next").await?;
+        let done = Reflect::get(&next_result, &JsValue::from_str("done"))?
+            .as_bool()
+            .unwrap_or(true);
+        if done {
+            return Ok(());
+        }
+        let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+        let name = Reflect::get(&value, &JsValue::from_str("0"))?
+            .as_string()
+            .unwrap_or_default();
+        let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
+        let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
+            .as_string()
+            .unwrap_or_default();
+        let path = prefix.join(&name);
+        if kind == "file" && super::is_image_file(&path) {
+            out.push((path, handle));
+        }
+    }
+}
+
 /// Обход vault по частям (001 T136): то же, что `walk_directory` без предела,
 /// плюс попутный сбор конфликтных копий по правилу `walk_conflict_copies`
 /// (011 T081) — тогда синхронизации не нужен свой обход всего vault.
@@ -918,6 +949,47 @@ impl VaultBackend for WebBackend {
         }
         fonts.sort_by(|left, right| left.path.cmp(&right.path));
         fonts
+    }
+
+    async fn list_images(&self, folder: Option<&Path>) -> Vec<super::ImageFile> {
+        let mut found = Vec::new();
+        match folder {
+            // Весь vault — тот же обход, что у шрифтов (паритет с native).
+            None => {
+                if walk_directory_matching(
+                    &self.root_handle,
+                    PathBuf::new(),
+                    &mut found,
+                    usize::MAX,
+                    super::is_image_file,
+                )
+                .await
+                .is_err()
+                {
+                    return Vec::new();
+                }
+            }
+            // Одна папка без вложенных; сама папка может быть скрытой.
+            Some(folder) => {
+                let Some(dir) = self.find_folder_handle(folder).await else {
+                    return Vec::new();
+                };
+                if collect_folder_files(&dir, folder, &mut found)
+                    .await
+                    .is_err()
+                {
+                    return Vec::new();
+                }
+            }
+        }
+        let mut images = Vec::with_capacity(found.len());
+        for (path, handle) in found {
+            if let Some((size, _)) = file_meta(&handle).await {
+                images.push(super::ImageFile { path, size });
+            }
+        }
+        images.sort_by(|left, right| left.path.cmp(&right.path));
+        images
     }
 
     /// Папка есть тогда и только тогда, когда на неё выдаётся хендл.

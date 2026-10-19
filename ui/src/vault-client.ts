@@ -1,5 +1,8 @@
 import type {
   AccessState,
+  AttachmentBatchState,
+  AttachmentBatchStep,
+  AttachmentBatchView,
   BacklinksPage,
   Board,
   BoardEvent,
@@ -30,6 +33,8 @@ import type {
   RenderOutcome,
   RenderRequest,
   InsertionPoint,
+  IncomingItem,
+  InsertMoment,
   LinkOutcome,
   LinkRequest,
   MentionScan,
@@ -501,6 +506,49 @@ export interface VaultClient {
 
   /** Пакетный импорт папки Markdown: источник только для чтения, шаги по одной заметке. */
   readonly import: ImportClient;
+
+  // ── Вложения (фича 016) ─────────────────────────────────────────────
+
+  /** Пачка вложений: правила — в `packages/core/src/attachments`. */
+  readonly attachments: AttachmentOps;
+}
+
+/**
+ * Вложения из буфера и перетаскиванием (фича 016,
+ * contracts/frontend-attachments.md). Значение пачки держит UI и передаёт его
+ * туда и обратно; вызовы с vault на web идут через очередь вызовов wasm.
+ */
+export interface AttachmentOps {
+  start(
+    overrides: VaultOverrides,
+    notePath: string,
+    items: IncomingItem[],
+    moment: InsertMoment,
+  ): Promise<AttachmentBatchState>;
+  next(state: AttachmentBatchState): Promise<AttachmentBatchStep>;
+  confirm(
+    state: AttachmentBatchState,
+    index: number,
+    accept: boolean,
+  ): Promise<AttachmentBatchState>;
+  store(
+    state: AttachmentBatchState,
+    index: number,
+    bytes: Uint8Array,
+  ): Promise<AttachmentBatchState>;
+  sourceFailed(state: AttachmentBatchState, index: number): Promise<AttachmentBatchState>;
+  cancel(state: AttachmentBatchState): Promise<AttachmentBatchState>;
+  view(state: AttachmentBatchState): Promise<AttachmentBatchView>;
+  planMarkup(
+    textLength: number,
+    point: InsertionPoint,
+    before: string,
+    after: string,
+    paths: string[],
+    block: boolean,
+  ): Promise<InsertionEdit | undefined>;
+  /** Нормальная форма названия папки; отказ — `AttachmentsFolderProblem`. */
+  validateFolder(raw: string): Promise<string>;
 }
 
 /**

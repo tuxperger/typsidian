@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod boards;
 pub mod capture;
 pub mod elements;

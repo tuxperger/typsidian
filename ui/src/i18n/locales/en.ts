@@ -34,6 +34,7 @@ import { slides } from "./en/slides.js";
 import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
+import { attachments } from "./en/attachments.js";
 import { outline } from "./en/outline.js";
 
 export const en = {
@@ -60,6 +61,7 @@ export const en = {
   ...properties,
   ...importing,
   ...capture,
+  ...attachments,
   ...outline,
 } as const;
 

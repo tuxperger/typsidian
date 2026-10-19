@@ -16,6 +16,7 @@ pub mod conflict_copy;
 pub mod device;
 pub mod engine;
 pub mod ignore;
+pub mod ignore_match;
 pub mod keeper;
 pub mod merge;
 pub mod secrets;

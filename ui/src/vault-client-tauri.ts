@@ -13,6 +13,9 @@ import type {
   OpenVaultError,
 } from "./vault-tree/useVault.js";
 import type {
+  AttachmentBatchState,
+  AttachmentBatchStep,
+  AttachmentBatchView,
   AccessState,
   BacklinksPage,
   VaultGraph,
@@ -620,6 +623,45 @@ export function tauriVaultClient(
         }),
       openDaily: (date) => invoke<OpenDaily>("open_daily", { date }),
       dailyNeighbours: (date) => invoke<DailyNeighbours>("daily_neighbours", { date }),
+    },
+
+    // ── Вложения (фича 016) ───────────────────────────────────────────
+    attachments: {
+      start: (overrides, notePath, items, moment) =>
+        invoke<AttachmentBatchState>("attachments_batch_start", {
+          overrides,
+          notePath,
+          items,
+          moment,
+        }),
+      next: (state) => invoke<AttachmentBatchStep>("attachments_batch_next", { state }),
+      confirm: (state, index, accept) =>
+        invoke<AttachmentBatchState>("attachments_batch_confirm", { state, index, accept }),
+      // Байты — сырым телом (research.md §11): длина JSON в 4 байтах
+      // little-endian, JSON `{state, index}`, затем файл. Массив чисел JSON
+      // вырос бы в 3–4 раза.
+      store: (state, index, bytes) => {
+        const head = new TextEncoder().encode(JSON.stringify({ state, index }));
+        const body = new Uint8Array(4 + head.length + bytes.length);
+        new DataView(body.buffer).setUint32(0, head.length, true);
+        body.set(head, 4);
+        body.set(bytes, 4 + head.length);
+        return invoke<AttachmentBatchState>("attachments_batch_store", body);
+      },
+      sourceFailed: (state, index) =>
+        invoke<AttachmentBatchState>("attachments_batch_source_failed", { state, index }),
+      cancel: (state) => invoke<AttachmentBatchState>("attachments_batch_cancel", { state }),
+      view: (state) => invoke<AttachmentBatchView>("attachments_batch_view", { state }),
+      planMarkup: async (textLength, point, before, after, paths, block) =>
+        (await invoke<InsertionEdit | null>("attachments_plan_markup", {
+          textLength,
+          point,
+          before,
+          after,
+          paths,
+          block,
+        })) ?? undefined,
+      validateFolder: (raw) => invoke<string>("attachments_validate_folder", { raw }),
     },
 
     // ── Импорт из Obsidian (фича 021) ─────────────────────────────────
