@@ -104,50 +104,74 @@ async fn walk_directory_matching(
     Ok(())
 }
 
-/// Тот же обход, что `walk_directory` без предела, но по частям (001 T136):
-/// продвигает `stack` (незаконченные каталоги и их итераторы `entries()`) до
-/// `deadline` и возвращает, закончен ли обход. Хотя бы одна запись
-/// обрабатывается за вызов при любом бюджете, иначе нулевой бюджет не сдвинул
-/// бы обход никогда.
-async fn walk_directory_step(
-    stack: &mut Vec<(PathBuf, JsValue)>,
-    out: &mut Vec<(PathBuf, JsValue)>,
-    deadline: f64,
-) -> Result<bool, WalkAbort> {
-    loop {
-        let Some((prefix, entries_iter)) = stack.last() else {
-            return Ok(true);
-        };
-        let next_result = js_call0(entries_iter, "next").await?;
-        let done = Reflect::get(&next_result, &JsValue::from_str("done"))?
-            .as_bool()
-            .unwrap_or(true);
-        if done {
-            stack.pop();
-        } else {
-            let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
-            let name = Reflect::get(&value, &JsValue::from_str("0"))?
-                .as_string()
-                .unwrap_or_default();
-            let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
-            if !is_excluded(&name) {
+/// Обход vault по частям (001 T136): то же, что `walk_directory` без предела,
+/// плюс попутный сбор конфликтных копий по правилу `walk_conflict_copies`
+/// (011 T081) — тогда синхронизации не нужен свой обход всего vault.
+struct StepWalk {
+    /// Незаконченные каталоги: путь, итератор `entries()` и попадают ли их
+    /// файлы в дерево (`false` — служебное место, из него нужны только копии).
+    stack: Vec<(PathBuf, JsValue, bool)>,
+    found: Vec<(PathBuf, JsValue)>,
+    copies: Vec<PathBuf>,
+}
+
+impl StepWalk {
+    async fn start(root: &JsValue) -> Result<Self, WalkAbort> {
+        let entries_iter = js_call0(root, "entries").await?;
+        Ok(StepWalk {
+            stack: vec![(PathBuf::new(), entries_iter, true)],
+            found: Vec::new(),
+            copies: Vec::new(),
+        })
+    }
+
+    /// Продвигает обход до `deadline` и возвращает, закончен ли он. Хотя бы
+    /// одна запись обрабатывается за вызов при любом бюджете, иначе нулевой
+    /// бюджет не сдвинул бы обход никогда.
+    async fn step(&mut self, deadline: f64) -> Result<bool, WalkAbort> {
+        loop {
+            let Some((prefix, entries_iter, listed)) = self.stack.last() else {
+                return Ok(true);
+            };
+            let listed = *listed;
+            let next_result = js_call0(entries_iter, "next").await?;
+            let done = Reflect::get(&next_result, &JsValue::from_str("done"))?
+                .as_bool()
+                .unwrap_or(true);
+            if done {
+                self.stack.pop();
+            } else {
+                let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+                let name = Reflect::get(&value, &JsValue::from_str("0"))?
+                    .as_string()
+                    .unwrap_or_default();
+                let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
                 let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
                     .as_string()
                     .unwrap_or_default();
                 let child_path = prefix.join(&name);
                 if kind == "directory" {
-                    let child_iter = js_call0(&handle, "entries").await?;
-                    stack.push((child_path, child_iter));
-                } else if kind == "file" && is_listed(&child_path) {
-                    out.push((child_path, handle));
+                    let service = name == super::service_dir::SERVICE_DIR_NAME;
+                    if !is_excluded(&name) || service {
+                        let child_iter = js_call0(&handle, "entries").await?;
+                        self.stack
+                            .push((child_path, child_iter, listed && !is_excluded(&name)));
+                    }
+                } else if kind == "file" {
+                    if crate::sync::conflict_copy::is_conflict_copy(&name) {
+                        self.copies.push(child_path.clone());
+                    }
+                    if listed && !is_excluded(&name) && is_listed(&child_path) {
+                        self.found.push((child_path, handle));
+                    }
                 }
             }
-        }
-        if stack.is_empty() {
-            return Ok(true);
-        }
-        if js_sys::Date::now() >= deadline {
-            return Ok(false);
+            if self.stack.is_empty() {
+                return Ok(true);
+            }
+            if js_sys::Date::now() >= deadline {
+                return Ok(false);
+            }
         }
     }
 }
@@ -158,10 +182,8 @@ async fn walk_directory_step(
 struct PollCycle {
     /// Оценка доступа на начало цикла — как у прежнего цельного опроса.
     permission_guess: AccessState,
-    /// Каталоги, обход которых не закончен: путь и итератор `entries()`.
-    stack: Vec<(PathBuf, JsValue)>,
-    found: Vec<(PathBuf, JsValue)>,
-    /// Предфильтр `{size, lastModified}` для первых `metas.len()` из `found`.
+    walk: StepWalk,
+    /// Предфильтр `{size, lastModified}` для первых `metas.len()` из `walk.found`.
     metas: Vec<Option<(u64, f64)>>,
     /// Отпечатки индекса на начало цикла. Путь, который само приложение
     /// изменило между шагами (создало, сохранило, удалило, перенесло), в этом
@@ -495,6 +517,9 @@ pub struct WebBackend {
     /// Незавершённый цикл сверки `pollStep` (001 T136); `None` — следующий шаг
     /// начинает новый цикл.
     poll_cycle: Option<PollCycle>,
+    /// Конфликтные копии по последнему полному обходу (открытие или цикл
+    /// опроса, 011 T081); `None` — полного обхода ещё не было.
+    conflict_copies: Option<Vec<PathBuf>>,
     /// Существовало ли `.typsidian/` до открытия (фича 006, FR-024).
     ///
     /// Снимок момента открытия, а не текущее состояние: открытие само эту
@@ -522,6 +547,7 @@ impl WebBackend {
             template_previews: crate::templates::PreviewCache::new(),
             poll_snapshot: HashMap::new(),
             poll_cycle: None,
+            conflict_copies: None,
             service_dir_existed: true,
         }
     }
@@ -705,6 +731,9 @@ impl WebBackend {
         self.index = index;
         self.cache = cache;
         self.poll_snapshot = snapshot;
+        // Перенос мог унести и конфликтные копии: до ближайшего полного обхода
+        // список берётся честным обходом (011 T081).
+        self.conflict_copies = None;
     }
 
     /// Паритет с `NativeBackend::publish_links_invalidated` (FR-030, T087).
@@ -824,6 +853,20 @@ impl VaultBackend for WebBackend {
     /// время изменения без чтения содержимого. Отказ обхода — пустой список,
     /// а не ошибка: без доступа к папке сборка всё равно назовёт причину сама.
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
+        // Синхронизация спрашивает о копиях на каждом такте; обход всего OPFS
+        // ради этого держал очередь вызовов секундами (011 T081). Копии берутся
+        // из последнего полного обхода; разобранные с тех пор самим приложением
+        // отсеиваются проверкой, а новые извне появятся с ближайшим циклом
+        // опроса — как и любое внешнее изменение на web.
+        if let Some(known) = &self.conflict_copies {
+            let mut alive = Vec::with_capacity(known.len());
+            for copy in known {
+                if self.find_handle(copy).await.is_some() {
+                    alive.push(copy.clone());
+                }
+            }
+            return alive;
+        }
         let mut found = Vec::new();
         if walk_conflict_copies(&self.root_handle, PathBuf::new(), &mut found)
             .await
@@ -1448,22 +1491,35 @@ impl WebBackend {
             template_previews: crate::templates::PreviewCache::new(),
             poll_snapshot: HashMap::new(),
             poll_cycle: None,
+            conflict_copies: None,
             // Уточняется ниже, до создания папки.
             service_dir_existed: false,
         };
-        let mut found = Vec::new();
         // FR-038: обход прерывается на превышении предела, и ни индекс, ни
         // кэш не наполняются — частичное дерево не показывается как рабочий
-        // vault.
-        walk_directory(&handle, PathBuf::new(), &mut found, SUPPORTED_NOTE_COUNT)
+        // vault. Обход тот же, что у опроса: он попутно собирает конфликтные
+        // копии, и первому такту синхронизации не нужен свой обход (011 T081).
+        // Обход исправной папки не проваливается: отказ здесь означает, что
+        // доступа к ней уже нет.
+        let mut walk = StepWalk::start(&handle)
             .await
-            .map_err(|abort| match abort {
-                WalkAbort::TooManyNotes => OpenError::TooManyNotes,
-                // Обход исправной папки не проваливается: отказ здесь означает,
-                // что доступа к ней уже нет.
-                WalkAbort::Js => OpenError::AccessDenied,
-            })?;
-        for (path, file_handle) in found {
+            .map_err(|_| OpenError::AccessDenied)?;
+        loop {
+            let done = walk
+                .step(f64::NEG_INFINITY)
+                .await
+                .map_err(|_| OpenError::AccessDenied)?;
+            if walk.found.len() > SUPPORTED_NOTE_COUNT {
+                return Err(OpenError::TooManyNotes);
+            }
+            if done {
+                break;
+            }
+        }
+        let mut copies = std::mem::take(&mut walk.copies);
+        copies.sort();
+        backend.conflict_copies = Some(copies);
+        for (path, file_handle) in walk.found {
             if let Ok(content) = read_file_handle_text(&file_handle).await {
                 let stamp = stamp_from_content(&content);
                 backend.index.insert(Note::new(path.clone(), stamp));
@@ -1545,14 +1601,13 @@ impl WebBackend {
                 // фактический провал обхода ниже переопределяет её до
                 // Unavailable (T056, FR-020, FR-036).
                 let permission_guess = probe_permission_access_state(&self.root_handle).await;
-                let Ok(root_iter) = js_call0(&self.root_handle, "entries").await else {
+                let Ok(walk) = StepWalk::start(&self.root_handle).await else {
                     self.poll_unavailable();
                     return true;
                 };
                 PollCycle {
                     permission_guess,
-                    stack: vec![(PathBuf::new(), root_iter)],
-                    found: Vec::new(),
+                    walk,
                     metas: Vec::new(),
                     start: self
                         .index
@@ -1566,7 +1621,7 @@ impl WebBackend {
 
         // Предел FR-038 применён при открытии; сверка уже открытого vault не
         // может закрыть его задним числом, поэтому обход без ограничения.
-        match walk_directory_step(&mut cycle.stack, &mut cycle.found, deadline).await {
+        match cycle.walk.step(deadline).await {
             Err(_) => {
                 self.poll_unavailable();
                 return true;
@@ -1578,10 +1633,10 @@ impl WebBackend {
             Ok(true) => {}
         }
 
-        while cycle.metas.len() < cycle.found.len() {
-            let meta = file_meta(&cycle.found[cycle.metas.len()].1).await;
+        while cycle.metas.len() < cycle.walk.found.len() {
+            let meta = file_meta(&cycle.walk.found[cycle.metas.len()].1).await;
             cycle.metas.push(meta);
-            if cycle.metas.len() < cycle.found.len() && js_sys::Date::now() >= deadline {
+            if cycle.metas.len() < cycle.walk.found.len() && js_sys::Date::now() >= deadline {
                 self.poll_cycle = Some(cycle);
                 return false;
             }
@@ -1606,6 +1661,10 @@ impl WebBackend {
     /// Сверка полного обхода с индексом и события (бывшая вторая половина
     /// `poll_for_changes`).
     async fn finish_poll_cycle(&mut self, cycle: PollCycle) {
+        let mut copies = cycle.walk.copies.clone();
+        copies.sort();
+        self.conflict_copies = Some(copies);
+
         let observed_access = cycle.permission_guess;
         if observed_access != self.access_state {
             self.access_state = observed_access;
@@ -1624,7 +1683,7 @@ impl WebBackend {
         let mut current_paths: HashSet<PathBuf> = HashSet::new();
         let mut changed_candidates: Vec<(PathBuf, JsValue)> = Vec::new();
         let mut fresh_metas: Vec<(PathBuf, (u64, f64))> = Vec::new();
-        for ((path, handle), meta) in cycle.found.iter().zip(&cycle.metas) {
+        for ((path, handle), meta) in cycle.walk.found.iter().zip(&cycle.metas) {
             current_paths.insert(path.clone());
             let Some(meta) = *meta else {
                 continue;

@@ -358,6 +358,11 @@ fn mock_dir(note_count: usize, extra: &[(&str, &str)], readwrite: &str, read: &s
                     contents.set(name, text);
                     versions.set(name, (versions.get(name) ?? 0) + 1);
                 }},
+                __addFile(name, text) {{
+                    contents.set(name, text);
+                    versions.set(name, 0);
+                    entries.push([name, makeFile(name)]);
+                }},
                 kind: "directory",
                 name: "vault",
                 async queryPermission(opts) {{
@@ -720,6 +725,52 @@ async fn external_deletion_between_poll_steps_is_seen_by_the_next_cycle() {
             |e| matches!(e, VaultEvent::NoteDeleted { path } if path == Path::new("note0.typ"))
         ),
         "удаление снаружи замечено следующим циклом"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn conflict_copies_come_from_the_last_full_walk_without_a_walk_of_their_own() {
+    // 011 T081: копии известны с открытия, разобранная копия пропадает из
+    // списка сразу, новая извне появляется после ближайшего цикла опроса.
+    use std::path::PathBuf;
+    use typsidian_core::vault::backend::VaultBackend;
+    use wasm_bindgen::JsCast;
+
+    const OLD: &str = "note1.sync-conflict-20261003-120000-ABCDEFG.typ";
+    const NEW: &str = "note2.sync-conflict-20261019-090000-HIJKLMN.typ";
+    let dir = mock_dir(5, &[(OLD, "их версия")], "granted", "granted");
+    let mut backend = WebBackend::from_handle("vault".into(), dir.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        backend.list_conflict_copies().await,
+        vec![PathBuf::from(OLD)],
+        "копия известна с открытия"
+    );
+
+    let call = |method: &str, args: &[&str]| {
+        let f = js_sys::Reflect::get(&dir, &JsValue::from_str(method))
+            .unwrap()
+            .dyn_into::<js_sys::Function>()
+            .unwrap();
+        let args: js_sys::Array = args.iter().map(|a| JsValue::from_str(a)).collect();
+        f.apply(&dir, &args).unwrap()
+    };
+    let removed = call("removeEntry", &[OLD]);
+    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(removed))
+        .await
+        .unwrap();
+    assert!(
+        backend.list_conflict_copies().await.is_empty(),
+        "разобранная копия не ждёт цикла опроса"
+    );
+
+    call("__addFile", &[NEW, "ещё одна версия"]);
+    backend.poll_for_changes().await;
+    assert_eq!(
+        backend.list_conflict_copies().await,
+        vec![PathBuf::from(NEW)],
+        "копия извне видна после цикла опроса"
     );
 }
 
