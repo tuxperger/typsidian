@@ -45,6 +45,21 @@ export function NotePanel({
     if (sheet) panelRef.current?.focus();
   }, [sheet]);
 
+  // Режимов больше, чем помещается в шапку (017 — пятый): включённый
+  // командой или сочетанием режим прокручивается в видимую часть.
+  const modesRef = useRef<HTMLDivElement | null>(null);
+  const activeId = spec?.id;
+  useEffect(() => {
+    const strip = modesRef.current;
+    const button = strip?.querySelector<HTMLElement>(".ts-notepanel__mode--on");
+    if (strip == null || button == null) return;
+    const left = button.offsetLeft - strip.offsetLeft;
+    if (left < strip.scrollLeft) strip.scrollLeft = left;
+    else if (left + button.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = left + button.offsetWidth - strip.clientWidth;
+    }
+  }, [activeId]);
+
   if (spec === undefined) return <></>;
 
   const panel = (
@@ -64,7 +79,7 @@ export function NotePanel({
       )}
       <div className="ts-notepanel__head">
         {modes.length > 1 ? (
-          <div className="ts-notepanel__modes" role="group" aria-label={t("notePanel.modes")}>
+          <div ref={modesRef} className="ts-notepanel__modes" role="group" aria-label={t("notePanel.modes")}>
             {modes.map((mode) => (
               <button
                 key={mode.id}

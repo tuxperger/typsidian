@@ -35,6 +35,7 @@ import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
 import { attachments } from "./en/attachments.js";
+import { sources } from "./en/sources.js";
 import { outline } from "./en/outline.js";
 
 export const en = {
@@ -62,6 +63,7 @@ export const en = {
   ...importing,
   ...capture,
   ...attachments,
+  ...sources,
   ...outline,
 } as const;
 

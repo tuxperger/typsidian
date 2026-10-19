@@ -13,6 +13,18 @@ import type {
   OpenVaultError,
 } from "./vault-tree/useVault.js";
 import type {
+  BibliographyOffer,
+  CitationPlan,
+  CitationPlanError,
+  CitationScanView,
+  CitingNote,
+  CreateSourceFileError,
+  LibrarySummary,
+  MissingKey,
+  NoteCheck,
+  RefreshStep,
+  SourceHit,
+  SourceHits,
   AttachmentBatchState,
   AttachmentBatchStep,
   AttachmentBatchView,
@@ -623,6 +635,48 @@ export function tauriVaultClient(
         }),
       openDaily: (date) => invoke<OpenDaily>("open_daily", { date }),
       dailyNeighbours: (date) => invoke<DailyNeighbours>("daily_neighbours", { date }),
+    },
+
+    // ── Источники (фича 017) ──────────────────────────────────────────
+    sources: {
+      refresh: (registered) => invoke<RefreshStep>("sources_refresh", { registered }),
+      summary: () => invoke<LibrarySummary>("sources_summary"),
+      search: (query, limit, uncitedOnly) =>
+        invoke<SourceHits>("sources_search", { query, limit, uncitedOnly }),
+      forCompletion: (prefix, limit) =>
+        invoke<SourceHit[]>("sources_for_completion", { prefix, limit }),
+      scanStart: () => invoke<CitationScanView>("sources_scan_start"),
+      scanStep: (maxNotes) => invoke<CitationScanView>("sources_scan_step", { maxNotes }),
+      scanCancel: () => invoke<CitationScanView>("sources_scan_cancel"),
+      noteChanged: (path) => invoke<void>("sources_note_changed", { path }),
+      noteRemoved: (path) => invoke<void>("sources_note_removed", { path }),
+      noteRenamed: (from, to) => invoke<void>("sources_note_renamed", { from, to }),
+      citing: (key) => invoke<CitingNote[]>("sources_citing", { key }),
+      missingKeys: () => invoke<MissingKey[]>("sources_missing_keys"),
+      checkNote: (text, knownLabels) =>
+        invoke<NoteCheck>("sources_check_note", { text, knownLabels }),
+      planCitation: async (text, caret, file, key) => {
+        try {
+          const plan = await invoke<CitationPlan>("sources_plan_citation", {
+            text,
+            caret,
+            file,
+            key,
+          });
+          return { ok: true, plan };
+        } catch (error) {
+          return { ok: false, error: error as CitationPlanError };
+        }
+      },
+      bibliographyOffer: (text, notePath, file) =>
+        invoke<BibliographyOffer>("sources_bibliography_offer", { text, notePath, file }),
+      createFile: async () => {
+        try {
+          return { ok: true, path: await invoke<string>("sources_create_file") };
+        } catch (error) {
+          return { ok: false, error: error as CreateSourceFileError };
+        }
+      },
     },
 
     // ── Вложения (фича 016) ───────────────────────────────────────────

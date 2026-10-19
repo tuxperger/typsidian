@@ -338,7 +338,7 @@ export function LinksMode({
 }
 
 /** Фрагмент строки: одно вхождение подсвечено ядром. */
-function Snippet({ segments }: { segments: readonly LineSegment[] }): React.JSX.Element {
+export function Snippet({ segments }: { segments: readonly LineSegment[] }): React.JSX.Element {
   return (
     <>
       {segments.map((part, index) =>

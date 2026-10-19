@@ -25,11 +25,14 @@ export interface NotePanelStateHandle {
   mentionsExpanded: boolean;
   /** Виды пунктов оглавления кроме заголовков (фича 015, FR-010). */
   outlineKinds: OutlineKinds;
+  /** В панели «Источники» — только непроцитированные (фича 017, US2 AS2). */
+  sourcesUncitedOnly: boolean;
   toggle: () => void;
   setShown: (shown: boolean) => void;
   setMode: (mode: PanelModeId) => void;
   setMentionsExpanded: (expanded: boolean) => void;
   setOutlineKinds: (kinds: OutlineKinds) => void;
+  setSourcesUncitedOnly: (only: boolean) => void;
 }
 
 interface Resolved {
@@ -37,6 +40,7 @@ interface Resolved {
   mode: PanelModeId;
   mentionsExpanded: boolean;
   outlineKinds: OutlineKinds;
+  sourcesUncitedOnly: boolean;
 }
 
 function resolved(state: NotePanelState | undefined): Resolved {
@@ -45,6 +49,7 @@ function resolved(state: NotePanelState | undefined): Resolved {
     mode: state?.mode ?? DEFAULT_MODE,
     mentionsExpanded: state?.mentions_expanded ?? false,
     outlineKinds: state?.outline_kinds ?? NO_KINDS,
+    sourcesUncitedOnly: state?.sources_uncited_only ?? false,
   };
 }
 
@@ -89,6 +94,7 @@ export function useNotePanelState(
         mode: state.mode,
         mentions_expanded: state.mentionsExpanded,
         outline_kinds: state.outlineKinds,
+        sources_uncited_only: state.sourcesUncitedOnly,
       };
       // Отказ записи не ломает окно: состояние уже применено, потеряется
       // только его память.
@@ -118,6 +124,10 @@ export function useNotePanelState(
     ),
     setOutlineKinds: useCallback(
       (outlineKinds: OutlineKinds) => update({ outlineKinds }),
+      [update],
+    ),
+    setSourcesUncitedOnly: useCallback(
+      (sourcesUncitedOnly: boolean) => update({ sourcesUncitedOnly }),
       [update],
     ),
   };

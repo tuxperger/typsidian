@@ -46,9 +46,36 @@ import {
   type AttachmentDrop,
   type AttachmentPort,
 } from "../attachments/editorExtension.js";
+import { CitePalette } from "../sources/CitePalette.js";
+import { BibliographyPrompt } from "../sources/BibliographyPrompt.js";
+import { useCitationMarks } from "../sources/useCitationMarks.js";
+import { createErrorText, planErrorText } from "../sources/describe.js";
+import type {
+  BibliographyOffer,
+  CreateSourceFileError,
+  LibrarySummary,
+  Source,
+} from "../wasm-core/typsidian_core.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 
 /** Порт пачки вложений из рабочей области (фича 016). */
+/** Источники vault для редактора заметки (фича 017). */
+export interface NoteSources {
+  revision: number;
+  summary: LibrarySummary | null;
+  readOnly: boolean;
+  /**
+   * Запрос из рабочей области: растущий `id`; `source` — вставить сразу
+   * (кнопка панели), `null` — открыть палитру у каретки.
+   */
+  request: { id: number; source: Source | null } | null;
+  /** Создать `references.bib`; отказ — значением. */
+  createFile(): Promise<CreateSourceFileError | null>;
+  registerFile(path: string): Promise<boolean>;
+  /** Заметки, где отказались от списка литературы до конца сеанса (FR-004). */
+  declined: Set<string>;
+}
+
 export interface NoteAttachments {
   insert(files: File[], drop: AttachmentDrop, notePath: string): void;
   linkDropped(): void;
@@ -164,6 +191,8 @@ export interface NoteEditorProps {
   attachments?: NoteAttachments;
   /** «вставлено: <имя>» после одиночной вставки — редактору с кареткой (макет 1a). */
   attachmentStatus?: string;
+  /** Источники vault: палитра цитат и отметки битых цитат (фича 017). */
+  sources?: NoteSources;
 }
 
 /**
@@ -205,6 +234,7 @@ export function NoteEditor({
   tabsSummary,
   attachments,
   attachmentStatus,
+  sources,
 }: NoteEditorProps): React.JSX.Element {
   const { t } = useI18n();
   const snapshot = useDocumentSnapshot(document);
@@ -471,6 +501,72 @@ export function NoteEditor({
     setParamForm(null);
     view.focus();
   }, []);
+
+  // ── Цитаты (фича 017) ────────────────────────────────────────────────────
+  const [citePalette, setCitePalette] = useState<{ anchor: CaretAnchor | null } | null>(null);
+  const [citeOffer, setCiteOffer] = useState<Exclude<BibliographyOffer, { kind: "None" }> | null>(
+    null,
+  );
+  const [citeError, setCiteError] = useState<string | null>(null);
+  const sourcesEnabled = typst === true && sources !== undefined;
+
+  /** Цитата в место каретки: запись решает ядро, применяет `applyEdits`. */
+  const insertCitation = useCallback(
+    async (source: Source) => {
+      const view = editorRef.current?.view();
+      if (!view || sources === undefined) return;
+      setCitePalette(null);
+      const caret = view.state.selection.main.head;
+      const result = await client.sources.planCitation(
+        view.state.doc.toString(),
+        caret,
+        source.file,
+        source.key,
+      );
+      if (!result.ok) {
+        setCiteError(planErrorText(t, result.error));
+        view.focus();
+        return;
+      }
+      setCiteError(null);
+      applyEdits(result.plan.edits);
+      view.dispatch({ selection: { anchor: result.plan.caret } });
+      // Предложение списка литературы — после вставки, по тексту с ней (FR-004).
+      if (sources.declined.has(document.path)) return;
+      const offer = await client.sources.bibliographyOffer(
+        view.state.doc.toString(),
+        document.path,
+        source.file,
+      );
+      setCiteOffer(offer.kind === "None" ? null : offer);
+    },
+    [client, sources, applyEdits, document.path, t],
+  );
+
+  const lastCiteRequest = useRef(sources?.request?.id ?? 0);
+  useEffect(() => {
+    const request = sources?.request ?? null;
+    if (request === null || request.id === lastCiteRequest.current) return;
+    lastCiteRequest.current = request.id;
+    if (!active || !sourcesEnabled) return;
+    if (request.source !== null) void insertCitation(request.source);
+    else setCitePalette({ anchor: editorRef.current?.caretCoords() ?? null });
+  }, [sources?.request, active, sourcesEnabled, insertCitation]);
+
+  const closeCitePalette = useCallback(() => {
+    setCitePalette(null);
+    editorRef.current?.focus();
+  }, []);
+
+  // Отметки битых цитат по живому тексту (FR-006).
+  const citationView = useCallback(() => editorRef.current?.view() ?? null, []);
+  const citationCheck = useCitationMarks(
+    client,
+    citationView,
+    content,
+    sources?.revision ?? 0,
+    sourcesEnabled,
+  );
 
 
 
@@ -850,6 +946,23 @@ export function NoteEditor({
         {...(fontSize ? { onZoom: fontSize.step } : {})}
       />
 
+      {citePalette && sources !== undefined && (
+        <CitePalette
+          anchor={citePalette.anchor}
+          client={client}
+          summary={sources.summary}
+          revision={sources.revision}
+          readOnly={sources.readOnly}
+          onPick={(source) => void insertCitation(source)}
+          onClose={closeCitePalette}
+          onCreateFile={() =>
+            void sources.createFile().then((error) =>
+              setCiteError(error === null ? t("sources.empty.created") : createErrorText(t, error)),
+            )
+          }
+          onRegisterFile={(path) => void sources.registerFile(path)}
+        />
+      )}
       {insertMenu && (
         <InsertMenu
           anchor={insertMenu.anchor}
@@ -917,6 +1030,29 @@ export function NoteEditor({
           переключатель, — моста к Neovim в web-сборке не существует
           (research.md §7), и кликабельная пилюля утверждала бы, что режим
           переключается. */}
+      {citeError !== null && (
+        <div className="ts-cite-offer ts-cite-offer--error" role="alert">
+          <span>{citeError}</span>
+          <span className="ts-spacer" />
+          <button type="button" className="ts-btn ts-btn--quiet" onClick={() => setCiteError(null)}>
+            {t("common.close")}
+          </button>
+        </div>
+      )}
+      {citeOffer !== null && (
+        <BibliographyPrompt
+          offer={citeOffer}
+          onAccept={() => {
+            applyEdits(citeOffer.edits);
+            setCiteOffer(null);
+          }}
+          onLater={() => {
+            sources?.declined.add(document.path);
+            setCiteOffer(null);
+            editorRef.current?.focus();
+          }}
+        />
+      )}
       <div className="ts-statusbar">
         <span className="ts-vim" title={t("editor.vimHint")}>
           NORMAL
@@ -931,6 +1067,14 @@ export function NoteEditor({
           </span>
         )}
         <SaveIndicator state={snapshot.save} />
+        {citationCheck !== null && citationCheck.citations > 0 && (
+          <span className={citationCheck.broken > 0 ? "ts-cite-status ts-cite-status--broken" : "ts-cite-status"}>
+            {t("sources.status", {
+              citations: citationCheck.citations,
+              broken: citationCheck.broken,
+            })}
+          </span>
+        )}
         {attachmentStatus !== undefined && (
           <span className="ts-attach-status">{attachmentStatus}</span>
         )}

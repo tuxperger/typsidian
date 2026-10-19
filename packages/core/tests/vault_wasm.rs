@@ -932,3 +932,69 @@ async fn list_images_walks_the_vault_or_one_folder_like_the_native_backend() {
     );
     assert!(backend.list_images(Some(Path::new("нет"))).await.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Фича 017 — изменения файлов источников на web (T047)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+async fn source_file_changes_are_announced_by_the_poll_and_by_own_writes() {
+    use std::path::Path;
+    use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::events::VaultEvent;
+    use wasm_bindgen::JsCast;
+
+    let announced = |events: &[VaultEvent]| {
+        events
+            .iter()
+            .any(|event| matches!(event, VaultEvent::SourceFilesChanged))
+    };
+    let dir = mock_dir(3, &[], "granted", "granted");
+    let mut backend = WebBackend::from_handle("vault".into(), dir.clone())
+        .await
+        .unwrap();
+    // Первый цикл только запоминает снимок кандидатов.
+    backend.poll_for_changes().await;
+    assert!(!announced(&backend.poll_events()));
+
+    let add = js_sys::Reflect::get(&dir, &JsValue::from_str("__addFile"))
+        .unwrap()
+        .dyn_into::<js_sys::Function>()
+        .unwrap();
+    add.call2(
+        &dir,
+        &JsValue::from_str("notes.txt"),
+        &JsValue::from_str("x"),
+    )
+    .unwrap();
+    backend.poll_for_changes().await;
+    assert!(
+        !announced(&backend.poll_events()),
+        "посторонний файл — не событие"
+    );
+
+    add.call2(
+        &dir,
+        &JsValue::from_str("refs.bib"),
+        &JsValue::from_str("@misc{a, title={x}}"),
+    )
+    .unwrap();
+    backend.poll_for_changes().await;
+    assert!(
+        announced(&backend.poll_events()),
+        "новый .bib замечен опросом"
+    );
+
+    set_content_outside(&dir, "refs.bib", "@misc{b, title={y}}");
+    backend.poll_for_changes().await;
+    assert!(
+        announced(&backend.poll_events()),
+        "правка .bib замечена опросом"
+    );
+
+    backend
+        .write_bytes(Path::new("own.bib"), b"")
+        .await
+        .unwrap();
+    assert!(announced(&backend.poll_events()), "своя запись — событие");
+}

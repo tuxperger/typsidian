@@ -1,5 +1,6 @@
 "use client";
 
+import { editorMarks } from "./marks.js";
 import { useEffect, useImperativeHandle, useRef } from "react";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
@@ -406,6 +407,9 @@ const baseExtensions: Extension[] = [
     ...historyKeymap,
   ]),
   documentSync,
+  // Отметки ссылок и цитат (017, 018): поле есть у каждого редактора, наборы
+  // кладут поставщики через `setMarks`.
+  editorMarks,
   viewListener,
   // Поля вставленного сниппета и переходы по ним (меню ⌘E). Внутри расширения
   // приоритет выше обычной раскладки, но только пока сниппет активен.

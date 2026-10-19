@@ -24,6 +24,10 @@ import {
   importBegin,
   importFinish,
   ImportSource,
+  SourceEngine,
+  createSourceFile,
+  type CitationPlanError,
+  type CreateSourceFileError,
   importStep,
   importSurvey,
   linksBacklinksPage,
@@ -152,6 +156,19 @@ export function webVaultClient(
 
   /** Открытая исходная папка импорта (фича 021); `null` — не открыта. */
   let importSource: ImportSource | null = null;
+  // Библиотека источников и индекс цитат этого vault (фича 017).
+  const sourceEngine = new SourceEngine();
+  // Вызовы движка по одному: синхронный вызов посреди его асинхронного шага
+  // упал бы на заимствовании («recursive use of an object»).
+  let engineTail: Promise<unknown> = Promise.resolve();
+  const engineCall = <T>(op: () => T | Promise<T>): Promise<T> => {
+    const run = engineTail.then(
+      () => op(),
+      () => op(),
+    );
+    engineTail = run.catch(() => undefined);
+    return run;
+  };
   const openedSource = (): ImportSource => {
     if (importSource === null) throw { kind: "NoSource" };
     return importSource;
@@ -435,6 +452,44 @@ export function webVaultClient(
         call(() => backend.captureWrite(capture, openBuffer ?? null, image ?? null)),
       openDaily: (date) => call(() => backend.openDaily(date)),
       dailyNeighbours: (date) => call(() => backend.dailyNeighbours(date)),
+    },
+
+    // ── Источники (фича 017) ──────────────────────────────────────────
+    // Движок — объект ядра на этого клиента. Его асинхронные шаги держат
+    // заимствование движка через `await`, поэтому все вызовы к нему идут
+    // своей цепочкой по одному; вызовы с vault — ещё и через общую очередь.
+    sources: {
+      refresh: (registered) => engineCall(() => call(() => sourceEngine.refresh(backend, registered))),
+      summary: () => engineCall(() => sourceEngine.summary()),
+      search: (query, limit, uncitedOnly) =>
+        engineCall(() => sourceEngine.search(query, limit, uncitedOnly)),
+      forCompletion: (prefix, limit) => engineCall(() => sourceEngine.sourcesForCompletion(prefix, limit)),
+      scanStart: () => engineCall(() => call(() => sourceEngine.scanStart(backend))),
+      scanStep: (maxNotes) => engineCall(() => call(() => sourceEngine.scanStep(backend, maxNotes))),
+      scanCancel: () => engineCall(() => sourceEngine.scanCancel()),
+      noteChanged: (path) => engineCall(() => call(() => sourceEngine.noteChanged(backend, path))),
+      noteRemoved: (path) => engineCall(() => sourceEngine.noteRemoved(path)),
+      noteRenamed: (from, to) => engineCall(() => sourceEngine.noteRenamed(from, to)),
+      citing: (key) => engineCall(() => sourceEngine.citing(key)),
+      missingKeys: () => engineCall(() => sourceEngine.missingKeys()),
+      checkNote: (text, knownLabels) => engineCall(() => sourceEngine.checkNote(text, knownLabels)),
+      planCitation: (text, caret, file, key) =>
+        engineCall(() => {
+          try {
+            return { ok: true as const, plan: sourceEngine.planCitation(text, caret, file, key) };
+          } catch (error) {
+            return { ok: false as const, error: error as CitationPlanError };
+          }
+        }),
+      bibliographyOffer: (text, notePath, file) =>
+        engineCall(() => sourceEngine.bibliographyOffer(text, notePath, file)),
+      createFile: async () => {
+        try {
+          return { ok: true, path: await call(() => createSourceFile(backend)) };
+        } catch (error) {
+          return { ok: false, error: error as CreateSourceFileError };
+        }
+      },
     },
 
     // ── Вложения (фича 016) ───────────────────────────────────────────

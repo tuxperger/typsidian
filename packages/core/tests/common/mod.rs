@@ -348,6 +348,31 @@ impl VaultBackend for MemoryVault {
         images
     }
 
+    /// Кандидаты в файлы источников (фича 017) — правило ядра, без скрытых
+    /// папок; «время изменения» — хэш содержимого, как у шрифтов.
+    async fn list_source_candidates(&self) -> Vec<typsidian_core::sources::SourceCandidate> {
+        let mut found: Vec<typsidian_core::sources::SourceCandidate> = self
+            .files
+            .borrow()
+            .iter()
+            .filter(|(path, _)| typsidian_core::sources::discover::is_source_candidate(path))
+            .filter(|(path, _)| {
+                !path
+                    .components()
+                    .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
+            })
+            .map(|(path, bytes)| typsidian_core::sources::SourceCandidate {
+                path: path.to_string_lossy().replace('\\', "/"),
+                size: bytes.len() as u64,
+                modified_ms: bytes.iter().fold(0i64, |hash, byte| {
+                    hash.wrapping_mul(31).wrapping_add(*byte as i64)
+                }),
+            })
+            .collect();
+        found.sort_by(|left, right| left.path.cmp(&right.path));
+        found
+    }
+
     async fn list_conflict_copies(&self) -> Vec<PathBuf> {
         let mut copies: Vec<PathBuf> = self
             .files
@@ -648,6 +673,7 @@ pub mod properties_cases;
 pub mod relocate_cases;
 pub mod search_cases;
 pub mod slides_cases;
+pub mod sources_cases;
 pub mod structure_cases;
 pub mod sync_cases;
 pub mod template_cases;

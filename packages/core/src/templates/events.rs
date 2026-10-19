@@ -71,6 +71,7 @@ pub fn library_event(event: &VaultEvent) -> Option<TemplateEvent> {
         }
         VaultEvent::BulkChangeStarted
         | VaultEvent::LinksInvalidated { .. }
+        | VaultEvent::SourceFilesChanged
         | VaultEvent::VaultSettingsLost
         | VaultEvent::VaultSettingsReadOnly => None,
     }

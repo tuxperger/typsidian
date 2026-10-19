@@ -4,6 +4,18 @@ import type {
   AttachmentBatchStep,
   AttachmentBatchView,
   BacklinksPage,
+  BibliographyOffer,
+  CitationPlan,
+  CitationPlanError,
+  CitationScanView,
+  CitingNote,
+  CreateSourceFileError,
+  LibrarySummary,
+  MissingKey,
+  NoteCheck,
+  RefreshStep,
+  SourceHit,
+  SourceHits,
   Board,
   BoardEvent,
   BoardWriteProfile,
@@ -511,6 +523,11 @@ export interface VaultClient {
 
   /** Пачка вложений: правила — в `packages/core/src/attachments`. */
   readonly attachments: AttachmentOps;
+
+  // ── Источники (фича 017) ─────────────────────────────────────────
+
+  /** Библиотека источников и индекс цитат: правила — в `packages/core/src/sources`. */
+  readonly sources: SourcesOps;
 }
 
 /**
@@ -738,4 +755,34 @@ export interface CaptureClient {
   /** «Сегодня»: создаёт заметку по шаблону при отсутствии. Отказ — `DailyError`. */
   openDaily(date: DailyDate): Promise<OpenDaily>;
   dailyNeighbours(date: DailyDate): Promise<DailyNeighbours>;
+}
+
+/**
+ * Источники vault (фича 017, contracts/frontend-sources.md). Состояние —
+ * в ядре по обе стороны границы; здесь только вызовы.
+ */
+export interface SourcesOps {
+  refresh(registered: string[]): Promise<RefreshStep>;
+  summary(): Promise<LibrarySummary>;
+  search(query: string, limit: number, uncitedOnly: boolean): Promise<SourceHits>;
+  /** Для дополнения по `@` (018). */
+  forCompletion(prefix: string, limit: number): Promise<SourceHit[]>;
+  scanStart(): Promise<CitationScanView>;
+  scanStep(maxNotes: number): Promise<CitationScanView>;
+  scanCancel(): Promise<CitationScanView>;
+  noteChanged(path: string): Promise<void>;
+  noteRemoved(path: string): Promise<void>;
+  noteRenamed(from: string, to: string): Promise<void>;
+  citing(key: string): Promise<CitingNote[]>;
+  missingKeys(): Promise<MissingKey[]>;
+  checkNote(text: string, knownLabels: string[]): Promise<NoteCheck>;
+  /** Отказ — `CitationPlanError` значением, а не исключением. */
+  planCitation(
+    text: string,
+    caret: number,
+    file: string,
+    key: string,
+  ): Promise<{ ok: true; plan: CitationPlan } | { ok: false; error: CitationPlanError }>;
+  bibliographyOffer(text: string, notePath: string, file: string): Promise<BibliographyOffer>;
+  createFile(): Promise<{ ok: true; path: string } | { ok: false; error: CreateSourceFileError }>;
 }

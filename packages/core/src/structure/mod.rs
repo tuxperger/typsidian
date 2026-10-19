@@ -28,7 +28,7 @@ pub use view::{
     outline_active, outline_view, OutlineCounts, OutlineRequest, OutlineRow, OutlineState,
     OutlineView,
 };
-pub use walk::parse;
+pub use walk::{mode_at, parse};
 
 /// Место в тексте заметки (data-model.md «TextPlace»).
 ///
@@ -59,6 +59,12 @@ pub struct NoteStructure {
     pub figures: Vec<FigureSite>,
     pub labels: Vec<LabelSite>,
     pub refs: Vec<RefSite>,
+    /// Вызовы `cite(…)` (фича 017, research.md §9).
+    #[serde(default)]
+    pub cites: Vec<CiteSite>,
+    /// Вызовы `bibliography(…)` (фича 017).
+    #[serde(default)]
+    pub bibliographies: Vec<BibliographySite>,
 }
 
 /// Заголовок: запись знаками `=` или вызов `heading(…)`.
@@ -139,4 +145,41 @@ pub struct RefSite {
     pub target: String,
     /// Ссылка целиком, с дополнением `[…]`.
     pub place: SourcePlace,
+}
+
+/// Вызов `cite(<ключ>)` или `cite(label("ключ"))` (фича 017).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct CiteSite {
+    pub key: String,
+    /// Вызов целиком, с `#` в разметке.
+    pub place: SourcePlace,
+}
+
+/// Вызов `bibliography(…)` (фича 017, research.md §13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct BibliographySite {
+    /// Пути-литералы в порядке записи; пусто, если аргумент не литерал.
+    pub paths: Vec<String>,
+    /// Аргумент — строка или массив строк.
+    pub literal: bool,
+    /// Вызов целиком.
+    pub place: SourcePlace,
+    /// Первый позиционный аргумент — его заменяет предложение «дополнить».
+    pub arg: SourcePlace,
+}
+
+/// Что записано в месте каретки (фича 017): от этого зависит запись цитаты.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum TextMode {
+    Markup,
+    Math,
+    Code,
+    String,
+    Comment,
 }

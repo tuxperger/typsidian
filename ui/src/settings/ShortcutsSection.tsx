@@ -46,6 +46,9 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   today: "capture.command.today",
   // Фича 016: изображение из файла к каретке.
   "insert-image": "attachments.command.insertImage",
+  // Фича 017: цитата поиском и колонка «Источники».
+  "insert-citation": "sources.command.insertCitation",
+  "toggle-sources": "sources.command.toggle",
 };
 
 /**

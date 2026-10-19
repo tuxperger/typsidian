@@ -61,6 +61,11 @@ export interface VaultSettingsState {
   /** Настройки графа связей (фича 025): таблица `graph` целиком, чужие ключи ядро не трогает. */
   setGraph: (graph: GraphSettings) => Promise<boolean>;
   /**
+   * Указанные пользователем файлы источников (фича 017, FR-002): список целиком.
+   * Годность пути проверяет ядро при записи — негодный отклоняется с причиной.
+   */
+  setSourceFiles: (paths: string[]) => Promise<boolean>;
+  /**
    * Размещение и папка вложений (фича 016, FR-016…FR-018). `undefined` в поле —
    * умолчание. Негодное название ядро отклоняет с причиной, прежнее остаётся.
    */
@@ -212,6 +217,15 @@ export function useVaultSettings(
     [overrides, write],
   );
 
+  const setSourceFiles = useCallback(
+    async (paths: string[]) => {
+      if (overrides === null) return false;
+      const { source_files: _files, ...rest } = overrides;
+      return write(paths.length > 0 ? { ...rest, source_files: paths } : rest);
+    },
+    [overrides, write],
+  );
+
   const setTemplateSources = useCallback(
     async (sources: TemplateSourceEntry[]) => {
       if (overrides === null) return false;
@@ -327,6 +341,7 @@ export function useVaultSettings(
     setExportFolder,
     setCapture,
     setGraph,
+    setSourceFiles,
     setAttachments,
     applyChange,
     setEditorFontSize,

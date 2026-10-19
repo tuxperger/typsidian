@@ -935,3 +935,8 @@ fn the_workspaces_key_round_trips_and_tolerates_garbage() {
 fn a_workspace_change_is_not_journaled() {
     workspace_settings::a_workspace_change_is_not_journaled();
 }
+
+#[wasm_bindgen_test]
+fn note_panel_sources_mode_and_uncited_flag_round_trip() {
+    note_panel::the_sources_mode_and_uncited_flag_round_trip();
+}

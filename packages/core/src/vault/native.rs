@@ -221,6 +221,9 @@ enum RawChange {
     Updated(PathBuf),
     Deleted(PathBuf),
     Renamed(PathBuf, PathBuf),
+    /// Изменился файл-кандидат в источники (фича 017): какой — решает сверка
+    /// отпечатков в библиотеке, поэтому без пути.
+    SourceFiles,
 }
 
 /// Классифицирует один `DebouncedEvent` в ноль или более [`RawChange`],
@@ -242,6 +245,17 @@ enum RawChange {
 ///   от/to у забюджеченного backend) — деградируем до `Deleted`/`Created`
 ///   вместо переименования, не теряя сам факт изменения.
 fn dispatch_debounced_event(ev: &DebouncedEvent, tx: &UnboundedSender<RawChange>) {
+    // Файлы источников (017) в дерево не попадают, но их изменение обязано
+    // дойти до библиотеки: создание, правка, удаление, переименование.
+    if !matches!(ev.event.kind, notify::EventKind::Access(_))
+        && ev
+            .event
+            .paths
+            .iter()
+            .any(|path| crate::sources::discover::is_source_candidate(path))
+    {
+        let _ = tx.send(RawChange::SourceFiles);
+    }
     match &ev.event.kind {
         notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
             if let [from, to] = ev.event.paths.as_slice() {
@@ -505,6 +519,55 @@ fn walk_source_files(root: &Path) -> crate::vault::SourceListing {
 /// Шрифты vault по метаданным, без чтения содержимого (FR-027).
 ///
 /// Правила обхода те же, что у [`walk`]: скрытые каталоги и символические
+/// Кандидаты в файлы источников (фича 017): обход шрифтов с другим отбором.
+fn walk_source_candidates(root: &Path) -> Vec<crate::sources::SourceCandidate> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_excluded(&name) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            if !file_type.is_file() || !crate::sources::discover::is_source_candidate(relative) {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let modified_ms = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_millis() as i64);
+            found.push(crate::sources::SourceCandidate {
+                path: relative.to_string_lossy().replace('\\', "/"),
+                size: metadata.len(),
+                modified_ms,
+            });
+        }
+    }
+    found.sort_by(|left, right| left.path.cmp(&right.path));
+    found
+}
+
 /// ссылки пропускаются. Порядок — по пути, чтобы набор шрифтов, а с ним и выбор
 /// Изображения vault (фича 016): тот же обход, что у шрифтов, — скрытые папки
 /// и символические ссылки пропускаются, читаются только метаданные.
@@ -831,7 +894,7 @@ impl NativeBackend {
                     .filter_map(|c| match c {
                         RawChange::Created(p) | RawChange::Updated(p) => Some(p.clone()),
                         RawChange::Renamed(_, to) => Some(to.clone()),
-                        RawChange::Deleted(_) => None,
+                        RawChange::Deleted(_) | RawChange::SourceFiles => None,
                     })
                     .collect();
                 let stamped: HashMap<PathBuf, Option<(Note, Derived)>> =
@@ -853,6 +916,7 @@ impl NativeBackend {
                 // Пути, появление/исчезновение/переезд которых меняет статус
                 // входящих на них ссылок (FR-030, T087).
                 let mut link_targets_touched: Vec<PathBuf> = Vec::new();
+                let mut sources_changed = false;
                 for change in batch {
                     match change {
                         RawChange::Created(abs) | RawChange::Updated(abs) => {
@@ -923,6 +987,7 @@ impl NativeBackend {
                                 });
                             }
                         }
+                        RawChange::SourceFiles => sources_changed = true,
                         RawChange::Renamed(from_abs, to_abs) => {
                             let (Some(from_rel), Some(to_rel)) = (
                                 from_abs.strip_prefix(&root).ok().map(Path::to_path_buf),
@@ -968,6 +1033,9 @@ impl NativeBackend {
                 }
                 drop(idx);
                 drop(cache_guard);
+                if sources_changed {
+                    pending.push(VaultEvent::SourceFilesChanged);
+                }
                 if !pending.is_empty() {
                     let mut batch = wrap_bulk_if_needed(pending);
                     batch.extend(links_invalidated(affected_by_links));
@@ -1371,6 +1439,10 @@ impl VaultBackend for NativeBackend {
         }
     }
 
+    async fn list_source_candidates(&self) -> Vec<crate::sources::SourceCandidate> {
+        walk_source_candidates(&self.root_path)
+    }
+
     async fn crosses_symlink(&self, path: &Path) -> bool {
         let mut current = self.root_path.clone();
         let Some(parent) = path.parent() else {
@@ -1505,7 +1577,16 @@ impl VaultBackend for NativeBackend {
             } else {
                 WriteError::Io
             }
-        })
+        })?;
+        // Файл источников, записанный самим приложением (017, research.md §7).
+        if crate::sources::discover::is_source_candidate(path) {
+            self.events
+                .lock()
+                .unwrap()
+                .push_back(VaultEvent::SourceFilesChanged);
+            self.events_ready.notify_one();
+        }
+        Ok(())
     }
 
     async fn write(

@@ -233,6 +233,15 @@ pub trait VaultBackend: Sized {
         Vec::new()
     }
 
+    /// Кандидаты в файлы источников (фича 017, research.md §3): `.bib`,
+    /// `.yml`, `.yaml` вида `Other`, вне скрытых папок. Только метаданные —
+    /// читает файлы библиотека, и только изменившиеся.
+    ///
+    /// Умолчание — пусто: двойникам без источников обход незачем.
+    async fn list_source_candidates(&self) -> Vec<crate::sources::SourceCandidate> {
+        Vec::new()
+    }
+
     /// Проходит ли путь через символическую ссылку-каталог (фича 011, T068).
     ///
     /// Запись по относительному пути обязана оставаться внутри vault, но
@@ -535,6 +544,10 @@ impl<B: VaultBackend> VaultBackend for ReadOnly<B> {
 
     async fn list_images(&self, folder: Option<&Path>) -> Vec<crate::vault::ImageFile> {
         self.inner.list_images(folder).await
+    }
+
+    async fn list_source_candidates(&self) -> Vec<crate::sources::SourceCandidate> {
+        self.inner.list_source_candidates().await
     }
 
     async fn crosses_symlink(&self, path: &Path) -> bool {

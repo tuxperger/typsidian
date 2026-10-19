@@ -407,3 +407,19 @@ Complexity Tracking.
 `SourceEngine::sources_for_completion(prefix, limit)` → `Vec<SourceHit>` — тот же поиск §14 и
 тот же тип, что у палитры. Дополнение по `@` целиком в 018; 017 только отдаёт список и
 `citation_text` для подстановки.
+
+## §19 Решения реализации
+
+1. **Вызовы движка на web — по одному.** Асинхронные шаги `SourceEngine` (`refresh`,
+   `scanStep`, `noteChanged`) держат заимствование wasm-объекта через `await`; синхронный
+   вызов панели посреди шага падал «recursive use of an object». В
+   `ui/src/vault-client-web.ts` все вызовы движка идут своей цепочкой `engineCall`, вызовы с
+   vault — ещё и через общую очередь. На desktop то же даёт `Mutex` состояния Tauri.
+2. **Своя запись заметки.** `write` событий vault не публикует, поэтому индекс цитат узнаёт
+   о сохранении от `NoteDocumentRegistry.onSaved` — тем же сигналом, что колонка «Связи»
+   (013): `Workspace` передаёт его в `useSources.onEvent` как `NoteUpdated`.
+3. **Пятый режим колонки.** Режимы прокручиваются вбок (013/015/020/025); `NotePanel`
+   прокручивает включённый командой режим в видимую часть шапки.
+4. **Типы ядра переименованы** против contracts/core-sources-api.md: `SourceProblem` →
+   `SourceReadProblem`, `SourceProblemKind` → `SourceReadProblemKind` — tsify склеивал их с
+   одноимёнными интерфейсами других модулей в `typsidian_core.d.ts`.

@@ -144,6 +144,8 @@ struct StepWalk {
     stack: Vec<(PathBuf, JsValue, bool)>,
     found: Vec<(PathBuf, JsValue)>,
     copies: Vec<PathBuf>,
+    /// Кандидаты в файлы источников (017) — для снимка в цикле опроса.
+    sources: Vec<(PathBuf, JsValue)>,
 }
 
 impl StepWalk {
@@ -153,6 +155,7 @@ impl StepWalk {
             stack: vec![(PathBuf::new(), entries_iter, true)],
             found: Vec::new(),
             copies: Vec::new(),
+            sources: Vec::new(),
         })
     }
 
@@ -191,6 +194,12 @@ impl StepWalk {
                 } else if kind == "file" {
                     if crate::sync::conflict_copy::is_conflict_copy(&name) {
                         self.copies.push(child_path.clone());
+                    }
+                    if listed
+                        && !is_excluded(&name)
+                        && crate::sources::discover::is_source_candidate(&child_path)
+                    {
+                        self.sources.push((child_path.clone(), handle.clone()));
                     }
                     if listed && !is_excluded(&name) && is_listed(&child_path) {
                         self.found.push((child_path, handle));
@@ -551,6 +560,9 @@ pub struct WebBackend {
     /// Конфликтные копии по последнему полному обходу (открытие или цикл
     /// опроса, 011 T081); `None` — полного обхода ещё не было.
     conflict_copies: Option<Vec<PathBuf>>,
+    /// Снимок `{size, lastModified}` кандидатов в источники (017, research.md
+    /// §7): расхождение кладёт `SourceFilesChanged`. `None` — опроса ещё не было.
+    source_snapshot: Option<HashMap<PathBuf, (u64, f64)>>,
     /// Существовало ли `.typsidian/` до открытия (фича 006, FR-024).
     ///
     /// Снимок момента открытия, а не текущее состояние: открытие само эту
@@ -579,6 +591,7 @@ impl WebBackend {
             poll_snapshot: HashMap::new(),
             poll_cycle: None,
             conflict_copies: None,
+            source_snapshot: None,
             service_dir_existed: true,
         }
     }
@@ -951,6 +964,34 @@ impl VaultBackend for WebBackend {
         fonts
     }
 
+    async fn list_source_candidates(&self) -> Vec<crate::sources::SourceCandidate> {
+        let mut found = Vec::new();
+        if walk_directory_matching(
+            &self.root_handle,
+            PathBuf::new(),
+            &mut found,
+            usize::MAX,
+            crate::sources::discover::is_source_candidate,
+        )
+        .await
+        .is_err()
+        {
+            return Vec::new();
+        }
+        let mut candidates = Vec::with_capacity(found.len());
+        for (path, handle) in found {
+            if let Some((size, modified)) = file_meta(&handle).await {
+                candidates.push(crate::sources::SourceCandidate {
+                    path: path.to_string_lossy().replace('\\', "/"),
+                    size,
+                    modified_ms: modified as i64,
+                });
+            }
+        }
+        candidates.sort_by(|left, right| left.path.cmp(&right.path));
+        candidates
+    }
+
     async fn list_images(&self, folder: Option<&Path>) -> Vec<super::ImageFile> {
         let mut found = Vec::new();
         match folder {
@@ -1083,6 +1124,10 @@ impl VaultBackend for WebBackend {
         js_call0(&writable, "close")
             .await
             .map_err(|_| WriteError::Io)?;
+        // Файл источников, записанный самим приложением (017, research.md §7).
+        if crate::sources::discover::is_source_candidate(path) {
+            self.events.push_back(VaultEvent::SourceFilesChanged);
+        }
         Ok(())
     }
 
@@ -1564,6 +1609,7 @@ impl WebBackend {
             poll_snapshot: HashMap::new(),
             poll_cycle: None,
             conflict_copies: None,
+            source_snapshot: None,
             // Уточняется ниже, до создания папки.
             service_dir_existed: false,
         };
@@ -1736,6 +1782,23 @@ impl WebBackend {
         let mut copies = cycle.walk.copies.clone();
         copies.sort();
         self.conflict_copies = Some(copies);
+
+        // Снимок кандидатов в источники (017): расхождение — событие; первый
+        // цикл только запоминает — библиотека и так читается при открытии.
+        let mut sources = HashMap::new();
+        for (path, handle) in &cycle.walk.sources {
+            if let Some(meta) = file_meta(handle).await {
+                sources.insert(path.clone(), meta);
+            }
+        }
+        if self
+            .source_snapshot
+            .as_ref()
+            .is_some_and(|known| *known != sources)
+        {
+            self.events.push_back(VaultEvent::SourceFilesChanged);
+        }
+        self.source_snapshot = Some(sources);
 
         let observed_access = cycle.permission_guess;
         if observed_access != self.access_state {

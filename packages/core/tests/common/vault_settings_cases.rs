@@ -558,12 +558,12 @@ pub fn a_punctuation_shortcut_carries_the_key_code() {
 
 // ── Команда оглавления (фича 015, T007) ─────────────────────────────────────
 
-/// `toggle-outline` стоит четвёртой с конца (за ней 019, 022 и 016), имя и
+/// `toggle-outline` стоит шестой с конца (за ней 019, 022, 016 и две 017), имя и
 /// умолчание зафиксированы, а `problem()`
 /// сочетание не отвергает; ни одна другая команда умолчания не делит.
 pub fn the_outline_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 4],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 6],
         CommandId::ToggleOutline
     );
     assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
@@ -587,11 +587,11 @@ pub fn the_outline_command_has_its_name_and_default() {
 
 // ── Команда показа слайдов (фича 019, T007) ─────────────────────────────────
 
-/// `start-show` стоит третьей с конца, имя и умолчание `Mod+Alt+P` зафиксированы,
+/// `start-show` стоит пятой с конца, имя и умолчание `Mod+Alt+P` зафиксированы,
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_start_show_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 3],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 5],
         CommandId::StartShow
     );
     assert_eq!(CommandId::StartShow.as_str(), "start-show");
@@ -613,12 +613,12 @@ pub fn the_start_show_command_has_its_name_and_default() {
 
 // ── Команда «Сегодня» (фича 022, T008) ───────────────────────────────────────
 
-/// `today` стоит предпоследней (за ней `insert-image` фичи 016), имя и
+/// `today` стоит четвёртой с конца (за ней 016 и две команды 017), имя и
 /// свободное умолчание `Mod+Alt+J` зафиксированы,
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_today_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 2],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 4],
         CommandId::Today
     );
     assert_eq!(CommandId::Today.as_str(), "today");

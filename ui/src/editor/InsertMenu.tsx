@@ -613,7 +613,7 @@ function describeFields(t: Translate, element: LocalizedElement): string {
  * оно встаёт над строкой. Размер берётся замером, а не константой, — иначе
  * правка отступов в CSS молча ломала бы раскладку.
  */
-function useMenuPosition(
+export function useMenuPosition(
   menuRef: React.RefObject<HTMLDivElement | null>,
   anchor: CaretAnchor | null,
 ): { left: number; top: number } | null {

@@ -40,6 +40,10 @@ pub enum VaultEvent {
     VaultAccessChanged {
         access_state: AccessState,
     },
+    /// Файл источников создан, изменён, удалён или переименован (фича 017,
+    /// research.md §7). Без путей: что изменилось, решает сверка отпечатков
+    /// в библиотеке, одна на оба таргета.
+    SourceFilesChanged,
     LinksInvalidated {
         affected_paths: Vec<PathBuf>,
     },

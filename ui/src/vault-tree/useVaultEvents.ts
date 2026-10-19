@@ -48,6 +48,8 @@ export interface VaultEventHandlers {
   onVaultSettingsLost?: () => void;
   /** Фича 006, FR-025: настройки уровня vault менять некуда — vault на чтение. */
   onVaultSettingsReadOnly?: () => void;
+  /** Изменился файл источников (фича 017): библиотека перечитывается. */
+  onSourceFilesChanged?: () => void;
 }
 
 /**
@@ -96,6 +98,9 @@ export function applyVaultEvent(
       return;
     case "VaultSettingsReadOnly":
       handlers.onVaultSettingsReadOnly?.();
+      return;
+    case "SourceFilesChanged":
+      handlers.onSourceFilesChanged?.();
       return;
     default: {
       const exhaustive: never = event;

@@ -21,6 +21,7 @@ fn open_panel() -> NotePanelState {
         mode: NotePanelMode::Links,
         mentions_expanded: true,
         outline_kinds: OutlineKinds::default(),
+        sources_uncited_only: false,
     }
 }
 
@@ -33,6 +34,7 @@ fn outline_panel() -> NotePanelState {
             figures: true,
             labels: false,
         },
+        sources_uncited_only: false,
     }
 }
 
@@ -196,6 +198,29 @@ pub fn the_properties_mode_round_trips() {
     assert!(text.contains("\"properties\""), "{text}");
     let back = format::parse(&text).unwrap().note_panel;
     assert_eq!(back.mode, NotePanelMode::Properties);
+}
+
+/// Режим «Источники» (фича 017) и «Не цитируются» переживают запись и чтение;
+/// негодное значение флага читается умолчанием.
+pub fn the_sources_mode_and_uncited_flag_round_trip() {
+    let panel = NotePanelState {
+        shown: true,
+        mode: NotePanelMode::Sources,
+        sources_uncited_only: true,
+        ..NotePanelState::default()
+    };
+    let changed = SettingsChange::note_panel(panel).apply_to(&Settings::default());
+    let text = format::render("", &changed, &FolderRefs::new());
+    assert!(text.contains("\"sources\""), "{text}");
+    let back = format::parse(&text).unwrap().note_panel;
+    assert_eq!(back.mode, NotePanelMode::Sources);
+    assert!(back.sources_uncited_only);
+
+    let bad = NotePanelState::lenient(
+        &serde_json::json!({ "mode": "sources", "sources_uncited_only": "да" }),
+    );
+    assert_eq!(bad.mode, NotePanelMode::Sources);
+    assert!(!bad.sources_uncited_only);
 }
 
 /// Режим «Граф» (фича 025) переживает запись и чтение и пишется как `graph`.

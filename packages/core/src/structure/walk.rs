@@ -180,6 +180,26 @@ impl Walker<'_> {
                 self.children(node);
                 Some(Owned::Figure(index))
             }
+            // Цитата (017): ключ — метка `<k>` или `label("k")` первым
+            // позиционным аргументом; прочее (ключ вычисляется) — не цитата.
+            Some("cite") => {
+                if let Some(key) = args_of(node).as_ref().and_then(cite_key) {
+                    self.found.cites.push(super::CiteSite { key, place });
+                }
+                None
+            }
+            Some("bibliography") => {
+                if let Some(arg) = args_of(node).as_ref().and_then(first_positional) {
+                    let (paths, literal) = bibliography_paths(&arg);
+                    self.found.bibliographies.push(super::BibliographySite {
+                        paths,
+                        literal,
+                        place,
+                        arg: self.place(arg.range()),
+                    });
+                }
+                None
+            }
             _ => {
                 self.children(node);
                 None
@@ -227,6 +247,111 @@ fn args_of<'a>(call: &LinkedNode<'a>) -> Option<LinkedNode<'a>> {
 }
 
 /// Именованные аргументы: имя и значение.
+
+/// Первый позиционный аргумент вызова.
+fn first_positional<'a>(args: &LinkedNode<'a>) -> Option<LinkedNode<'a>> {
+    args.children().find(|child| {
+        !matches!(
+            child.kind(),
+            SyntaxKind::LeftParen
+                | SyntaxKind::RightParen
+                | SyntaxKind::Comma
+                | SyntaxKind::Space
+                | SyntaxKind::Named
+                | SyntaxKind::Spread
+                | SyntaxKind::LineComment
+                | SyntaxKind::BlockComment
+        ) && !child.kind().is_trivia()
+    })
+}
+
+/// Ключ цитаты: `<k>` либо `label("k")` (017, research.md §9).
+fn cite_key(args: &LinkedNode) -> Option<String> {
+    let first = first_positional(args)?;
+    match first.kind() {
+        SyntaxKind::Label => first
+            .cast::<ast::Label>()
+            .map(|label| label.get().to_string()),
+        SyntaxKind::FuncCall => {
+            let callee = first.children().next()?;
+            if callee.kind() != SyntaxKind::Ident || callee.leaf_text() != "label" {
+                return None;
+            }
+            let inner = args_of(&first)?;
+            string_literal(&first_positional(&inner)?)
+        }
+        _ => None,
+    }
+}
+
+/// Пути `bibliography(…)`: строка или массив строк; иначе — не литерал.
+fn bibliography_paths(arg: &LinkedNode) -> (Vec<String>, bool) {
+    if let Some(path) = string_literal(arg) {
+        return (vec![path], true);
+    }
+    if arg.kind() == SyntaxKind::Array {
+        let items: Vec<LinkedNode> = arg
+            .children()
+            .filter(|child| {
+                !matches!(
+                    child.kind(),
+                    SyntaxKind::LeftParen | SyntaxKind::RightParen | SyntaxKind::Comma
+                ) && !child.kind().is_trivia()
+            })
+            .collect();
+        let paths: Option<Vec<String>> = items.iter().map(string_literal).collect();
+        if let Some(paths) = paths {
+            return (paths, true);
+        }
+    }
+    (Vec::new(), false)
+}
+
+/// Что записано в месте каретки (017): разметка, математика, код, строка или
+/// комментарий. Смещение — в кодовых единицах UTF-16; за концом текста —
+/// разметка. Не паникует на любом входе.
+pub fn mode_at(text: &str, offset_utf16: usize) -> super::TextMode {
+    use super::TextMode;
+    use typst::syntax::Side;
+    let root = typst::syntax::parse(text);
+    let lines = Lines::new(text);
+    let Some(cursor) = lines.utf16_to_byte(offset_utf16) else {
+        return TextMode::Markup;
+    };
+    let linked = LinkedNode::new(&root);
+    let Some(leaf) = linked.leaf_at(cursor, Side::Before) else {
+        return TextMode::Markup;
+    };
+    // Каретка внутри строки или комментария — только строго внутри: за
+    // закрывающей кавычкой уже код вокруг неё.
+    let inside = leaf.offset() < cursor && cursor < leaf.range().end;
+    match leaf.kind() {
+        SyntaxKind::Str if inside => return TextMode::String,
+        SyntaxKind::LineComment => return TextMode::Comment,
+        SyntaxKind::BlockComment if inside => return TextMode::Comment,
+        _ => {}
+    }
+    let mut node = leaf.parent().cloned();
+    while let Some(current) = node {
+        match current.kind() {
+            SyntaxKind::Math | SyntaxKind::Equation => return TextMode::Math,
+            SyntaxKind::Markup | SyntaxKind::ContentBlock => return TextMode::Markup,
+            SyntaxKind::Code
+            | SyntaxKind::CodeBlock
+            | SyntaxKind::Args
+            | SyntaxKind::Array
+            | SyntaxKind::Dict
+            | SyntaxKind::Parenthesized
+            | SyntaxKind::LetBinding
+            | SyntaxKind::Closure
+            | SyntaxKind::Conditional
+            | SyntaxKind::ForLoop
+            | SyntaxKind::WhileLoop => return TextMode::Code,
+            _ => node = current.parent().cloned(),
+        }
+    }
+    TextMode::Markup
+}
 fn named<'a>(args: &LinkedNode<'a>) -> Vec<(String, LinkedNode<'a>)> {
     args.children()
         .filter(|child| child.kind() == SyntaxKind::Named)

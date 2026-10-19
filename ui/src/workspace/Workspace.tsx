@@ -124,9 +124,17 @@ import { CaptureSheet } from "../capture/CaptureSheet.js";
 import { DailyNav } from "../capture/DailyNav.js";
 import { useCapture } from "../capture/useCapture.js";
 import { useDailyNote } from "../capture/useDailyNote.js";
+import { useSources } from "../sources/useSources.js";
+import { SourcesPanel } from "../sources/SourcesPanel.js";
+import { createErrorText } from "../sources/describe.js";
+import type { NoteSources } from "../editor/NoteEditor.js";
+import type { Source } from "../wasm-core/typsidian_core.js";
 
 /** Тексты заметок для связей, пока vault не открыт. */
 const NO_OPEN_TEXTS: readonly OpenText[] = [];
+
+/** Указанных пользователем файлов источников нет (фича 017). */
+const NO_SOURCE_FILES: readonly string[] = [];
 
 /** Конец заметки: редактор прижимает строку и колонку к последним (фича 022). */
 const END_OF_NOTE: TextPlace = { line: 1_000_000_000, column: 1_000_000_000 };
@@ -325,6 +333,8 @@ function WorkspaceView({
   // Вкладки читают состояние через ссылки: событие vault и переход документа
   // «чисто ↔ несохранённое» приходят раньше, чем хук вкладок создан.
   const tabsEventRef = useRef<((event: VaultEvent) => void) | null>(null);
+  // Библиотека источников (фича 017) появляется позже колбэка событий.
+  const sourcesEventRef = useRef<((event: VaultEvent) => void) | null>(null);
   const tabsRefreshRef = useRef<(() => void) | null>(null);
   // Последнее изменение файла в vault. Передаётся вниз, а не обрабатывается
   // здесь: `pollEvents` осушает очередь ядра, поэтому второй подписчик на
@@ -387,6 +397,8 @@ function WorkspaceView({
     syncRef.current?.noticeVaultChange();
     // Вкладки: переименование, удаление и внешнее изменение заметки.
     tabsEventRef.current?.(event);
+    // Источники: файлы библиотеки и цитаты заметок (фича 017).
+    sourcesEventRef.current?.(event);
     // Колонка заметки: что именно изменилось, определяет вид события. Переименование
     // и конец массового изменения путей не называют — упоминания ищутся заново;
     // `LinksInvalidated` меняет только ссылки.
@@ -459,6 +471,24 @@ function WorkspaceView({
       setNotePanelShown(true);
     } else if (notePanelMode !== "outline") {
       setNotePanelMode("outline");
+    } else {
+      setNotePanelShown(false);
+    }
+  }, [narrow, drawer, noteSheetOpen, notePanelMode, notePanelShown, setNotePanelMode, setNotePanelShown]);
+  // «Источники» (фича 017) — тем же порядком, что «Оглавление».
+  const toggleSources = useCallback(() => {
+    if (narrow || drawer) {
+      if (noteSheetOpen && notePanelMode === "sources") {
+        setNoteSheetOpen(false);
+      } else {
+        setNotePanelMode("sources");
+        setNoteSheetOpen(true);
+      }
+    } else if (!notePanelShown) {
+      setNotePanelMode("sources");
+      setNotePanelShown(true);
+    } else if (notePanelMode !== "sources") {
+      setNotePanelMode("sources");
     } else {
       setNotePanelShown(false);
     }
@@ -612,7 +642,11 @@ function WorkspaceView({
         ? null
         : new NoteDocumentRegistry(state.client, {
             // `write` событий наружу не публикует: колонка заметки обновляется по этому сигналу.
-            onSaved: (path) => bumpLinks([path]),
+            // Индекс цитат (фича 017) — по тому же сигналу.
+            onSaved: (path) => {
+              bumpLinks([path]);
+              sourcesEventRef.current?.({ type: "NoteUpdated", path });
+            },
             onDirtyChange: () => tabsRefreshRef.current?.(),
           }),
     [state.client, bumpLinks],
@@ -657,6 +691,44 @@ function WorkspaceView({
     vaultSettings.overrides,
     openNotePath,
     getEditorView,
+  );
+  // Источники (фича 017): библиотека одна на окно, редакторы получают её срез
+  // и запросы «вставить цитату».
+  const sources = useSources(
+    state.client,
+    vaultSettings.overrides?.source_files ?? NO_SOURCE_FILES,
+    vaultSettings.setSourceFiles,
+  );
+  sourcesEventRef.current = sources.onEvent;
+  const [citeRequest, setCiteRequest] = useState<{ id: number; source: Source | null } | null>(null);
+  const declinedBibliography = useRef(new Set<string>());
+  const requestCitation = useCallback((source: Source | null) => {
+    setCiteRequest((previous) => ({ id: (previous?.id ?? 0) + 1, source }));
+  }, []);
+  const insertCitationCommand = useCallback(() => {
+    if (openNotePath !== null) requestCitation(null);
+  }, [openNotePath, requestCitation]);
+  const sourcesReadOnly = state.accessState === "readOnly";
+  const { createFile: createSourceFile, registerFile: registerSourceFile } = sources;
+  const noteSources = useMemo<NoteSources>(
+    () => ({
+      revision: sources.revision,
+      summary: sources.summary,
+      readOnly: sourcesReadOnly,
+      request: citeRequest,
+      createFile: createSourceFile,
+      registerFile: registerSourceFile,
+      declined: declinedBibliography.current,
+    }),
+    [sources.revision, sources.summary, sourcesReadOnly, citeRequest, createSourceFile, registerSourceFile],
+  );
+  const createSourceFileFromPanel = useCallback(async () => {
+    const failure = await createSourceFile();
+    return failure === null ? t("sources.empty.created") : createErrorText(t, failure);
+  }, [createSourceFile, t]);
+  const registerSourceFileFromPanel = useCallback(
+    (path: string) => void registerSourceFile(path),
+    [registerSourceFile],
   );
   const [imageSheetOpen, setImageSheetOpen] = useState(false);
   const [rulesFile, setRulesFile] = useState<IgnoreFile | null>(null);
@@ -1147,6 +1219,29 @@ function WorkspaceView({
           />
         ),
       },
+      {
+        id: "sources",
+        title: "sources.mode",
+        badge: sources.summary === null ? null : t("sources.badge", { count: sources.summary.source_count }),
+        render: () =>
+          state.client === null ? null : (
+            <SourcesPanel
+              client={state.client}
+              summary={sources.summary}
+              scan={sources.scan}
+              revision={sources.revision}
+              readOnly={sourcesReadOnly}
+              uncitedOnly={notePanel.sourcesUncitedOnly}
+              onUncitedOnly={notePanel.setSourcesUncitedOnly}
+              onStartScan={sources.startScan}
+              onCancelScan={sources.cancelScan}
+              onReveal={revealPlace}
+              onInsert={openNotePath === null ? null : requestCitation}
+              onCreateFile={createSourceFileFromPanel}
+              onRegisterFile={registerSourceFileFromPanel}
+            />
+          ),
+      },
     ],
     [
       linksBadge,
@@ -1176,6 +1271,19 @@ function WorkspaceView({
       focusEditor,
       narrow,
       drawer,
+      sources.summary,
+      sources.scan,
+      sources.revision,
+      sources.startScan,
+      sources.cancelScan,
+      sourcesReadOnly,
+      notePanel.sourcesUncitedOnly,
+      notePanel.setSourcesUncitedOnly,
+      openNotePath,
+      requestCitation,
+      createSourceFileFromPanel,
+      registerSourceFileFromPanel,
+      t,
     ],
   );
 
@@ -1503,6 +1611,12 @@ function WorkspaceView({
       } else if (shortcuts.matches("toggle-outline", event)) {
         event.preventDefault();
         toggleOutline();
+      } else if (shortcuts.matches("toggle-sources", event)) {
+        event.preventDefault();
+        toggleSources();
+      } else if (shortcuts.matches("insert-citation", event)) {
+        event.preventDefault();
+        insertCitationCommand();
       } else if (shortcuts.matches("tab-close", event)) {
         event.preventDefault();
         tabCommands.close();
@@ -1577,6 +1691,8 @@ function WorkspaceView({
     toggleView,
     toggleNotePanel,
     toggleOutline,
+    toggleSources,
+    insertCitationCommand,
     tabCommands,
     exportCurrent,
     syncClient,
@@ -1684,6 +1800,26 @@ function WorkspaceView({
         icon: "list",
         meta: shortcuts.displayOf("toggle-outline"),
         run: toggleOutline,
+      });
+    }
+    // Фича 017. «Источники» — при открытом vault; «Вставить цитату…» — у
+    // открытой заметки Typst.
+    if (view === "workspace") {
+      items.push({
+        id: "toggle-sources",
+        ...titled("sources.command.toggle"),
+        icon: "list",
+        meta: shortcuts.displayOf("toggle-sources"),
+        run: toggleSources,
+      });
+    }
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push({
+        id: "insert-citation",
+        ...titled("sources.command.insertCitation"),
+        icon: "plus",
+        meta: shortcuts.displayOf("insert-citation"),
+        run: insertCitationCommand,
       });
     }
     // Фича 019. Показ слайдов — только у открытой заметки Typst и там, где
@@ -1983,6 +2119,8 @@ function WorkspaceView({
     toggleView,
     toggleNotePanel,
     toggleOutline,
+    toggleSources,
+    insertCitationCommand,
     outlineNotePath,
     createBoard,
     settings,
@@ -2276,6 +2414,19 @@ function WorkspaceView({
             </button>
           )}
 
+          {/* Источники (017, макет 1a): та же колонка в режиме «Источники». */}
+          {view === "workspace" && (
+            <button
+              type="button"
+              className="ts-btn"
+              aria-pressed={notePanelOpen && notePanel.mode === "sources"}
+              title={hintWith(t("sources.command.toggle"), shortcuts.displayOf("toggle-sources"))}
+              onClick={toggleSources}
+            >
+              {t("sources.command.toggle")}
+            </button>
+          )}
+
           {/* Колонка заметки (013): на узком окне кнопка подписана названием
               активного режима и открывает шторку. */}
           {view === "workspace" && (
@@ -2495,6 +2646,7 @@ function WorkspaceView({
               selectRequest,
               onLibraryStatus: (status) => setLibraryCustomized(status === "Customized"),
               attachments: noteAttachments,
+              sources: noteSources,
             }}
             linksSummary={linksSummary ?? undefined}
             attachmentStatus={

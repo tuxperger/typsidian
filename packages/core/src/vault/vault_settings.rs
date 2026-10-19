@@ -92,6 +92,11 @@ pub struct VaultOverrides {
     /// Хранится в нормальной форме [`crate::attachments::folder::validate_folder`].
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub attachments_folder: Option<String>,
+    /// YAML-файлы источников, указанные пользователем (фича 017, research.md §11).
+    /// Пути от корня vault в нормальной форме; пусто — ничего не указано.
+    #[serde(default)]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub source_files: Vec<String>,
     /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
     ///
     /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
@@ -168,6 +173,12 @@ pub enum VaultSettingsError {
     InvalidAttachmentsFolder {
         problem: crate::attachments::AttachmentsFolderProblem,
     },
+    /// Путь файла источников не годится (фича 017, research.md §11). Файл не тронут.
+    #[error("{problem}")]
+    InvalidSourceFile {
+        path: String,
+        problem: crate::sources::SourceFileProblem,
+    },
     /// Путь в настройках захвата не годится (фича 022, FR-010). Файл не тронут.
     #[error("{problem}")]
     InvalidCapture {
@@ -237,6 +248,19 @@ pub async fn write_vault_settings<B: VaultBackend>(
             .map_err(|problem| VaultSettingsError::InvalidExportFolder { problem })?;
         overrides.export_folder = Some(folder);
     }
+    // Файлы источников — пути внутри vault с расширением источника (017).
+    overrides.source_files = overrides
+        .source_files
+        .iter()
+        .map(|raw| {
+            crate::sources::validate_source_file(raw).map_err(|problem| {
+                VaultSettingsError::InvalidSourceFile {
+                    path: raw.clone(),
+                    problem,
+                }
+            })
+        })
+        .collect::<Result<_, _>>()?;
     // Папка вложений — та же нормальная форма (016 FR-018).
     if let Some(raw) = overrides.attachments_folder.take() {
         let folder = crate::attachments::folder::validate_folder(&raw)
@@ -526,6 +550,7 @@ const EXPORT_TABLE: &str = "export";
 const CAPTURE_TABLE: &str = "capture";
 const GRAPH_TABLE: &str = "graph";
 const ATTACHMENTS_TABLE: &str = "attachments";
+const SOURCES_TABLE: &str = "sources";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -543,6 +568,8 @@ struct FileShape {
     capture: CaptureTable,
     #[serde(default)]
     attachments: AttachmentsTable,
+    #[serde(default)]
+    sources: SourcesTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -558,6 +585,13 @@ struct FileShape {
 struct ExportTable {
     #[serde(default)]
     folder: Option<String>,
+}
+
+/// Таблица источников (017): список путей, указанных пользователем.
+#[derive(Debug, Default, Deserialize)]
+struct SourcesTable {
+    #[serde(default)]
+    files: Option<Value>,
 }
 
 /// Таблица вложений (016). Значения как `Value`: неверное — «не задано», а
@@ -705,6 +739,15 @@ impl FileShape {
             attachments_folder: match self.attachments.folder {
                 Some(Value::String(raw)) => crate::attachments::folder::validate_folder(&raw).ok(),
                 _ => None,
+            },
+            // Негодный путь отбрасывается молча, остальные остаются.
+            source_files: match self.sources.files {
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter_map(|raw| crate::sources::validate_source_file(raw).ok())
+                    .collect(),
+                _ => Vec::new(),
             },
             capture: self.capture.into_overrides(),
             graph: self.graph.as_ref().and_then(graph_from_value),
@@ -854,6 +897,21 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         ATTACHMENTS_TABLE,
         "folder",
         overrides.attachments_folder.clone().map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        SOURCES_TABLE,
+        "files",
+        (!overrides.source_files.is_empty()).then(|| {
+            Value::Array(
+                overrides
+                    .source_files
+                    .iter()
+                    .cloned()
+                    .map(Value::from)
+                    .collect(),
+            )
+        }),
     );
 
     let capture = overrides.capture.clone().unwrap_or_default();
@@ -1119,6 +1177,8 @@ mod tests {
             // Фича 016: размещение и папка вложений.
             attachments_placement: Some(crate::attachments::AttachmentsPlacement::VaultFolder),
             attachments_folder: Some("файлы/картинки".into()),
+            // Фича 017: указанные YAML-файлы источников.
+            source_files: vec!["lit/refs.yml".into()],
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

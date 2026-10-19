@@ -70,6 +70,8 @@ pub enum NotePanelMode {
     Properties,
     /// Локальный граф заметки (фича 025): в файле - `"graph"`.
     Graph,
+    /// Источники vault (фича 017): в файле - `"sources"`.
+    Sources,
 }
 
 /// Состояние колонки заметки — свойство устройства (фича 013, FR-021).
@@ -93,6 +95,11 @@ pub struct NotePanelState {
     #[serde(skip_serializing_if = "outline_kinds_are_default")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub outline_kinds: crate::structure::OutlineKinds,
+    /// В панели «Источники» показаны только непроцитированные (фича 017, US2
+    /// AS2). Умолчание (`false`) не пишется.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub sources_uncited_only: bool,
 }
 
 fn outline_kinds_are_default(kinds: &crate::structure::OutlineKinds) -> bool {
@@ -121,6 +128,7 @@ impl NotePanelState {
                     }
                 })
                 .unwrap_or_default(),
+            sources_uncited_only: flag("sources_uncited_only").unwrap_or_default(),
         }
     }
 }

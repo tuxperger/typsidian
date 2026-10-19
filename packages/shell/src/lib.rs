@@ -57,6 +57,7 @@ use typsidian_core::settings::store::{SettingsStore, StorageState, StoreCapabili
 use typsidian_core::settings::vaults::{VaultId, VaultRecord};
 use typsidian_core::settings::Settings;
 use typsidian_core::slides;
+use typsidian_core::sources;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::structure;
 use typsidian_core::templates::{
@@ -117,6 +118,11 @@ pub struct Vault(Mutex<Option<NativeBackend>>);
 /// становилось вторым поводом держать блокировку самого vault.
 #[derive(Default)]
 pub struct TemplatePreviews(Mutex<templates::PreviewCache>);
+
+/// Библиотека источников и индекс цитат (фича 017, research.md §8): состояние
+/// живёт здесь, а не ездит через границу, и сбрасывается при смене vault.
+#[derive(Default)]
+pub struct Sources(Mutex<sources::SourceEngine>);
 
 /// Движок предпросмотра (фича 005, T042): встроенные шрифты и кэш файлов
 /// внешних шаблонов.
@@ -201,11 +207,14 @@ impl<E> From<NoVault> for Failure<E> {
 async fn open_vault(
     app: AppHandle,
     state: State<'_, Vault>,
+    sources_state: State<'_, Sources>,
     path: String,
 ) -> Answer<(), OpenError> {
     let backend = NativeBackend::open(Path::new(&path)).await?;
     let ready = backend.events_ready();
     *state.0.lock().await = Some(backend);
+    // Источники и цитаты прежнего vault к новому отношения не имеют (017).
+    *sources_state.0.lock().await = sources::SourceEngine::new();
     spawn_event_forwarding(app, ready);
     Ok(())
 }
@@ -1512,6 +1521,167 @@ fn export_batch_view(state: export::BatchState) -> export::BatchView {
     export::batch::view(state)
 }
 
+// ── Источники (фича 017) ────────────────────────────────────────────────────
+//
+// Движок живёт в состоянии `Sources`; команды с vault берут обе блокировки —
+// сначала vault, затем движок, всегда в этом порядке.
+
+#[tauri::command]
+async fn sources_refresh(
+    state: State<'_, Vault>,
+    engine: State<'_, Sources>,
+    registered: Vec<String>,
+) -> Answer<sources::RefreshStep, Failure<()>> {
+    with_vault!(state, |backend| {
+        let mut engine = engine.0.lock().await;
+        Ok(engine.refresh(&*backend, &registered).await)
+    })
+}
+
+#[tauri::command]
+async fn sources_summary(engine: State<'_, Sources>) -> Answer<sources::LibrarySummary, ()> {
+    Ok(engine.0.lock().await.summary())
+}
+
+#[tauri::command]
+async fn sources_search(
+    engine: State<'_, Sources>,
+    query: String,
+    limit: u32,
+    uncited_only: bool,
+) -> Answer<sources::SourceHits, ()> {
+    Ok(engine.0.lock().await.search(&query, limit, uncited_only))
+}
+
+#[tauri::command]
+async fn sources_for_completion(
+    engine: State<'_, Sources>,
+    prefix: String,
+    limit: u32,
+) -> Answer<Vec<sources::SourceHit>, ()> {
+    Ok(engine.0.lock().await.sources_for_completion(&prefix, limit))
+}
+
+#[tauri::command]
+async fn sources_scan_start(
+    state: State<'_, Vault>,
+    engine: State<'_, Sources>,
+) -> Answer<sources::CitationScanView, Failure<()>> {
+    with_vault!(state, |backend| {
+        let notes = backend.list().await;
+        Ok(engine.0.lock().await.scan_start(&notes))
+    })
+}
+
+#[tauri::command]
+async fn sources_scan_step(
+    state: State<'_, Vault>,
+    engine: State<'_, Sources>,
+    max_notes: u32,
+) -> Answer<sources::CitationScanView, Failure<()>> {
+    with_vault!(state, |backend| {
+        let mut engine = engine.0.lock().await;
+        Ok(engine.scan_step(&*backend, max_notes).await)
+    })
+}
+
+#[tauri::command]
+async fn sources_scan_cancel(engine: State<'_, Sources>) -> Answer<sources::CitationScanView, ()> {
+    Ok(engine.0.lock().await.scan_cancel())
+}
+
+#[tauri::command]
+async fn sources_scan_view(engine: State<'_, Sources>) -> Answer<sources::CitationScanView, ()> {
+    Ok(engine.0.lock().await.scan_view())
+}
+
+#[tauri::command]
+async fn sources_note_changed(
+    state: State<'_, Vault>,
+    engine: State<'_, Sources>,
+    path: String,
+) -> Answer<(), Failure<()>> {
+    with_vault!(state, |backend| {
+        engine.0.lock().await.note_changed(&*backend, &path).await;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+async fn sources_note_removed(engine: State<'_, Sources>, path: String) -> Answer<(), ()> {
+    engine.0.lock().await.note_removed(&path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn sources_note_renamed(
+    engine: State<'_, Sources>,
+    from: String,
+    to: String,
+) -> Answer<(), ()> {
+    engine.0.lock().await.note_renamed(&from, &to);
+    Ok(())
+}
+
+#[tauri::command]
+async fn sources_citing(
+    engine: State<'_, Sources>,
+    key: String,
+) -> Answer<Vec<sources::CitingNote>, ()> {
+    Ok(engine.0.lock().await.citing(&key))
+}
+
+#[tauri::command]
+async fn sources_missing_keys(engine: State<'_, Sources>) -> Answer<Vec<sources::MissingKey>, ()> {
+    Ok(engine.0.lock().await.missing_keys())
+}
+
+#[tauri::command]
+async fn sources_check_note(
+    engine: State<'_, Sources>,
+    text: String,
+    known_labels: Vec<String>,
+) -> Answer<sources::NoteCheck, ()> {
+    Ok(engine.0.lock().await.check_note(&text, &known_labels))
+}
+
+#[tauri::command]
+async fn sources_plan_citation(
+    engine: State<'_, Sources>,
+    text: String,
+    caret: usize,
+    file: String,
+    key: String,
+) -> Answer<sources::CitationPlan, sources::CitationPlanError> {
+    engine
+        .0
+        .lock()
+        .await
+        .plan_citation(&text, caret, &file, &key)
+}
+
+#[tauri::command]
+async fn sources_bibliography_offer(
+    engine: State<'_, Sources>,
+    text: String,
+    note_path: String,
+    file: String,
+) -> Answer<sources::BibliographyOffer, ()> {
+    Ok(engine
+        .0
+        .lock()
+        .await
+        .bibliography_offer(&text, &note_path, &file))
+}
+
+#[tauri::command]
+async fn sources_create_file(
+    state: State<'_, Vault>,
+) -> Answer<String, Failure<sources::CreateSourceFileError>> {
+    with_vault!(state, |backend| sources::create_source_file(backend)
+        .await
+        .map_err(Failure::Core))
+}
 // ── Вложения (фича 016) ─────────────────────────────────────────────────────
 //
 // Как у пакета экспорта, значение пачки держит окно; оболочка только вызывает
@@ -2407,6 +2577,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(PropertiesReindex::default())
         .manage(Device::default())
         .manage(TemplatePreviews::default())
+        .manage(Sources::default())
         .manage(Preview::default())
         .manage(HighlightSessions::default())
         .invoke_handler(tauri::generate_handler![
@@ -2491,6 +2662,23 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             export_pdf,
             export_candidates,
             export_batch_start,
+            sources_refresh,
+            sources_summary,
+            sources_search,
+            sources_for_completion,
+            sources_scan_start,
+            sources_scan_step,
+            sources_scan_cancel,
+            sources_scan_view,
+            sources_note_changed,
+            sources_note_removed,
+            sources_note_renamed,
+            sources_citing,
+            sources_missing_keys,
+            sources_check_note,
+            sources_plan_citation,
+            sources_bibliography_offer,
+            sources_create_file,
             attachments_batch_start,
             attachments_batch_next,
             attachments_batch_confirm,

@@ -13,6 +13,7 @@ pub mod properties;
 pub mod search;
 pub mod settings;
 pub mod slides;
+pub mod sources;
 pub mod stamp;
 pub mod structure;
 pub mod sync;

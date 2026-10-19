@@ -89,6 +89,10 @@ pub enum CommandId {
     Today,
     /// Вставить изображение из файла (фича 016, research.md §14).
     InsertImage,
+    /// Вставить цитату поиском по источникам (фича 017, research.md §15).
+    InsertCitation,
+    /// Колонка заметки в режиме «Источники» (фича 017).
+    ToggleSources,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -125,6 +129,8 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::StartShow,
     CommandId::Today,
     CommandId::InsertImage,
+    CommandId::InsertCitation,
+    CommandId::ToggleSources,
 ];
 
 impl CommandId {
@@ -160,6 +166,8 @@ impl CommandId {
             Self::StartShow => "start-show",
             Self::Today => "today",
             Self::InsertImage => "insert-image",
+            Self::InsertCitation => "insert-citation",
+            Self::ToggleSources => "toggle-sources",
         }
     }
 
@@ -242,6 +250,11 @@ impl CommandId {
             // разработчика — команда остаётся в палитре и меню, сочетание
             // переназначается в настройках.
             Self::InsertImage => (false, true, "i"),
+            // Источники (фича 017, research.md §15): `Mod+Shift+U` из брифа не
+            // взято — на Linux это ввод знака Unicode (GTK/IBus). `b` и `r` на
+            // `Mod+Alt` свободны.
+            Self::InsertCitation => (false, true, "b"),
+            Self::ToggleSources => (false, true, "r"),
         };
         Shortcut {
             mod_key: true,
@@ -851,7 +864,7 @@ mod tests {
     fn tab_commands_follow_the_note_panel_with_the_documented_defaults() {
         // Семь команд вкладок стоят перед командами более поздних фич: за ними
         // идут `ToggleOutline` (015), `StartShow` (019), `Today` (022) и `InsertImage` (016).
-        let tail = &COMMANDS[COMMANDS.len() - 11..COMMANDS.len() - 4];
+        let tail = &COMMANDS[COMMANDS.len() - 13..COMMANDS.len() - 6];
         let expected = [
             (CommandId::TabClose, "tab-close", "Mod+Alt+W"),
             (CommandId::TabNext, "tab-next", "Mod+Alt+."),
@@ -872,13 +885,13 @@ mod tests {
             assert_eq!(command.default_shortcut().to_text(), text);
         }
         // `ToggleNotePanel` остаётся на прежнем месте.
-        assert_eq!(COMMANDS[COMMANDS.len() - 12], CommandId::ToggleNotePanel);
+        assert_eq!(COMMANDS[COMMANDS.len() - 14], CommandId::ToggleNotePanel);
     }
 
     #[test]
     fn the_today_command_precedes_insert_image_with_its_default() {
         // Фича 022: «Сегодня» — перед «Вставить изображение…», сочетание свободное.
-        assert_eq!(COMMANDS[COMMANDS.len() - 2], CommandId::Today);
+        assert_eq!(COMMANDS[COMMANDS.len() - 4], CommandId::Today);
         assert_eq!(CommandId::Today.as_str(), "today");
         assert_eq!(CommandId::parse("today"), Some(CommandId::Today));
         let shortcut = CommandId::Today.default_shortcut();
@@ -892,11 +905,46 @@ mod tests {
             .collect();
         assert_eq!(same, vec![CommandId::Today]);
     }
+    #[test]
+    fn the_sources_commands_come_last_with_their_defaults() {
+        // Фича 017: «Вставить цитату» и «Источники» — последние команды.
+        assert_eq!(
+            &COMMANDS[COMMANDS.len() - 2..],
+            &[CommandId::InsertCitation, CommandId::ToggleSources]
+        );
+        for (command, name, text, code) in [
+            (
+                CommandId::InsertCitation,
+                "insert-citation",
+                "Mod+Alt+B",
+                "KeyB",
+            ),
+            (
+                CommandId::ToggleSources,
+                "toggle-sources",
+                "Mod+Alt+R",
+                "KeyR",
+            ),
+        ] {
+            assert_eq!(command.as_str(), name);
+            assert_eq!(CommandId::parse(name), Some(command));
+            let shortcut = command.default_shortcut();
+            assert_eq!(shortcut.to_text(), text);
+            assert_eq!(shortcut.code(), Some(code.to_string()));
+            assert_eq!(shortcut.problem(), None);
+            let same: Vec<CommandId> = COMMANDS
+                .iter()
+                .copied()
+                .filter(|other| other.default_shortcut() == shortcut)
+                .collect();
+            assert_eq!(same, vec![command]);
+        }
+    }
 
     #[test]
-    fn the_insert_image_command_comes_last_with_its_default() {
-        // Фича 016: «Вставить изображение…» — последняя команда, `Mod+Alt+I`.
-        assert_eq!(COMMANDS.last(), Some(&CommandId::InsertImage));
+    fn the_insert_image_command_precedes_the_sources_commands() {
+        // Фича 016: «Вставить изображение…» — перед командами 017, `Mod+Alt+I`.
+        assert_eq!(COMMANDS[COMMANDS.len() - 3], CommandId::InsertImage);
         assert_eq!(CommandId::InsertImage.as_str(), "insert-image");
         assert_eq!(
             CommandId::parse("insert-image"),
@@ -916,7 +964,7 @@ mod tests {
 
     #[test]
     fn the_start_show_command_precedes_today_with_its_default() {
-        assert_eq!(COMMANDS[COMMANDS.len() - 3], CommandId::StartShow);
+        assert_eq!(COMMANDS[COMMANDS.len() - 5], CommandId::StartShow);
         assert_eq!(CommandId::StartShow.as_str(), "start-show");
         assert_eq!(CommandId::parse("start-show"), Some(CommandId::StartShow));
         let shortcut = CommandId::StartShow.default_shortcut();
@@ -927,7 +975,7 @@ mod tests {
 
     #[test]
     fn the_outline_command_keeps_its_default() {
-        assert_eq!(COMMANDS[COMMANDS.len() - 4], CommandId::ToggleOutline);
+        assert_eq!(COMMANDS[COMMANDS.len() - 6], CommandId::ToggleOutline);
         assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
         assert_eq!(
             CommandId::parse("toggle-outline"),
