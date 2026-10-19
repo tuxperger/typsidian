@@ -104,6 +104,72 @@ async fn walk_directory_matching(
     Ok(())
 }
 
+/// Тот же обход, что `walk_directory` без предела, но по частям (001 T136):
+/// продвигает `stack` (незаконченные каталоги и их итераторы `entries()`) до
+/// `deadline` и возвращает, закончен ли обход. Хотя бы одна запись
+/// обрабатывается за вызов при любом бюджете, иначе нулевой бюджет не сдвинул
+/// бы обход никогда.
+async fn walk_directory_step(
+    stack: &mut Vec<(PathBuf, JsValue)>,
+    out: &mut Vec<(PathBuf, JsValue)>,
+    deadline: f64,
+) -> Result<bool, WalkAbort> {
+    loop {
+        let Some((prefix, entries_iter)) = stack.last() else {
+            return Ok(true);
+        };
+        let next_result = js_call0(entries_iter, "next").await?;
+        let done = Reflect::get(&next_result, &JsValue::from_str("done"))?
+            .as_bool()
+            .unwrap_or(true);
+        if done {
+            stack.pop();
+        } else {
+            let value = Reflect::get(&next_result, &JsValue::from_str("value"))?;
+            let name = Reflect::get(&value, &JsValue::from_str("0"))?
+                .as_string()
+                .unwrap_or_default();
+            let handle = Reflect::get(&value, &JsValue::from_str("1"))?;
+            if !is_excluded(&name) {
+                let kind = Reflect::get(&handle, &JsValue::from_str("kind"))?
+                    .as_string()
+                    .unwrap_or_default();
+                let child_path = prefix.join(&name);
+                if kind == "directory" {
+                    let child_iter = js_call0(&handle, "entries").await?;
+                    stack.push((child_path, child_iter));
+                } else if kind == "file" && is_listed(&child_path) {
+                    out.push((child_path, handle));
+                }
+            }
+        }
+        if stack.is_empty() {
+            return Ok(true);
+        }
+        if js_sys::Date::now() >= deadline {
+            return Ok(false);
+        }
+    }
+}
+
+/// Незавершённый цикл сверки web (001 T136). Цикл идёт шагами, чтобы вызовы
+/// пользователя вставали между ними в очереди вызовов wasm, а не ждали обхода
+/// всего vault (025 research.md §15).
+struct PollCycle {
+    /// Оценка доступа на начало цикла — как у прежнего цельного опроса.
+    permission_guess: AccessState,
+    /// Каталоги, обход которых не закончен: путь и итератор `entries()`.
+    stack: Vec<(PathBuf, JsValue)>,
+    found: Vec<(PathBuf, JsValue)>,
+    /// Предфильтр `{size, lastModified}` для первых `metas.len()` из `found`.
+    metas: Vec<Option<(u64, f64)>>,
+    /// Отпечатки индекса на начало цикла. Путь, который само приложение
+    /// изменило между шагами (создало, сохранило, удалило, перенесло), в этом
+    /// цикле не сверяется: обход мог пройти его каталог до правки и счёл бы,
+    /// например, только что созданную заметку удалённой. Сверит следующий цикл.
+    start: HashMap<PathBuf, FileStamp>,
+}
+
 /// Конфликтные копии Syncthing (фича 011, FR-024) — тот же обход, но со
 /// служебным местом: копия `vault.json` означает спор о хранителе. Правило
 /// каталогов то же, что у `native::walk_conflict_copies` (принцип II).
@@ -426,6 +492,9 @@ pub struct WebBackend {
     /// заметки, см. `stamp_from_content`, только как сигнал "возможно,
     /// изменилось, стоит перечитать").
     poll_snapshot: HashMap<PathBuf, (u64, f64)>,
+    /// Незавершённый цикл сверки `pollStep` (001 T136); `None` — следующий шаг
+    /// начинает новый цикл.
+    poll_cycle: Option<PollCycle>,
     /// Существовало ли `.typsidian/` до открытия (фича 006, FR-024).
     ///
     /// Снимок момента открытия, а не текущее состояние: открытие само эту
@@ -452,6 +521,7 @@ impl WebBackend {
             board_write_profile: crate::boards::BoardWriteProfile::ReadWrite,
             template_previews: crate::templates::PreviewCache::new(),
             poll_snapshot: HashMap::new(),
+            poll_cycle: None,
             service_dir_existed: true,
         }
     }
@@ -1377,6 +1447,7 @@ impl WebBackend {
             board_write_profile: crate::boards::BoardWriteProfile::ReadWrite,
             template_previews: crate::templates::PreviewCache::new(),
             poll_snapshot: HashMap::new(),
+            poll_cycle: None,
             // Уточняется ниже, до создания папки.
             service_dir_existed: false,
         };
@@ -1432,21 +1503,26 @@ impl WebBackend {
     /// web-эквивалент `NativeBackend::watch()` — File System Access API не
     /// даёт подписки на изменения, поэтому WASM (однопоточный, без
     /// собственного таймера) не может сам себя периодически будить. JS-сторона
-    /// обязана вызывать этот метод по своему таймеру (см. отчёт агента —
-    /// `useVault.ts`, уже существующий `setInterval` на 1000мс, должен
-    /// переключиться с "просто читать `pollEvents()`" на "сначала
-    /// `await pollForChanges()`, потом `pollEvents()`") — адаптивное
-    /// увеличение интервала на больших vault (research.md §3) целиком на
-    /// стороне JS, эта функция не знает и не хранит собственный интервал.
+    /// вызывает сверку по своему таймеру и сама решает об интервале.
     ///
-    /// Один проход обхода `walk_directory`+дешёвого предфильтра
-    /// `{size, lastModified}` (только кандидаты на изменение читаются
-    /// целиком) — метаданные читаются для КАЖДОГО файла на КАЖДЫЙ вызов
-    /// (`FileSystemFileHandle.getFile()` не требует полного чтения
-    /// содержимого), поэтому именно частота вызовов этого метода
-    /// определяет фактическую задержку обнаружения (SC-004).
+    /// Цикл целиком, без уступок: шаги `poll_step` с неограниченным бюджетом.
+    /// Клиент web зовёт `pollStep`, чтобы цикл не держал очередь вызовов.
     #[wasm_bindgen(js_name = pollForChanges)]
     pub async fn poll_for_changes(&mut self) {
+        while !self.poll_step(f64::INFINITY).await {}
+    }
+
+    /// Шаг цикла сверки не дольше `budget_ms` (001 T136); `true` — цикл
+    /// завершён (или прерван недоступностью), следующий шаг начнёт новый.
+    ///
+    /// Шаги проходят обход `walk_directory_step` и дешёвый предфильтр
+    /// `{size, lastModified}` (только кандидаты на изменение читаются целиком):
+    /// метаданные читаются для КАЖДОГО файла в КАЖДОМ цикле
+    /// (`FileSystemFileHandle.getFile()` не требует полного чтения содержимого).
+    /// Сверка с индексом и события — только по завершении полного обхода:
+    /// по незавершённому нельзя судить, какие заметки пропали.
+    #[wasm_bindgen(js_name = pollStep)]
+    pub async fn poll_step(&mut self, budget_ms: f64) -> bool {
         // `Unavailable` — терминальное состояние для этого экземпляра backend
         // (T100, FR-020, data-model.md «Vault»): выйти из него можно только
         // явным переоткрытием vault, а не тем, что папка снова начала
@@ -1457,56 +1533,118 @@ impl WebBackend {
         // Без этой проверки таргеты расходились бы в поведении, что
         // запрещено принципом II конституции (NON-NEGOTIABLE).
         if self.access_state == AccessState::Unavailable {
-            return;
+            self.poll_cycle = None;
+            return true;
         }
+        let deadline = js_sys::Date::now() + budget_ms.max(0.0);
 
-        // Дешёвая (без пользовательского жеста) оценка доступа —
-        // фактический провал обхода ниже переопределяет её до Unavailable,
-        // если обход реально проваливается (T056, FR-020, FR-036).
-        let permission_guess = probe_permission_access_state(&self.root_handle).await;
+        let mut cycle = match self.poll_cycle.take() {
+            Some(cycle) => cycle,
+            None => {
+                // Дешёвая (без пользовательского жеста) оценка доступа —
+                // фактический провал обхода ниже переопределяет её до
+                // Unavailable (T056, FR-020, FR-036).
+                let permission_guess = probe_permission_access_state(&self.root_handle).await;
+                let Ok(root_iter) = js_call0(&self.root_handle, "entries").await else {
+                    self.poll_unavailable();
+                    return true;
+                };
+                PollCycle {
+                    permission_guess,
+                    stack: vec![(PathBuf::new(), root_iter)],
+                    found: Vec::new(),
+                    metas: Vec::new(),
+                    start: self
+                        .index
+                        .all()
+                        .into_iter()
+                        .map(|note| (note.path, note.stamp))
+                        .collect(),
+                }
+            }
+        };
 
-        let mut found = Vec::new();
         // Предел FR-038 применён при открытии; сверка уже открытого vault не
         // может закрыть его задним числом, поэтому обход без ограничения.
-        let walk_result =
-            walk_directory(&self.root_handle, PathBuf::new(), &mut found, usize::MAX).await;
+        match walk_directory_step(&mut cycle.stack, &mut cycle.found, deadline).await {
+            Err(_) => {
+                self.poll_unavailable();
+                return true;
+            }
+            Ok(false) => {
+                self.poll_cycle = Some(cycle);
+                return false;
+            }
+            Ok(true) => {}
+        }
 
-        let observed_access = if walk_result.is_err() {
-            AccessState::Unavailable
-        } else {
-            permission_guess
-        };
+        while cycle.metas.len() < cycle.found.len() {
+            let meta = file_meta(&cycle.found[cycle.metas.len()].1).await;
+            cycle.metas.push(meta);
+            if cycle.metas.len() < cycle.found.len() && js_sys::Date::now() >= deadline {
+                self.poll_cycle = Some(cycle);
+                return false;
+            }
+        }
+
+        self.finish_poll_cycle(cycle).await;
+        true
+    }
+
+    /// Провал обхода: недоступность диска не трактуется как удаление всех
+    /// заметок (FR-020) — индекс не трогаем, цикл бросаем.
+    fn poll_unavailable(&mut self) {
+        self.poll_cycle = None;
+        if self.access_state != AccessState::Unavailable {
+            self.access_state = AccessState::Unavailable;
+            self.events.push_back(VaultEvent::VaultAccessChanged {
+                access_state: AccessState::Unavailable,
+            });
+        }
+    }
+
+    /// Сверка полного обхода с индексом и события (бывшая вторая половина
+    /// `poll_for_changes`).
+    async fn finish_poll_cycle(&mut self, cycle: PollCycle) {
+        let observed_access = cycle.permission_guess;
         if observed_access != self.access_state {
             self.access_state = observed_access;
             self.events.push_back(VaultEvent::VaultAccessChanged {
                 access_state: observed_access,
             });
         }
-        if walk_result.is_err() {
-            // Недоступность диска — не трактуем как удаление всех заметок
-            // (FR-020): индекс не трогаем, просто останавливаем этот цикл.
-            return;
-        }
+
+        let index = &self.index;
+        let touched =
+            |path: &Path| index.get(path).map(|note| &note.stamp) != cycle.start.get(path);
 
         // Дешёвый предфильтр {path, size, lastModified} (research.md §3) —
         // полное чтение содержимого выполняется только для кандидатов на
         // изменение, не для каждого файла на каждом цикле опроса.
         let mut current_paths: HashSet<PathBuf> = HashSet::new();
         let mut changed_candidates: Vec<(PathBuf, JsValue)> = Vec::new();
-        for (path, handle) in &found {
+        let mut fresh_metas: Vec<(PathBuf, (u64, f64))> = Vec::new();
+        for ((path, handle), meta) in cycle.found.iter().zip(&cycle.metas) {
             current_paths.insert(path.clone());
-            let Some(meta) = file_meta(handle).await else {
+            let Some(meta) = *meta else {
                 continue;
             };
-            let previous = self.poll_snapshot.get(path).copied();
-            if previous != Some(meta) {
+            if touched(path) {
+                continue;
+            }
+            if self.poll_snapshot.get(path).copied() != Some(meta) {
                 changed_candidates.push((path.clone(), handle.clone()));
             }
-            self.poll_snapshot.insert(path.clone(), meta);
+            fresh_metas.push((path.clone(), meta));
         }
 
         let known_paths: HashSet<PathBuf> = self.index.all().into_iter().map(|n| n.path).collect();
-        let removed_paths: Vec<PathBuf> = known_paths.difference(&current_paths).cloned().collect();
+        let removed_paths: Vec<PathBuf> = known_paths
+            .difference(&current_paths)
+            .filter(|path| !touched(path))
+            .cloned()
+            .collect();
+        self.poll_snapshot.extend(fresh_metas);
         for path in &removed_paths {
             self.poll_snapshot.remove(path);
         }

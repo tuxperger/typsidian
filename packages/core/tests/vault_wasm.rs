@@ -340,7 +340,14 @@ fn mock_dir(note_count: usize, extra: &[(&str, &str)], readwrite: &str, read: &s
                         }};
                     }},
                     async createWritable() {{
-                        return {{ async write() {{}}, async close() {{}} }};
+                        let pending = "";
+                        return {{
+                            async write(text) {{ pending = text; }},
+                            async close() {{
+                                contents.set(name, pending);
+                                versions.set(name, (versions.get(name) ?? 0) + 1);
+                            }},
+                        }};
                     }},
                 }};
             }}
@@ -358,18 +365,26 @@ fn mock_dir(note_count: usize, extra: &[(&str, &str)], readwrite: &str, read: &s
                     return {{ state: opts && opts.mode === "read" ? {read:?} : {readwrite:?} }};
                 }},
                 entries() {{
+                    // Снимок на момент вызова: файл, созданный после начала
+                    // обхода, этому обходу не виден (001 T136).
+                    const list = entries.slice();
                     let i = 0;
                     return {{
                         async next() {{
-                            if (i >= entries.length) return {{ done: true }};
-                            return {{ done: false, value: entries[i++] }};
+                            if (i >= list.length) return {{ done: true }};
+                            return {{ done: false, value: list[i++] }};
                         }},
                     }};
                 }},
-                async getFileHandle(n) {{
+                async getFileHandle(n, opts) {{
                     const hit = entries.find(([k]) => k === n);
-                    if (!hit) throw new Error("not found");
-                    return hit[1];
+                    if (hit) return hit[1];
+                    if (!(opts && opts.create)) throw new Error("not found");
+                    contents.set(n, "");
+                    versions.set(n, 0);
+                    const made = [n, makeFile(n)];
+                    entries.push(made);
+                    return made[1];
                 }},
                 async removeEntry(n) {{
                     const i = entries.findIndex(([k]) => k === n);
@@ -580,6 +595,132 @@ async fn external_change_is_detected_within_sc004_budget_at_full_scale() {
     console_log(&format!(
         "T109: pollForChanges на {SUPPORTED_NOTE_COUNT} заметках — {elapsed_ms} мс (бюджет SC-004: 2000 мс)"
     ));
+}
+
+/// Меняет файл двойника «снаружи», как сторонняя программа.
+fn set_content_outside(dir: &JsValue, name: &str, text: &str) {
+    use wasm_bindgen::JsCast;
+    js_sys::Reflect::get(dir, &JsValue::from_str("__setContent"))
+        .unwrap()
+        .dyn_into::<js_sys::Function>()
+        .unwrap()
+        .call2(dir, &JsValue::from_str(name), &JsValue::from_str(text))
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn stepped_poll_reports_changes_only_after_the_full_walk() {
+    // 001 T136: шаги с нулевым бюджетом продвигают цикл понемногу; события
+    // появляются только по завершении полного обхода, и внешняя правка,
+    // сделанная до цикла, в нём замечена.
+    use std::path::Path;
+    use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::events::VaultEvent;
+
+    let dir = mock_dir(40, &[], "granted", "granted");
+    let mut backend = WebBackend::from_handle("vault".into(), dir.clone())
+        .await
+        .unwrap();
+    backend.poll_for_changes().await;
+    let _ = backend.poll_events();
+
+    set_content_outside(&dir, "note7.typ", "изменено снаружи");
+    let mut steps = 0;
+    loop {
+        steps += 1;
+        let finished = backend.poll_step(0.0).await;
+        if finished {
+            break;
+        }
+        assert!(
+            backend.poll_events().is_empty(),
+            "по незавершённому обходу событий быть не должно (шаг {steps})"
+        );
+        assert!(steps < 1000, "цикл обязан завершиться");
+    }
+    assert!(steps > 1, "нулевой бюджет делит цикл на шаги");
+    assert!(
+        backend.poll_events().iter().any(
+            |e| matches!(e, VaultEvent::NoteUpdated { path } if path == Path::new("note7.typ"))
+        ),
+        "внешняя правка замечена по завершении цикла"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn note_created_by_the_app_between_poll_steps_is_not_reported_deleted() {
+    // 001 T136: обход начался до создания заметки и её не увидит. Без учёта
+    // правок самого приложения сверка сочла бы новую заметку пропавшей с диска
+    // и убрала бы её из дерева.
+    use std::path::{Path, PathBuf};
+    use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::events::VaultEvent;
+
+    let dir = mock_dir(20, &[], "granted", "granted");
+    let mut backend = WebBackend::from_handle("vault".into(), dir.clone())
+        .await
+        .unwrap();
+    backend.poll_for_changes().await;
+    let _ = backend.poll_events();
+
+    assert!(!backend.poll_step(0.0).await, "цикл начат, но не закончен");
+    backend.create(Path::new("new.typ")).await.unwrap();
+    while !backend.poll_step(0.0).await {}
+
+    let deleted = |events: &[VaultEvent]| {
+        events
+            .iter()
+            .any(|e| matches!(e, VaultEvent::NoteDeleted { path } if path == Path::new("new.typ")))
+    };
+    assert!(!deleted(&backend.poll_events()), "своя заметка не удалена");
+    let listed = |notes: Vec<typsidian_core::vault::index::Note>| {
+        notes
+            .into_iter()
+            .any(|n| n.path == PathBuf::from("new.typ"))
+    };
+    assert!(listed(backend.list().await), "заметка осталась в дереве");
+
+    // Следующий цикл видит файл на диске и тоже ничего не удаляет.
+    backend.poll_for_changes().await;
+    assert!(!deleted(&backend.poll_events()));
+    assert!(listed(backend.list().await));
+}
+
+#[wasm_bindgen_test]
+async fn external_deletion_between_poll_steps_is_seen_by_the_next_cycle() {
+    // 001 T136: файл, удалённый снаружи после того, как обход его прошёл,
+    // текущий цикл ещё считает живым; следующий — объявляет удалённым.
+    use std::path::Path;
+    use typsidian_core::vault::backend::VaultBackend;
+    use typsidian_core::vault::events::VaultEvent;
+    use wasm_bindgen::JsCast;
+
+    let dir = mock_dir(20, &[], "granted", "granted");
+    let mut backend = WebBackend::from_handle("vault".into(), dir.clone())
+        .await
+        .unwrap();
+    backend.poll_for_changes().await;
+    let _ = backend.poll_events();
+
+    assert!(!backend.poll_step(0.0).await);
+    let remove = js_sys::Reflect::get(&dir, &JsValue::from_str("removeEntry"))
+        .unwrap()
+        .dyn_into::<js_sys::Function>()
+        .unwrap();
+    let promise = remove.call1(&dir, &JsValue::from_str("note0.typ")).unwrap();
+    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
+        .await
+        .unwrap();
+    while !backend.poll_step(0.0).await {}
+    let _ = backend.poll_events();
+
+    backend.poll_for_changes().await;
+    assert!(
+        backend.poll_events().iter().any(
+            |e| matches!(e, VaultEvent::NoteDeleted { path } if path == Path::new("note0.typ"))
+        ),
+        "удаление снаружи замечено следующим циклом"
+    );
 }
 
 // Прямая привязка вместо web-sys-фичи "console": включать фичу зависимости

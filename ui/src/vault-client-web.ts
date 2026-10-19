@@ -50,6 +50,7 @@ import {
   workspaceSnapshot,
   workspaceView,
   type VaultRecord,
+  type VaultEvent,
 } from "./wasm-core/typsidian_core.js";
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
@@ -86,6 +87,12 @@ const PROPERTIES_BATCH = 50;
  * плюс запас на сам обход.
  */
 export const VAULT_POLL_INTERVAL_MS = 1000;
+
+/**
+ * Сколько один шаг сверки держит очередь вызовов wasm (001 T136): вызов
+ * пользователя ждёт опроса не дольше этого, а не всего обхода vault.
+ */
+const POLL_STEP_BUDGET_MS = 20;
 
 /**
  * Оборачивает готовый `WebBackend` в оба интерфейса сразу.
@@ -230,17 +237,23 @@ export function webVaultClient(
         if (inFlight || cancelled) return;
         inFlight = true;
         try {
-          const events = await callInternal(async () => {
-            // Порядок из двух шагов обязателен и продиктован ядром:
-            // `pollEvents` сам ничего не обнаруживает — очередь наполняет
-            // `pollForChanges` (doc-комментарий `WebBackend::poll_for_changes`).
-            // Без первого шага ни одно внешнее изменение не было бы замечено.
-            // Оба шага идут одной операцией очереди намеренно: разорвать их
-            // значило бы отдать наполненную очередь событий чужому вызову.
-            await backend.pollForChanges();
-            return cancelled ? [] : backend.pollEvents();
-          });
-          if (!cancelled && events.length > 0) onEvents(events);
+          // Цикл сверки идёт шагами, каждый — отдельной операцией очереди:
+          // на большом vault цельный цикл держал очередь секундами, и вызовы
+          // пользователя ждали его (001 T136). Между шагами они встают вперёд.
+          let events: VaultEvent[] | null = null;
+          while (events === null && !cancelled) {
+            events = await callInternal(async () => {
+              // `pollEvents` сам ничего не обнаруживает — очередь событий
+              // наполняет завершённый цикл (doc-комментарий
+              // `WebBackend::poll_step`). Последний шаг и выборка событий идут
+              // одной операцией намеренно: разорвать их значило бы отдать
+              // наполненную очередь событий чужому вызову.
+              const finished = await backend.pollStep(POLL_STEP_BUDGET_MS);
+              if (!finished) return null;
+              return cancelled ? [] : backend.pollEvents();
+            });
+          }
+          if (!cancelled && events !== null && events.length > 0) onEvents(events);
         } finally {
           inFlight = false;
         }

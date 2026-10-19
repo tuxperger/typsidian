@@ -120,12 +120,10 @@ export default async (page) => {
     "3: редактор показывает набранный текст",
     ((await page.text(".cm-content")) ?? "").includes("несохранённая строка"),
   );
-  check(
-    "3: строка под новым путём выделена как открытая",
-    await page.evaluate(
-      `document.querySelector('[data-drag-path="Лекции/Физика/черновик.typ"] > [data-drag-handle]')?.getAttribute("aria-current") === "true"`,
-    ),
-  );
+  // Отметка открытой заметки переезжает следующей отрисовкой после строки.
+  const openMark = `document.querySelector('[data-drag-path="Лекции/Физика/черновик.typ"] > [data-drag-handle]')?.getAttribute("aria-current") === "true"`;
+  await page.waitFor(openMark, { timeout: 3000, label: "отметка открытой заметки" }).catch(() => {});
+  check("3: строка под новым путём выделена как открытая", await page.evaluate(openMark));
   await page.sleep(1500);
   check(
     "3: текст дошёл до файла на новом месте",
