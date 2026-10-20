@@ -234,3 +234,13 @@ async fn a_file_over_the_note_size_limit_is_pulled_like_any_other() {
 async fn a_lost_history_is_restored_from_the_remote() {
     cases::a_lost_history_is_restored_from_the_remote().await;
 }
+
+#[wasm_bindgen_test]
+async fn a_note_saved_during_the_network_step_is_merged() {
+    cases::a_note_saved_during_the_network_step_is_merged().await;
+}
+
+#[wasm_bindgen_test]
+async fn progress_is_readable_while_the_operation_runs() {
+    cases::progress_is_readable_while_the_operation_runs().await;
+}

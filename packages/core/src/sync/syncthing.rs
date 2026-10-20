@@ -300,13 +300,28 @@ pub fn devices(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{discover, pin, query};
+pub use native::{discover, pin, query, wait_events};
+
+/// Номер последнего события в ответе `/rest/events`.
+pub fn last_event_id(events: &Value) -> Option<u64> {
+    events
+        .as_array()?
+        .iter()
+        .filter_map(|event| event.get("id").and_then(Value::as_u64))
+        .max()
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    /// Обычный запрос к локальному Syncthing: он либо отвечает сразу, либо не
+    /// запущен (принцип VII).
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+    /// Ожидание событий: Syncthing держит запрос до 60 с, если ничего не происходит.
+    const EVENTS_WAIT_SECS: u64 = 60;
 
     /// Где искать `config.xml` Syncthing этого пользователя (research §8).
     fn config_candidates() -> Vec<PathBuf> {
@@ -367,16 +382,112 @@ mod native {
     /// Сертификат GUI самоподписанный (Android, `tls="true"`), проверить его по
     /// цепочке нельзя — вместо этого он сверяется с закреплённым отпечатком
     /// (см. [`peer_fingerprint`]), и только для адреса этого устройства.
-    fn client(endpoint: &SyncthingEndpoint) -> Option<reqwest::Client> {
+    fn client(endpoint: &SyncthingEndpoint, timeout: Duration) -> Option<reqwest::Client> {
         let mut builder = reqwest::Client::builder()
             // Перенаправление увело бы запрос с ключом API на другой адрес.
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(5));
+            .timeout(timeout);
         if endpoint.tls {
             builder = builder.danger_accept_invalid_certs(true).tls_info(true);
         }
         builder.build().ok()
+    }
+
+    /// Отпечаток сертификата — тот же, что закрепляется при первом обращении.
+    pub(super) fn certificate_fingerprint(certificate: &[u8]) -> String {
+        blake3::hash(certificate).to_hex().to_string()
+    }
+
+    /// Проверка сертификата внутри TLS-рукопожатия (T076): сервер обязан
+    /// предъявить ровно закреплённый сертификат, иначе соединение рвётся до
+    /// первого байта запроса — ключ API не уходит никому другому. Подпись
+    /// рукопожатия по-прежнему проверяется: предъявить чужой сертификат, не
+    /// владея его ключом, нельзя.
+    #[derive(Debug)]
+    pub(super) struct PinnedCertificate {
+        pinned: String,
+        provider: std::sync::Arc<rustls::crypto::CryptoProvider>,
+    }
+
+    impl PinnedCertificate {
+        pub(super) fn new(pinned: &str) -> Self {
+            Self {
+                pinned: pinned.to_owned(),
+                provider: std::sync::Arc::new(rustls::crypto::ring::default_provider()),
+            }
+        }
+    }
+
+    impl rustls::client::danger::ServerCertVerifier for PinnedCertificate {
+        fn verify_server_cert(
+            &self,
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            if certificate_fingerprint(end_entity.as_ref()) == self.pinned {
+                Ok(rustls::client::danger::ServerCertVerified::assertion())
+            } else {
+                Err(rustls::Error::InvalidCertificate(
+                    rustls::CertificateError::ApplicationVerificationFailure,
+                ))
+            }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.provider
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    /// Клиент, который говорит только с сервером закреплённого сертификата.
+    pub(super) fn pinned_client(pinned: &str, timeout: Duration) -> Option<reqwest::Client> {
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .ok()?
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(PinnedCertificate::new(pinned)))
+            .with_no_client_auth();
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(timeout)
+            .use_preconfigured_tls(config)
+            .build()
+            .ok()
     }
 
     /// Отпечаток сертификата, который предъявляет адрес. Запрос идёт **без
@@ -393,7 +504,7 @@ mod native {
             .ok()?;
         let info = response.extensions().get::<reqwest::tls::TlsInfo>()?;
         let certificate = info.peer_certificate()?;
-        Some(blake3::hash(certificate).to_hex().to_string())
+        Some(certificate_fingerprint(certificate))
     }
 
     /// Отпечаток для закрепления при первом обращении (TOFU). `None` — адрес
@@ -402,7 +513,43 @@ mod native {
         if !endpoint.tls || !endpoint.is_loopback() {
             return None;
         }
-        peer_fingerprint(&client(endpoint)?, endpoint).await
+        peer_fingerprint(&client(endpoint, REQUEST_TIMEOUT)?, endpoint).await
+    }
+
+    /// Ждёт событий папок и устройств (long-poll `/rest/events`, FR-022,
+    /// research §8): возвращает номер, с которого ждать дальше. Ответ приходит,
+    /// как только что-то случилось, или через минуту ожидания. Тот же порядок
+    /// доверия, что у [`query`]: при TLS ключ уходит только закреплённому
+    /// сертификату.
+    pub async fn wait_events(
+        endpoint: &SyncthingEndpoint,
+        api_key: &str,
+        since: u64,
+    ) -> Result<u64, LinkState> {
+        if !endpoint.is_loopback() {
+            return Err(LinkState::Unreachable);
+        }
+        let timeout = Duration::from_secs(EVENTS_WAIT_SECS + 15);
+        let client = if endpoint.tls {
+            let pinned = endpoint
+                .cert_fingerprint
+                .as_deref()
+                .ok_or(LinkState::Unreachable)?;
+            pinned_client(pinned, timeout)
+        } else {
+            client(endpoint, timeout)
+        }
+        .ok_or(LinkState::Unreachable)?;
+        let events = get(
+            &client,
+            endpoint,
+            api_key,
+            &format!(
+                "/rest/events?events=FolderSummary,StateChanged,DeviceConnected,DeviceDisconnected&since={since}&timeout={EVENTS_WAIT_SECS}"
+            ),
+        )
+        .await?;
+        Ok(last_event_id(&events).unwrap_or(since))
     }
 
     /// Состояние папки vault.
@@ -415,24 +562,25 @@ mod native {
         if !endpoint.is_loopback() {
             return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
         }
-        let Some(client) = client(endpoint) else {
-            return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
-        };
-        if endpoint.tls {
-            // Ключ API уходит только тому, кто предъявил закреплённый сертификат.
-            // Без закрепления (ещё не было первого обращения) — не уходит вовсе:
-            // закрепляет вызывающая сторона через [`pin`].
+        // Ключ API уходит только тому, кто предъявил закреплённый сертификат, —
+        // проверка внутри рукопожатия того же соединения, по которому идёт ключ
+        // (T076). Без закрепления (ещё не было первого обращения) ключ не уходит
+        // вовсе: закрепляет вызывающая сторона через [`pin`].
+        let pinned = if endpoint.tls {
             let Some(pinned) = endpoint.cert_fingerprint.as_deref() else {
                 return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
             };
-            match peer_fingerprint(&client, endpoint).await {
-                Some(actual) if actual == pinned => {}
-                Some(_) => {
-                    return SyncthingFolder::unlinked(detected, LinkState::CertificateChanged)
-                }
-                None => return SyncthingFolder::unlinked(detected, LinkState::Unreachable),
-            }
-        }
+            Some(pinned)
+        } else {
+            None
+        };
+        let client = match pinned {
+            Some(pinned) => pinned_client(pinned, REQUEST_TIMEOUT),
+            None => client(endpoint, REQUEST_TIMEOUT),
+        };
+        let Some(client) = client else {
+            return SyncthingFolder::unlinked(detected, LinkState::Unreachable);
+        };
         let result: Result<SyncthingFolder, LinkState> = async {
             let status = get(&client, endpoint, api_key, "/rest/system/status").await?;
             let my_id = status
@@ -470,6 +618,21 @@ mod native {
             })
         }
         .await;
+        // Соединение не сложилось: сменился ли сертификат, выясняется запросом
+        // без ключа на точку `noauth` — только чтобы назвать причину.
+        let result = match (result, pinned) {
+            (Err(LinkState::Unreachable), Some(pinned)) => {
+                let actual = match self::client(endpoint, REQUEST_TIMEOUT) {
+                    Some(probe) => peer_fingerprint(&probe, endpoint).await,
+                    None => None,
+                };
+                Err(match actual {
+                    Some(actual) if actual != pinned => LinkState::CertificateChanged,
+                    _ => LinkState::Unreachable,
+                })
+            }
+            (result, _) => result,
+        };
         result.unwrap_or_else(|link| SyncthingFolder::unlinked(detected, link))
     }
 
@@ -490,6 +653,16 @@ mod native {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_last_event_id_is_the_largest() {
+        assert_eq!(
+            last_event_id(&json!([{"id": 4}, {"id": 9}, {"id": 7}])),
+            Some(9)
+        );
+        assert_eq!(last_event_id(&json!([])), None);
+        assert_eq!(last_event_id(&json!({"error": "x"})), None);
+    }
 
     #[test]
     fn gui_config_is_read() {
@@ -587,5 +760,159 @@ mod tests {
             cert_fingerprint: None,
         };
         assert!(!endpoint.is_loopback());
+    }
+}
+
+/// Закрепление сертификата внутри рукопожатия (T076) — на настоящем TLS.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod pinning {
+    use super::native::{certificate_fingerprint, pinned_client};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    const CERT_A: &[u8] = include_bytes!("testdata/cert-a.der");
+    const KEY_A: &[u8] = include_bytes!("testdata/key-a.der");
+    const CERT_B: &[u8] = include_bytes!("testdata/cert-b.der");
+    const KEY_B: &[u8] = include_bytes!("testdata/key-b.der");
+
+    /// TLS-сервер на свободном порту; запоминает заголовки каждого запроса,
+    /// который дошёл до него после рукопожатия.
+    fn serve(cert: &[u8], key: &[u8]) -> (u16, Arc<Mutex<Vec<String>>>) {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = Arc::new(
+            rustls::ServerConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.to_vec())],
+                    rustls::pki_types::PrivateKeyDer::Pkcs8(key.to_vec().into()),
+                )
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let connection = rustls::ServerConnection::new(config.clone()).unwrap();
+                let mut tls = rustls::StreamOwned::new(connection, stream);
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 1024];
+                // Рукопожатие с чужим сертификатом клиент рвёт — чтение
+                // кончается ошибкой, запроса нет.
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match tls.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => request.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                if request.is_empty() {
+                    continue;
+                }
+                record
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request).into_owned());
+                let _ = tls.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                );
+                let _ = tls.flush();
+            }
+        });
+        (port, seen)
+    }
+
+    #[tokio::test]
+    async fn the_api_key_reaches_only_the_pinned_certificate() {
+        let pinned = certificate_fingerprint(CERT_A);
+
+        let (port, seen) = serve(CERT_A, KEY_A);
+        let response = pinned_client(&pinned, std::time::Duration::from_secs(5))
+            .unwrap()
+            .get(format!("https://127.0.0.1:{port}/rest/system/status"))
+            .header("X-API-Key", "секрет-a")
+            .send()
+            .await
+            .expect("закреплённый сертификат принят");
+        assert_eq!(response.status().as_u16(), 200);
+        assert!(seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.contains("секрет-a")));
+
+        // Тот же адрес, другой сертификат: соединение рвётся в рукопожатии,
+        // и запрос с ключом до сервера не доходит.
+        let (port, seen) = serve(CERT_B, KEY_B);
+        let refused = pinned_client(&pinned, std::time::Duration::from_secs(5))
+            .unwrap()
+            .get(format!("https://127.0.0.1:{port}/rest/system/status"))
+            .header("X-API-Key", "секрет-b")
+            .send()
+            .await;
+        assert!(refused.is_err());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "{:?}",
+            seen.lock().unwrap()
+        );
+    }
+}
+
+/// Ожидание событий (T078) — на поддельном Syncthing по HTTP.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod events {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn waiting_returns_the_last_event_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(String::new()));
+        let record = seen.clone();
+        std::thread::spawn(move || {
+            if let Some(Ok(mut stream)) = listener.incoming().next() {
+                let mut buffer = [0u8; 4096];
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                *record.lock().unwrap() = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                let body =
+                    r#"[{"id": 12, "type": "StateChanged"}, {"id": 13, "type": "FolderSummary"}]"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        let endpoint = SyncthingEndpoint {
+            address: format!("127.0.0.1:{port}"),
+            tls: false,
+            cert_fingerprint: None,
+        };
+        assert_eq!(wait_events(&endpoint, "ключ", 11).await, Ok(13));
+        let request = seen.lock().unwrap().clone();
+        assert!(request.contains("since=11"), "{request}");
+        assert!(
+            request.contains("events=FolderSummary,StateChanged"),
+            "{request}"
+        );
+        assert!(request.to_lowercase().contains("x-api-key"), "{request}");
+        // Чужой адрес — без запроса.
+        let remote = SyncthingEndpoint {
+            address: "192.0.2.1:8384".into(),
+            tls: false,
+            cert_fingerprint: None,
+        };
+        assert_eq!(
+            wait_events(&remote, "ключ", 0).await,
+            Err(LinkState::Unreachable)
+        );
     }
 }

@@ -78,6 +78,8 @@ export const sync: Translation<typeof en> = {
   "sync.error.targetNotEmpty": "Выбранная папка не пуста. Выберите пустую папку.",
   "sync.error.cancelled": "Отменено.",
   "sync.error.io": (p) => `Операция не удалась: ${p.detail}`,
+  "sync.error.tooLarge": (p) =>
+    `Файл в истории или отправка больше ${p.limit} МБ — обработать их в памяти нельзя.`,
 
   "sync.inProgress.merge": "Не завершено слияние, начатое вне приложения.",
   "sync.inProgress.rebase": "Не завершён перенос снимков, начатый вне приложения.",
@@ -262,6 +264,11 @@ export const sync: Translation<typeof en> = {
   "sync.remote.clone": "Выбрать папку и загрузить",
   "sync.remote.connecting": "Проверяем доступ…",
   "sync.remote.cloning": "Загружаем репозиторий…",
+  "sync.progress": (p) => `${p.operation}: ${p.done} из ${p.total}`,
+  "sync.progress.firstSnapshot": "первый снимок",
+  "sync.progress.pull": "получение",
+  "sync.progress.push": "отправка",
+  "sync.progress.clone": "загрузка",
   "sync.remote.notCounted": "с сервером ещё не сверялись",
   "sync.remote.counts": (p) => `↑${p.ahead} к отправке · ↓${p.behind} к получению`,
   "sync.remote.neverExchanged": "обмена ещё не было",

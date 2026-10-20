@@ -78,6 +78,8 @@ export const sync = {
   "sync.error.targetNotEmpty": "The chosen folder is not empty. Pick an empty folder.",
   "sync.error.cancelled": "Cancelled.",
   "sync.error.io": (p: { detail: string }) => `The operation failed: ${p.detail}`,
+  "sync.error.tooLarge": (p: { limit: number }) =>
+    `A file in the history or the upload is larger than ${p.limit} MB — it can’t be processed in memory.`,
 
   "sync.inProgress.merge": "An unfinished merge started outside the app.",
   "sync.inProgress.rebase": "An unfinished rebase started outside the app.",
@@ -264,6 +266,12 @@ export const sync = {
   "sync.remote.clone": "Choose a folder and download",
   "sync.remote.connecting": "Checking access…",
   "sync.remote.cloning": "Downloading the repository…",
+  "sync.progress": (p: { operation: string; done: number; total: number }) =>
+    `${p.operation}: ${p.done} of ${p.total}`,
+  "sync.progress.firstSnapshot": "first snapshot",
+  "sync.progress.pull": "receiving",
+  "sync.progress.push": "sending",
+  "sync.progress.clone": "downloading",
   "sync.remote.notCounted": "not compared with the server yet",
   "sync.remote.counts": (p: { ahead: number; behind: number }) =>
     `↑${p.ahead} to push · ↓${p.behind} to pull`,

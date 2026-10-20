@@ -13,7 +13,7 @@ JS-тестов в репозитории нет — проверка по quick
 
 - [X] T001 Объявить `pub mod sync;` в `packages/core/src/lib.rs` и создать скелет модулей по plan.md → Project Structure (`packages/core/src/sync/{mod.rs,engine/mod.rs,ignore.rs,conflict_copy.rs,merge.rs,pull.rs,keeper.rs,autosnapshot.rs,syncthing.rs,secrets.rs,device.rs}`; `engine/native.rs`, `engine/transport_http.rs`, `engine/transport_ssh.rs` под `cfg(not(wasm32))`, `engine/web.rs` и `web.rs` под `cfg(wasm32)`)
 - [X] T002 Добавить зависимости в `packages/core/Cargo.toml` с комментариями-обоснованиями по research.md: `similar` (оба таргета), `getrandom` (оба; `js`/`wasm_js` под wasm32), под native — `git2 = { default-features = false, features = ["vendored-libgit2"] }` и `quick-xml`; убедиться, что `cargo build --target wasm32-unknown-unknown -p typsidian-core` не тянет `git2`
-- [ ] T003 Проверить сборку `libgit2-sys` в dev-оболочке и под Android-таргетом; при нехватке нативных инструментов (cmake, pkg-config) дополнить `flake.nix` (агент `nix-env-agent`), без системного OpenSSL и libssh2 (research §2)
+- [X] T003 Проверить сборку `libgit2-sys` в dev-оболочке и под Android-таргетом; при нехватке нативных инструментов (cmake, pkg-config) дополнить `flake.nix` (агент `nix-env-agent`), без системного OpenSSL и libssh2 (research §2)
 - [X] T004 [P] Добавить `isomorphic-git` (точная версия) в `ui/package.json` и `keyring = { version = "3", features = ["sync-secret-service", "crypto-rust", "apple-native", "windows-native"] }` в `packages/shell/Cargo.toml` только для не-Android таргетов
 
 ## Phase 2: Foundational
@@ -155,14 +155,14 @@ JS-тестов в репозитории нет — проверка по quick
 
 ## Phase 10: Convergence
 
-- [ ] T071 Вынести сетевую часть `pull`/`push`/`tick`/`refresh_mirror` из-под блокировки vault: fetch и push без `VaultBackend`, запись файлов — отдельным шагом под блокировкой, в `packages/core/src/sync/session.rs` и `packages/shell/src/sync.rs`; в web — не занимать очередь `wasm-call-queue` на время сети (`ui/src/sync/sync-client-web.ts`), чтобы сохранение заметок не ждало обмена per FR-020, SC-004, Constitution X (partial)
+- [X] T071 Вынести сетевую часть `pull`/`push`/`tick`/`refresh_mirror` из-под блокировки vault: fetch и push без `VaultBackend`, запись файлов — отдельным шагом под блокировкой, в `packages/core/src/sync/session.rs` и `packages/shell/src/sync.rs`; в web — не занимать очередь `wasm-call-queue` на время сети (`ui/src/sync/sync-client-web.ts`), чтобы сохранение заметок не ждало обмена per FR-020, SC-004, Constitution X (partial)
 - [X] T072 Предел простоя сетевого обмена (20 с без данных, 30 с без прогресса — research §9) в `packages/core/src/sync/engine/transport_http.rs` вместо одного общего предела 600 с; в `packages/core/src/sync/engine/transport_ssh.rs` — тот же предел и завершение процесса `ssh` по `CancelToken`, а не только в `Drop`; тест «сервер принял соединение и молчит» в `packages/core/tests/sync_engine_native.rs` per FR-020, SC-004 (partial)
 - [X] T073 Получение при локальном файле больше предела заметки (10 МБ): читать версии для `pull`/`resolve` без этого предела (отдельный метод `VaultBackend` или потоковое сравнение по хэшу) вместо отказа «локальный файл не читается» в `packages/core/src/sync/session.rs`; тест в `packages/core/tests/common/sync_cases.rs` per Edge Cases «огромные или двоичные файлы», FR-016 (partial)
-- [ ] T074 Vault внутри чужого репозитория: либо реализовать список изменений и снимки, ограниченные путями vault (префикс из `RepoProbe::ForeignParent` в `packages/core/src/sync/engine/native.rs`, `session.rs`), либо через `/speckit-clarify` закрепить в spec.md нынешнее поведение «только показ, без записи» per Edge Cases «vault — часть более крупного репозитория», T021 (contradicts)
-- [ ] T075 Живой прогресс массовых операций: доставлять `SyncEvent::Progress` во время первого снимка, получения и клонирования (отдельный канал событий, не ждущий блокировки сессии) и показывать «N из M» в `ui/src/sync/useSync.ts`, `SyncIndicator.tsx`, `EnableHistoryWizard.tsx`, `RemoteDialog.tsx` per Constitution X, contracts/core-sync-api.md «События» (partial)
-- [ ] T076 Закрепление сертификата Syncthing внутри TLS-рукопожатия (свой проверяющий сертификат `rustls` со сравнением отпечатка) вместо сверки на отдельном запросе `/rest/noauth/health` в `packages/core/src/sync/syncthing.rs` per T068 п. 10, FR-014 (partial)
-- [ ] T077 Хранилище секретов и память: не считать секрет удалённым при ошибке удаления из keyring, блокировка и защита от повреждённого файла секретов на Android в `packages/shell/src/sync.rs`; пределы размера блоба, тела отправки и `stderr` ssh с отказом, видимым пользователю, в `packages/core/src/sync/engine/native.rs`, `transport_ssh.rs` per T068 п. 13–14, FR-014 (partial)
-- [ ] T078 Обновление состояния Syncthing по long-poll `/rest/events` с запасным опросом вместо опроса по такту в `packages/core/src/sync/syncthing.rs`, `packages/shell/src/sync.rs` per plan research §8, FR-022 (partial)
+- [X] T074 Vault внутри чужого репозитория: либо реализовать список изменений и снимки, ограниченные путями vault (префикс из `RepoProbe::ForeignParent` в `packages/core/src/sync/engine/native.rs`, `session.rs`), либо через `/speckit-clarify` закрепить в spec.md нынешнее поведение «только показ, без записи» per Edge Cases «vault — часть более крупного репозитория», T021 (contradicts)
+- [X] T075 Живой прогресс массовых операций: доставлять `SyncEvent::Progress` во время первого снимка, получения и клонирования (отдельный канал событий, не ждущий блокировки сессии) и показывать «N из M» в `ui/src/sync/useSync.ts`, `SyncIndicator.tsx`, `EnableHistoryWizard.tsx`, `RemoteDialog.tsx` per Constitution X, contracts/core-sync-api.md «События» (partial)
+- [X] T076 Закрепление сертификата Syncthing внутри TLS-рукопожатия (свой проверяющий сертификат `rustls` со сравнением отпечатка) вместо сверки на отдельном запросе `/rest/noauth/health` в `packages/core/src/sync/syncthing.rs` per T068 п. 10, FR-014 (partial)
+- [X] T077 Хранилище секретов и память: не считать секрет удалённым при ошибке удаления из keyring, блокировка и защита от повреждённого файла секретов на Android в `packages/shell/src/sync.rs`; пределы размера блоба, тела отправки и `stderr` ssh с отказом, видимым пользователю, в `packages/core/src/sync/engine/native.rs`, `transport_ssh.rs` per T068 п. 13–14, FR-014 (partial)
+- [X] T078 Обновление состояния Syncthing по long-poll `/rest/events` с запасным опросом вместо опроса по такту в `packages/core/src/sync/syncthing.rs`, `packages/shell/src/sync.rs` per plan research §8, FR-022 (partial)
 - [X] T079 При `HistoryState::Lost` и записанном адресе удалённого репозитория предлагать, кроме новой истории, загрузку истории из удалённого в `packages/core/src/sync/session.rs`, `ui/src/sync/SyncPanel.tsx` per Edge Cases «история удалена» (partial)
 
 ---
@@ -190,7 +190,7 @@ JS-тестов в репозитории нет — проверка по quick
 прогресс здесь и есть приход данных. Тест `a_silent_server_is_given_up_on_after_the_idle_limit`
 (сервер принимает соединение и молчит) в `sync_engine_native.rs`.
 
-- [ ] T080 Предел простоя и отмена для SSH-транспорта: чтение `stdout` процесса `ssh` в
+- [X] T080 Предел простоя и отмена для SSH-транспорта: чтение `stdout` процесса `ssh` в
       `packages/core/src/sync/engine/transport_ssh.rs` блокирующее, без предела, а
       `CancelToken` проверяется только перед чтением — зависший `ssh` не прерывается ни
       отменой, ни временем. Читать в отдельном потоке с ожиданием по такту, завершать

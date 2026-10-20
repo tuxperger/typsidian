@@ -33,6 +33,11 @@ pub struct TransportContext {
 /// сколько нужно, пока данные приходят.
 pub const NETWORK_IDLE_LIMIT: Duration = Duration::from_secs(20);
 
+/// Самое большое тело одной отправки (T077): pack-файл собирается в памяти, и
+/// без предела отправка огромной истории заняла бы её всю. Отказ виден
+/// пользователю как «больше N МБ», а не как падение приложения.
+pub const PUSH_BODY_LIMIT_MB: u32 = 1024;
+
 /// Наименьшая скорость отправки, при которой она ещё не считается зависшей.
 /// Ход отправки тела запроса отсюда не виден — виден только её конец, —
 /// поэтому предел для неё считается от размера тела.
@@ -279,9 +284,27 @@ impl Read for HttpStream {
     }
 }
 
+/// Дописывает к телу, если оно не выйдет за предел; `false` — отказ, тело прежнее.
+fn append_capped(body: &mut Vec<u8>, data: &[u8], limit: usize) -> bool {
+    if body.len() + data.len() > limit {
+        return false;
+    }
+    body.extend_from_slice(data);
+    true
+}
+
 impl Write for HttpStream {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.body.extend_from_slice(data);
+        if !append_capped(
+            &mut self.body,
+            data,
+            PUSH_BODY_LIMIT_MB as usize * 1024 * 1024,
+        ) {
+            record_failure(EngineError::TooLarge {
+                limit_mb: PUSH_BODY_LIMIT_MB,
+            });
+            return Err(std::io::Error::other("отправка больше предела"));
+        }
         Ok(data.len())
     }
 
@@ -293,6 +316,15 @@ impl Write for HttpStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_push_body_stops_at_its_limit() {
+        let mut body = Vec::new();
+        assert!(append_capped(&mut body, b"abcd", 6));
+        assert!(!append_capped(&mut body, b"efg", 6), "за пределом — отказ");
+        assert_eq!(body, b"abcd", "тело при отказе прежнее");
+        assert!(append_capped(&mut body, b"ef", 6));
+    }
 
     #[test]
     fn host_is_extracted_without_credentials_and_port() {

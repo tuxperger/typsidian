@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { IgnoreReport, SyncError } from "../wasm-core/typsidian_core.js";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
-import { describeSyncError } from "./describe.js";
+import { describeProgress, describeSyncError } from "./describe.js";
 import { asSyncError } from "./sync-client.js";
 import type { SyncControl } from "./useSync.js";
 
@@ -192,7 +192,9 @@ export function EnableHistoryWizard({
                 <span className="ts-hazard" aria-hidden="true">
                   <span className="ts-hazard__fill" />
                 </span>{" "}
-                {t("sync.wizard.running")}
+                {sync.progress === null
+                  ? t("sync.wizard.running")
+                  : describeProgress(t, sync.progress)}
               </p>
             )}
           </>

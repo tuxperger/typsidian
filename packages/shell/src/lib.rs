@@ -2808,6 +2808,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             sync::sync_capabilities,
             sync::sync_overview,
             sync::sync_poll_events,
+            sync::sync_progress,
             sync::sync_note_change,
             sync::sync_cancel,
             sync::sync_ignore_reports,

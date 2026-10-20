@@ -169,10 +169,18 @@ pub enum EngineError {
     NotFound,
     RejectedNonFastForward,
     CorsBlocked,
-    UnsupportedScheme { scheme: String },
+    UnsupportedScheme {
+        scheme: String,
+    },
     Cancelled,
     NotARepository,
-    Io { message: String },
+    /// Файл истории или отправка больше предела памяти (T077).
+    TooLarge {
+        limit_mb: u32,
+    },
+    Io {
+        message: String,
+    },
 }
 
 /// Флаг отмены сетевой операции (принцип X).

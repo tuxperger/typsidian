@@ -1655,3 +1655,90 @@ pub async fn a_lost_history_is_restored_from_the_remote() {
         SyncError::NoRemote
     );
 }
+
+/// Обмен по шагам (T071): заметка, сохранённая, пока шла сеть, не теряется —
+/// запись полученного сливается с ней так же, как с правкой до обмена.
+pub async fn a_note_saved_during_the_network_step_is_merged() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("n.typ", BASE)], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    a.push().await.unwrap();
+    let mut b = clone_of(&remote).await;
+    a.put("n.typ", &BASE.replace("Первый абзац.", "Первый, правка A."))
+        .await;
+    a.snap("A").await;
+    a.push().await.unwrap();
+
+    let ctx = b.ctx();
+    let plan = b
+        .session
+        .begin_pull(&b.vault, &b.secrets, &ctx, false)
+        .await
+        .unwrap();
+    // Блокировки отпущены: заметку сохраняют, пока идёт сеть.
+    b.put("n.typ", &BASE.replace("Третий абзац.", "Третий, правка B."))
+        .await;
+    let fetched = plan.exchange.fetch(b.session.engine()).await;
+    let outcome = b
+        .session
+        .complete_pull(&mut b.vault, &ctx, plan, fetched)
+        .await
+        .unwrap();
+    assert_eq!(outcome.conflicts, 0);
+    let merged = b.text("n.typ").unwrap();
+    assert!(
+        merged.contains("правка A") && merged.contains("правка B"),
+        "{merged}"
+    );
+
+    // Отправка по шагам — то же, что одним вызовом. Правка B уже в снимке
+    // слияния: файл был среди пришедших.
+    let plan = b
+        .session
+        .begin_push(&b.vault, &b.secrets, &ctx, false)
+        .await
+        .unwrap();
+    let sent = plan.push(b.session.engine()).await;
+    let status = b
+        .session
+        .complete_push(&b.vault, &ctx, &plan, sent)
+        .await
+        .unwrap();
+    assert_eq!(status.ahead, Some(0));
+    assert!(a.pull().await.is_ok());
+    assert!(a.text("n.typ").unwrap().contains("правка B"));
+}
+
+/// Ход массовой операции (T075) читается через приёмник, пока операция идёт,
+/// и пропадает после её конца.
+pub async fn progress_is_readable_while_the_operation_runs() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("a.typ", "= A\n")], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    let sink = a.session.progress_sink();
+    assert_eq!(sink.current(), None);
+
+    let ctx = a.ctx();
+    let plan = a
+        .session
+        .begin_push(&a.vault, &a.secrets, &ctx, false)
+        .await
+        .unwrap();
+    // Сессия свободна, сеть ещё не прошла — ход виден через копию приёмника.
+    assert_eq!(
+        sink.current(),
+        Some(typsidian_core::sync::SyncProgress {
+            operation: typsidian_core::sync::Operation::Push,
+            done: 0,
+            total: 1,
+        })
+    );
+    let sent = plan.push(a.session.engine()).await;
+    a.session
+        .complete_push(&a.vault, &ctx, &plan, sent)
+        .await
+        .unwrap();
+    assert_eq!(sink.current(), None);
+}

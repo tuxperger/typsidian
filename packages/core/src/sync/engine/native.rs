@@ -22,6 +22,10 @@ use super::*;
 use crate::sync::Author;
 
 /// Движок одной истории: рабочая копия vault или голое зеркало.
+/// Самый большой файл истории, который движок читает в память (T077): файл
+/// больше — отказ с названным пределом, а не исчерпание памяти.
+pub const BLOB_LIMIT_MB: u32 = 256;
+
 #[derive(Debug, Clone)]
 pub struct NativeGitEngine {
     root: PathBuf,
@@ -407,6 +411,17 @@ impl GitEngine for NativeGitEngine {
             Err(error) if error.code() == ErrorCode::NotFound => return Ok(None),
             Err(error) => return Err(io(error)),
         };
+        // Размер — из заголовка объекта, до чтения содержимого в память (T077).
+        let size = repo
+            .odb()
+            .and_then(|odb| odb.read_header(entry.id()))
+            .map(|(size, _)| size)
+            .unwrap_or(0);
+        if size > BLOB_LIMIT_MB as usize * 1024 * 1024 {
+            return Err(EngineError::TooLarge {
+                limit_mb: BLOB_LIMIT_MB,
+            });
+        }
         let blob = repo.find_blob(entry.id()).map_err(io)?;
         Ok(Some(blob.content().to_vec()))
     }

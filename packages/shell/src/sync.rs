@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 use typsidian_core::settings::apply::ApplyContext;
@@ -23,9 +23,9 @@ use typsidian_core::sync::ignore::{
     self, IgnoreCheck, IgnoreDocument, IgnoreFile, IgnoreReport, IgnoreSaveOutcome,
     IgnoreSaveRequest,
 };
-use typsidian_core::sync::secrets::{
-    entry_name, MemorySecretStore, SecretKind, SecretStore, SecretStoreError,
-};
+#[cfg(not(target_os = "android"))]
+use typsidian_core::sync::secrets::MemorySecretStore;
+use typsidian_core::sync::secrets::{entry_name, SecretKind, SecretStore, SecretStoreError};
 use typsidian_core::sync::session::{
     self as sync_session, Conflict, Credentials, PullOutcome, Resolution, TickOutcome,
 };
@@ -53,6 +53,11 @@ pub struct OpenSync {
 /// сессия заблокирована, а отменить её нужно именно тогда.
 #[derive(Default)]
 pub struct SyncCancel(std::sync::Mutex<Option<CancelToken>>);
+
+/// Ход массовой операции открытой сессии (T075) — отдельно от сессии по той же
+/// причине, что токен отмены: читается, пока операция идёт.
+#[derive(Default)]
+pub struct SyncProgressSlot(std::sync::Mutex<Option<sync::ProgressSink>>);
 
 /// Отказ команды синхронизации.
 #[derive(Debug, serde::Serialize)]
@@ -117,7 +122,7 @@ pub enum ShellSecrets {
     #[cfg(not(target_os = "android"))]
     Keyring(MemorySecretStore),
     #[cfg(target_os = "android")]
-    File(PathBuf),
+    File(PathBuf, tokio::sync::Mutex<()>),
 }
 
 impl ShellSecrets {
@@ -128,7 +133,7 @@ impl ShellSecrets {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
-            ShellSecrets::File(dir.join("sync-secrets.json"))
+            ShellSecrets::File(dir.join("sync-secrets.json"), tokio::sync::Mutex::new(()))
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -154,12 +159,36 @@ async fn keyring_call<T: Send + 'static>(
     .map_err(|_| SecretStoreError)?
 }
 
+/// Файл секретов: нет файла — пусто; файл есть, но не читается или не
+/// разбирается — отказ, а не «пусто» (T077): иначе следующая запись затёрла
+/// бы его вместе со всеми секретами.
 #[cfg(target_os = "android")]
-fn read_file_secrets(path: &std::path::Path) -> std::collections::BTreeMap<String, String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+fn read_file_secrets(
+    path: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, String>, SecretStoreError> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|_| SecretStoreError),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(_) => Err(SecretStoreError),
+    }
+}
+
+/// Записи для изменения. Повреждённый файл откладывается рядом
+/// (`sync-secrets.corrupt.json`), а не перезаписывается: секреты в нём,
+/// возможно, ещё можно достать, а новые пишутся в чистый файл.
+#[cfg(target_os = "android")]
+fn entries_for_change(
+    path: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, String>, SecretStoreError> {
+    match read_file_secrets(path) {
+        Ok(entries) => Ok(entries),
+        Err(_) if path.exists() => {
+            std::fs::rename(path, path.with_extension("corrupt.json"))
+                .map_err(|_| SecretStoreError)?;
+            Ok(Default::default())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -209,7 +238,10 @@ impl SecretStore for ShellSecrets {
                 .or(Ok(None))
             }
             #[cfg(target_os = "android")]
-            ShellSecrets::File(path) => Ok(read_file_secrets(path).get(&name).cloned()),
+            ShellSecrets::File(path, lock) => {
+                let _guard = lock.lock().await;
+                Ok(read_file_secrets(path)?.get(&name).cloned())
+            }
         }
     }
 
@@ -233,8 +265,11 @@ impl SecretStore for ShellSecrets {
                 }
             }
             #[cfg(target_os = "android")]
-            ShellSecrets::File(path) => {
-                let mut entries = read_file_secrets(path);
+            ShellSecrets::File(path, lock) => {
+                // Прочитать-изменить-записать под одной блокировкой: две
+                // записи подряд иначе теряли бы одна другую.
+                let _guard = lock.lock().await;
+                let mut entries = entries_for_change(path)?;
                 entries.insert(name, value.to_string());
                 write_file_secrets(path, &entries)
             }
@@ -247,16 +282,18 @@ impl SecretStore for ShellSecrets {
             #[cfg(not(target_os = "android"))]
             ShellSecrets::Keyring(fallback) => {
                 let _ = fallback.delete(vault_id, kind).await;
-                let _ = keyring_call(name, |entry| match entry.delete_credential() {
+                // Отказ keyring — отказ удаления (T077): секрет остался в
+                // хранилище ОС, и называть его удалённым нельзя.
+                keyring_call(name, |entry| match entry.delete_credential() {
                     Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
                     Err(error) => Err(error),
                 })
-                .await;
-                Ok(())
+                .await
             }
             #[cfg(target_os = "android")]
-            ShellSecrets::File(path) => {
-                let mut entries = read_file_secrets(path);
+            ShellSecrets::File(path, lock) => {
+                let _guard = lock.lock().await;
+                let mut entries = entries_for_change(path)?;
                 if entries.remove(&name).is_some() {
                     write_file_secrets(path, &entries)?;
                 }
@@ -344,6 +381,34 @@ macro_rules! with_sync {
     }};
 }
 
+/// Шаг под обеими блокировками — тот же порядок, что у `with_sync!`: vault,
+/// затем сессия. Сетевой шаг обмена идёт между такими шагами без блокировок
+/// (T071): сохранение заметок и опрос состояния не ждут сети.
+macro_rules! locked {
+    ($vault:expr, $sync:expr, |$backend:ident, $session:ident| $body:expr) => {{
+        let mut vault_guard = $vault.0.lock().await;
+        #[allow(unused_variables)]
+        let $backend = vault_guard.as_mut().ok_or_else(not_open)?;
+        let mut sync_guard = $sync.0.lock().await;
+        let open = sync_guard.as_mut().ok_or_else(not_open)?;
+        let $session = &mut open.session;
+        $body
+    }};
+}
+
+/// Контекст команды по идентификатору открытого vault.
+async fn sync_context(
+    app: &AppHandle,
+    device: &State<'_, Device>,
+    sync_state: &State<'_, SyncState>,
+) -> Answer<SyncContext> {
+    let vault_id = {
+        let guard = sync_state.0.lock().await;
+        guard.as_ref().ok_or_else(not_open)?.vault.clone()
+    };
+    context(app, device, &vault_id).await
+}
+
 // ── Команды ────────────────────────────────────────────────────────────────
 
 /// Открывает сессию синхронизации для только что открытого vault.
@@ -353,6 +418,7 @@ pub async fn sync_open(
     vault: State<'_, Vault>,
     sync_state: State<'_, SyncState>,
     cancel: State<'_, SyncCancel>,
+    progress: State<'_, SyncProgressSlot>,
     vault_id: String,
 ) -> Answer<()> {
     require_vault_id(&vault_id)?;
@@ -377,11 +443,25 @@ pub async fn sync_open(
     if let Ok(mut slot) = cancel.0.lock() {
         *slot = Some(session.cancel_token());
     }
+    if let Ok(mut slot) = progress.0.lock() {
+        *slot = Some(session.progress_sink());
+    }
     *sync_state.0.lock().await = Some(OpenSync {
         session,
         vault: VaultId::from_raw(vault_id),
     });
+    restart_syncthing_watcher(&app);
     Ok(())
+}
+
+/// Ход идущей массовой операции — без блокировки сессии (T075, принцип X).
+#[tauri::command]
+pub fn sync_progress(progress: State<'_, SyncProgressSlot>) -> Option<sync::SyncProgress> {
+    progress
+        .0
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().and_then(sync::ProgressSink::current))
 }
 
 #[tauri::command]
@@ -674,11 +754,19 @@ pub async fn sync_push(
     secrets: State<'_, Secrets>,
     confirm_not_keeper: bool,
 ) -> Answer<RemoteStatus> {
-    with_sync!(app, device, vault, sync_state, |backend, session, ctx| Ok(
+    let ctx = sync_context(&app, &device, &sync_state).await?;
+    let (plan, engine) = locked!(vault, sync_state, |backend, session| (
         session
-            .push(backend, &secrets.0, &ctx, confirm_not_keeper)
-            .await?
-    ))
+            .begin_push(backend, &secrets.0, &ctx, confirm_not_keeper)
+            .await?,
+        session.engine().clone()
+    ));
+    let sent = plan.push(&engine).await;
+    let result = locked!(vault, sync_state, |backend, session| session
+        .complete_push(backend, &ctx, &plan, sent)
+        .await);
+    persist_device_update(&app, &device, &sync_state).await;
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -690,11 +778,19 @@ pub async fn sync_pull(
     secrets: State<'_, Secrets>,
     confirm_not_keeper: bool,
 ) -> Answer<PullOutcome> {
-    with_sync!(app, device, vault, sync_state, |backend, session, ctx| Ok(
+    let ctx = sync_context(&app, &device, &sync_state).await?;
+    let (plan, engine) = locked!(vault, sync_state, |backend, session| (
         session
-            .pull(backend, &secrets.0, &ctx, confirm_not_keeper)
-            .await?
-    ))
+            .begin_pull(backend, &secrets.0, &ctx, confirm_not_keeper)
+            .await?,
+        session.engine().clone()
+    ));
+    let fetched = plan.exchange.fetch(&engine).await;
+    let result = locked!(vault, sync_state, |backend, session| session
+        .complete_pull(backend, &ctx, plan, fetched)
+        .await);
+    persist_device_update(&app, &device, &sync_state).await;
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -796,9 +892,19 @@ pub async fn sync_refresh_mirror(
     sync_state: State<'_, SyncState>,
     secrets: State<'_, Secrets>,
 ) -> Answer<()> {
-    with_sync!(app, device, vault, sync_state, |backend, session, ctx| Ok(
-        session.refresh_mirror(backend, &secrets.0, &ctx).await?
-    ))
+    let ctx = sync_context(&app, &device, &sync_state).await?;
+    let (plan, mirror) = locked!(vault, sync_state, |backend, session| (
+        session.begin_mirror(backend, &secrets.0, &ctx).await?,
+        session.mirror_engine().cloned()
+    ));
+    let fetched = match &mirror {
+        Some(mirror) => plan.mirror(mirror).await,
+        None => Err(SyncError::NoHistory),
+    };
+    let result = locked!(vault, sync_state, |backend, session| session
+        .complete_mirror(&ctx, fetched));
+    persist_device_update(&app, &device, &sync_state).await;
+    Ok(result?)
 }
 
 /// Параметры локального Syncthing, найденные в его конфигурации (FR-022a).
@@ -837,11 +943,13 @@ pub async fn sync_syncthing_connect(
                 message: "ключ Syncthing не найден".to_string(),
             })?,
     };
-    with_sync!(app, device, vault, sync_state, |_backend, session, ctx| Ok(
+    let result = with_sync!(app, device, vault, sync_state, |_backend, session, ctx| Ok(
         session
             .syncthing_connect(&secrets.0, &ctx, endpoint, &api_key)
             .await?
-    ))
+    ));
+    restart_syncthing_watcher(&app);
+    result
 }
 
 #[tauri::command]
@@ -858,6 +966,107 @@ pub async fn sync_syncthing_disconnect(
     })
 }
 
+// ── Наблюдатель Syncthing (T078, FR-022, research §8) ───────────────────────
+
+/// Фоновое ожидание событий Syncthing открытой сессии: одна задача на окно.
+#[derive(Default)]
+pub struct SyncthingWatcher(std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
+
+/// Запасной опрос, если ждать событий не выходит (Syncthing не запущен, ключа
+/// ещё нет, сертификат не закреплён).
+const SYNCTHING_RETRY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Событие окну: состояние синхронизации изменилось само.
+pub const SYNC_CHANGED_EVENT: &str = "sync-changed";
+
+/// Запускает наблюдателя заново: после открытия сессии и после подключения
+/// Syncthing. Прежний останавливается.
+fn restart_syncthing_watcher(app: &AppHandle) {
+    let watcher = app.state::<SyncthingWatcher>();
+    let Ok(mut slot) = watcher.0.lock() else {
+        return;
+    };
+    if let Some(previous) = slot.take() {
+        previous.abort();
+    }
+    let app = app.clone();
+    *slot = Some(tauri::async_runtime::spawn(async move {
+        let mut since = 0;
+        loop {
+            // Сессия закрыта — наблюдать нечего.
+            let Ok(target) = refresh_syncthing(&app).await else {
+                return;
+            };
+            match target {
+                Some((endpoint, key)) => match syncthing::wait_events(&endpoint, &key, since).await
+                {
+                    Ok(next) => since = next,
+                    Err(_) => tokio::time::sleep(SYNCTHING_RETRY).await,
+                },
+                None => tokio::time::sleep(SYNCTHING_RETRY).await,
+            }
+        }
+    }));
+}
+
+/// Перечитывает состояние папки vault в Syncthing и сообщает окну, если оно
+/// изменилось. Возвращает адрес и ключ, по которым ждать событий; `None` —
+/// Syncthing не подключён или ключа нет. Отказ — сессия закрыта.
+async fn refresh_syncthing(
+    app: &AppHandle,
+) -> Result<Option<(SyncthingEndpoint, String)>, SyncFailure> {
+    let device = app.state::<Device>();
+    let vault = app.state::<Vault>();
+    let sync_state = app.state::<SyncState>();
+    let secrets = app.state::<Secrets>();
+    let ctx = sync_context(app, &device, &sync_state).await?;
+    let Some(mut endpoint) = ctx.device_sync.syncthing.clone() else {
+        return Ok(None);
+    };
+    // Первое обращение к Syncthing по TLS закрепляет его сертификат; ключ API
+    // уходит только после этого (research §8).
+    if endpoint.tls && endpoint.cert_fingerprint.is_none() {
+        if let Some(fingerprint) = syncthing::pin(&endpoint).await {
+            endpoint.cert_fingerprint = Some(fingerprint.clone());
+            if let Some(open) = sync_state.0.lock().await.as_mut() {
+                open.session.syncthing_pinned(&ctx, fingerprint);
+            }
+            persist_device_update(app, &device, &sync_state).await;
+        }
+    }
+    let (root, detected) = {
+        let guard = vault.0.lock().await;
+        let backend = guard.as_ref().ok_or_else(not_open)?;
+        let detected = matches!(
+            backend
+                .folder_access(std::path::Path::new(syncthing::FOLDER_MARKER))
+                .await,
+            typsidian_core::vault::FolderAccess::Present
+                | typsidian_core::vault::FolderAccess::NotWritable { .. }
+        );
+        (backend.root_path().to_path_buf(), detected)
+    };
+    let key = {
+        let guard = sync_state.0.lock().await;
+        let open = guard.as_ref().ok_or_else(not_open)?;
+        open.session.syncthing_api_key(&secrets.0).await
+    };
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    let folder = syncthing::query(&endpoint, &key, &root.to_string_lossy(), detected).await;
+    let changed = {
+        let mut guard = sync_state.0.lock().await;
+        let open = guard.as_mut().ok_or_else(not_open)?;
+        open.session.set_syncthing_state(folder)
+    };
+    if changed {
+        // Окно перечитывает сводку сразу, не дожидаясь такта.
+        let _ = app.emit(SYNC_CHANGED_EVENT, ());
+    }
+    Ok(Some((endpoint, key)))
+}
+
 /// Такт автоматики (FR-019, FR-031): обновляет состояние Syncthing и
 /// спрашивает ядро, пора ли снимать и обмениваться. Таймер — у окна.
 #[tauri::command]
@@ -869,53 +1078,60 @@ pub async fn sync_tick(
     secrets: State<'_, Secrets>,
     auto_prefix: String,
 ) -> Answer<TickOutcome> {
-    // Состояние Syncthing читается до такта: автоснимок ждёт окончания
-    // доставки, если она идёт (FR-031).
-    let vault_id = {
-        let guard = sync_state.0.lock().await;
-        guard.as_ref().ok_or_else(not_open)?.vault.clone()
-    };
-    let ctx = context(&app, &device, &vault_id).await?;
-    if let Some(mut endpoint) = ctx.device_sync.syncthing.clone() {
-        // Первое обращение к Syncthing по TLS закрепляет его сертификат; ключ API
-        // уходит только после этого (research §8).
-        if endpoint.tls && endpoint.cert_fingerprint.is_none() {
-            if let Some(fingerprint) = syncthing::pin(&endpoint).await {
-                endpoint.cert_fingerprint = Some(fingerprint.clone());
-                if let Some(open) = sync_state.0.lock().await.as_mut() {
-                    open.session.syncthing_pinned(&ctx, fingerprint);
+    // Состояние Syncthing держит наблюдатель (T078): такт его не опрашивает.
+    let ctx = sync_context(&app, &device, &sync_state).await?;
+    // Такт по шагам (T071): сеть автополучения и автоотправки — без блокировок.
+    let mut outcome = TickOutcome::idle(ctx.now);
+    let pull = locked!(vault, sync_state, |backend, session| {
+        if session.tick_pull_due(backend, &ctx).await {
+            match session.begin_pull(backend, &secrets.0, &ctx, false).await {
+                Ok(plan) => Some((plan, session.engine().clone())),
+                Err(error) => {
+                    session.tick_pulled(&mut outcome, Err(error));
+                    None
                 }
             }
+        } else {
+            None
         }
-        let (root, detected) = {
-            let guard = vault.0.lock().await;
-            let backend = guard.as_ref().ok_or_else(not_open)?;
-            let detected = matches!(
-                backend
-                    .folder_access(std::path::Path::new(syncthing::FOLDER_MARKER))
-                    .await,
-                typsidian_core::vault::FolderAccess::Present
-                    | typsidian_core::vault::FolderAccess::NotWritable { .. }
-            );
-            (backend.root_path().to_path_buf(), detected)
-        };
-        let key = {
-            let guard = sync_state.0.lock().await;
-            match guard.as_ref() {
-                Some(open) => open.session.syncthing_api_key(&secrets.0).await,
-                None => None,
-            }
-        };
-        if let Some(key) = key {
-            let folder = syncthing::query(&endpoint, &key, &root.to_string_lossy(), detected).await;
-            if let Some(open) = sync_state.0.lock().await.as_mut() {
-                open.session.set_syncthing_state(folder);
-            }
+    });
+    let fetched = match &pull {
+        Some((plan, engine)) => Some(plan.exchange.fetch(engine).await),
+        None => None,
+    };
+    let push = locked!(vault, sync_state, |backend, session| {
+        if let (Some((plan, _)), Some(fetched)) = (pull, fetched) {
+            let result = session.complete_pull(backend, &ctx, plan, fetched).await;
+            session.tick_pulled(&mut outcome, result);
         }
-    }
-    with_sync!(app, device, vault, sync_state, |backend, session, ctx| {
-        Ok(session.tick(backend, &secrets.0, &ctx, &auto_prefix).await)
-    })
+        if session
+            .tick_local(backend, &ctx, &auto_prefix, &mut outcome)
+            .await
+        {
+            match session.begin_push(backend, &secrets.0, &ctx, false).await {
+                Ok(plan) => Some((plan, session.engine().clone())),
+                Err(error) => {
+                    session.tick_pushed(&mut outcome, Err(error));
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    });
+    let sent = match &push {
+        Some((plan, engine)) => Some(plan.push(engine).await),
+        None => None,
+    };
+    locked!(vault, sync_state, |backend, session| {
+        if let (Some((plan, _)), Some(sent)) = (push, sent) {
+            let result = session.complete_push(backend, &ctx, &plan, sent).await;
+            session.tick_pushed(&mut outcome, result);
+        }
+        session.tick_finish(backend, &ctx, &mut outcome).await;
+    });
+    persist_device_update(&app, &device, &sync_state).await;
+    Ok(outcome)
 }
 
 /// Клонирует удалённый репозиторий в пустую папку будущего vault (FR-013).
@@ -960,6 +1176,8 @@ pub fn manage(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry>
     builder
         .manage(SyncState::default())
         .manage(SyncCancel::default())
+        .manage(SyncProgressSlot::default())
+        .manage(SyncthingWatcher::default())
         .setup(|app| {
             let secrets = ShellSecrets::for_app(app.handle());
             app.manage(Secrets(secrets));

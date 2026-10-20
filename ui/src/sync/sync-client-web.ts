@@ -8,6 +8,8 @@ import {
   syncContext,
   type DeviceVaultSync,
   type SyncContext,
+  type SyncExchange,
+  type TickOutcome,
   type WebBackend,
 } from "../wasm-core/typsidian_core.js";
 import type { WasmCallQueue } from "../wasm-call-queue.js";
@@ -57,6 +59,7 @@ export async function webSyncClient(
   // Ручка отмены — отдельный объект ядра: пока операция идёт, сама сессия
   // заимствована, и звать её метод из обработчика кнопки нельзя.
   const cancelHandle = session.cancelHandle();
+  const progressHandle = session.progressHandle();
 
   const context = async (): Promise<SyncContext> => {
     const store = await deviceStore();
@@ -93,6 +96,54 @@ export async function webSyncClient(
 
   const plain = <T>(op: () => T | Promise<T>): Promise<T> => queue.run(op);
 
+  /**
+   * Обмен по шагам (T071): план и итог — под очередью, сеть — вне её. Пока идёт
+   * сеть, сохранение заметок и опрос состояния не ждут сервер (FR-020).
+   * Значения устройства сохраняются после итога, как у `withContext`.
+   */
+  const stepped = async <T>(
+    begin: (ctx: SyncContext) => Promise<SyncExchange>,
+    complete: (ctx: SyncContext, exchange: SyncExchange) => T | Promise<T>,
+  ): Promise<T> => {
+    const ctx = await context();
+    let update: DeviceVaultSync | undefined;
+    try {
+      const exchange = await queue.run(() => begin(ctx));
+      await exchange.run();
+      return await queue.run(async () => {
+        try {
+          return await complete(ctx, exchange);
+        } finally {
+          update = session.takeDeviceUpdate();
+        }
+      });
+    } finally {
+      if (update === undefined) update = await queue.run(() => session.takeDeviceUpdate());
+      await persist(update);
+    }
+  };
+
+  /** Такт автоматики по тем же шагам: сеть автополучения и автоотправки — вне очереди. */
+  const tickStepped = async (autoPrefix: string): Promise<TickOutcome> => {
+    const ctx = await context();
+    let update: DeviceVaultSync | undefined;
+    try {
+      const pulled = await queue.run(() => session.tickBegin(backend, ctx));
+      await pulled?.run();
+      const pushed = await queue.run(() => session.tickMiddle(backend, ctx, autoPrefix, pulled));
+      await pushed?.run();
+      return await queue.run(async () => {
+        try {
+          return await session.tickEnd(backend, ctx, pushed);
+        } finally {
+          update = session.takeDeviceUpdate();
+        }
+      });
+    } finally {
+      await persist(update);
+    }
+  };
+
   const writeDeviceSync = async (
     change: (current: DeviceVaultSync) => DeviceVaultSync,
   ): Promise<void> => {
@@ -105,6 +156,7 @@ export async function webSyncClient(
     pollEvents: () => queue.runInternal(() => session.pollEvents()),
     noteChange: () => queue.runInternal(() => session.noteChange(Date.now())),
     cancel: () => cancelHandle.cancel(),
+    progress: async () => progressHandle.current() ?? null,
 
     ignoreReports: () => plain(() => session.ignoreReports(backend)),
     applyIgnore: (file) => withContext((ctx) => session.applyIgnore(backend, ctx, file)),
@@ -144,9 +196,15 @@ export async function webSyncClient(
       withContext((ctx) => session.connectRemote(backend, ctx, url, credentials)),
     disconnectRemote: () => plain(() => session.disconnectRemote(backend)),
     push: (confirmNotKeeper) =>
-      withContext((ctx) => session.push(backend, ctx, confirmNotKeeper)),
+      stepped(
+        (ctx) => session.beginPush(backend, ctx, confirmNotKeeper),
+        (ctx, exchange) => session.completePush(backend, ctx, exchange),
+      ),
     pull: (confirmNotKeeper) =>
-      withContext((ctx) => session.pull(backend, ctx, confirmNotKeeper)),
+      stepped(
+        (ctx) => session.beginPull(backend, ctx, confirmNotKeeper),
+        (ctx, exchange) => session.completePull(backend, ctx, exchange),
+      ),
     restoreHistory: (confirmNotKeeper) =>
       withContext((ctx) => session.restoreHistory(backend, ctx, confirmNotKeeper)),
     abortPull: () => plain(() => session.abortPull(backend)),
@@ -157,7 +215,11 @@ export async function webSyncClient(
     setKeeper: () => withContext((ctx) => session.setKeeper(backend, ctx)),
     clearKeeper: () => plain(() => session.clearKeeper(backend)),
     updateSettings: (patch) => plain(() => session.updateSettings(backend, patch)),
-    refreshMirror: () => withContext((ctx) => session.refreshMirror(backend, ctx)),
+    refreshMirror: () =>
+      stepped(
+        (ctx) => session.beginMirror(backend, ctx),
+        (ctx, exchange) => session.completeMirror(ctx, exchange),
+      ),
 
     // GUI Syncthing не отвечает на обращения со страницы (CORS) — состояние в
     // браузере недоступно, и ядро сообщает об этом через `capabilities`
@@ -169,7 +231,7 @@ export async function webSyncClient(
       withContext((ctx) => session.syncthingConnect(ctx, endpoint, apiKey ?? "")),
     syncthingDisconnect: async () => undefined,
 
-    tick: (autoPrefix) => withContext((ctx) => session.tick(backend, ctx, autoPrefix)),
+    tick: tickStepped,
 
     deviceSync: async () => (await context()).device_sync,
     setAuthor: (author) =>

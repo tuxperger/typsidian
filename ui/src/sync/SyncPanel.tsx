@@ -146,6 +146,7 @@ export function SyncPanel({
           initialProxy={proxy}
           initialUrl={overview.remote?.url ?? null}
           busy={sync.activity === "connect"}
+          progress={sync.progress}
           error={remoteError}
           onCancel={() => {
             if (sync.activity === "connect") sync.cancel();

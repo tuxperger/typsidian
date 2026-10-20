@@ -268,6 +268,8 @@ pub enum SyncError {
     TargetNotEmpty,
     #[error("операция отменена")]
     Cancelled,
+    #[error("файл истории или отправка больше {limit_mb} МБ")]
+    TooLarge { limit_mb: u32 },
     #[error("ошибка чтения или записи")]
     Io { message: String },
 }
@@ -286,6 +288,7 @@ impl From<engine::EngineError> for SyncError {
             E::UnsupportedScheme { scheme } => SyncError::UnsupportedScheme { scheme },
             E::Cancelled => SyncError::Cancelled,
             E::NotARepository => SyncError::NoHistory,
+            E::TooLarge { limit_mb } => SyncError::TooLarge { limit_mb },
             E::Io { message } => SyncError::Io { message },
         }
     }
@@ -434,6 +437,36 @@ pub enum Operation {
     Pull,
     Push,
     Clone,
+}
+
+/// Ход массовой операции: что делается и сколько из скольких (принцип X).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct SyncProgress {
+    pub operation: Operation,
+    pub done: u32,
+    pub total: u32,
+}
+
+/// Последний ход идущей операции — общий у сессии и оболочки (T075). Событие
+/// `Progress` очереди сессии читается только между операциями: пока операция
+/// идёт, сессия занята. Приёмник читается в любой момент, без блокировки
+/// сессии и без очереди вызовов wasm.
+#[derive(Debug, Clone, Default)]
+pub struct ProgressSink(std::sync::Arc<std::sync::Mutex<Option<SyncProgress>>>);
+
+impl ProgressSink {
+    pub fn set(&self, progress: Option<SyncProgress>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = progress;
+        }
+    }
+
+    /// Ход сейчас; `None` — массовой операции нет.
+    pub fn current(&self) -> Option<SyncProgress> {
+        self.0.lock().ok().and_then(|slot| *slot)
+    }
 }
 
 /// Изменение настроек устройства, выдающее ему тождество, если его ещё нет

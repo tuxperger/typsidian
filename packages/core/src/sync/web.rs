@@ -28,6 +28,8 @@ use crate::vault::web::WebBackend;
 pub struct WebSyncSession {
     inner: SyncSession<JsGitEngine>,
     engine: JsGitEngine,
+    /// Такт по шагам: итог, накопленный между `tickBegin` и `tickEnd`.
+    tick: Option<TickOutcome>,
 }
 
 /// Отмена операции сессии; живёт отдельно от неё — см. [`WebSyncSession::cancel_handle`].
@@ -61,6 +63,7 @@ impl WebSyncSession {
         WebSyncSession {
             inner: SyncSession::new(engine.clone(), mirror, vault_id),
             engine,
+            tick: None,
         }
     }
 
@@ -458,4 +461,279 @@ pub fn ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
 #[wasm_bindgen(js_name = ignoreRestore)]
 pub fn ignore_restore(file: IgnoreFile, text: String) -> String {
     ignore::restore_block(file, &text)
+}
+
+// ── Обмен по шагам (T071) ──────────────────────────────────────────────────
+//
+// Сеть — долгая часть обмена, и на её время нельзя занимать очередь вызовов
+// wasm: сохранение заметок и опрос состояния ждали бы сервер (FR-020,
+// принцип X). Поэтому обмен идёт тремя вызовами: план под очередью
+// (`begin…`), сеть на отдельном объекте [`SyncExchange`] вне очереди — он не
+// заимствует ни сессию, ни vault, — и итог снова под очередью (`complete…`).
+
+enum ExchangeKind {
+    Pull(session::PullPlan),
+    Push(session::ExchangePlan),
+    Mirror(session::ExchangePlan),
+}
+
+enum ExchangeResult {
+    Fetched(Result<Option<String>, SyncError>),
+    Done(Result<(), SyncError>),
+}
+
+/// Сетевой шаг обмена: копия движка, план и итог.
+#[wasm_bindgen]
+pub struct SyncExchange {
+    engine: Option<JsGitEngine>,
+    kind: ExchangeKind,
+    result: Option<ExchangeResult>,
+}
+
+#[wasm_bindgen]
+impl SyncExchange {
+    /// Сеть. Звать вне очереди `wasm-call-queue`; итог остаётся в объекте.
+    pub async fn run(&mut self) {
+        let Some(engine) = self.engine.as_ref() else {
+            self.result = Some(ExchangeResult::Done(Err(SyncError::NoHistory)));
+            return;
+        };
+        self.result = Some(match &self.kind {
+            ExchangeKind::Pull(plan) => ExchangeResult::Fetched(plan.exchange.fetch(engine).await),
+            ExchangeKind::Push(plan) => ExchangeResult::Done(plan.push(engine).await),
+            ExchangeKind::Mirror(plan) => ExchangeResult::Done(plan.mirror(engine).await),
+        });
+    }
+}
+
+impl SyncExchange {
+    fn fetched(&mut self) -> Result<Option<String>, SyncError> {
+        match self.result.take() {
+            Some(ExchangeResult::Fetched(result)) => result,
+            _ => Err(SyncError::Cancelled),
+        }
+    }
+
+    fn done(&mut self) -> Result<(), SyncError> {
+        match self.result.take() {
+            Some(ExchangeResult::Done(result)) => result,
+            _ => Err(SyncError::Cancelled),
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl WebSyncSession {
+    #[wasm_bindgen(js_name = beginPull)]
+    pub async fn begin_pull(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<SyncExchange, JsValue> {
+        let plan = self
+            .inner
+            .begin_pull(backend, &IdbSecretStore, &ctx, confirm_not_keeper)
+            .await
+            .map_err(js_error)?;
+        Ok(self.exchange(ExchangeKind::Pull(plan)))
+    }
+
+    #[wasm_bindgen(js_name = completePull)]
+    pub async fn complete_pull(
+        &mut self,
+        backend: &mut WebBackend,
+        ctx: SyncContext,
+        mut exchange: SyncExchange,
+    ) -> Result<PullOutcome, JsValue> {
+        let fetched = exchange.fetched();
+        let ExchangeKind::Pull(plan) = exchange.kind else {
+            return Err(js_error(SyncError::Cancelled));
+        };
+        self.inner
+            .complete_pull(backend, &ctx, plan, fetched)
+            .await
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = beginPush)]
+    pub async fn begin_push(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<SyncExchange, JsValue> {
+        let plan = self
+            .inner
+            .begin_push(backend, &IdbSecretStore, &ctx, confirm_not_keeper)
+            .await
+            .map_err(js_error)?;
+        Ok(self.exchange(ExchangeKind::Push(plan)))
+    }
+
+    #[wasm_bindgen(js_name = completePush)]
+    pub async fn complete_push(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+        mut exchange: SyncExchange,
+    ) -> Result<RemoteStatus, JsValue> {
+        let sent = exchange.done();
+        let ExchangeKind::Push(plan) = exchange.kind else {
+            return Err(js_error(SyncError::Cancelled));
+        };
+        self.inner
+            .complete_push(backend, &ctx, &plan, sent)
+            .await
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = beginMirror)]
+    pub async fn begin_mirror(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+    ) -> Result<SyncExchange, JsValue> {
+        let plan = self
+            .inner
+            .begin_mirror(backend, &IdbSecretStore, &ctx)
+            .await
+            .map_err(js_error)?;
+        Ok(SyncExchange {
+            engine: self.inner.mirror_engine().cloned(),
+            kind: ExchangeKind::Mirror(plan),
+            result: None,
+        })
+    }
+
+    #[wasm_bindgen(js_name = completeMirror)]
+    pub fn complete_mirror(
+        &mut self,
+        ctx: SyncContext,
+        mut exchange: SyncExchange,
+    ) -> Result<(), JsValue> {
+        let result = exchange.done();
+        self.inner.complete_mirror(&ctx, result).map_err(js_error)
+    }
+
+    /// Такт по шагам: начало — автополучение, если пора.
+    #[wasm_bindgen(js_name = tickBegin)]
+    pub async fn tick_begin(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+    ) -> Option<SyncExchange> {
+        self.tick = Some(TickOutcome::idle(ctx.now));
+        if !self.inner.tick_pull_due(backend, &ctx).await {
+            return None;
+        }
+        match self
+            .inner
+            .begin_pull(backend, &IdbSecretStore, &ctx, false)
+            .await
+        {
+            Ok(plan) => Some(self.exchange(ExchangeKind::Pull(plan))),
+            Err(error) => {
+                let mut outcome = self.tick.take().unwrap_or(TickOutcome::idle(ctx.now));
+                self.inner.tick_pulled(&mut outcome, Err(error));
+                self.tick = Some(outcome);
+                None
+            }
+        }
+    }
+
+    /// Середина такта: итог получения, автоснимок и, если пора, план отправки.
+    #[wasm_bindgen(js_name = tickMiddle)]
+    pub async fn tick_middle(
+        &mut self,
+        backend: &mut WebBackend,
+        ctx: SyncContext,
+        auto_prefix: String,
+        pulled: Option<SyncExchange>,
+    ) -> Option<SyncExchange> {
+        let mut outcome = self.tick.take().unwrap_or(TickOutcome::idle(ctx.now));
+        if let Some(mut exchange) = pulled {
+            let fetched = exchange.fetched();
+            if let ExchangeKind::Pull(plan) = exchange.kind {
+                let result = self.inner.complete_pull(backend, &ctx, plan, fetched).await;
+                self.inner.tick_pulled(&mut outcome, result);
+            }
+        }
+        let push_due = self
+            .inner
+            .tick_local(backend, &ctx, &auto_prefix, &mut outcome)
+            .await;
+        let next = if push_due {
+            match self
+                .inner
+                .begin_push(backend, &IdbSecretStore, &ctx, false)
+                .await
+            {
+                Ok(plan) => Some(self.exchange(ExchangeKind::Push(plan))),
+                Err(error) => {
+                    self.inner.tick_pushed(&mut outcome, Err(error));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        self.tick = Some(outcome);
+        next
+    }
+
+    /// Конец такта: итог отправки и время следующего.
+    #[wasm_bindgen(js_name = tickEnd)]
+    pub async fn tick_end(
+        &mut self,
+        backend: &WebBackend,
+        ctx: SyncContext,
+        pushed: Option<SyncExchange>,
+    ) -> TickOutcome {
+        let mut outcome = self.tick.take().unwrap_or(TickOutcome::idle(ctx.now));
+        if let Some(mut exchange) = pushed {
+            let sent = exchange.done();
+            if let ExchangeKind::Push(plan) = exchange.kind {
+                let result = self.inner.complete_push(backend, &ctx, &plan, sent).await;
+                self.inner.tick_pushed(&mut outcome, result);
+            }
+        }
+        self.inner.tick_finish(backend, &ctx, &mut outcome).await;
+        outcome
+    }
+}
+
+impl WebSyncSession {
+    fn exchange(&self, kind: ExchangeKind) -> SyncExchange {
+        SyncExchange {
+            engine: Some(self.engine.clone()),
+            kind,
+            result: None,
+        }
+    }
+}
+
+/// Ход массовой операции (T075): свой объект, а не метод сессии — пока
+/// операция идёт, сессия заимствована, и вызов на ней упал бы.
+#[wasm_bindgen]
+pub struct SyncProgressHandle {
+    sink: super::ProgressSink,
+}
+
+#[wasm_bindgen]
+impl SyncProgressHandle {
+    pub fn current(&self) -> Option<super::SyncProgress> {
+        self.sink.current()
+    }
+}
+
+#[wasm_bindgen]
+impl WebSyncSession {
+    /// Взять один раз при открытии; читать — когда угодно, вне очереди.
+    #[wasm_bindgen(js_name = progressHandle)]
+    pub fn progress_handle(&self) -> SyncProgressHandle {
+        SyncProgressHandle {
+            sink: self.inner.progress_sink(),
+        }
+    }
 }

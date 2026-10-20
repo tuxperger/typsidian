@@ -778,3 +778,51 @@ async fn a_silent_server_is_given_up_on_after_the_idle_limit() {
         1
     );
 }
+
+/// Vault внутри чужого репозитория (Edge Cases, T074): история видна как
+/// чужая, а приложение в неё не пишет — ни снимка, ни своей истории поверх.
+#[tokio::test]
+async fn a_vault_inside_a_foreign_repository_is_shown_not_written() {
+    let outer = tempfile::TempDir::new().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(outer.path())
+        .status()
+        .expect("системный git");
+    assert!(status.success());
+    let vault = outer.path().join("notes");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("a.typ"), "= A\n").unwrap();
+
+    let mut backend = NativeBackend::open(&vault).await.unwrap();
+    let mut session = SyncSession::new(NativeGitEngine::open(&vault), None, "vault-f");
+    let context = ctx(1_000, 'f');
+    let overview = session.overview(&backend, &context).await;
+    assert!(
+        matches!(overview.history, HistoryState::ForeignParent { .. }),
+        "{:?}",
+        overview.history
+    );
+    assert_eq!(
+        session
+            .snapshot(&backend, &context, None, "снимок", "Снимок", true, false)
+            .await
+            .unwrap_err(),
+        SyncError::ForeignRepository
+    );
+    assert_eq!(
+        session
+            .enable_history(&mut backend, &context, "начало")
+            .await
+            .unwrap_err(),
+        SyncError::ForeignRepository
+    );
+    // Во внешней истории не появилось ни одного снимка.
+    let log = std::process::Command::new("git")
+        .args(["rev-list", "--all", "--count"])
+        .current_dir(outer.path())
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "0");
+    assert!(!vault.join(".git").exists());
+}

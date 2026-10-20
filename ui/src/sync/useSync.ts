@@ -6,6 +6,7 @@ import type {
   SyncError,
   SyncEvent,
   SyncOverview,
+  SyncProgress,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { asSyncError, type SyncClient } from "./sync-client.js";
@@ -25,6 +26,8 @@ const MAX_TICK_MS = 60_000;
 const REFRESH_DEBOUNCE_MS = 1_500;
 /** Не чаще этого ядру сообщается об изменении файлов. */
 const NOTE_CHANGE_THROTTLE_MS = 1_000;
+/** Как часто спрашивать ход массовой операции, пока она идёт (T075). */
+const PROGRESS_POLL_MS = 250;
 
 /** Что сейчас выполняется по просьбе пользователя — для индикатора и блокировки кнопок. */
 export type SyncActivity = "enable" | "snapshot" | "push" | "pull" | "connect" | "resolve";
@@ -42,6 +45,8 @@ export interface SyncControl {
   /** `null` — сводка ещё не прочитана. */
   overview: SyncOverview | null;
   activity: SyncActivity | null;
+  /** Ход идущей массовой операции — «N из M» (T075); `null` — хода нет. */
+  progress: SyncProgress | null;
   /** Последний отказ — фонового обмена или действия пользователя (FR-019). */
   error: SyncError | null;
   dismissError: () => void;
@@ -85,6 +90,22 @@ export function useSync(
 ): SyncControl | null {
   const [overview, setOverview] = useState<SyncOverview | null>(null);
   const [activity, setActivity] = useState<SyncActivity | null>(null);
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
+  // Пока идёт действие, ход опрашивается сам: сессия занята, и события придут
+  // только после конца.
+  useEffect(() => {
+    if (client === null || activity === null) {
+      setProgress(null);
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void client
+        .progress()
+        .then(setProgress)
+        .catch(() => {});
+    }, PROGRESS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [client, activity]);
   const [error, setError] = useState<SyncError | null>(null);
   const [revision, setRevision] = useState(0);
   const [keeperConfirmation, setKeeperConfirmation] = useState<KeeperConfirmation | null>(
@@ -234,6 +255,14 @@ export function useSync(
     await runGated("pull", (confirm) => client.pull(confirm));
   }, [client, runGated]);
 
+  // Оболочка сообщает о переменах сама (Syncthing, T078) — сводка сразу.
+  useEffect(() => {
+    if (client?.onChanged === undefined) return undefined;
+    return client.onChanged(() => {
+      void drainEvents().then(refresh);
+    });
+  }, [client, drainEvents, refresh]);
+
   // Таймер такта (T062). Только вызывает ядро: когда следующий такт, говорит
   // его ответ (`next_tick_at`), здесь он лишь зажимается в разумные границы.
   useEffect(() => {
@@ -302,6 +331,7 @@ export function useSync(
     client,
     overview,
     activity,
+    progress,
     error,
     dismissError,
     revision,

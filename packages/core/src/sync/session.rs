@@ -122,6 +122,72 @@ pub struct TickOutcome {
     pub next_tick_at: Millis,
 }
 
+impl TickOutcome {
+    /// Такт, который ещё ничего не сделал: снимок запрещён, следующий — через
+    /// минуту.
+    pub fn idle(now: Millis) -> Self {
+        Self {
+            decision: AutoDecision::Blocked {
+                reason: autosnapshot::BlockReason::Disabled,
+            },
+            snapshot: None,
+            pulled: false,
+            pushed: false,
+            next_tick_at: now + 60_000,
+        }
+    }
+}
+
+/// Всё, что нужно сетевому шагу обмена, без vault и без сессии (T071):
+/// оболочка получает план под блокировками, отпускает их и идёт в сеть.
+/// Сохранение заметок тем временем не ждёт обмена (FR-020, принцип X).
+#[derive(Debug, Clone)]
+pub struct ExchangePlan {
+    pub spec: RemoteSpec,
+    pub auth: Auth,
+    pub cancel: CancelToken,
+}
+
+impl ExchangePlan {
+    /// Получение снимков сервера; `None` — ветки на сервере нет.
+    pub async fn fetch<E: GitEngine>(&self, engine: &E) -> Result<Option<String>, SyncError> {
+        engine
+            .fetch(&self.spec, &self.auth, &self.cancel)
+            .await
+            .map_err(SyncError::from)
+    }
+
+    pub async fn push<E: GitEngine>(&self, engine: &E) -> Result<(), SyncError> {
+        engine
+            .push(&self.spec, &self.auth, &self.cancel)
+            .await
+            .map_err(SyncError::from)
+    }
+
+    /// Обновление зеркала не-хранителя: клон при первом обращении (FR-033).
+    pub async fn mirror<E: GitEngine>(&self, mirror: &E) -> Result<(), SyncError> {
+        match mirror.probe().await? {
+            RepoProbe::Mirror => mirror
+                .fetch(&self.spec, &self.auth, &self.cancel)
+                .await
+                .map(|_| ()),
+            _ => {
+                mirror
+                    .clone_into(&self.spec, &self.auth, true, &self.cancel)
+                    .await
+            }
+        }
+        .map_err(SyncError::from)
+    }
+}
+
+/// План получения: обмен и автор будущего снимка слияния.
+#[derive(Debug, Clone)]
+pub struct PullPlan {
+    pub exchange: ExchangePlan,
+    author: super::Author,
+}
+
 /// Данные доступа, введённые пользователем при подключении (FR-013).
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
@@ -176,6 +242,8 @@ pub struct SyncSession<E: GitEngine> {
     device_update: Option<DeviceVaultSync>,
     events: Vec<SyncEvent>,
     cancel: CancelToken,
+    /// Ход идущей операции для оболочки — см. [`super::ProgressSink`].
+    progress_sink: super::ProgressSink,
 }
 
 impl<E: GitEngine> SyncSession<E> {
@@ -194,6 +262,7 @@ impl<E: GitEngine> SyncSession<E> {
             device_update: None,
             events: Vec::new(),
             cancel: CancelToken::new(),
+            progress_sink: super::ProgressSink::default(),
         }
     }
 
@@ -222,6 +291,8 @@ impl<E: GitEngine> SyncSession<E> {
     }
 
     fn fresh_cancel(&mut self) -> CancelToken {
+        // Новая операция — ход прежней больше не показывается.
+        self.progress_sink.set(None);
         self.cancel.reset();
         self.cancel.clone()
     }
@@ -1151,19 +1222,29 @@ impl<E: GitEngine> SyncSession<E> {
         secrets: &S,
         ctx: &SyncContext,
     ) -> Result<Option<String>, SyncError> {
-        let spec = self.remote_spec(backend, secrets, ctx).await?;
-        let auth = self.auth(secrets).await;
-        let cancel = self.fresh_cancel();
-        let result = self
-            .engine
-            .fetch(&spec, &auth, &cancel)
-            .await
-            .map_err(SyncError::from);
+        let plan = self.plan_exchange(backend, secrets, ctx).await?;
+        let result = plan.fetch(&self.engine).await;
         self.record_exchange(ctx.now, &result.as_ref().map(|_| ()).map_err(Clone::clone));
         result
     }
 
-    /// Отправка снимков на сервер (FR-015, FR-018).
+    /// Адрес, данные доступа и свежий токен отмены — всё, что нужно сети.
+    async fn plan_exchange<B: VaultBackend, S: SecretStore>(
+        &mut self,
+        backend: &B,
+        secrets: &S,
+        ctx: &SyncContext,
+    ) -> Result<ExchangePlan, SyncError> {
+        let spec = self.remote_spec(backend, secrets, ctx).await?;
+        let auth = self.auth(secrets).await;
+        let cancel = self.fresh_cancel();
+        Ok(ExchangePlan { spec, auth, cancel })
+    }
+
+    /// Отправка снимков на сервер (FR-015, FR-018). Три шага подряд; оболочка,
+    /// которой важно не держать vault на время сети, зовёт их по отдельности
+    /// (T071): [`Self::begin_push`], [`ExchangePlan::push`],
+    /// [`Self::complete_push`].
     pub async fn push<B: VaultBackend, S: SecretStore>(
         &mut self,
         backend: &B,
@@ -1171,22 +1252,41 @@ impl<E: GitEngine> SyncSession<E> {
         ctx: &SyncContext,
         confirm_not_keeper: bool,
     ) -> Result<RemoteStatus, SyncError> {
+        let plan = self
+            .begin_push(backend, secrets, ctx, confirm_not_keeper)
+            .await?;
+        let result = plan.push(&self.engine).await;
+        self.complete_push(backend, ctx, &plan, result).await
+    }
+
+    /// Проверки и план отправки — под блокировкой vault.
+    pub async fn begin_push<B: VaultBackend, S: SecretStore>(
+        &mut self,
+        backend: &B,
+        secrets: &S,
+        ctx: &SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<ExchangePlan, SyncError> {
         self.require_local().await?;
         self.gate_write(backend, ctx, confirm_not_keeper).await?;
-        let spec = self.remote_spec(backend, secrets, ctx).await?;
-        let auth = self.auth(secrets).await;
-        let cancel = self.fresh_cancel();
+        let plan = self.plan_exchange(backend, secrets, ctx).await?;
         self.progress(Operation::Push, 0, 1);
-        let result = self
-            .engine
-            .push(&spec, &auth, &cancel)
-            .await
-            .map_err(SyncError::from);
+        Ok(plan)
+    }
+
+    /// Итог отправки: запись об обмене и состояние удалённого репозитория.
+    pub async fn complete_push<B: VaultBackend>(
+        &mut self,
+        backend: &B,
+        ctx: &SyncContext,
+        plan: &ExchangePlan,
+        result: Result<(), SyncError>,
+    ) -> Result<RemoteStatus, SyncError> {
         self.record_exchange(ctx.now, &result);
         result?;
         self.progress(Operation::Push, 1, 1);
         let settings = sync_settings::read(backend).await;
-        Ok(self.remote_status(&spec.url, &settings, true).await)
+        Ok(self.remote_status(&plan.spec.url, &settings, true).await)
     }
 
     /// Получение снимков с сервера со слиянием (FR-016, FR-017, research §9).
@@ -1223,6 +1323,9 @@ impl<E: GitEngine> SyncSession<E> {
         self.pull(backend, secrets, ctx, confirm_not_keeper).await
     }
 
+    /// Получение снимков: подготовка, сеть, запись файлов. Оболочка, которой
+    /// важно не держать vault на время сети, зовёт шаги по отдельности (T071):
+    /// [`Self::begin_pull`], [`ExchangePlan::fetch`], [`Self::complete_pull`].
     pub async fn pull<B: VaultBackend, S: SecretStore>(
         &mut self,
         backend: &mut B,
@@ -1230,13 +1333,47 @@ impl<E: GitEngine> SyncSession<E> {
         ctx: &SyncContext,
         confirm_not_keeper: bool,
     ) -> Result<PullOutcome, SyncError> {
+        let plan = self
+            .begin_pull(backend, secrets, ctx, confirm_not_keeper)
+            .await?;
+        let fetched = plan.exchange.fetch(&self.engine).await;
+        self.complete_pull(backend, ctx, plan, fetched).await
+    }
+
+    /// Проверки и план получения — под блокировкой vault.
+    pub async fn begin_pull<B: VaultBackend, S: SecretStore>(
+        &mut self,
+        backend: &B,
+        secrets: &S,
+        ctx: &SyncContext,
+        confirm_not_keeper: bool,
+    ) -> Result<PullPlan, SyncError> {
         if self.pull.is_some() {
             return Err(SyncError::PullConflictsPending);
         }
         self.require_local().await?;
         self.gate_write(backend, ctx, confirm_not_keeper).await?;
         let author = self.author(ctx).await?;
-        let Some(theirs) = self.fetch(backend, secrets, ctx).await? else {
+        let exchange = self.plan_exchange(backend, secrets, ctx).await?;
+        Ok(PullPlan { exchange, author })
+    }
+
+    /// Слияние полученного с файлами vault — под блокировкой vault. `fetched`
+    /// — итог сетевого шага: снимок сервера или отказ.
+    pub async fn complete_pull<B: VaultBackend>(
+        &mut self,
+        backend: &mut B,
+        ctx: &SyncContext,
+        plan: PullPlan,
+        fetched: Result<Option<String>, SyncError>,
+    ) -> Result<PullOutcome, SyncError> {
+        self.record_exchange(ctx.now, &fetched.as_ref().map(|_| ()).map_err(Clone::clone));
+        let author = plan.author;
+        // Пока шла сеть, получение могли начать другим путём.
+        if self.pull.is_some() {
+            return Err(SyncError::PullConflictsPending);
+        }
+        let Some(theirs) = fetched? else {
             return Ok(PullOutcome {
                 applied: 0,
                 conflicts: 0,
@@ -1395,6 +1532,7 @@ impl<E: GitEngine> SyncSession<E> {
     }
 
     async fn rollback<B: VaultBackend>(&mut self, backend: &mut B, pending: &PendingPull) {
+        self.progress_sink.set(None);
         for (path, before) in &pending.journal {
             let _ = write_file(backend, path, before.as_deref()).await;
         }
@@ -1600,15 +1738,35 @@ impl<E: GitEngine> SyncSession<E> {
         secrets: &S,
         ctx: &SyncContext,
     ) -> Result<(), SyncError> {
-        let spec = self.remote_spec(backend, secrets, ctx).await?;
-        let auth = self.auth(secrets).await;
-        let cancel = self.fresh_cancel();
+        let plan = self.begin_mirror(backend, secrets, ctx).await?;
         let mirror = self.mirror.as_ref().ok_or(SyncError::NoHistory)?;
-        let result = match mirror.probe().await? {
-            RepoProbe::Mirror => mirror.fetch(&spec, &auth, &cancel).await.map(|_| ()),
-            _ => mirror.clone_into(&spec, &auth, true, &cancel).await,
+        let result = plan.mirror(mirror).await;
+        self.complete_mirror(ctx, result)
+    }
+
+    /// План обновления зеркала — под блокировкой vault (T071).
+    pub async fn begin_mirror<B: VaultBackend, S: SecretStore>(
+        &mut self,
+        backend: &B,
+        secrets: &S,
+        ctx: &SyncContext,
+    ) -> Result<ExchangePlan, SyncError> {
+        if self.mirror.is_none() {
+            return Err(SyncError::NoHistory);
         }
-        .map_err(SyncError::from);
+        self.plan_exchange(backend, secrets, ctx).await
+    }
+
+    /// Движок зеркала — оболочка запускает сетевой шаг на его копии.
+    pub fn mirror_engine(&self) -> Option<&E> {
+        self.mirror.as_ref()
+    }
+
+    pub fn complete_mirror(
+        &mut self,
+        ctx: &SyncContext,
+        result: Result<(), SyncError>,
+    ) -> Result<(), SyncError> {
         if result.is_ok() {
             self.mirror_fetched_at = Some(ctx.now);
         }
@@ -1619,11 +1777,14 @@ impl<E: GitEngine> SyncSession<E> {
     // ── Syncthing (US4) ────────────────────────────────────────────────────
 
     /// Запоминает последнее известное состояние папки в Syncthing.
-    pub fn set_syncthing_state(&mut self, folder: SyncthingFolder) {
-        if self.syncthing.as_ref() != Some(&folder) {
-            self.syncthing = Some(folder);
-            self.events.push(SyncEvent::OverviewChanged);
+    /// `true` — состояние изменилось, окну пора перечитать сводку.
+    pub fn set_syncthing_state(&mut self, folder: SyncthingFolder) -> bool {
+        if self.syncthing.as_ref() == Some(&folder) {
+            return false;
         }
+        self.syncthing = Some(folder);
+        self.events.push(SyncEvent::OverviewChanged);
+        true
     }
 
     /// Сохраняет параметры доступа к Syncthing (FR-022): адрес — в значениях
@@ -1686,6 +1847,10 @@ impl<E: GitEngine> SyncSession<E> {
 
     /// Такт автоматики: автополучение, автоснимок, автоотправка. Ошибки
     /// обмена уходят в индикатор событием, а не в отказ (FR-019).
+    ///
+    /// Оболочка, которой важно не держать vault на время сети, проходит те же
+    /// шаги по отдельности (T071): [`Self::tick_pull_due`], получение по
+    /// шагам, [`Self::tick_local`], отправка по шагам, [`Self::tick_finish`].
     pub async fn tick<B: VaultBackend, S: SecretStore>(
         &mut self,
         backend: &mut B,
@@ -1693,40 +1858,77 @@ impl<E: GitEngine> SyncSession<E> {
         ctx: &SyncContext,
         auto_prefix: &str,
     ) -> TickOutcome {
+        let mut outcome = TickOutcome::idle(ctx.now);
+        if self.tick_pull_due(backend, ctx).await {
+            let result = self.pull(backend, secrets, ctx, false).await;
+            self.tick_pulled(&mut outcome, result);
+        }
+        if self
+            .tick_local(backend, ctx, auto_prefix, &mut outcome)
+            .await
+        {
+            let result = self.push(backend, secrets, ctx, false).await;
+            self.tick_pushed(&mut outcome, result);
+        }
+        self.tick_finish(backend, ctx, &mut outcome).await;
+        outcome
+    }
+
+    /// Обмен с сервером разрешён: история своя, адрес есть, писать можно,
+    /// незавершённого получения и операции git нет.
+    async fn exchange_allowed<B: VaultBackend>(
+        &self,
+        backend: &B,
+        ctx: &SyncContext,
+        settings: &VaultSyncSettings,
+    ) -> bool {
+        let copies = conflict_copies(backend).await;
+        let keeper_state = self.keeper_state(settings, ctx, &copies);
+        let local = matches!(self.engine.probe().await, Ok(RepoProbe::Local));
+        let head = self.engine.head().await.unwrap_or_default();
+        local
+            && settings.remote_url.is_some()
+            && keeper_state.may_write_history()
+            && self.pull.is_none()
+            && head.in_progress.is_none()
+    }
+
+    /// Пора ли автополучение — при открытии и по интервалу.
+    pub async fn tick_pull_due<B: VaultBackend>(&mut self, backend: &B, ctx: &SyncContext) -> bool {
+        let settings = sync_settings::read(backend).await;
+        let allowed = self.exchange_allowed(backend, ctx, &settings).await;
+        let interval = settings.auto_pull_interval_secs.map(|s| s as Millis * 1000);
+        let due = allowed
+            && ((settings.auto_pull_on_open && !self.pull_on_open_done)
+                || autosnapshot::pull_due(ctx.now, self.fetched_at, interval));
+        self.pull_on_open_done = true;
+        due
+    }
+
+    pub fn tick_pulled(
+        &mut self,
+        outcome: &mut TickOutcome,
+        result: Result<PullOutcome, SyncError>,
+    ) {
+        match result {
+            Ok(result) => outcome.pulled = result.applied > 0 || result.conflicts > 0,
+            Err(error) => self.events.push(SyncEvent::ExchangeFailed { error }),
+        }
+    }
+
+    /// Автоснимок без сети. Возвращает, пора ли автоотправка.
+    pub async fn tick_local<B: VaultBackend>(
+        &mut self,
+        backend: &mut B,
+        ctx: &SyncContext,
+        auto_prefix: &str,
+        outcome: &mut TickOutcome,
+    ) -> bool {
         let settings = sync_settings::read(backend).await;
         let copies = conflict_copies(backend).await;
         let keeper_state = self.keeper_state(&settings, ctx, &copies);
         let local = matches!(self.engine.probe().await, Ok(RepoProbe::Local));
         let head = self.engine.head().await.unwrap_or_default();
-        let mut outcome = TickOutcome {
-            decision: AutoDecision::Blocked {
-                reason: autosnapshot::BlockReason::Disabled,
-            },
-            snapshot: None,
-            pulled: false,
-            pushed: false,
-            next_tick_at: ctx.now + 60_000,
-        };
-
-        let exchange_allowed = local
-            && settings.remote_url.is_some()
-            && keeper_state.may_write_history()
-            && self.pull.is_none()
-            && head.in_progress.is_none();
-
-        // Автополучение при открытии и по интервалу.
-        let interval = settings.auto_pull_interval_secs.map(|s| s as Millis * 1000);
-        let pull_now = exchange_allowed
-            && ((settings.auto_pull_on_open && !self.pull_on_open_done)
-                || autosnapshot::pull_due(ctx.now, self.fetched_at, interval));
-        self.pull_on_open_done = true;
-        if pull_now {
-            match self.pull(backend, secrets, ctx, false).await {
-                Ok(result) => outcome.pulled = result.applied > 0 || result.conflicts > 0,
-                Err(error) => self.events.push(SyncEvent::ExchangeFailed { error }),
-            }
-        }
-
         let has_changes = local
             && self
                 .engine
@@ -1780,29 +1982,57 @@ impl<E: GitEngine> SyncSession<E> {
         }
 
         // Автоотправка: после снимка или если есть неотправленное.
-        if exchange_allowed && settings.auto_push && self.pull.is_none() {
-            let status = self
-                .remote_status(
-                    settings.remote_url.as_deref().unwrap_or(""),
-                    &settings,
-                    true,
-                )
-                .await;
-            if outcome.snapshot.is_some() || status.ahead.unwrap_or(0) > 0 {
-                match self.push(backend, secrets, ctx, false).await {
-                    Ok(_) => outcome.pushed = true,
-                    Err(error) => self.events.push(SyncEvent::ExchangeFailed { error }),
-                }
-            }
+        if !(settings.auto_push && self.exchange_allowed(backend, ctx, &settings).await) {
+            return false;
         }
-        if let Some(interval) = interval {
+        let status = self
+            .remote_status(
+                settings.remote_url.as_deref().unwrap_or(""),
+                &settings,
+                true,
+            )
+            .await;
+        outcome.snapshot.is_some() || status.ahead.unwrap_or(0) > 0
+    }
+
+    pub fn tick_pushed(
+        &mut self,
+        outcome: &mut TickOutcome,
+        result: Result<RemoteStatus, SyncError>,
+    ) {
+        match result {
+            Ok(_) => outcome.pushed = true,
+            Err(error) => self.events.push(SyncEvent::ExchangeFailed { error }),
+        }
+    }
+
+    /// Когда спросить снова: не позже следующего автополучения.
+    pub async fn tick_finish<B: VaultBackend>(
+        &self,
+        backend: &B,
+        ctx: &SyncContext,
+        outcome: &mut TickOutcome,
+    ) {
+        let settings = sync_settings::read(backend).await;
+        if let Some(interval) = settings.auto_pull_interval_secs.map(|s| s as Millis * 1000) {
             let next_pull = self.fetched_at.unwrap_or(ctx.now) + interval;
             outcome.next_tick_at = outcome.next_tick_at.min(next_pull.max(ctx.now + 1_000));
         }
-        outcome
+    }
+
+    /// Приёмник хода операций: оболочка читает его, пока сессия занята (T075).
+    pub fn progress_sink(&self) -> super::ProgressSink {
+        self.progress_sink.clone()
     }
 
     fn progress(&mut self, operation: Operation, done: u32, total: u32) {
+        // Операция закончилась — хода больше нет.
+        self.progress_sink
+            .set((done < total).then_some(super::SyncProgress {
+                operation,
+                done,
+                total,
+            }));
         self.events.push(SyncEvent::Progress {
             operation,
             done,

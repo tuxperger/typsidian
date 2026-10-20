@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { SyncError } from "../wasm-core/typsidian_core.js";
+import type { SyncError, SyncProgress } from "../wasm-core/typsidian_core.js";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
-import { describeSyncError } from "./describe.js";
+import { describeProgress, describeSyncError } from "./describe.js";
 import type { CloneRequest, RemoteCapabilities } from "./sync-client.js";
 
 export interface RemoteDialogProps {
@@ -17,6 +17,8 @@ export interface RemoteDialogProps {
   initialUrl?: string | null;
   /** Операция идёт: поля заперты, «Отмена» прерывает её. */
   busy: boolean;
+  /** Ход операции, если она массовая — «N из M» (T075). */
+  progress?: SyncProgress | null;
   error: SyncError | null;
   onSubmit: (request: CloneRequest) => void;
   onCancel: () => void;
@@ -36,6 +38,7 @@ export function RemoteDialog({
   initialProxy = null,
   initialUrl = null,
   busy,
+  progress = null,
   error,
   onSubmit,
   onCancel,
@@ -158,7 +161,11 @@ export function RemoteDialog({
             <span className="ts-hazard" aria-hidden="true">
               <span className="ts-hazard__fill" />
             </span>{" "}
-            {mode === "clone" ? t("sync.remote.cloning") : t("sync.remote.connecting")}
+            {progress !== null
+              ? describeProgress(t, progress)
+              : mode === "clone"
+                ? t("sync.remote.cloning")
+                : t("sync.remote.connecting")}
           </p>
         )}
         {/* Enter в любом поле отправляет форму; видимая кнопка — в подвале. */}

@@ -11,13 +11,18 @@
 //! отклоняется при подключении (FR-014a).
 
 use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream};
 
 use super::transport_http::{current_context, record_failure};
 use super::EngineError;
+
+/// Сколько последних байт `stderr` процесса `ssh` хранится (T077).
+const STDERR_LIMIT: usize = 64 * 1024;
 
 /// Разобранный адрес `ssh://[user@]host[:port]/path`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +82,45 @@ fn quote(path: &str) -> String {
 struct Channel {
     child: Child,
     stdin: ChildStdin,
-    stdout: ChildStdout,
+    /// Вывод `ssh` читает свой поток (T080): чтение не блокируется насмерть, и
+    /// зависший процесс прерывается отменой и пределом простоя.
+    stdout: Receiver<Vec<u8>>,
+    /// Остаток куска, не поместившийся в буфер прошлого чтения.
+    pending: Vec<u8>,
     stderr: Arc<Mutex<Vec<u8>>>,
+}
+
+/// Как часто чтение просыпается проверить отмену и предел простоя.
+const READ_TICK: Duration = Duration::from_millis(100);
+
+/// Почему чтение прервано.
+#[derive(Debug, PartialEq, Eq)]
+enum Interrupted {
+    Cancelled,
+    Idle,
+}
+
+/// Следующий кусок вывода: ждёт тактами, просыпаясь проверить отмену и предел
+/// простоя. `Ok(None)` — вывод закончился.
+fn next_chunk(
+    stdout: &Receiver<Vec<u8>>,
+    cancel: &dyn Fn() -> bool,
+    idle_limit: Duration,
+) -> Result<Option<Vec<u8>>, Interrupted> {
+    let started = Instant::now();
+    loop {
+        if cancel() {
+            return Err(Interrupted::Cancelled);
+        }
+        match stdout.recv_timeout(READ_TICK) {
+            Ok(chunk) => return Ok(Some(chunk)),
+            Err(RecvTimeoutError::Disconnected) => return Ok(None),
+            Err(RecvTimeoutError::Timeout) if started.elapsed() >= idle_limit => {
+                return Err(Interrupted::Idle)
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
 }
 
 impl Drop for Channel {
@@ -123,10 +165,20 @@ impl SshSubtransport {
             .stdin
             .take()
             .ok_or_else(|| std::io::Error::other("нет stdin"))?;
-        let stdout = child
+        let mut stdout = child
             .stdout
             .take()
             .ok_or_else(|| std::io::Error::other("нет stdout"))?;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 16 * 1024];
+            // Конец вывода или его ошибка закрывают канал — читатель видит конец.
+            while let Ok(read) = stdout.read(&mut chunk) {
+                if read == 0 || sender.send(chunk[..read].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
         let stderr_buffer = Arc::new(Mutex::new(Vec::new()));
         if let Some(mut stderr) = child.stderr.take() {
             let sink = stderr_buffer.clone();
@@ -137,7 +189,7 @@ impl SshSubtransport {
                         break;
                     }
                     if let Ok(mut sink) = sink.lock() {
-                        sink.extend_from_slice(&chunk[..read]);
+                        keep_tail(&mut sink, &chunk[..read], STDERR_LIMIT);
                     }
                 }
             });
@@ -145,7 +197,8 @@ impl SshSubtransport {
         Ok(Channel {
             child,
             stdin,
-            stdout,
+            stdout: receiver,
+            pending: Vec::new(),
             stderr: stderr_buffer,
         })
     }
@@ -201,6 +254,16 @@ struct SshStream {
     channel: Arc<Mutex<Channel>>,
 }
 
+/// Дописывает вывод, храня не больше `limit` последних байт: причину отказа
+/// `ssh` пишет последней строкой (T077), и болтливый сервер память не занимает.
+fn keep_tail(buffer: &mut Vec<u8>, chunk: &[u8], limit: usize) {
+    buffer.extend_from_slice(chunk);
+    if buffer.len() > limit {
+        let excess = buffer.len() - limit;
+        buffer.drain(..excess);
+    }
+}
+
 /// Причина отказа по выводу `ssh` в stderr.
 fn classify_stderr(stderr: &str) -> EngineError {
     let lower = stderr.to_ascii_lowercase();
@@ -235,7 +298,35 @@ impl Read for SshStream {
             .channel
             .lock()
             .map_err(|_| std::io::Error::other("ssh"))?;
-        let read = channel.stdout.read(buf)?;
+        if channel.pending.is_empty() {
+            let context = current_context();
+            let cancel = || {
+                context
+                    .as_ref()
+                    .is_some_and(|context| context.cancel.is_cancelled())
+            };
+            let idle_limit = context
+                .as_ref()
+                .map_or(super::transport_http::NETWORK_IDLE_LIMIT, |context| {
+                    context.idle_limit
+                });
+            match next_chunk(&channel.stdout, &cancel, idle_limit) {
+                Ok(Some(chunk)) => channel.pending = chunk,
+                Ok(None) => {}
+                Err(interrupted) => {
+                    // Зависший `ssh` завершается — по отмене и по простою.
+                    let _ = channel.child.kill();
+                    record_failure(match interrupted {
+                        Interrupted::Cancelled => EngineError::Cancelled,
+                        Interrupted::Idle => EngineError::Timeout,
+                    });
+                    return Err(std::io::Error::other("ssh прерван"));
+                }
+            }
+        }
+        let read = channel.pending.len().min(buf.len());
+        buf[..read].copy_from_slice(&channel.pending[..read]);
+        channel.pending.drain(..read);
         if read == 0 {
             // Канал закрыт до конца протокола — причина в stderr.
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -296,6 +387,56 @@ mod tests {
     #[test]
     fn paths_are_quoted_for_the_server_shell() {
         assert_eq!(quote("/a'b"), "'/a'\\''b'");
+    }
+
+    #[test]
+    fn a_silent_ssh_is_given_up_on_and_cancellation_is_heard() {
+        let (sender, receiver) = std::sync::mpsc::channel::<Vec<u8>>();
+        // Молчит дольше предела простоя — чтение прерывается по времени.
+        let started = Instant::now();
+        assert_eq!(
+            next_chunk(&receiver, &|| false, Duration::from_millis(300)),
+            Err(Interrupted::Idle)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        // Отмена слышна в пределах такта, даже пока процесс молчит.
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(150));
+                cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            assert_eq!(
+                next_chunk(
+                    &receiver,
+                    &|| cancelled.load(std::sync::atomic::Ordering::SeqCst),
+                    Duration::from_secs(60)
+                ),
+                Err(Interrupted::Cancelled)
+            );
+        });
+        assert!(started.elapsed() < Duration::from_secs(2));
+        // Данные приходят — отдаются; конец вывода — конец.
+        sender.send(b"0008NAK\n".to_vec()).unwrap();
+        assert_eq!(
+            next_chunk(&receiver, &|| false, Duration::from_secs(1)),
+            Ok(Some(b"0008NAK\n".to_vec()))
+        );
+        drop(sender);
+        assert_eq!(
+            next_chunk(&receiver, &|| false, Duration::from_secs(1)),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn stderr_keeps_only_its_tail() {
+        let mut buffer = Vec::new();
+        keep_tail(&mut buffer, b"0123456789", 4);
+        assert_eq!(buffer, b"6789");
+        keep_tail(&mut buffer, b"ab", 4);
+        assert_eq!(buffer, b"89ab");
     }
 
     #[test]

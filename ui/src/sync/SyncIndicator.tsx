@@ -1,7 +1,7 @@
 "use client";
 
 import { useI18n } from "../i18n/index.js";
-import { describeSyncError, indicatorText } from "./describe.js";
+import { describeProgress, describeSyncError, indicatorText } from "./describe.js";
 import type { SyncControl } from "./useSync.js";
 
 export interface SyncIndicatorProps {
@@ -24,7 +24,10 @@ export function SyncIndicator({
   onOpenPanel,
 }: SyncIndicatorProps): React.JSX.Element {
   const { t } = useI18n();
-  const { label, tone } = indicatorText(t, sync.overview, sync.activity, sync.error);
+  const { label: state, tone } = indicatorText(t, sync.overview, sync.activity, sync.error);
+  // Массовая операция — с ходом «N из M» (принцип X).
+  const label =
+    tone === "busy" && sync.progress !== null ? describeProgress(t, sync.progress) : state;
   const detail = sync.error === null ? t("sync.indicator.open") : describeSyncError(t, sync.error);
 
   return (

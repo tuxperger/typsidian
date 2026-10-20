@@ -5,6 +5,7 @@ import type {
   LinkState,
   SyncError,
   SyncOverview,
+  SyncProgress,
 } from "../wasm-core/typsidian_core.js";
 import type { Translate } from "../i18n/index.js";
 import type { SyncActivity } from "./useSync.js";
@@ -66,6 +67,8 @@ export function describeSyncError(t: Translate, error: SyncError): string {
       return t("sync.error.targetNotEmpty");
     case "Cancelled":
       return t("sync.error.cancelled");
+    case "TooLarge":
+      return t("sync.error.tooLarge", { limit: error.limit_mb });
     case "Io":
       return t("sync.error.io", { detail: error.message });
     default: {
@@ -247,4 +250,21 @@ export function indicatorText(
       return exhaustive;
     }
   }
+}
+
+/** «получение: 12 из 340» — ход массовой операции (T075, принцип X). */
+export function describeProgress(t: Translate, progress: SyncProgress): string {
+  const operation = (() => {
+    switch (progress.operation) {
+      case "FirstSnapshot":
+        return t("sync.progress.firstSnapshot");
+      case "Pull":
+        return t("sync.progress.pull");
+      case "Push":
+        return t("sync.progress.push");
+      case "Clone":
+        return t("sync.progress.clone");
+    }
+  })();
+  return t("sync.progress", { operation, done: progress.done, total: progress.total });
 }

@@ -1,8 +1,10 @@
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "../tauri-invoke.js";
 import type {
   Change,
   Conflict,
   Content,
+  SyncProgress,
   DeviceVaultSync,
   FileDiff,
   HistoryPage,
@@ -67,6 +69,21 @@ function tauriSyncClient(vaultId: string): SyncClient {
   return {
     overview: () => invoke<SyncOverview>("sync_overview"),
     pollEvents: () => invoke<SyncEvent[]>("sync_poll_events"),
+    progress: async () => (await invoke<SyncProgress | null>("sync_progress")) ?? null,
+    onChanged: (listener) => {
+      // Подписка асинхронная: отписка до её готовности не должна оставить
+      // слушателя навсегда.
+      let stop: (() => void) | null = null;
+      let cancelled = false;
+      void listen("sync-changed", () => listener()).then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      });
+      return () => {
+        cancelled = true;
+        stop?.();
+      };
+    },
     noteChange: () => invoke<void>("sync_note_change"),
     cancel: () => void invoke("sync_cancel"),
 

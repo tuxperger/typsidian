@@ -104,6 +104,10 @@ mitex = "0.2.4"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 # TLS только под native: в браузере им занимается сам `fetch`.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+# Закрепление сертификата локального Syncthing внутри TLS-рукопожатия (фича 011,
+# T076): свой проверяющий сертификат. Тот же rustls 0.23 с `ring`, что у `reqwest`, —
+# новых крейтов не добавляет.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 notify = "6"
 notify-debouncer-full = "0.3"
 # Каталог конфигурации по правилам платформы (research.md §1): путь показывается

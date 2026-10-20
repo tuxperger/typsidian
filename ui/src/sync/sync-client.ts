@@ -5,6 +5,7 @@ import type {
   Content,
   Credentials,
   DeviceVaultSync,
+  SyncProgress,
   FileDiff,
   HistoryPage,
   IgnoreCheck,
@@ -73,6 +74,17 @@ export interface SyncClient {
   noteChange(): Promise<void>;
   /** Отменяет текущую сетевую или массовую операцию (принцип X). */
   cancel(): void;
+  /**
+   * Ход идущей массовой операции — читается, пока она идёт: без ожидания
+   * сессии и очереди вызовов (T075). `null` — операции нет.
+   */
+  progress(): Promise<SyncProgress | null>;
+  /**
+   * Состояние синхронизации изменилось само (Syncthing доставил файлы,
+   * подключилось устройство — T078): окно перечитывает сводку, не дожидаясь
+   * такта. Нет — оболочка не сообщает, сводка догоняет по такту.
+   */
+  onChanged?(listener: () => void): () => void;
 
   ignoreReports(): Promise<IgnoreReport[]>;
   applyIgnore(file: IgnoreFile): Promise<void>;
@@ -203,6 +215,7 @@ const SYNC_ERROR_KINDS: ReadonlySet<string> = new Set<SyncError["kind"]>([
   "ConflictNotFound",
   "TargetNotEmpty",
   "Cancelled",
+  "TooLarge",
   "Io",
 ]);
 
