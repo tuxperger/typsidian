@@ -85,3 +85,9 @@ nix develop -c node scripts/dev/browser.mjs http://localhost:3000 \
 - **iOS** — оболочки нет; не проверено и не будет проверено в рамках фичи.
 - **Desktop-оболочка в headless-режиме** — `tauri-driver` в окружении нет; desktop
   проверяется вручную по шагам 1–8.
+
+## Гейты (T047, 2026-10-20)
+
+`.specify/scripts/typsidian/gates.sh all` — `gates: OK (all)`: fmt, хардкод интерфейса,
+`cargo check` ядра под native и wasm32, `cargo test`, `wasm-bindgen-test` в Chrome, сборка
+wasm и ui, `pnpm typecheck` по ui, web, desktop и mobile.
