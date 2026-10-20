@@ -128,6 +128,10 @@ export default async (page) => {
   await page.click("text=Выбрать…");
   await page.waitFor(`Boolean(document.querySelector('.ts-import__facts b'))`, { label: "числа обзора" });
   check("C1: папка открыта только для чтения", (await page.evaluate(`window.__pickMode`)) === "read");
+  check(
+    "C1: импорт идёт в своём воркере (T026)",
+    await page.evaluate(`performance.getEntriesByType("resource").some((entry) => entry.name.includes("import-worker"))`),
+  );
   const facts = await page.text(".ts-import__facts");
   page.log("обзор: " + facts.replace(/\n/g, " "));
   check("C1: .obsidian и .trash не считаются", facts.includes("без .obsidian/ и .trash/"));

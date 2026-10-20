@@ -24,6 +24,8 @@ import {
   importBegin,
   importFinish,
   ImportSource,
+  type ImportState,
+  type ImportSurvey,
   SourceEngine,
   createSourceFile,
   type CitationPlanError,
@@ -70,6 +72,7 @@ import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
 import { ensureWasmInitialized } from "./wasm-init.js";
 import { createCompileWorker } from "./preview/compile-worker-client.js";
+import { createImportWorker, type ImportWorker } from "./import/import-worker-client.js";
 import { loadBuiltinFonts } from "./preview/builtin-fonts.js";
 import type { SyncClient, VaultCloner } from "./sync/sync-client.js";
 import { webSyncClient, webVaultCloner } from "./sync/sync-client-web.js";
@@ -118,13 +121,15 @@ const POLL_STEP_BUDGET_MS = 20;
 export function webClients(
   backend: WebBackend,
   engine: PreviewEngine,
+  /** Папка vault — воркеру импорта (021 T026); `null` — импорт в окне. */
+  vaultHandle: FileSystemDirectoryHandle | null = null,
 ): { vault: VaultClient; preview: PreviewClient; queue: WasmCallQueue } {
   const queue = createWasmCallQueue();
   return {
     // Очередь отдаётся наружу ради синхронизации (фича 011): её сессия тоже
     // заимствует backend и обязана стоять в той же очереди.
     queue,
-    vault: webVaultClient(backend, queue),
+    vault: webVaultClient(backend, queue, vaultHandle),
     // Снимок несохранённых правок предпросмотру обновлять не нужно: сборка
     // ничего в vault не пишет, поэтому здесь обычный `run`, а не обёртка
     // `withSnapshotRefresh` из клиента vault.
@@ -141,7 +146,16 @@ export function webClients(
 export function webVaultClient(
   backend: WebBackend,
   queue = createWasmCallQueue(),
+  vaultHandle: FileSystemDirectoryHandle | null = null,
 ): VaultClient {
+  // Импорт из Obsidian — в своём воркере, если есть папка vault (021 T026):
+  // шаг на большой заметке — сотни миллисекунд, окну их ждать незачем.
+  let importWorker: ImportWorker | null = null;
+  const workerImport = vaultHandle !== null && typeof Worker !== "undefined";
+  const inWorker = <T,>(request: Record<string, unknown>): Promise<T> => {
+    if (importWorker === null) return Promise.reject({ kind: "NoSource" });
+    return importWorker.call<T>(request);
+  };
   // Ядро живёт в том же процессе одним Rust-объектом, и обращаться к нему можно
   // только по одному вызову за раз — см. `wasm-call-queue.ts`. Через очередь
   // проходят все вызовы **экземпляра**; статические методы `WebBackend`
@@ -521,17 +535,41 @@ export function webVaultClient(
     import: {
       open: async (target, name) => {
         if (target.kind !== "handle") throw { kind: "NoSource" };
+        if (workerImport && vaultHandle !== null) {
+          importWorker?.terminate();
+          importWorker = createImportWorker();
+          await importWorker.call({
+            kind: "open",
+            vault: { name: vaultHandle.name, handle: vaultHandle },
+            source: { name, handle: target.handle },
+          });
+          return;
+        }
         importSource?.free();
         importSource = ImportSource.fromHandle(name, target.handle);
       },
       close: async () => {
+        importWorker?.terminate();
+        importWorker = null;
         importSource?.free();
         importSource = null;
       },
-      survey: (job) => call(() => importSurvey(openedSource(), backend, job)),
-      begin: (job) => call(() => importBegin(openedSource(), backend, job)),
-      step: (state) => call(() => importStep(openedSource(), backend, state)),
-      finish: (state) => call(() => importFinish(backend, state)),
+      survey: (job) =>
+        workerImport
+          ? inWorker<ImportSurvey>({ kind: "survey", job })
+          : call(() => importSurvey(openedSource(), backend, job)),
+      begin: (job) =>
+        workerImport
+          ? inWorker<ImportState>({ kind: "begin", job })
+          : call(() => importBegin(openedSource(), backend, job)),
+      step: (state) =>
+        workerImport
+          ? inWorker<ImportState>({ kind: "step", state })
+          : call(() => importStep(openedSource(), backend, state)),
+      finish: (state) =>
+        workerImport
+          ? inWorker<string>({ kind: "finish", state })
+          : call(() => importFinish(backend, state)),
     },
   };
 }
@@ -659,7 +697,7 @@ async function openWebVaultFromHandle(
   knownId: string | null,
 ): Promise<VaultOpenResult> {
   const backend = await WebBackend.fromHandle(handle.name, handle);
-  const { vault, preview, queue } = webClients(backend, new PreviewEngine());
+  const { vault, preview, queue } = webClients(backend, new PreviewEngine(), handle);
   // FR-007: открытый vault становится последним. После успеха, а не до:
   // папка, которую не удалось открыть, последней не становится.
   const remembered =

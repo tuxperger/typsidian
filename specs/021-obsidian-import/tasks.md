@@ -54,4 +54,4 @@ T001 блокирует всё ядро. T005 — до T016. US1 → US2 → US3
 
 ## Phase 7: Convergence
 
-- [ ] T026 Вынести шаги импорта на web в отдельный воркер со вторым экземпляром ядра (условие пересмотра plan.md Complexity Tracking выполнено: шаг на заметке 1 МБ — 228 мс уже нативно при пороге 50 мс, research.md §12); форма вызова `VaultClient.import` не меняется; хендлы источника и vault передаются в воркер через `postMessage` per Constitution X, SC-004 (partial)
+- [X] T026 Вынести шаги импорта на web в отдельный воркер со вторым экземпляром ядра (условие пересмотра plan.md Complexity Tracking выполнено: шаг на заметке 1 МБ — 228 мс уже нативно при пороге 50 мс, research.md §12); форма вызова `VaultClient.import` не меняется; хендлы источника и vault передаются в воркер через `postMessage` per Constitution X, SC-004 (partial)
