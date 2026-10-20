@@ -203,5 +203,55 @@ async function perf(page) {
   const took = Date.now() - jump;
   if (!arrived) page.log(`после команды: строка ${JSON.stringify(await page.evaluate(`document.querySelector(".ts-editor .cm-activeLine")?.textContent ?? ""`))}, вкладки ${JSON.stringify(await page.text(".ts-tabs, .ts-tabbar").catch(() => ""))}, статус ${JSON.stringify(await page.text(".ts-cite-offer").catch(() => ""))}`);
   failures += check(page, arrived && took <= 1000, `SC-003: переход к метке связанного файла ${took} мс (≤ 1000)`);
+
+  // SC-004: отклик на нажатие с включённым показом и без него (≤ 10 %).
+  // Набор без `@` и `[[` — ядро при нём не спрашивается вовсе.
+  const sample = "обычный текст без ссылок и меток ".repeat(5);
+  const typing = async () => {
+    await page.press("End", { ctrl: true, code: "End" });
+    await typeSlowly(page, "\n");
+    const started = Date.now();
+    for (const ch of sample) await page.type(ch);
+    try {
+      await page.waitFor(
+        `document.querySelector(".ts-editor .cm-activeLine")?.textContent.includes(${JSON.stringify(sample.trimEnd())})`,
+        { timeout: 10000 },
+      );
+    } catch (error) {
+      page.log("активная строка: " + JSON.stringify(await page.evaluate(`document.querySelector(".ts-editor .cm-activeLine")?.textContent ?? "нет"`)));
+      page.log("фокус: " + (await page.evaluate(`document.activeElement?.className ?? "нет"`)));
+      throw error;
+    }
+    return (Date.now() - started) / sample.length;
+  };
+  const setAuto = async (on) => {
+    await page.evaluate(`[...document.querySelectorAll(".ts-header button")].find((b) => b.textContent.trim() === "Настройки")?.click()`);
+    await page.sleep(600);
+    await page.click("text=Внешний вид");
+    await page.sleep(300);
+    await page.evaluate(`(() => {
+      const box = [...document.querySelectorAll("label")].find((l) => l.textContent.includes("Предлагать метки"))?.querySelector("input");
+      if (box && box.checked !== ${on}) box.click();
+    })()`);
+    await page.sleep(300);
+    await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Закрыть")?.click()`);
+    await page.sleep(800);
+    await page.evaluate(caretToEnd);
+  };
+  const rounds = { on: [], off: [] };
+  for (const on of [true, false, true, false, true, false]) {
+    await setAuto(on);
+    rounds[on ? "on" : "off"].push(await typing());
+  }
+  // Медиана раундов: одиночный замер в headless шумит на десятки процентов.
+  const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const on = median(rounds.on);
+  const off = median(rounds.off);
+  const ratio = on / off;
+  failures += check(
+    page,
+    ratio <= 1.1,
+    `SC-004: ${on.toFixed(1)} мс на нажатие с показом, ${off.toFixed(1)} без него (${((ratio - 1) * 100).toFixed(1)} %, ≤ 10 %)`,
+  );
   return failures;
 }

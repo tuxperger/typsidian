@@ -142,7 +142,7 @@ vault; список сужается, управляется с клавиату
 ## Phase 6: Polish & Cross-Cutting
 
 - [X] T067 [P] Бенчмарк `packages/core/benches/completion_scale.rs` с записью `[[bench]]` в `packages/core/Cargo.toml`: 10 000 строк и 500 меток — `completions` ≤ 20 мс, `reference_marks` ≤ 50 мс на нативном таргете (SC-001, FR-006)
-- [ ] T068 Проверить SC-004 и SC-001 в браузере: дополнить `scripts/dev/scenarios/completion.mjs` замером — при наборе текста без `@` и `[[` вызовов `completions` нет, а от набора `@` до показа списка в заметке с 500 метками проходит не больше 100 мс; результат записать в `specs/018-label-completion/quickstart.md`
+- [X] T068 Проверить SC-004 и SC-001 в браузере: дополнить `scripts/dev/scenarios/completion.mjs` замером — при наборе текста без `@` и `[[` вызовов `completions` нет, а от набора `@` до показа списка в заметке с 500 метками проходит не больше 100 мс; результат записать в `specs/018-label-completion/quickstart.md`
 - [X] T069 Проверить SC-003 в браузере: дополнить `scripts/dev/scenarios/completion.mjs` замером времени от команды до каретки у метки в связанном файле (не больше 1 с); результат записать в `specs/018-label-completion/quickstart.md`
 - [X] T070 [P] Прогнать гейты по скиллу `quality-gates-typsidian` (fmt, оба таргета ядра, `cargo test`, `wasm-bindgen-test`, `pnpm typecheck`, `scripts/check-i18n.sh`; FR-010 — паритет таргетов и тексты только из переводов) и записать итог в `specs/018-label-completion/quickstart.md`
 - [ ] T071 Пройти ручные пункты quickstart.md на desktop и Android, в том числе с отключённой сетью (FR-010), и записать итог в `specs/018-label-completion/quickstart.md`; iOS записать как «не проверено» — оболочки нет
