@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { OpenNoteEditors } from "./openNoteEditors.js";
 import type {
   LinkOutcome,
   MentionScan,
@@ -64,6 +65,11 @@ export interface NoteLinksInput {
   mentionsExpanded: boolean;
   /** «Связать» записало файл: Workspace увеличивает счётчик обновления. */
   onLinked: (sourcePath: string) => void;
+  /**
+   * Открытые заметки (013 T046–T047): заметка-источник, открытая в редакторе,
+   * правится в нём, а не на диске — несохранённые правки не теряются.
+   */
+  editors: OpenNoteEditors | null;
 }
 
 export type BacklinksView =
@@ -174,6 +180,8 @@ export function useNoteLinks(input: NoteLinksInput): NoteLinks {
   openTextsRef.current = input.openTexts;
   const onLinkedRef = useRef(onLinked);
   onLinkedRef.current = onLinked;
+  const editorsRef = useRef(input.editors);
+  editorsRef.current = input.editors;
 
   const [backlinksState, setBacklinksState] = useState<BacklinksState | null>(null);
   const [mentionsState, setMentionsState] = useState<MentionsState | null>(null);
@@ -476,13 +484,21 @@ export function useNoteLinks(input: NoteLinksInput): NoteLinks {
       setLinkingKey(key);
       let outcome: LinkOutcome;
       try {
-        // 013 T046–T047: когда появится порт `OpenNoteEditors`, здесь будет
-        // `editors.textOf(source.path)`; пока текст редактора не передаётся, и
-        // ядро пишет файл само либо отказывает (`UnsavedElsewhere`).
+        // Заметка открыта в редакторе — ядро считает замену по её тексту и
+        // отдаёт её порту (`EditorEdit`); не открыта — пишет файл само.
+        const editors = editorsRef.current;
+        const editorText = editors?.textOf(source.path) ?? null;
         outcome = await current.linkMention(
           { target: forTarget, source: source.path, place: row.place, text: row.text },
-          null,
+          editorText,
         );
+        if (outcome.kind === "EditorEdit") {
+          // Текст успел измениться — место уже другое: список перечитывается.
+          outcome =
+            editors?.applyEdit(source.path, outcome.edit).ok === true
+              ? { kind: "Written" }
+              : { kind: "Stale" };
+        }
       } catch {
         outcome = { kind: "Failed" };
       }

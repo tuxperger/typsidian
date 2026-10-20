@@ -115,6 +115,7 @@ import { OutlineMode, type OutlineTarget } from "../note-panel/OutlineMode.js";
 import { useOutline } from "../note-panel/useOutline.js";
 import type { HeadingRequest } from "../preview/PreviewPane.js";
 import { LinksMode, type RevealPlace } from "../note-panel/links/LinksMode.js";
+import { plainEditors } from "../note-panel/links/plainEditors.js";
 import { useNoteLinks, type LinksChanges } from "../note-panel/links/useNoteLinks.js";
 import type { PreviewState } from "../preview/useCompiledDocument.js";
 import type { ShowHost } from "../slides/show-channel.js";
@@ -841,6 +842,18 @@ function WorkspaceView({
   //
   // Запросы идут, только пока колонка видна (research.md §14): скрытая ничего
   // не читает. Целью служит открытая заметка или доска.
+  // Порт правки открытых заметок (013 T047): «Связать» правит заметку в
+  // редакторе, а не на диске. Активный редактор — через ref: порт создаётся
+  // один раз на реестр.
+  const activeEditorRef = useRef<() => { path: string; view: EditorView } | null>(() => null);
+  activeEditorRef.current = () => {
+    const view = getEditorView?.() ?? null;
+    return view !== null && openNotePath !== null ? { path: openNotePath, view } : null;
+  };
+  const noteEditors = useMemo(
+    () => plainEditors(registry, () => activeEditorRef.current()),
+    [registry],
+  );
   const links = useNoteLinks({
     client: state.client?.links ?? null,
     target: activePath,
@@ -852,6 +865,7 @@ function WorkspaceView({
     mentionsExpanded: notePanel.mentionsExpanded,
     // Итог «Связать»: файл заметки-источника изменился.
     onLinked: (sourcePath) => bumpLinks([sourcePath]),
+    editors: noteEditors,
   });
   const { backlinkCount, mentionCount } = links;
   const linksBadge = useMemo(() => {
