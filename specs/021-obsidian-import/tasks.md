@@ -46,7 +46,7 @@
 
 - [X] T023 [P] Генератор `scripts/dev/gen-obsidian.sh` и замер SC-004 на рабочем столе (quickstart.md §3); итог — Decision в research.md (замер — путь ядра нативно, бенч `import_scale`, а не окно рабочего стола)
 - [X] T024 Гейты `.specify/scripts/typsidian/gates.sh all`
-- [ ] T025 README и `**Status**: Implemented` в `specs/021-obsidian-import/spec.md`
+- [X] T025 README и `**Status**: Implemented` в `specs/021-obsidian-import/spec.md`
 
 ## Dependencies
 

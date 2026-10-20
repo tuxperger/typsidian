@@ -57,7 +57,7 @@
 
 - [X] T023 [P] Проверка значений свойств в сообщениях ошибок и журнале (IX) — тест на обоих путях в `packages/core/tests/common/properties_cases.rs`
 - [X] T024 Гейты `.specify/scripts/typsidian/gates.sh all`
-- [ ] T025 README: свойства, поиск по ним, блок выборки и его вид вне приложения в `README.md`; `**Status**: Implemented` в `specs/020-note-properties-queries/spec.md`
+- [X] T025 README: свойства, поиск по ним, блок выборки и его вид вне приложения в `README.md`; `**Status**: Implemented` в `specs/020-note-properties-queries/spec.md`
 
 ## Dependencies
 
