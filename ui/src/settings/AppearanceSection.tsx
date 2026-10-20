@@ -9,6 +9,13 @@ export interface AppearanceSectionProps {
   onChangeFontSize: (size: number) => void;
   /** Выбор языка интерфейса (фича 010, FR-010). Уходит в настройки устройства. */
   onChangeLanguage: (choice: LanguageChoice) => void;
+  /**
+   * «Предлагать метки и заметки при наборе» (фича 018, FR-009): привычка
+   * устройства. Не передано — выключателя нет.
+   */
+  onChangeCompletionAuto?: (auto: boolean) => void;
+  /** Сочетание ручного вызова — в подписи выключателя; пусто — не назначено. */
+  completionShortcut?: string;
   /** Причина отказа из ядра (FR-016) — UI её показывает, но не придумывает. */
   rejectionMessage: string | null;
 
@@ -39,6 +46,8 @@ export function AppearanceSection({
   onChangeTheme,
   onChangeFontSize,
   onChangeLanguage,
+  onChangeCompletionAuto,
+  completionShortcut = "",
   canMakeDefault = false,
   onMakeDefault,
   defaultsMessage = null,
@@ -91,6 +100,22 @@ export function AppearanceSection({
         size={settings.editor_font_size ?? null}
         onChange={onChangeFontSize}
       />
+
+      {onChangeCompletionAuto !== undefined && (
+        <>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.editor_completion_auto ?? true}
+              onChange={(event) => onChangeCompletionAuto(event.target.checked)}
+            />
+            {t("completion.setting.auto")}
+          </label>
+          <p className="ts-field__hint">
+            {t("completion.setting.autoHint", { shortcut: completionShortcut })}
+          </p>
+        </>
+      )}
 
       {rejectionMessage && <p role="alert">{rejectionMessage}</p>}
 

@@ -77,7 +77,13 @@ import type {
   OpenText,
   PreviewState,
   ResolvedBinding,
+  CompletionList,
+  CompletionRequest,
+  DefinitionOutcome,
+  DefinitionRequest,
   GraphRequest,
+  MarksRequest,
+  ReferenceMark,
   VaultGraph,
   SearchQuery,
   SearchResults,
@@ -196,6 +202,12 @@ export interface VaultClient {
   backlinks(path: string): Promise<Note[]>;
   /** Граф связей vault одним вызовом ядра (фича 025). */
   graph(request: GraphRequest): Promise<VaultGraph>;
+  /** Список меток и заметок у каретки (фича 018). Текст — буфер редактора. */
+  completions(request: CompletionRequest): Promise<CompletionList>;
+  /** Куда ведёт ссылка под кареткой (фича 018, FR-005). */
+  definitionAt(request: DefinitionRequest): Promise<DefinitionOutcome>;
+  /** Отметки ссылок в никуда и повторных меток (фича 018, FR-006). */
+  referenceMarks(request: MarksRequest): Promise<ReferenceMark[]>;
   brokenLinks(path: string): Promise<string[]>;
   accessState(): Promise<AccessState>;
 

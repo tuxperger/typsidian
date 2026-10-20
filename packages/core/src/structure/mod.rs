@@ -28,7 +28,7 @@ pub use view::{
     outline_active, outline_view, OutlineCounts, OutlineRequest, OutlineRow, OutlineState,
     OutlineView,
 };
-pub use walk::{mode_at, parse};
+pub use walk::{mode_at, of_tree, parse};
 
 /// Место в тексте заметки (data-model.md «TextPlace»).
 ///
@@ -123,6 +123,19 @@ pub enum LabelOwner {
     Other,
 }
 
+/// Что помечено меткой — для списка дополнения 018 (тег вида у строки).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum LabelKind {
+    Heading,
+    Figure,
+    Table,
+    Equation,
+    #[default]
+    Other,
+}
+
 /// Определение метки — узел `Label` в разметке. Употребления в коде
 /// (`#cite(<ключ>)`, `#link(<раздел>)`) сюда не попадают.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +145,16 @@ pub struct LabelSite {
     /// Имя без угловых скобок.
     pub name: String,
     pub attached: LabelOwner,
+    /// Что помечено (018): вид и текст элемента одной строкой; у `Other` текст
+    /// пуст.
+    #[serde(default)]
+    pub kind: LabelKind,
+    #[serde(default)]
+    pub text: String,
+    /// Метка в разметке, которая попадёт в документ ровно один раз: ни один
+    /// предок не условие, блок кода, `let` или `context` (018, research.md §17).
+    #[serde(default)]
+    pub top_level: bool,
     /// Сама метка `<имя>`.
     pub place: SourcePlace,
 }

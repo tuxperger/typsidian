@@ -74,6 +74,11 @@ pub struct CompiledDocument {
     /// PDF и у неудавшейся пусто, как и `pages`.
     #[serde(default)]
     pub slides: Vec<PageSlideInfo>,
+    /// Метки документа и ссылки текста удачной сборки в страницы — для
+    /// отметок 018 (research.md §4). `Some` только у `Succeeded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub evidence: Option<super::evidence::BuildEvidence>,
 }
 
 impl CompiledDocument {
@@ -819,6 +824,7 @@ fn stopped(note_path: &str, revision: u64, reason: ExecutorError) -> CompiledDoc
         dependencies: Vec::new(),
         anchor: None,
         slides: Vec::new(),
+        evidence: None,
     }
 }
 
@@ -906,6 +912,7 @@ fn compile_with(
         .map(|d| translate(&world, main, d))
         .collect();
 
+    let mut evidence = None;
     let mut slides = Vec::new();
     let (outcome, pages, pdf) = match (compiled.output, render) {
         (Ok(document), Render::Pages) => {
@@ -913,6 +920,7 @@ fn compile_with(
             // (019, research.md §3).
             if let Ok(source) = world.source(main) {
                 slides = collect_slides(&document, &world, main, source.text());
+                evidence = Some(super::evidence::collect(&document, source.text()));
             }
             (CompileOutcome::Succeeded, render_pages(&document), None)
         }
@@ -944,6 +952,7 @@ fn compile_with(
             dependencies: Vec::new(),
             anchor: None,
             slides,
+            evidence,
         },
         pdf,
         world.into_snapshot(),

@@ -99,6 +99,12 @@ export interface CodeEditorProps {
    */
   onSlashMenu?: (at: number) => void;
   /**
+   * Только что набран `@` или второй `[` подряд (фича 018): повод спросить
+   * ядро о списке меток и заметок. Ничего больше редактор не решает —
+   * подходит ли место, отвечает ядро. `offset` — каретка после знака.
+   */
+  onCompletionTrigger?: (offset: number) => void;
+  /**
    * Где курсор среди полей вставленного сниппета; `null` — полей нет.
    * Показывается в статус-баре.
    */
@@ -128,6 +134,7 @@ export interface CodeEditorProps {
 interface ViewCallbacks {
   onCaretMove: ((caret: CaretPosition) => void) | undefined;
   onSlashMenu: ((at: number) => void) | undefined;
+  onCompletionTrigger: ((offset: number) => void) | undefined;
   onFieldState: ((state: SnippetFieldState | null) => void) | undefined;
 }
 
@@ -180,6 +187,15 @@ const viewListener: Extension = EditorView.updateListener.of((update) => {
       callbacks.onSlashMenu(line.from);
     }
   }
+  // Дополнение 018: знак набран пользователем — вставка и откат не считаются.
+  if (update.docChanged && callbacks.onCompletionTrigger) {
+    const typed = update.transactions.some((transaction) => transaction.isUserEvent("input.type"));
+    const head = update.state.selection.main.head;
+    if (typed && head > 0) {
+      const last = update.state.doc.sliceString(Math.max(0, head - 2), head);
+      if (last.endsWith("@") || last === "[[") callbacks.onCompletionTrigger(head);
+    }
+  }
 });
 
 function caretOf(state: EditorState): CaretPosition {
@@ -224,6 +240,7 @@ export function CodeEditor({
   onCaretMove,
   onZoom,
   onSlashMenu,
+  onCompletionTrigger,
   onFieldState,
   ariaLabel,
   onContextMenu,
@@ -259,8 +276,13 @@ export function CodeEditor({
 
   // Колбэки живут в ref: пересоздавать редактор из-за новой ссылки на
   // обработчик нельзя — вместе с ним пропадут история правок и позиция курсора.
-  const callbacks = useRef<ViewCallbacks>({ onCaretMove, onSlashMenu, onFieldState });
-  callbacks.current = { onCaretMove, onSlashMenu, onFieldState };
+  const callbacks = useRef<ViewCallbacks>({
+    onCaretMove,
+    onSlashMenu,
+    onCompletionTrigger,
+    onFieldState,
+  });
+  callbacks.current = { onCaretMove, onSlashMenu, onCompletionTrigger, onFieldState };
   const onZoomRef = useRef(onZoom);
   onZoomRef.current = onZoom;
   const ariaLabelRef = useRef(ariaLabel);

@@ -36,6 +36,7 @@ import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
 import { attachments } from "./en/attachments.js";
 import { sources } from "./en/sources.js";
+import { completion } from "./en/completion.js";
 import { outline } from "./en/outline.js";
 
 export const en = {
@@ -64,6 +65,7 @@ export const en = {
   ...capture,
   ...attachments,
   ...sources,
+  ...completion,
   ...outline,
 } as const;
 

@@ -9575,3 +9575,152 @@ button.ts-props__chipbtn,
   color: var(--steel-200);
   font-size: var(--text-xs);
 }
+
+/* ── Дополнение меток и ссылок (фича 018, макет 1a–1c) ─────────────────── */
+
+.ts-complete {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  max-height: 50vh;
+  overflow: hidden;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  font-size: var(--text-xs);
+}
+
+/* Узкий экран: над строкой набора на ширину редактора — низ занят клавиатурой. */
+.ts-complete--narrow {
+  width: auto;
+  max-width: none;
+  max-height: 40vh;
+}
+
+.ts-complete__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ts-complete__head {
+  padding: var(--space-1) var(--space-3);
+  color: var(--steel-500);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ts-complete__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  color: var(--steel-200);
+  cursor: pointer;
+}
+
+.ts-complete__row--on {
+  background: var(--steel-800);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-complete__name {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--steel-100);
+}
+
+.ts-complete__name mark {
+  background: none;
+  color: var(--orange-400);
+}
+
+.ts-complete__tag {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ts-complete__tag--warn {
+  flex: none;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.ts-complete__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--steel-400);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-complete__side {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--steel-600);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-complete__more {
+  padding: var(--space-1) var(--space-3);
+  color: var(--steel-600);
+}
+
+.ts-complete__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-top: var(--border-width) solid var(--border-default);
+  color: var(--steel-600);
+}
+
+.ts-complete__will {
+  overflow: hidden;
+  color: var(--steel-400);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Отметки 018 — жёлтый пунктир; красная подача — у 017. */
+.ts-mark-note {
+  text-decoration: underline dashed var(--warning);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+.ts-mark-explain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-top: var(--border-width) solid var(--border-default);
+  background: var(--steel-900);
+  font-size: var(--text-xs);
+}
+
+.ts-mark-explain__title {
+  color: var(--warning);
+}
+
+.ts-mark-explain__detail {
+  color: var(--steel-400);
+}
+
+.ts-mark-count {
+  color: var(--warning);
+}

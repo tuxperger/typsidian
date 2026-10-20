@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +31,9 @@ import {
 import { parseSnippet } from "./snippet.js";
 import { ElementSample } from "./elementSamples.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { useMenuPosition, type CaretAnchor } from "./useMenuPosition.js";
+
+export type { CaretAnchor };
 
 // Меню вставки элементов Typst (макет «Typsidian Вставка» → § Меню вставки и
 // § Палитра математики). Открывается по ⌘E у каретки.
@@ -51,12 +53,6 @@ import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 // правилу, по которому пилюля vim-режима здесь надпись, а не переключатель.
 
 /** Положение каретки в окне: меню открывается под ней. */
-export interface CaretAnchor {
-  left: number;
-  top: number;
-  bottom: number;
-}
-
 export interface InsertRequest {
   /**
    * Запись каталога: по ней ядро решает, открывать ли форму параметров
@@ -80,11 +76,6 @@ export interface InsertMenuProps {
 }
 
 type Mode = "elements" | "symbols";
-
-/** Отступ от края окна, если меню не помещается под кареткой. */
-const VIEWPORT_MARGIN = 8;
-/** Зазор между кареткой и меню. */
-const CARET_GAP = 6;
 
 export function InsertMenu({
   anchor,
@@ -606,37 +597,6 @@ function describeFields(t: Translate, element: LocalizedElement): string {
   const count = parseSnippet(element.template).fields.length;
   if (count === 0) return t("insert.menu.noFields");
   return t("insert.menu.fields", { count });
-}
-
-/**
- * Меню под кареткой, но целиком в окне: снизу места может не хватить, и тогда
- * оно встаёт над строкой. Размер берётся замером, а не константой, — иначе
- * правка отступов в CSS молча ломала бы раскладку.
- */
-export function useMenuPosition(
-  menuRef: React.RefObject<HTMLDivElement | null>,
-  anchor: CaretAnchor | null,
-): { left: number; top: number } | null {
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const node = menuRef.current;
-    if (!node) return;
-    const box = node.getBoundingClientRect();
-
-    const maxLeft = window.innerWidth - box.width - VIEWPORT_MARGIN;
-    const wanted = anchor?.left ?? (window.innerWidth - box.width) / 2;
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(wanted, Math.max(VIEWPORT_MARGIN, maxLeft)));
-
-    const below = (anchor?.bottom ?? window.innerHeight * 0.12) + CARET_GAP;
-    const fits = below + box.height <= window.innerHeight - VIEWPORT_MARGIN;
-    const above = (anchor?.top ?? 0) - box.height - CARET_GAP;
-    const top = fits ? below : Math.max(VIEWPORT_MARGIN, above);
-
-    setPosition({ left, top });
-  }, [menuRef, anchor]);
-
-  return position;
 }
 
 function elementRowId(element: TypstElement): string {

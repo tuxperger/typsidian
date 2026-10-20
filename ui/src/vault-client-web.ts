@@ -217,6 +217,9 @@ export function webVaultClient(
     delete: (path) => call(() => backend.delete(path)),
     backlinks: (path) => call(() => backend.backlinks(path)),
     graph: (request) => call(() => backend.vaultGraph(request)),
+    completions: (request) => call(() => backend.completions(request)),
+    definitionAt: (request) => call(() => backend.definitionAt(request)),
+    referenceMarks: (request) => call(() => backend.referenceMarks(request)),
     brokenLinks: (path) => call(() => backend.brokenLinks(path)),
     accessState: () => call(() => backend.accessState()),
     search: (query) => call(() => backend.search(query)),
@@ -560,6 +563,8 @@ function webPreviewClient(
     // Мимо очереди: отмена обязана дойти, пока сборка её занимает.
     cancel: () => worker?.cancel(),
     dependencyMark: (paths) => call(() => engine.dependencyMark(backend, paths)),
+    completionLinkedIndex: (notePath, dependencies) =>
+      call(() => engine.completionLinkedIndex(backend, notePath, dependencies)),
     compile: (notePath, text, revision, anchor) =>
       call(() => engine.compile(backend, notePath, text, BigInt(revision), anchor)),
     // Фича 007: тот же движок, но недостающие шаблоны доустанавливаются.

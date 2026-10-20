@@ -315,6 +315,10 @@ export function SettingsPanel({
             settings={settings}
             onChangeTheme={(theme) => void route(changeOf({ theme }))}
             onChangeLanguage={(language) => void route(changeOf({ language }))}
+            onChangeCompletionAuto={(auto) =>
+              void route(changeOf({ editor_completion_auto: auto }))
+            }
+            completionShortcut={shortcuts.displayOf("trigger-completion")}
             onChangeFontSize={(size) =>
               void route(changeOf({ editor_font_size: size }))
             }

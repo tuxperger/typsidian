@@ -34,6 +34,9 @@ export interface EditorMenuActions {
   notify: (message: string) => void;
   /** Подписи сочетаний — те же, что в палитре. */
   insertShortcut: string;
+  /** «Перейти к определению» (фича 018); нет — пункта нет (не заметка Typst). */
+  gotoDefinition?: (() => void) | undefined;
+  gotoShortcut?: string;
 }
 
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -167,6 +170,15 @@ export function editorMenuItems(
       shortcut: actions.paramsShortcut,
       run: actions.openParams,
     },
+    ...(actions.gotoDefinition
+      ? [
+          {
+            label: t("completion.command.goto"),
+            shortcut: actions.gotoShortcut ?? "",
+            run: actions.gotoDefinition,
+          },
+        ]
+      : []),
     { label: t("editor.menu.insertBoard"), run: actions.chooseBoard },
     ...(actions.saveAsTemplate
       ? [

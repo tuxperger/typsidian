@@ -9,9 +9,10 @@ use std::ops::Range;
 
 use typst::syntax::{ast, Lines, LinkedNode, SyntaxKind};
 
-use super::plain::{plain_text, source_head, string_literal};
+use super::plain::{collapse, plain_text, source_head, string_literal, SOURCE_FALLBACK_CHARS};
 use super::{
-    FigureKind, FigureSite, HeadingSite, LabelOwner, LabelSite, NoteStructure, RefSite, SourcePlace,
+    FigureKind, FigureSite, HeadingSite, LabelKind, LabelOwner, LabelSite, NoteStructure, RefSite,
+    SourcePlace,
 };
 
 /// Разбирает текст заметки и собирает всё, что в нём записано.
@@ -19,7 +20,12 @@ use super::{
 /// Текст с ошибками даёт всё, что удалось распознать; узлы-ошибки
 /// пропускаются. Не паникует на любом входе.
 pub fn parse(text: &str) -> NoteStructure {
-    let root = typst::syntax::parse(text);
+    of_tree(&typst::syntax::parse(text), text)
+}
+
+/// То же над уже разобранным деревом этого текста — кто разбирает текст для
+/// своего вопроса (контекст каретки 018), не разбирает его второй раз.
+pub fn of_tree(root: &typst::syntax::SyntaxNode, text: &str) -> NoteStructure {
     // Один раз на вызов: пересчёт байт в UTF-16 и в строку через
     // `elements::utf16_at` проходил бы текст с начала на каждый пункт и на
     // 2 000 заголовках стал бы квадратичным (research.md §3).
@@ -28,15 +34,17 @@ pub fn parse(text: &str) -> NoteStructure {
         lines: &lines,
         found: NoteStructure::default(),
     };
-    walker.children(&LinkedNode::new(&root));
+    walker.children(&LinkedNode::new(root));
     walker.found
 }
 
 /// Что только что записано в списки: к нему может привязаться метка.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Owned {
     Heading(usize),
     Figure(usize),
+    /// Формула `$ … $` с её записью одной строкой (018).
+    Equation(String),
 }
 
 struct Walker<'a> {
@@ -105,6 +113,17 @@ impl Walker<'_> {
             | SyntaxKind::ModuleInclude
             | SyntaxKind::Error => None,
             SyntaxKind::Heading => Some(self.heading(node)),
+            // Формула: к ней привязывается метка (018). Внутри бывают вызовы —
+            // `$#cite(<k>)$` (017), — их обход не теряет.
+            SyntaxKind::Equation => {
+                self.children(node);
+                Some(Owned::Equation(
+                    collapse(&node.full_text())
+                        .chars()
+                        .take(SOURCE_FALLBACK_CHARS)
+                        .collect(),
+                ))
+            }
             SyntaxKind::FuncCall => self.call(node, hash),
             SyntaxKind::Ref => {
                 self.reference(node);
@@ -222,23 +241,57 @@ impl Walker<'_> {
         };
         let name = label.get().to_string();
         // Вторая метка у того же элемента к нему уже не привязана.
-        let attached = match owner {
+        let (attached, kind, text) = match owner {
             Some(Owned::Heading(index)) if self.found.headings[index].label.is_none() => {
                 self.found.headings[index].label = Some(name.clone());
-                LabelOwner::Heading
+                let text = self.found.headings[index].text.clone();
+                (LabelOwner::Heading, LabelKind::Heading, text)
             }
             Some(Owned::Figure(index)) if self.found.figures[index].label.is_none() => {
                 self.found.figures[index].label = Some(name.clone());
-                LabelOwner::Figure
+                let figure = &self.found.figures[index];
+                let kind = match figure.kind {
+                    FigureKind::Figure => LabelKind::Figure,
+                    FigureKind::Table => LabelKind::Table,
+                };
+                (
+                    LabelOwner::Figure,
+                    kind,
+                    figure.caption.clone().unwrap_or_default(),
+                )
             }
-            _ => LabelOwner::Other,
+            Some(Owned::Equation(text)) => (LabelOwner::Other, LabelKind::Equation, text),
+            _ => (LabelOwner::Other, LabelKind::Other, String::new()),
         };
         self.found.labels.push(LabelSite {
             name,
             attached,
+            kind,
+            text,
+            top_level: top_level(node),
             place: self.place(node.range()),
         });
     }
+}
+
+/// Метка попадёт в документ ровно один раз: её не порождает условие, блок кода,
+/// значение `let` или `context` (018, research.md §17). Циклы, замыкания и
+/// правила обход не посещает вовсе.
+fn top_level(node: &LinkedNode) -> bool {
+    let mut current = node.parent().cloned();
+    while let Some(parent) = current {
+        if matches!(
+            parent.kind(),
+            SyntaxKind::Conditional
+                | SyntaxKind::CodeBlock
+                | SyntaxKind::LetBinding
+                | SyntaxKind::Contextual
+        ) {
+            return false;
+        }
+        current = parent.parent().cloned();
+    }
+    true
 }
 
 fn args_of<'a>(call: &LinkedNode<'a>) -> Option<LinkedNode<'a>> {

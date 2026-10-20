@@ -22,6 +22,7 @@ pub mod anchor;
 pub mod cache;
 pub mod compile;
 pub mod diagnostics;
+pub mod evidence;
 pub mod fonts;
 pub mod packages;
 pub mod pages;

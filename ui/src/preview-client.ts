@@ -7,6 +7,7 @@ import type {
   ExportReport,
   InstalledTemplate,
   InstallReport,
+  LinkedIndex,
   Outline,
   ResolvedAnchor,
   ScrollAnchor,
@@ -83,6 +84,12 @@ export interface PreviewClient {
    * пересобрать. Что в неё входит, решает ядро; интерфейс только сравнивает.
    */
   dependencyMark?(paths: string[]): Promise<string>;
+
+  /**
+   * Метки связанных файлов заметки для дополнения (фича 018): файлы `.typ` из
+   * `dependencies` последней сборки. Нечитаемые — в `unreadable`, без исключения.
+   */
+  completionLinkedIndex?(notePath: string, dependencies: string[]): Promise<LinkedIndex>;
 
   /**
    * Установленные шаблоны: имя, версия, источник и отпечаток (фича 007, US5).

@@ -146,3 +146,8 @@ fn counts_cover_the_whole_note_and_children_follow_the_kinds() {
 fn filter_reaches_label_names_and_the_active_section_is_always_a_heading() {
     cases::filter_reaches_label_names_and_the_active_section_is_always_a_heading();
 }
+
+#[wasm_bindgen_test]
+fn labels_carry_kind_text_and_top_level() {
+    cases::labels_carry_kind_text_and_top_level();
+}

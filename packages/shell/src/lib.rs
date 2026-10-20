@@ -36,6 +36,7 @@ use typsidian_core::boards::{
     ReadBoardError, SnapshotWriteError, WriteBoardError,
 };
 use typsidian_core::capture;
+use typsidian_core::completion;
 use typsidian_core::export;
 use typsidian_core::graph::view as graph_view;
 use typsidian_core::import;
@@ -2148,6 +2149,60 @@ async fn vault_select(
 
 /// Граф связей vault одним запросом (фича 025): узлы и связи с фильтром,
 /// группами и локальной выборкой. Обёртка 1:1 над `graph::view::vault_graph`.
+/// Метки связанных файлов заметки для дополнения 018: кэш связанных файлов —
+/// тот же, что у сборки предпросмотра.
+#[tauri::command]
+async fn completion_linked_index(
+    state: State<'_, Vault>,
+    engine: State<'_, Preview>,
+    note_path: String,
+    dependencies: Vec<String>,
+) -> Answer<completion::LinkedIndex, Failure<()>> {
+    with_vault!(state, |backend| Ok(completion::linked_index(
+        backend,
+        &engine.packages,
+        &note_path,
+        &dependencies,
+    )
+    .await))
+}
+
+/// Список предложений у каретки (018). Обёртка 1:1 над `completion::completions`.
+#[tauri::command]
+async fn completions(
+    state: State<'_, Vault>,
+    request: completion::CompletionRequest,
+) -> Answer<completion::CompletionList, Failure<()>> {
+    with_vault!(state, |backend| Ok(completion::completions(
+        backend, &request
+    )
+    .await))
+}
+
+/// Цель перехода для ссылки под кареткой (018).
+#[tauri::command]
+async fn definition_at(
+    state: State<'_, Vault>,
+    request: completion::DefinitionRequest,
+) -> Answer<completion::DefinitionOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(completion::definition_at(
+        backend, &request
+    )
+    .await))
+}
+
+/// Отметки ссылок в никуда и повторных меток (018).
+#[tauri::command]
+async fn reference_marks(
+    state: State<'_, Vault>,
+    request: completion::MarksRequest,
+) -> Answer<Vec<completion::ReferenceMark>, Failure<()>> {
+    with_vault!(state, |backend| Ok(completion::reference_marks(
+        backend, &request
+    )
+    .await))
+}
+
 #[tauri::command]
 async fn vault_graph(
     state: State<'_, Vault>,
@@ -2739,6 +2794,10 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             vault_select,
             vault_property_keys,
             vault_graph,
+            completion_linked_index,
+            completions,
+            definition_at,
+            reference_marks,
             vault_properties_current,
             vault_reindex_properties,
             vault_cancel_reindex_properties,

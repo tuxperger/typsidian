@@ -49,6 +49,9 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   // Фича 017: цитата поиском и колонка «Источники».
   "insert-citation": "sources.command.insertCitation",
   "toggle-sources": "sources.command.toggle",
+  // Фича 018: переход к определению и ручной вызов дополнения.
+  "goto-definition": "completion.command.goto",
+  "trigger-completion": "completion.command.trigger",
 };
 
 /**

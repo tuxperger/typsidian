@@ -5,7 +5,7 @@ import { useI18n } from "../i18n/index.js";
 import type { VaultClient } from "../vault-client.js";
 import type { LibrarySummary, Source, SourceHits } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
-import { useMenuPosition, type CaretAnchor } from "../editor/InsertMenu.js";
+import { useMenuPosition, type CaretAnchor } from "../editor/useMenuPosition.js";
 import { authorsLine } from "./describe.js";
 
 /** Строк в палитре (contracts/frontend-sources.md § Палитра). */

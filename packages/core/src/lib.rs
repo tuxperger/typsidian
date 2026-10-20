@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod boards;
 pub mod capture;
+pub mod completion;
 pub mod elements;
 pub mod export;
 pub mod graph;

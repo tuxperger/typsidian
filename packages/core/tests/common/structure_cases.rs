@@ -898,3 +898,52 @@ pub fn filter_reaches_label_names_and_the_active_section_is_always_a_heading() {
     let tree_key = key_of(&tree, "Подраздел");
     assert_eq!(outline_active(&tree, &req), Some(tree_key));
 }
+
+// ── Метки для дополнения 018 (T004, T005) ──────────────────────────────────
+
+/// Вид, текст и «верхний уровень» каждой метки: то, что 018 показывает в
+/// списке и по чему решает о повторах.
+pub fn labels_carry_kind_text_and_top_level() {
+    use typsidian_core::structure::LabelKind;
+    let text = "= Введение <введение>\n\n\
+                #figure(rect(), caption: [Схема установки]) <рис-схема>\n\n\
+                #figure(table(columns: 2)[a][b], caption: [Замеры]) <таб-замеры>\n\n\
+                $ E = m c^2 $ <eq-энергия>\n\n\
+                Просто метка <просто>\n\n\
+                #if true [ = Вариант <вариант> ] else [ = Иначе <вариант> ]\n\n\
+                #let тело = [Текст <в-let>]\n\n\
+                #[ Блок <в-блоке> ]\n";
+    let labels = parse(text).labels;
+    let found: Vec<(&str, LabelKind, &str, bool)> = labels
+        .iter()
+        .map(|label| {
+            (
+                label.name.as_str(),
+                label.kind,
+                label.text.as_str(),
+                label.top_level,
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("введение", LabelKind::Heading, "Введение", true),
+            ("рис-схема", LabelKind::Figure, "Схема установки", true),
+            ("таб-замеры", LabelKind::Table, "Замеры", true),
+            ("eq-энергия", LabelKind::Equation, "$ E = m c^2 $", true),
+            ("просто", LabelKind::Other, "", true),
+            ("вариант", LabelKind::Heading, "Вариант", false),
+            ("вариант", LabelKind::Heading, "Иначе", false),
+            ("в-let", LabelKind::Other, "", false),
+            // Блок содержимого в разметке вычисляется один раз.
+            ("в-блоке", LabelKind::Other, "", true),
+        ]
+    );
+    // Оглавление 015 видит прежнюю привязку: формула — не рисунок и не заголовок.
+    let equation = labels
+        .iter()
+        .find(|label| label.name == "eq-энергия")
+        .unwrap();
+    assert_eq!(equation.attached, LabelOwner::Other);
+}

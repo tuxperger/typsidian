@@ -940,3 +940,15 @@ fn a_workspace_change_is_not_journaled() {
 fn note_panel_sources_mode_and_uncited_flag_round_trip() {
     note_panel::the_sources_mode_and_uncited_flag_round_trip();
 }
+
+// Фича 018 — дополнение при наборе и команды (T024): common/completion_cases.rs
+
+#[wasm_bindgen_test]
+fn completion_setting_defaults_to_on_and_lives_on_the_device() {
+    common::completion_cases::completion_setting_defaults_to_on_and_lives_on_the_device();
+}
+
+#[wasm_bindgen_test]
+fn completion_commands_have_free_defaults() {
+    common::completion_cases::completion_commands_have_free_defaults();
+}

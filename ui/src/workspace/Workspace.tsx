@@ -127,8 +127,11 @@ import { useDailyNote } from "../capture/useDailyNote.js";
 import { useSources } from "../sources/useSources.js";
 import { SourcesPanel } from "../sources/SourcesPanel.js";
 import { createErrorText } from "../sources/describe.js";
-import type { NoteSources } from "../editor/NoteEditor.js";
-import type { Source } from "../wasm-core/typsidian_core.js";
+import type { NoteCompletion, NoteSources } from "../editor/NoteEditor.js";
+import { useLinkedIndex } from "../completion/useLinkedIndex.js";
+import { useCompletionAuto } from "../completion/useCompletionAuto.js";
+import { authorsLine } from "../sources/describe.js";
+import type { DefinitionOutcome, Source } from "../wasm-core/typsidian_core.js";
 
 /** Тексты заметок для связей, пока vault не открыт. */
 const NO_OPEN_TEXTS: readonly OpenText[] = [];
@@ -384,9 +387,19 @@ function WorkspaceView({
   // Связанные файлы показанной сборки (005 FR-020): изменение любого из них
   // пересобирает предпросмотр. Что считать связанным, сказало ядро — здесь
   // только сверка пути события со списком.
+  // Те же пути — списком для меток связанных файлов (018); тот же список
+  // после очередной сборки состояния не меняет.
+  const [previewDependencies, setPreviewDependencies] = useState<readonly string[]>([]);
+  // Заметки появились или исчезли — отметки «заметки нет» пересчитываются (018).
+  const [notesRevision, setNotesRevision] = useState(0);
   const previewDependenciesRef = useRef<ReadonlySet<string>>(new Set());
   const notePreviewDependencies = useCallback((paths: string[]) => {
     previewDependenciesRef.current = new Set(paths);
+    setPreviewDependencies((previous) =>
+      previous.length === paths.length && previous.every((path, index) => path === paths[index])
+        ? previous
+        : paths,
+    );
   }, []);
   const noticeEvent = useCallback((event: VaultEvent) => {
     if (touchesAny(event, previewDependenciesRef.current)) {
@@ -402,6 +415,14 @@ function WorkspaceView({
     // Колонка заметки: что именно изменилось, определяет вид события. Переименование
     // и конец массового изменения путей не называют — упоминания ищутся заново;
     // `LinksInvalidated` меняет только ссылки.
+    if (
+      event.type === "NoteCreated" ||
+      event.type === "NoteDeleted" ||
+      event.type === "NoteRenamed" ||
+      event.type === "BulkChangeSettled"
+    ) {
+      setNotesRevision((count) => count + 1);
+    }
     switch (event.type) {
       case "NoteCreated":
       case "NoteUpdated":
@@ -1075,6 +1096,130 @@ function WorkspaceView({
   const noteBuild = useCallback((notePath: string, buildState: PreviewState) => {
     setPreviewBuild({ notePath, state: buildState });
   }, []);
+
+  // ── Дополнение меток и ссылок (фича 018) ─────────────────────────────────
+  // Метки связанных файлов, свидетельство последней удачной сборки, ключи
+  // источников 017 и команды; сам список, отметки и переход — в редакторе.
+  const linkedIndex = useLinkedIndex(previewClient, openNotePath, previewDependencies);
+  const buildOfNote =
+    previewBuild !== null && previewBuild.notePath === openNotePath ? previewBuild.state : null;
+  const shownBuild = buildOfNote?.shown ?? null;
+  const buildEvidence =
+    shownBuild !== null && shownBuild.note_path === openNotePath ? (shownBuild.evidence ?? null) : null;
+  const building = buildOfNote === null || buildOfNote.isBuilding || buildOfNote.isStale;
+  const completionAuto = useCompletionAuto(device, showSettings);
+  const [completionRequest, setCompletionRequest] = useState<{
+    id: number;
+    kind: "trigger" | "goto";
+  } | null>(null);
+  const requestCompletion = useCallback((kind: "trigger" | "goto") => {
+    setCompletionRequest((previous) => ({ id: (previous?.id ?? 0) + 1, kind }));
+  }, []);
+  const triggerCompletion = useCallback(() => {
+    if (openNotePath !== null) requestCompletion("trigger");
+  }, [openNotePath, requestCompletion]);
+  const gotoDefinition = useCallback(() => {
+    if (openNotePath !== null) requestCompletion("goto");
+  }, [openNotePath, requestCompletion]);
+  // Все ключи источников — раз на изменение библиотеки, не на нажатие.
+  const [sourceKeys, setSourceKeys] = useState<readonly string[]>([]);
+  const sourcesClient = state.client?.sources ?? null;
+  const sourcesHaveEntries = (sources.summary?.source_count ?? 0) > 0;
+  useEffect(() => {
+    if (sourcesClient === null || !sourcesHaveEntries) {
+      setSourceKeys([]);
+      return;
+    }
+    let alive = true;
+    void sourcesClient
+      .forCompletion("", 1_000_000)
+      .then((hits) => {
+        if (alive) setSourceKeys(hits.map((hit) => hit.source.key));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [sourcesClient, sourcesHaveEntries, sources.revision]);
+  const sourcesFor = useMemo(
+    () =>
+      sourcesClient === null || !sourcesHaveEntries
+        ? null
+        : async (query: string) =>
+            (await sourcesClient.forCompletion(query, 50)).map((hit) => ({
+              key: hit.source.key,
+              summary: authorsLine(hit.source),
+            })),
+    [sourcesClient, sourcesHaveEntries],
+  );
+  const [sourcesFocus, setSourcesFocus] = useState<{ id: number; key: string } | null>(null);
+  const onGoto = useCallback(
+    (outcome: DefinitionOutcome) => {
+      if (outcome.kind === "Place") {
+        revealPlace({
+          path: outcome.location.path,
+          line: outcome.location.line,
+          column: outcome.location.column,
+        });
+      } else if (outcome.kind === "Source") {
+        // Источник показывается в колонке «Источники» (017).
+        setSourcesFocus((previous) => ({ id: (previous?.id ?? 0) + 1, key: outcome.key }));
+        if (narrow || drawer) {
+          setNotePanelMode("sources");
+          setNoteSheetOpen(true);
+        } else {
+          setNotePanelMode("sources");
+          setNotePanelShown(true);
+        }
+      }
+    },
+    [revealPlace, narrow, drawer, setNotePanelMode, setNotePanelShown],
+  );
+  const createNoteAt = useCallback(
+    async (path: string) => {
+      const current = state.client;
+      if (current === null) return false;
+      try {
+        await current.create(path);
+        // Своя запись событий vault не публикует — отметки пересчитываются здесь.
+        setNotesRevision((count) => count + 1);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [state.client],
+  );
+  const noteCompletion = useMemo<NoteCompletion>(
+    () => ({
+      auto: completionAuto,
+      linked: linkedIndex,
+      evidence: buildEvidence,
+      building,
+      sourceKeys,
+      sourcesFor,
+      request: completionRequest,
+      onGoto,
+      createNote: createNoteAt,
+      vaultRevision: notesRevision,
+      narrow,
+      readOnly: state.accessState === "readOnly",
+    }),
+    [
+      completionAuto,
+      linkedIndex,
+      buildEvidence,
+      building,
+      sourceKeys,
+      sourcesFor,
+      completionRequest,
+      onGoto,
+      createNoteAt,
+      notesRevision,
+      narrow,
+      state.accessState,
+    ],
+  );
   // Окно показа не открылось (блокировщик): тост с «Открыть ещё раз».
   const [showBlocked, setShowBlocked] = useState<{ retry: () => void } | null>(null);
   const showSession = useShowSession({
@@ -1239,6 +1384,7 @@ function WorkspaceView({
               onInsert={openNotePath === null ? null : requestCitation}
               onCreateFile={createSourceFileFromPanel}
               onRegisterFile={registerSourceFileFromPanel}
+              focus={sourcesFocus}
             />
           ),
       },
@@ -1283,6 +1429,7 @@ function WorkspaceView({
       requestCitation,
       createSourceFileFromPanel,
       registerSourceFileFromPanel,
+      sourcesFocus,
       t,
     ],
   );
@@ -1617,6 +1764,12 @@ function WorkspaceView({
       } else if (shortcuts.matches("insert-citation", event)) {
         event.preventDefault();
         insertCitationCommand();
+      } else if (shortcuts.matches("goto-definition", event)) {
+        event.preventDefault();
+        gotoDefinition();
+      } else if (shortcuts.matches("trigger-completion", event)) {
+        event.preventDefault();
+        triggerCompletion();
       } else if (shortcuts.matches("tab-close", event)) {
         event.preventDefault();
         tabCommands.close();
@@ -1693,6 +1846,8 @@ function WorkspaceView({
     toggleOutline,
     toggleSources,
     insertCitationCommand,
+    gotoDefinition,
+    triggerCompletion,
     tabCommands,
     exportCurrent,
     syncClient,
@@ -1821,6 +1976,25 @@ function WorkspaceView({
         meta: shortcuts.displayOf("insert-citation"),
         run: insertCitationCommand,
       });
+    }
+    // Фича 018. Переход и ручной вызов дополнения — у открытой заметки Typst.
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push(
+        {
+          id: "goto-definition",
+          ...titled("completion.command.goto"),
+          icon: "link",
+          meta: shortcuts.displayOf("goto-definition"),
+          run: gotoDefinition,
+        },
+        {
+          id: "trigger-completion",
+          ...titled("completion.command.trigger"),
+          icon: "list",
+          meta: shortcuts.displayOf("trigger-completion"),
+          run: triggerCompletion,
+        },
+      );
     }
     // Фича 019. Показ слайдов — только у открытой заметки Typst и там, где
     // оболочка умеет открывать окно показа.
@@ -2121,6 +2295,8 @@ function WorkspaceView({
     toggleOutline,
     toggleSources,
     insertCitationCommand,
+    gotoDefinition,
+    triggerCompletion,
     outlineNotePath,
     createBoard,
     settings,
@@ -2647,6 +2823,7 @@ function WorkspaceView({
               onLibraryStatus: (status) => setLibraryCustomized(status === "Customized"),
               attachments: noteAttachments,
               sources: noteSources,
+              completion: noteCompletion,
             }}
             linksSummary={linksSummary ?? undefined}
             attachmentStatus={
@@ -2704,7 +2881,7 @@ function WorkspaceView({
                 canReveal={canRevealPath}
                 onDependencies={notePreviewDependencies}
                 // Фича 019: показ слайдов следит за сборкой этой заметки.
-                onBuild={showHost === undefined ? undefined : noteBuild}
+                onBuild={noteBuild}
                 // Фича 015: переход из оглавления доводит и предпросмотр.
                 headingRequest={headingRequest}
               />

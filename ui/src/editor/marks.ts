@@ -13,7 +13,8 @@ export interface EditorMark {
   /** Смещения в кодовых единицах UTF-16, как у `SourcePlace`. */
   from: number;
   to: number;
-  tone: "error" | "warning";
+  /** `note` — жёлтый пунктир ссылок 018; красная подача — у 017. */
+  tone: "error" | "warning" | "note";
   message: string;
 }
 
@@ -66,7 +67,12 @@ const marksField = StateField.define<ReadonlyMap<string, Marked[]>>({
         .sort((left, right) => left.from - right.from || left.to - right.to)
         .map((item) =>
           Decoration.mark({
-            class: item.mark.tone === "error" ? "ts-mark--error" : "ts-mark--warning",
+            class:
+              item.mark.tone === "error"
+                ? "ts-mark--error"
+                : item.mark.tone === "note"
+                  ? "ts-mark-note"
+                  : "ts-mark--warning",
           }).range(item.from, item.to),
         );
       return Decoration.set(ranges, true);

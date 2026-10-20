@@ -31,6 +31,10 @@ import type {
   AccessState,
   BacklinksPage,
   VaultGraph,
+  CompletionList,
+  DefinitionOutcome,
+  LinkedIndex,
+  ReferenceMark,
   CaptureOutcome,
   CaptureSettings,
   DailyDate,
@@ -244,6 +248,8 @@ interface LastVaultRecord {
 function tauriPreviewClient(): PreviewClient {
   return {
     dependencyMark: (paths) => invoke<string>("preview_dependency_mark", { paths }),
+    completionLinkedIndex: (notePath, dependencies) =>
+      invoke<LinkedIndex>("completion_linked_index", { notePath, dependencies }),
     compile: (notePath, text, revision, anchor) =>
       invoke<CompiledDocument>("preview_compile", { notePath, text, revision, anchor }),
     // Фича 007: то же, но недостающие внешние шаблоны доустанавливаются. Это
@@ -351,6 +357,9 @@ export function tauriVaultClient(
     moveEntry: (request) => invoke<MoveOutcome>("move_entry", { request }),
     backlinks: (path) => invoke<Note[]>("backlinks", { path }),
     graph: (request) => invoke<VaultGraph>("vault_graph", { request }),
+    completions: (request) => invoke<CompletionList>("completions", { request }),
+    definitionAt: (request) => invoke<DefinitionOutcome>("definition_at", { request }),
+    referenceMarks: (request) => invoke<ReferenceMark[]>("reference_marks", { request }),
     brokenLinks: (path) => invoke<string[]>("broken_links", { path }),
     accessState: () => invoke<AccessState>("access_state"),
     search: (query) => invoke<SearchResults>("search", { query }),

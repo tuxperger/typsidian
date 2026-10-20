@@ -141,6 +141,19 @@ impl PreviewEngine {
         super::compile::dependency_mark(backend, &paths).await
     }
 
+    /// Метки связанных файлов заметки для дополнения 018 (research.md §3):
+    /// байты — из кэша связанных файлов этого движка, если отметка совпала.
+    /// Через `wasm-call-queue`: вызов занимает заимствование `WebBackend`.
+    #[wasm_bindgen(js_name = completionLinkedIndex)]
+    pub async fn completion_linked_index_js(
+        &self,
+        backend: &crate::vault::web::WebBackend,
+        note_path: &str,
+        dependencies: Vec<String>,
+    ) -> crate::completion::LinkedIndex {
+        crate::completion::linked_index(backend, &self.packages, note_path, &dependencies).await
+    }
+
     /// То же, но недостающие внешние шаблоны доустанавливаются (фича 007,
     /// FR-001).
     ///

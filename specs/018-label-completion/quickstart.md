@@ -72,3 +72,28 @@ nix develop -c node scripts/dev/browser.mjs http://localhost:3000 \
 - Android: пункт 1 касанием — список над строкой набора, строка не перекрыта; пункт 3 через
   контекстное меню редактора.
 - iOS: **не проверено** — оболочки нет.
+
+## Результаты замеров (2026-10-20)
+
+`completion_scale` (native, release, лучший из 7): заметка в 10 000 строк с 500 метками —
+`completions` 16,6 мс (бюджет 20 мс), `reference_marks` 16,1 мс (бюджет 50 мс). Первый
+прогон дал 24,5 мс: текст разбирался дважды — на контекст каретки и на метки; теперь один
+разбор (`structure::of_tree`, `context::at_in`).
+
+Сценарий `scripts/dev/scenarios/completion.mjs` с `COMPLETION_PERF=1` (web, dev-сборка,
+headless chromium): от набора `@` до показа списка на заметке с 500 метками — 46 мс
+(SC-001, ≤ 100 мс); переход к метке связанного файла — 76 мс (SC-003, ≤ 1 с).
+
+SC-004 (набор без `@` и `[[` не зовёт ядро) проверен по коду, а не счётчиком в браузере:
+`CodeEditor` зовёт `onCompletionTrigger` только на набранный `@` или второй `[`, а
+`useCompletion.onCaretMove` спрашивает ядро только при открытом списке. Счётчика вызовов
+ядра в браузере нет — T068 открыта до него.
+
+## Гейты (T070, 2026-10-20)
+
+`cargo fmt --check`, `scripts/check-i18n.sh`, `cargo check` ядра под native и wasm32 — чисто.
+`cargo test -p typsidian-core` — 1 205 тестов, все зелёные. `wasm-pack test` по каждому файлу
+отдельно — 25 файлов, все зелёные (`completion_wasm` 18). `pnpm typecheck` — ui, web,
+desktop, mobile без ошибок; `cargo check -p typsidian-shell` чисто. Сценарии `completion.mjs`
+(16 проверок) и `sources.mjs` 017 (13) — без провалов и исключений. Попутно найден и
+исправлен откат 017: обход `structure` перестал заходить в формулы и терял `$#cite(<k>)$`.

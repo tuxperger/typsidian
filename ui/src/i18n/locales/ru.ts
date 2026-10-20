@@ -29,6 +29,7 @@ import { importing } from "./ru/import.js";
 import { capture } from "./ru/capture.js";
 import { attachments } from "./ru/attachments.js";
 import { sources } from "./ru/sources.js";
+import { completion } from "./ru/completion.js";
 import { outline } from "./ru/outline.js";
 
 export const ru: Catalog = {
@@ -57,5 +58,6 @@ export const ru: Catalog = {
   ...capture,
   ...attachments,
   ...sources,
+  ...completion,
   ...outline,
 };

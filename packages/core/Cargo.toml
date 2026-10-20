@@ -218,6 +218,11 @@ harness = false
 name = "sources_scale"
 harness = false
 
+# Список меток и отметки на заметке в 10 000 строк (фича 018, T067, SC-001).
+[[bench]]
+name = "completion_scale"
+harness = false
+
 # Отбор по свойствам в vault из 10 000 заметок (фича 020, SC-001).
 [[bench]]
 name = "properties_scale"

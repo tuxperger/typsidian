@@ -33,6 +33,8 @@ export interface SourcesPanelProps {
   onInsert: ((source: Source) => void) | null;
   onCreateFile: () => Promise<string | null>;
   onRegisterFile: (path: string) => void;
+  /** Показать источник по ключу (переход к определению 018): растущий `id`. */
+  focus?: { id: number; key: string } | null;
 }
 
 /**
@@ -51,6 +53,15 @@ export function SourcesPanel(props: SourcesPanelProps): React.JSX.Element {
   const [message, setMessage] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const asked = useRef(0);
+  // Ключ, который надо выбрать, когда придёт выдача (018).
+  const pendingKey = useRef<string | null>(null);
+  const focusId = props.focus?.id ?? 0;
+  const focusKey = props.focus?.key ?? null;
+  useEffect(() => {
+    if (focusKey === null) return;
+    pendingKey.current = focusKey;
+    setQuery(focusKey);
+  }, [focusId, focusKey]);
 
   // Первый показ панели запускает проход индекса цитат (research.md §8).
   useEffect(() => {
@@ -60,7 +71,14 @@ export function SourcesPanel(props: SourcesPanelProps): React.JSX.Element {
   useEffect(() => {
     const ticket = ++asked.current;
     void client.sources.search(query, PANEL_LIMIT, uncitedOnly).then((result) => {
-      if (ticket === asked.current) setHits(result);
+      if (ticket !== asked.current) return;
+      setHits(result);
+      const wanted = pendingKey.current;
+      const found = result.hits.find((hit) => hit.source.key === wanted);
+      if (found !== undefined) {
+        pendingKey.current = null;
+        setSelected(found.source);
+      }
     });
     void client.sources.missingKeys().then(setMissing);
   }, [client, query, uncitedOnly, revision, scan?.phase]);

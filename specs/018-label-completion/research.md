@@ -356,3 +356,76 @@ UI передаёт `Place` в существующий переход `revealDi
 UI: JS-тестов в репозитории нет; проверка — `pnpm typecheck`, `scripts/check-i18n.sh` и
 сценарий `scripts/dev/scenarios/completion.mjs` со снимками трёх экранов макета. Оболочку
 рабочего стола сценарием открыть нельзя (`tauri-driver` нет) — вручную по quickstart.md.
+
+## §17 Сверка с соседями (T002, 2026-10-20)
+
+**`structure` (015, `packages/core/src/structure/`)**:
+- `parse(text) -> NoteStructure` — `labels: Vec<LabelSite>`, `refs: Vec<RefSite>`, `cites`
+  (017). Места — `SourcePlace { line, column, from, to }` в UTF-16, байтового диапазона нет.
+- `LabelSite { name, attached: LabelOwner, place }`; `LabelOwner` — `Heading`, `Figure`,
+  `Other`. **Не хватает** вида «таблица» и «формула», текста помеченного элемента и признака
+  «разметка верхнего уровня». T004 добавляет в `LabelSite` поля `kind: LabelKind` (`Heading`,
+  `Figure`, `Table`, `Equation`, `Other`), `text: String` и `top_level: bool`; `attached`
+  остаётся для оглавления 015. Метка после `$ … $` привязывается к формуле так же, как к
+  заголовку (`Owned::Equation`), текст формулы — её запись одной строкой.
+- «Верхний уровень» — ни один предок метки не `Conditional`, `CodeBlock`, `LetBinding` или
+  `Contextual`. Метки внутри замыканий, циклов и правил `show`/`set` обход 015 не собирает
+  вовсе (правило 2) — для 018 они «из кода» и известны только по свидетельству сборки.
+- Доступа к корню разбора наружу нет и не нужно: контекст каретки (§2) живёт в
+  `completion/context.rs` и разбирает текст сам тем же `typst::syntax::parse` — ровно как
+  `structure::mode_at` (017). Пересчёт UTF-16 ↔ байты — `crate::text_offsets::{byte_at,
+  utf16_at}` (не `elements::…`, как в T008).
+
+**`graph` (013, `packages/core/src/graph/mod.rs`)**: `link_sites(text) -> Vec<LinkSite>`
+(`raw`, `label`, байтовый диапазон всей записи), `resolve_link_target(source, raw)`,
+кратчайшая запись — `link_text(source, target) -> Option<String>` (возвращает `[[…]]`
+целиком; 018 берёт внутреннюю часть).
+
+**Предпросмотр (005)**: `CompiledDocument` собирается в `compile_with`
+(`preview/compile.rs`); удачная сборка `Render::Pages` — ветка `(Ok(document),
+Render::Pages)`, там же `world.source(main)` даёт текст сборки. `PackageCache::vault_files_of
+(note) -> Vec<(FileId, FileMark, Bytes)>`, путь — `preview::resolve::vault_path(id)`,
+отметка — `VaultBackend::file_mark`. В web сборка идёт в воркере, но тем же `compile_with`.
+
+**Переход (014)**: `revealPlace({ path, line, column })` в `Workspace.tsx` открывает вкладку
+через `openTab` — запись в историю «Назад» делает 014. Функции `revealDiagnostic` нет; T048,
+T049 идут через `revealPlace`.
+
+**Отметки (017, `ui/src/editor/marks.ts`)**: `setMarks(view, provider, marks)` по
+поставщикам, `EditorMark { from, to, tone, message }`, подсказка по наведению общая. 018
+добавляет тон `note` (класс `.ts-mark-note`, жёлтый пунктир) и свой поставщик
+`"references"`; `claimed` — диапазоны отметок 017 из `useCitationMarks`.
+
+**Источники (017)**: ключи — `client.sources.forCompletion(prefix, limit)` → `SourceHit`
+(автор и год строкой — `describe.authorsLine`). Показа источника в панели снаружи не было:
+018 добавляет в `SourcesPanel` вход «показать ключ» (поле поиска = ключ, карточка открыта),
+им пользуется переход к определению на ключе источника.
+
+**Сочетания (поправка §12)**: `Mod+Alt+P` занят показом слайдов 019 (`StartShow`), а
+`Ctrl+Alt+D` на Linux сворачивает окна (записано в 022 у `Today`). Новые умолчания:
+`goto-definition` — `Mod+Alt+F` («follow»), `trigger-completion` — `Mod+Alt+A`
+(«autocomplete»). Среди `Mod+Alt` обе свободны, не входят в `RESERVED_KEYS`, у обеих есть
+`code()` (`KeyF`, `KeyA`). Обе команды встают в **конец** `COMMANDS`, как у 017, а не после
+`ElementParams`: середина списка сдвинула бы позиционные проверки всех фич после 008.
+
+**Настройки (004)**: `editor_font_size` — образец поля в `Settings` и `SettingsChange`
+(`settings/apply.rs`); `AppearanceSection.tsx` — место выключателя.
+
+## §18 Решения реализации
+
+1. **Сочетания** — `Mod+Alt+F` и `Mod+Alt+A` вместо `Mod+Alt+D`/`Mod+Alt+P` (§17).
+2. **Тексты** — своим каталогом `ui/src/i18n/locales/{ru,en}/completion.ts` (ключи
+   `completion.*`), а не ключами в `editor.ts`, `settings.ts` и `palette.ts`: так же сделана
+   017 (`sources.ts`), и тексты фичи лежат в одном месте.
+3. **`ItemDetail::Label.label_kind`** — поле названо не `kind`: тег варианта `ItemDetail`
+   уже `kind` (`serde(tag = "kind")`).
+4. **Один разбор** — `completions` разбирает заметку один раз на контекст каретки и метки
+   (`structure::of_tree`, `context::at_in`); иначе 10 000 строк не укладывались в 20 мс.
+5. **Случаи свидетельства сборки** (T011) — в `completion_cases.rs`, а не в
+   `preview_cases.rs`: проверяются вместе с отметками, ради которых свидетельство заведено.
+6. **Ключи источников** — у списка только под набранную часть (`forCompletion(query, 50)`,
+   второй вопрос ядру), у отметок и перехода — весь перечень, раз на изменение библиотеки.
+7. **Своя запись** — «Создать заметку» и автосохранение событий vault не публикуют: после
+   создания рабочая область сама поднимает счётчик пересчёта отметок.
+8. **Показ источника** — `SourcesPanel` получил вход `focus` (ключ в поле поиска и открытая
+   карточка); переход на ключ источника открывает колонку в режиме «Источники».

@@ -49,6 +49,18 @@ import {
 import { CitePalette } from "../sources/CitePalette.js";
 import { BibliographyPrompt } from "../sources/BibliographyPrompt.js";
 import { useCitationMarks } from "../sources/useCitationMarks.js";
+import { useCompletion } from "../completion/useCompletion.js";
+import { completionKeys } from "../completion/completionKeys.js";
+import { CompletionPopup, completionOptionId } from "../completion/CompletionPopup.js";
+import { useReferenceMarks } from "../completion/useReferenceMarks.js";
+import { MarkExplanation } from "../completion/MarkExplanation.js";
+import { gotoReason } from "../completion/describe.js";
+import type {
+  BuildEvidence,
+  DefinitionOutcome,
+  LinkedIndex,
+  SourceKey,
+} from "../wasm-core/typsidian_core.js";
 import { createErrorText, planErrorText } from "../sources/describe.js";
 import type {
   BibliographyOffer,
@@ -74,6 +86,36 @@ export interface NoteSources {
   registerFile(path: string): Promise<boolean>;
   /** Заметки, где отказались от списка литературы до конца сеанса (FR-004). */
   declined: Set<string>;
+}
+
+/**
+ * Дополнение меток и ссылок (фича 018): всё, что редактор берёт у рабочей
+ * области, — сборка, связанные файлы, ключи источников и команды.
+ */
+/** Ключей источников нет — один пустой список на все редакторы. */
+const NO_KEYS: readonly string[] = [];
+
+export interface NoteCompletion {
+  /** Показывать список при наборе `@` и `[[` (FR-009). */
+  auto: boolean;
+  linked: LinkedIndex | null;
+  /** Последняя удачная сборка этой заметки. */
+  evidence: BuildEvidence | null;
+  /** Сборка текущего текста ещё не вернулась. */
+  building: boolean;
+  /** Все ключи источников 017 — для отметок и перехода. */
+  sourceKeys: readonly string[];
+  /** Ключи под набранную часть; `null` — библиографии нет. */
+  sourcesFor: ((query: string) => Promise<SourceKey[]>) | null;
+  /** Команда из рабочей области: растущий `id`. */
+  request: { id: number; kind: "trigger" | "goto" } | null;
+  /** Переход в другое место или к источнику — исполняет рабочая область. */
+  onGoto: (outcome: DefinitionOutcome) => void;
+  createNote: (path: string) => Promise<boolean>;
+  /** Растёт по событию vault: заметки появились или исчезли. */
+  vaultRevision: number;
+  narrow: boolean;
+  readOnly: boolean;
 }
 
 export interface NoteAttachments {
@@ -193,6 +235,8 @@ export interface NoteEditorProps {
   attachmentStatus?: string;
   /** Источники vault: палитра цитат и отметки битых цитат (фича 017). */
   sources?: NoteSources;
+  /** Дополнение меток и ссылок, переход и отметки (фича 018). */
+  completion?: NoteCompletion;
 }
 
 /**
@@ -235,6 +279,7 @@ export function NoteEditor({
   attachments,
   attachmentStatus,
   sources,
+  completion,
 }: NoteEditorProps): React.JSX.Element {
   const { t } = useI18n();
   const snapshot = useDocumentSnapshot(document);
@@ -251,11 +296,15 @@ export function NoteEditor({
   // Наружу — только каретка активной вкладки: соседняя группа разделения
   // оглавлению не указ. Через ref, чтобы `onCaretMove` оставался стабильным.
   const caretSink = useRef<((offset: number) => void) | undefined>(undefined);
+  // Дополнение 018: открытый список спрашивает заново, причина отказа
+  // перехода гаснет — при каждом движении каретки.
+  const caretListeners = useRef<() => void>(() => {});
   caretSink.current = active ? onCaretOffset : undefined;
   const onCaretMove = useCallback((next: CaretPosition) => {
     caretRef.current = next;
     setCaret(next);
     caretSink.current?.(next.offset);
+    caretListeners.current();
   }, []);
 
   // Меню вставки элементов Typst (⌘E). Открытое меню помнит, где была каретка
@@ -567,6 +616,101 @@ export function NoteEditor({
     sources?.revision ?? 0,
     sourcesEnabled,
   );
+
+  // Дополнение меток и ссылок (фича 018).
+  const completionEnabled = typst === true && completion !== undefined;
+  const editorBox = useCallback(
+    () => editorRef.current?.view()?.dom.getBoundingClientRect() ?? null,
+    [],
+  );
+  const caretCoords = useCallback(() => editorRef.current?.caretCoords() ?? null, []);
+  const completionState = useCompletion({
+    client,
+    notePath: document.path,
+    view: citationView,
+    caretCoords,
+    linked: completion?.linked ?? null,
+    sourcesFor: completion?.sourcesFor ?? null,
+    auto: completion?.auto ?? false,
+    enabled: completionEnabled,
+  });
+  const completionPort = useRef(completionState.keys);
+  completionPort.current = completionState.keys;
+  const completionExtension = useMemo(() => completionKeys(() => completionPort.current), []);
+  const editorExtensions = useMemo(
+    () => [
+      ...(typst && attachments !== undefined ? [attachmentExtensions] : []),
+      ...(typst ? [completionExtension] : []),
+    ],
+    [typst, attachments, attachmentExtensions, completionExtension],
+  );
+  const [gotoMessage, setGotoMessage] = useState<string | null>(null);
+  caretListeners.current = () => {
+    completionState.onCaretMove();
+    setGotoMessage(null);
+  };
+  const claimed = useMemo<[number, number][]>(
+    () => citationCheck?.marks.map((mark) => [mark.place.from, mark.place.to]) ?? [],
+    [citationCheck],
+  );
+  const referenceMarks = useReferenceMarks({
+    client,
+    view: citationView,
+    notePath: document.path,
+    text: content,
+    linked: completion?.linked ?? null,
+    evidence: completion?.evidence ?? null,
+    building: completion?.building ?? false,
+    sourceKeys: completion?.sourceKeys ?? NO_KEYS,
+    claimed,
+    vaultRevision: completion?.vaultRevision ?? 0,
+    enabled: completionEnabled,
+  });
+  const markAtCaret = referenceMarks.find(
+    (mark) => mark.from <= caret.offset && caret.offset <= mark.to,
+  );
+
+  const goToDefinition = useCallback(async () => {
+    const view = editorRef.current?.view();
+    if (!view || completion === undefined) return;
+    try {
+      const outcome = await client.definitionAt({
+        note_path: document.path,
+        text: view.state.doc.toString(),
+        offset: view.state.selection.main.head,
+        linked: completion.linked ?? { note_path: document.path, files: [], unreadable: [] },
+        ...(completion.evidence === null ? {} : { evidence: completion.evidence }),
+        sources: [...completion.sourceKeys],
+      });
+      if (outcome.kind === "Nothing") setGotoMessage(gotoReason(t, outcome.reason));
+      else if (outcome.kind === "Source") {
+        setGotoMessage(t("completion.goto.source", { key: outcome.key }));
+        completion.onGoto(outcome);
+      } else completion.onGoto(outcome);
+    } catch {
+      // Ядро не ответило — переходить некуда, сообщать нечего.
+    }
+  }, [client, completion, document.path, t]);
+
+  // Экранный диктор: поле редактора указывает на выбранную строку списка.
+  const activeOption =
+    completionState.session === null ? null : completionOptionId(completionState.session.active);
+  useEffect(() => {
+    const content = editorRef.current?.view()?.contentDOM;
+    if (content === undefined) return;
+    if (activeOption === null) content.removeAttribute("aria-activedescendant");
+    else content.setAttribute("aria-activedescendant", activeOption);
+  }, [activeOption]);
+
+  const lastCompletionRequest = useRef(completion?.request?.id ?? 0);
+  useEffect(() => {
+    const request = completion?.request ?? null;
+    if (request === null || request.id === lastCompletionRequest.current) return;
+    lastCompletionRequest.current = request.id;
+    if (!active || !completionEnabled) return;
+    if (request.kind === "trigger") completionState.trigger();
+    else void goToDefinition();
+  }, [completion?.request, active, completionEnabled, completionState, goToDefinition]);
 
 
 
@@ -915,7 +1059,8 @@ export function NoteEditor({
         tabId={tabId}
         ariaLabel={t("editor.contentLabel", { name })}
         {...(typst ? { highlight: typstHighlightFor(client) } : {})}
-        {...(typst && attachments !== undefined ? { extensions: attachmentExtensions } : {})}
+        extensions={editorExtensions}
+        {...(completionEnabled ? { onCompletionTrigger: completionState.onTrigger } : {})}
         onCaretMove={onCaretMove}
         onSlashMenu={openInsertMenuAt}
         onContextMenu={(event) => {
@@ -939,6 +1084,8 @@ export function NoteEditor({
                 : undefined,
               notify: contextMenu.notify,
               insertShortcut: shortcuts.displayOf("insert-menu"),
+              gotoDefinition: completionEnabled ? () => void goToDefinition() : undefined,
+              gotoShortcut: shortcuts.displayOf("goto-definition"),
             }),
           );
         }}
@@ -1039,6 +1186,28 @@ export function NoteEditor({
           </button>
         </div>
       )}
+      {completionState.session !== null && active && (
+        <CompletionPopup
+          session={completionState.session}
+          narrow={completion?.narrow ?? false}
+          editorBox={editorBox}
+          onPick={completionState.pick}
+          onHover={completionState.setActive}
+        />
+      )}
+      {completionEnabled && markAtCaret !== undefined && completion !== undefined && (
+        <MarkExplanation
+          key={`${markAtCaret.from}:${markAtCaret.to}`}
+          mark={markAtCaret}
+          readOnly={completion.readOnly}
+          onCreateNote={completion.createNote}
+        />
+      )}
+      {gotoMessage !== null && (
+        <div className="ts-cite-offer" role="status">
+          <span>{gotoMessage}</span>
+        </div>
+      )}
       {citeOffer !== null && (
         <BibliographyPrompt
           offer={citeOffer}
@@ -1077,6 +1246,14 @@ export function NoteEditor({
         )}
         {attachmentStatus !== undefined && (
           <span className="ts-attach-status">{attachmentStatus}</span>
+        )}
+        {completionState.session !== null && (
+          <span>{t("completion.status", { count: completionState.session.items.length })}</span>
+        )}
+        {referenceMarks.length > 0 && (
+          <span className="ts-mark-count">
+            {t("completion.mark.count", { count: referenceMarks.length })}
+          </span>
         )}
         <span className="ts-spacer" />
 

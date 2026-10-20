@@ -208,6 +208,10 @@ pub struct Settings {
     /// Наборы вкладок по vault (фича 014, FR-021…FR-023): только устройству.
     #[serde(deserialize_with = "lenient_workspaces")]
     pub workspaces: Vec<VaultWorkspaceEntry>,
+    /// Предлагать метки и заметки при наборе `@` и `[[` (фича 018, FR-009).
+    /// Привычка набора, а не свойство папки: только устройству. Нет в файле —
+    /// `true` (умолчание всей структуры).
+    pub editor_completion_auto: bool,
 }
 
 /// Набор вкладок одного vault на этом устройстве (фича 014, data-model
@@ -308,6 +312,7 @@ impl Default for Settings {
             vault_sync: Vec::new(),
             note_panel: NotePanelState::default(),
             workspaces: Vec::new(),
+            editor_completion_auto: true,
         }
     }
 }
@@ -397,6 +402,7 @@ pub fn resolve(
         vault_sync: device.vault_sync.clone(),
         note_panel: device.note_panel,
         workspaces: device.workspaces.clone(),
+        editor_completion_auto: device.editor_completion_auto,
     }
 }
 

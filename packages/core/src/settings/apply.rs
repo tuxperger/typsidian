@@ -54,6 +54,11 @@ pub struct SettingsChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub workspace: Option<super::VaultWorkspaceEntry>,
+    /// Предлагать ли метки и заметки при наборе (фича 018). Всегда в
+    /// устройство: см. [`route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub editor_completion_auto: Option<bool>,
 }
 
 /// Выбор языка интерфейса (фича 010, data-model.md «LanguageChoice»).
@@ -157,6 +162,9 @@ impl SettingsChange {
         }
         if let Some(state) = self.note_panel {
             next.note_panel = state;
+        }
+        if let Some(auto) = self.editor_completion_auto {
+            next.editor_completion_auto = auto;
         }
         if let Some(entry) = &self.workspace {
             next.workspaces
@@ -346,12 +354,15 @@ pub fn route(change: &SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> 
     // Набор вкладок (фича 014, FR-022) — тоже только устройству: вне vault, вне
     // его истории и доставки.
     let workspace = rest.workspace.take();
+    // Дополнение при наборе (фича 018) — привычка устройства.
+    let editor_completion_auto = rest.editor_completion_auto.take();
     let mut routed = Vec::with_capacity(2);
     if language.is_some()
         || device.is_some()
         || vault_sync.is_some()
         || note_panel.is_some()
         || workspace.is_some()
+        || editor_completion_auto.is_some()
     {
         routed.push(RoutedChange {
             target: ChangeTarget::Device,
@@ -361,6 +372,7 @@ pub fn route(change: &SettingsChange, vault_is_open: bool) -> Vec<RoutedChange> 
                 vault_sync,
                 note_panel,
                 workspace,
+                editor_completion_auto,
                 ..SettingsChange::default()
             },
         });

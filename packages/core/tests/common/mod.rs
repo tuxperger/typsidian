@@ -656,6 +656,7 @@ impl VaultBackend for MemoryVault {
 // контракта, оставив один таргет проверенным по устаревшему правилу.
 pub mod attachment_cases;
 pub mod capture_cases;
+pub mod completion_cases;
 pub mod element_cases;
 pub mod export_cases;
 pub mod graph_cases;
