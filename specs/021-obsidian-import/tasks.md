@@ -39,7 +39,7 @@
 
 - [X] T019 [P] [US3] Тесты: отмена посреди (нет частичных файлов, отчёт есть); журнал и продолжение без дублей; отчёт собирается
 - [X] T020 [US3] Журнал `.typsidian/imports/<id>.json` и продолжение в `batch.rs`; `survey` отдаёт `resume` per FR-011
-- [ ] T021 [US3] Заметка отчёта (C3) в `packages/core/src/import/report.rs`; предложение снимка 011 после импорта в `ImportProgress.tsx` per FR-012 — ядро (`report.rs`) готово; предложение снимка написано (`SnapshotOffer`, только при истории `Local`), в браузере не проверено: история в сценарии выключена
+- [X] T021 [US3] Заметка отчёта (C3) в `packages/core/src/import/report.rs`; предложение снимка 011 после импорта в `ImportProgress.tsx` per FR-012 — ядро (`report.rs`) готово; предложение снимка написано (`SnapshotOffer`, только при истории `Local`), в браузере не проверено: история в сценарии выключена
 - [X] T022 [US3] Экран продолжения C4 в `ImportDialog.tsx`; сценарий `scripts/dev/scenarios/import.mjs` (quickstart.md §2), снимки сверить с C1–C4
 
 ## Phase 6: Polish
