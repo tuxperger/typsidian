@@ -108,6 +108,7 @@ import type { DeviceSettingsClient } from "../settings/device-settings-client.js
 import { NotePanel } from "../note-panel/NotePanel.js";
 import type { NotePanelModeSpec } from "../note-panel/modes.js";
 import { useNarrowViewport } from "../note-panel/useNarrowViewport.js";
+import { usePhoneViewport } from "./usePhoneViewport.js";
 import { useNotePanelState } from "../note-panel/useNotePanelState.js";
 import { NotePanelDrawer, useBodyBelow } from "../note-panel/NotePanelDrawer.js";
 import { OutlineMode, type OutlineTarget } from "../note-panel/OutlineMode.js";
@@ -135,6 +136,15 @@ import type { DefinitionOutcome, Source } from "../wasm-core/typsidian_core.js";
 
 /** Тексты заметок для связей, пока vault не открыт. */
 const NO_OPEN_TEXTS: readonly OpenText[] = [];
+
+/** Колонка, которую показывает телефон (010 T057). */
+type PhonePane = "tree" | "editor" | "preview";
+
+const PHONE_PANE_LABEL = {
+  tree: "workspace.phone.tree",
+  editor: "workspace.phone.editor",
+  preview: "workspace.phone.preview",
+} as const satisfies Record<PhonePane, MessageKey>;
 
 /** Указанных пользователем файлов источников нет (фича 017). */
 const NO_SOURCE_FILES: readonly string[] = [];
@@ -692,6 +702,18 @@ function WorkspaceView({
   const { open: openTab, dispatch: dispatchTab } = tabs;
   // Колонка предпросмотра: доска при одной группе её не имеет (research.md §9).
   const showPreview = !(isBoardOpen && (layout?.groups.length ?? 1) < 2);
+
+  // Телефон (010 T057, SC-006): дерево, текст и предпросмотр — по одному, с
+  // переключателем внизу. Открытая заметка сама переводит к тексту.
+  const phone = usePhoneViewport();
+  const [phonePane, setPhonePane] = useState<PhonePane>("tree");
+  const lastPhonePath = useRef<string | null>(null);
+  useEffect(() => {
+    if (activePath !== null && activePath !== lastPhonePath.current) setPhonePane("editor");
+    lastPhonePath.current = activePath;
+  }, [activePath]);
+  const shownPhonePane: PhonePane =
+    phonePane === "preview" && !showPreview ? "editor" : phonePane;
   const activeNote = useMemo(
     () => (activePath === null ? null : (state.notes.find((entry) => entry.path === activePath) ?? null)),
     [activePath, state.notes],
@@ -2734,11 +2756,17 @@ function WorkspaceView({
           onBack={toggleView}
         />
       ) : (
-      <div className="ts-body" ref={panes.bodyRef} style={panes.style}>
+      <>
+      <div
+        className="ts-body"
+        ref={panes.bodyRef}
+        style={panes.style}
+        {...(phone ? { "data-phone-pane": shownPhonePane } : {})}
+      >
         {/* Скрытое дерево не рендерится вовсе, а не сжимается до нуля: панель
             нулевой ширины оставляла бы в раскладке свою рамку и по-прежнему
             читала бы vault ради счётчика в подвале. */}
-        {!panes.sidebarHidden && (
+        {(!panes.sidebarHidden || phone) && (
           <>
             <Sidebar
               client={state.client}
@@ -2889,6 +2917,23 @@ function WorkspaceView({
           </>
         )}
       </div>
+      {phone && (
+        <nav className="ts-phone-switch" aria-label={t("workspace.phone.switch")}>
+          {(["tree", "editor", "preview"] as const).map((pane) => (
+            <button
+              key={pane}
+              type="button"
+              className="ts-phone-switch__btn"
+              aria-pressed={shownPhonePane === pane}
+              disabled={pane === "preview" && !showPreview}
+              onClick={() => setPhonePane(pane)}
+            >
+              {t(PHONE_PANE_LABEL[pane])}
+            </button>
+          ))}
+        </nav>
+      )}
+      </>
       )}
 
       {drawer && noteSheetOpen && view === "workspace" && (

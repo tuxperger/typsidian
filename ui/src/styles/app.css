@@ -9724,3 +9724,106 @@ button.ts-props__chipbtn,
 .ts-mark-count {
   color: var(--warning);
 }
+
+/* ── Телефон (фича 010, T057, SC-006) ─────────────────────────────────────
+ * Уже 560px три колонки рядом не помещаются: дерево, текст и предпросмотр
+ * показываются по одной, переключатель — внизу. Шапка и тулбары не выходят за
+ * экран: лишнее прокручивается вбок внутри своей строки. Окна и панели — во
+ * всю ширину. Порог — `PHONE_VIEWPORT_QUERY` в `workspace/usePhoneViewport.ts`. */
+
+@media (max-width: 560px) {
+  .ts-body[data-phone-pane] > * {
+    display: none;
+  }
+
+  .ts-body[data-phone-pane="tree"] > .ts-sidebar,
+  .ts-body[data-phone-pane="editor"] > .ts-groups,
+  .ts-body[data-phone-pane="editor"] > .ts-pane--board,
+  .ts-body[data-phone-pane="preview"] > .ts-pane--preview {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .ts-header {
+    justify-content: flex-start;
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ts-header::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ts-header > *,
+  .ts-header__group > * {
+    flex: none;
+  }
+
+  .ts-header__group {
+    gap: var(--space-2);
+  }
+
+  .ts-pane__toolbar,
+  .ts-statusbar,
+  .ts-insertbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ts-pane__toolbar > *,
+  .ts-statusbar > * {
+    flex: none;
+  }
+
+  .ts-dialog,
+  .ts-sheet,
+  .ts-palette {
+    width: 100vw;
+    max-width: 100vw;
+    border-radius: 0;
+  }
+
+  .ts-settings {
+    flex-direction: column;
+  }
+
+  .ts-settings__nav {
+    flex: none;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .ts-phone-switch {
+    flex: none;
+    display: flex;
+    border-top: var(--border-width) solid var(--border-default);
+    background: var(--steel-950);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .ts-phone-switch__btn {
+    flex: 1 1 0;
+    padding: var(--space-3) 0;
+    border: 0;
+    background: none;
+    color: var(--steel-400);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .ts-phone-switch__btn[aria-pressed="true"] {
+    color: var(--orange-400);
+    box-shadow: inset 0 2px 0 var(--orange-500);
+  }
+
+  .ts-phone-switch__btn:disabled {
+    color: var(--steel-700);
+    cursor: default;
+  }
+}

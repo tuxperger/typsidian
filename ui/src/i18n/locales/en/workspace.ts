@@ -27,6 +27,10 @@ export const workspace = {
   "workspace.graph": "Graph",
   "workspace.openPalette": "Open command palette",
   "workspace.sidebarWidth": "Sidebar width",
+  "workspace.phone.switch": "Show",
+  "workspace.phone.tree": "Files",
+  "workspace.phone.editor": "Text",
+  "workspace.phone.preview": "Preview",
   "workspace.editorPreviewSplit": "Editor and preview divider",
   "workspace.templateName": "Template",
 

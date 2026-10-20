@@ -194,6 +194,6 @@ T028 settings     T029 templates   T030 export   T031 search   T032 icons/menu  
 
 ## Phase 8: Convergence
 
-- [ ] T057 Сделать телефонную раскладку для ширины 400 px (одна колонка: дерево / редактор / предпросмотр переключаются, шапка и тулбары без выхода за экран, панель настроек и модальные окна во всю ширину) в `ui/src/styles/app.css` селекторами `.ts-*` и при необходимости в `ui/src/workspace/Workspace.tsx`; проверить стендом из quickstart § «Результаты прогона» на `en` и `ru` per SC-006 (partial)
+- [X] T057 Сделать телефонную раскладку для ширины 400 px (одна колонка: дерево / редактор / предпросмотр переключаются, шапка и тулбары без выхода за экран, панель настроек и модальные окна во всю ширину) в `ui/src/styles/app.css` селекторами `.ts-*` и при необходимости в `ui/src/workspace/Workspace.tsx`; проверить стендом из quickstart § «Результаты прогона» на `en` и `ru` per SC-006 (partial)
 - [ ] T058 Проверить SC-007 на подключённом Android-устройстве (подписанный `app-universal-release-signed.apk`) и в запущенном desktop-бинаре: те же экраны на `en`, что и web; дописать результат в `specs/010-ui-localization/quickstart.md` per SC-007 / FR-019 (partial)
 - [X] T059 Не сериализовать `None` у `Settings::language` и `Settings::editor_config_path` (`skip_serializing_if`) в `packages/core/src/settings/mod.rs`: команды Tauri отдают `Option::None` как `null`, а тип и проверки UI ждут `undefined` — `resolveLanguage` падает на `null.split`, и окно desktop/Android остаётся пустым; тест в том же модуле per SC-007 / FR-029

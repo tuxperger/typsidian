@@ -27,6 +27,10 @@ export const workspace: Translation<typeof en> = {
   "workspace.graph": "Граф",
   "workspace.openPalette": "Открыть палитру команд",
   "workspace.sidebarWidth": "Ширина боковой панели",
+  "workspace.phone.switch": "Показать",
+  "workspace.phone.tree": "Файлы",
+  "workspace.phone.editor": "Текст",
+  "workspace.phone.preview": "Вид",
   "workspace.editorPreviewSplit": "Граница редактора и предпросмотра",
   "workspace.templateName": "Заготовка",
 
