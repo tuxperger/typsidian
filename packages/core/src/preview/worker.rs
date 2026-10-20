@@ -138,8 +138,17 @@ fn encode_job(job: &CompileJob, builtin_fonts: usize) -> Result<JsValue, JsValue
 
 thread_local! {
     /// Встроенные шрифты экземпляра-воркера: разбираются один раз, а не на
-    /// каждую сборку.
-    static BUILTIN: FontSet = FontSet::builtin();
+    /// каждую сборку. Без вшитого набора (wasm приложения) их присылает
+    /// интерфейс при создании воркера — [`set_worker_builtin_fonts`].
+    static BUILTIN: std::cell::RefCell<FontSet> = std::cell::RefCell::new(FontSet::builtin());
+}
+
+/// Встроенный набор для этого воркера (005 T029): файлы, загруженные рядом с
+/// модулем. Зовётся из `ui/src/preview/compile-worker.ts` один раз после старта.
+#[wasm_bindgen(js_name = setWorkerBuiltinFonts)]
+pub fn set_worker_builtin_fonts(files: Vec<js_sys::Uint8Array>) {
+    let fonts = FontSet::from_bytes(files.into_iter().map(|file| Bytes::new(file.to_vec())));
+    BUILTIN.with(|builtin| *builtin.borrow_mut() = fonts);
 }
 
 /// Сторона воркера: выполняет один проход компилятора.
@@ -159,11 +168,13 @@ pub fn run_compile_job(message: JsValue) -> Result<JsValue, JsValue> {
         snapshot.insert(id, Bytes::new(js_sys::Uint8Array::new(&bytes).to_vec()));
     }
     let main = header.main.id().ok_or_else(|| bad("unreadable main key"))?;
-    let fonts = BUILTIN.with(FontSet::clone).with_vault_fonts(
-        fonts
-            .iter()
-            .map(|bytes| Bytes::new(js_sys::Uint8Array::new(&bytes).to_vec())),
-    );
+    let fonts = BUILTIN
+        .with(|builtin| builtin.borrow().clone())
+        .with_vault_fonts(
+            fonts
+                .iter()
+                .map(|bytes| Bytes::new(js_sys::Uint8Array::new(&bytes).to_vec())),
+        );
     let render = match header.pdf_ident {
         None => Render::Pages,
         Some(ident) => Render::Pdf(PdfMeta { ident }),
@@ -220,6 +231,11 @@ impl WorkerExecutor {
             post,
             builtin_fonts,
         }
+    }
+
+    /// Сколько первых начертаний набора воркер уже знает сам (встроенный набор).
+    pub fn set_builtin_fonts(&mut self, count: usize) {
+        self.builtin_fonts = count;
     }
 
     async fn ask(&self, job: &CompileJob) -> Result<(ResultHeader, Option<Vec<u8>>), JsValue> {

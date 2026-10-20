@@ -29,6 +29,15 @@ import type { Phrase } from "../i18n/index.js";
 export const NOTE_AUTOSAVE_DEBOUNCE_MS = 600;
 
 /**
+ * Пауза, через которую ядро узнаёт новую версию несохранённого буфера (005
+ * T064). Первая правка объявляется сразу — с этого мига внешнее изменение
+ * не применяется молча (FR-035); следующие нажатия сводятся в один вызов:
+ * буфер целиком на каждый символ — лишние мегабайты через очередь вызовов
+ * wasm или IPC на длинной заметке.
+ */
+export const EDIT_ANNOUNCE_DEBOUNCE_MS = 150;
+
+/**
  * Что показывает статус-бар редактора.
  *
  * Форма — как у `BoardSaveState` из ядра, но тип свой: у заметки есть
@@ -163,6 +172,8 @@ export class NoteDocumentImpl implements NoteDocument {
   /** Ядру объявлена правка, которую ещё не сняла запись или `discardEdit`. */
   private announced = false;
   private timer: number | null = null;
+  /** Объявление новой версии буфера ядру, отложенное до паузы набора. */
+  private announceTimer: number | null = null;
   private disposed = false;
   private loading: Promise<void> | null = null;
   private readonly unregisterFlusher: () => void;
@@ -318,6 +329,7 @@ export class NoteDocumentImpl implements NoteDocument {
       // Буфер вернулся к сохранённому тексту: ядру больше нечего считать
       // несохранённым, иначе вкладку нельзя было бы закрыть (research.md §6).
       this.cancelTimer();
+      this.cancelAnnounce();
       if (this.announced) {
         this.announced = false;
         void this.client.discardEdit(this.path).catch(() => undefined);
@@ -327,8 +339,19 @@ export class NoteDocumentImpl implements NoteDocument {
     }
     // FR-035: ядро должно знать о несохранённых правках и держать сам буфер —
     // иначе внешнее изменение будет применено молча.
-    this.announced = true;
-    void this.client.beginEdit(this.path, next).catch(() => undefined);
+    if (!this.announced) {
+      this.announced = true;
+      this.cancelAnnounce();
+      void this.client.beginEdit(this.path, next).catch(() => undefined);
+    } else if (this.announceTimer === null) {
+      this.announceTimer = window.setTimeout(() => {
+        this.announceTimer = null;
+        // К этому мигу буфер мог уйти вперёд — объявляется последний.
+        const latest = this.buffer;
+        if (this.disposed || latest === null || latest === this.saved) return;
+        void this.client.beginEdit(this.path, latest).catch(() => undefined);
+      }, EDIT_ANNOUNCE_DEBOUNCE_MS);
+    }
     this.cancelTimer();
     this.timer = window.setTimeout(() => {
       this.timer = null;
@@ -342,6 +365,13 @@ export class NoteDocumentImpl implements NoteDocument {
     if (this.timer !== null) {
       window.clearTimeout(this.timer);
       this.timer = null;
+    }
+  }
+
+  private cancelAnnounce(): void {
+    if (this.announceTimer !== null) {
+      window.clearTimeout(this.announceTimer);
+      this.announceTimer = null;
     }
   }
 
@@ -366,6 +396,8 @@ export class NoteDocumentImpl implements NoteDocument {
       return;
     }
 
+    // Запись покрывает отложенное объявление: файл и так станет этим буфером.
+    this.cancelAnnounce();
     this.setSave({ state: "Saving" });
     try {
       await this.client.write(path, buffer, undefined);
@@ -389,6 +421,7 @@ export class NoteDocumentImpl implements NoteDocument {
   dispose(): void {
     this.disposed = true;
     this.cancelTimer();
+    this.cancelAnnounce();
     this.unregisterFlusher();
     this.listeners.clear();
     this.views.clear();

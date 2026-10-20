@@ -70,6 +70,7 @@ import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
 import { ensureWasmInitialized } from "./wasm-init.js";
 import { createCompileWorker } from "./preview/compile-worker-client.js";
+import { loadBuiltinFonts } from "./preview/builtin-fonts.js";
 import type { SyncClient, VaultCloner } from "./sync/sync-client.js";
 import { webSyncClient, webVaultCloner } from "./sync/sync-client-web.js";
 import { deviceStore, deviceStoreQueue } from "./settings/deviceStore.js";
@@ -557,8 +558,23 @@ function webPreviewClient(
   // ждёт компилятор, а сборка дольше предела обрывается. Без `Worker`
   // (старый браузер, тестовая среда) ядро собирает на месте, как раньше.
   const worker =
-    typeof Worker === "undefined" ? null : createCompileWorker(buildTimeLimitMs());
+    typeof Worker === "undefined"
+      ? null
+      : createCompileWorker(buildTimeLimitMs(), loadBuiltinFonts);
   if (worker !== null) engine.setCompileWorker(worker.post);
+  // Встроенный набор шрифтов (005 T029) — файлами рядом с модулем, один раз
+  // перед первой сборкой: без него Typst не верстает текст.
+  let fontsAdded: Promise<void> | null = null;
+  const withFonts = async <T,>(op: () => T | Promise<T>): Promise<T> => {
+    fontsAdded ??= loadBuiltinFonts()
+      .then((files) => call(() => engine.addBuiltinFonts(files)))
+      .catch((cause: unknown) => {
+        fontsAdded = null;
+        throw cause;
+      });
+    await fontsAdded;
+    return call(op);
+  };
   return {
     // Мимо очереди: отмена обязана дойти, пока сборка её занимает.
     cancel: () => worker?.cancel(),
@@ -566,12 +582,12 @@ function webPreviewClient(
     completionLinkedIndex: (notePath, dependencies) =>
       call(() => engine.completionLinkedIndex(backend, notePath, dependencies)),
     compile: (notePath, text, revision, anchor) =>
-      call(() => engine.compile(backend, notePath, text, BigInt(revision), anchor)),
+      withFonts(() => engine.compile(backend, notePath, text, BigInt(revision), anchor)),
     // Фича 007: тот же движок, но недостающие шаблоны доустанавливаются.
     // Идёт через ту же очередь: путь пишет в vault, и наложение на цикл
     // опроса упало бы «recursive use of an object».
     compileWithTemplates: (notePath, text, revision, overrides, anchor) =>
-      call(() =>
+      withFonts(() =>
         engine.compileWithTemplates(
           backend,
           notePath,
@@ -589,7 +605,7 @@ function webPreviewClient(
     // Фича 009. Экспорт собирает документ и пишет файл — через очередь, как
     // `compile`: сборка держит заимствование `WebBackend`.
     exportPdf: (notePath, text, overrides) =>
-      call(() => engine.exportPdf(backend, notePath, text, overrides)),
+      withFonts(() => engine.exportPdf(backend, notePath, text, overrides)),
     exportCandidates: (overrides) =>
       call(() => exportCandidates(backend, overrides)),
     // Фича 015: свободная функция, vault не трогает — мимо очереди.

@@ -66,6 +66,24 @@ impl PreviewEngine {
         self.packages.len()
     }
 
+    /// Встроенный набор шрифтов (FR-027, 005 T029): файлы, загруженные рядом с
+    /// модулем. Встаёт в начало набора, перед шрифтами vault; воркер сборки
+    /// получает его сам, один раз, и с каждой сборкой его больше не шлют.
+    #[wasm_bindgen(js_name = addBuiltinFonts)]
+    pub fn add_builtin_fonts(&mut self, files: Vec<js_sys::Uint8Array>) {
+        let builtin = FontSet::from_bytes(files.into_iter().map(|file| Bytes::new(file.to_vec())));
+        let count = builtin.len();
+        let rest = std::mem::take(&mut self.fonts)
+            .into_fonts()
+            .into_iter()
+            .skip(self.builtin_fonts);
+        self.fonts = builtin.with_fonts(rest);
+        self.builtin_fonts = count;
+        if let Some(executor) = self.executor.as_mut() {
+            executor.set_builtin_fonts(count);
+        }
+    }
+
     /// Добавляет шрифты из папки vault (FR-027, FR-029).
     #[wasm_bindgen(js_name = addVaultFonts)]
     pub fn add_vault_fonts(&mut self, files: Vec<js_sys::Uint8Array>) {

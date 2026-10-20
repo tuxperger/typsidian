@@ -13,7 +13,7 @@
 | 002 | [Drawing Boards](002-drawing-boards/spec.md) | — | implement 72/78 | — | — |
 | 003 | [Templates and Snippets](003-templates-snippets/spec.md) | — | implement 44/50 | — | — |
 | 004 | [Application Settings](004-app-settings/spec.md) | — | implement 106/115 | — | — |
-| 005 | [Note Rendering and Live Preview](005-live-preview/spec.md) | — | implement 111/122 | — | — |
+| 005 | [Note Rendering and Live Preview](005-live-preview/spec.md) | — | implement 113/122 | — | — |
 | 006 | [Vault Service Layout](006-vault-service-layout/spec.md) | — | implement 68/75 | — | — |
 | 007 | [Template Download](007-template-download/spec.md) | — | implement 49/50 | — | — |
 | 008 | [Element Parameters](008-element-parameters/spec.md) | — | implement 57/58 | — | — |

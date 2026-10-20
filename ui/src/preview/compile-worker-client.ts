@@ -7,6 +7,7 @@
 
 type Reply =
   | { ready: true }
+  | { fontsReady: true }
   | { failed: string }
   | { id: number; reply: unknown }
   | { id: number; error: string };
@@ -38,7 +39,14 @@ export interface CompileWorker {
  * не при открытии vault: пока предпросмотр не понадобился, второй экземпляр
  * ядра не загружается.
  */
-export function createCompileWorker(limitMs: number): CompileWorker {
+/**
+ * `fonts` — встроенный набор шрифтов (005 T029): каждый новый воркер получает
+ * его один раз, до первой сборки.
+ */
+export function createCompileWorker(
+  limitMs: number,
+  fonts: () => Promise<Uint8Array[]>,
+): CompileWorker {
   let worker: Worker | null = null;
   let ready: Promise<void> | null = null;
   let pending: Pending | null = null;
@@ -69,6 +77,11 @@ export function createCompileWorker(limitMs: number): CompileWorker {
       created.onmessage = (event: MessageEvent<Reply>) => {
         const data = event.data;
         if ("ready" in data) {
+          void fonts().then(
+            (files) => created.postMessage({ fonts: files }),
+            (cause: unknown) => reject(cause instanceof Error ? cause : new Error(String(cause))),
+          );
+        } else if ("fontsReady" in data) {
           resolve();
         } else if ("failed" in data) {
           reject(new Error(data.failed));

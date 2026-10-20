@@ -4,10 +4,12 @@
 // компилятора и отдаёт результат. Форму сообщений знает только ядро
 // (`packages/core/src/preview/worker.rs`) — здесь они не разбираются, а
 // передаются как есть.
-import init, { runCompileJob } from "../wasm-core/typsidian_core.js";
+import init, { runCompileJob, setWorkerBuiltinFonts } from "../wasm-core/typsidian_core.js";
 
 interface WorkerScope {
-  onmessage: ((event: MessageEvent<{ id: number; message: unknown }>) => void) | null;
+  onmessage:
+    | ((event: MessageEvent<{ id: number; message: unknown } | { fonts: Uint8Array[] }>) => void)
+    | null;
   postMessage(message: unknown): void;
 }
 
@@ -21,7 +23,16 @@ const ready = init().then(
 );
 
 scope.onmessage = (event) => {
-  const { id, message } = event.data;
+  const data = event.data;
+  // Встроенный набор шрифтов — один раз после старта (005 T029): в модуле его нет.
+  if ("fonts" in data) {
+    void ready.then(() => {
+      setWorkerBuiltinFonts(data.fonts);
+      scope.postMessage({ fontsReady: true });
+    });
+    return;
+  }
+  const { id, message } = data;
   void ready.then(() => {
     try {
       scope.postMessage({ id, reply: runCompileJob(message) });

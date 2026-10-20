@@ -13,6 +13,8 @@ result
 packages/core/pkg/
 ui/src/wasm-core/
 ui/dist/wasm-core/
+# Встроенные шрифты предпросмотра для web — копия из typst-assets (005 T029).
+apps/web/public/fonts/typst/
 
 # --- Сборка пакетов ---
 # ui/dist собирается из ui/src через `pnpm --filter @typsidian/ui build`,
