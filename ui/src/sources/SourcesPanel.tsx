@@ -13,7 +13,7 @@ import type {
   SourceHits,
 } from "../wasm-core/typsidian_core.js";
 import { Snippet, type RevealPlace } from "../note-panel/links/LinksMode.js";
-import { authorsLine, problemDetail, problemText } from "./describe.js";
+import { problemDetail, problemText } from "./describe.js";
 
 /** Строк в списке панели (contracts/frontend-sources.md § Панель). */
 const PANEL_LIMIT = 200;
@@ -306,15 +306,15 @@ function SourceCard({
   const { source } = hit;
   return (
     <div className="ts-sources__card">
-      <span className="ts-sources__authors">{authorsLine(source)}</span>
-      <strong className="ts-sources__title">{source.title}</strong>
+      <span className="ts-sources__authors">{source.authors.join(", ")}</span>
+      <span className="ts-sources__title">{source.title}</span>
       <span className="ts-sources__meta">
         {[source.container, source.year === undefined ? undefined : String(source.year)]
           .filter((part) => part !== undefined)
           .join(" · ")}
       </span>
       <span className="ts-sources__meta">
-        {source.key}
+        {t("sources.keyLabel", { key: source.key })}
         {hit.cited !== undefined && ` · ${t("sources.inText", { count: hit.cited })}`}
       </span>
       <span className="ts-sources__meta">{source.file}</span>

@@ -150,7 +150,7 @@ Tracking).
 ## Phase 7: Polish
 
 - [X] T066 Сценарий `scripts/dev/scenarios/attachments.mjs` по образцу `scripts/dev/scenarios/rules-editor.mjs`: синтетические `paste` и `drop` с файлами, проверка файлов в OPFS и текста заметки, смешанная пачка, настройки vault, бросок ссылки без файла — текст не изменён и сетевых запросов нет (research.md §15)
-- [ ] T067 Сверка вёрстки с макетом `Typsidian Вложения.dc.html` (экраны 1a–1c) снимками `scripts/dev/browser.mjs … --opfs-vault --shot`; расхождения сверх research.md §16 исправить в `ui/src/styles/app.css`
+- [X] T067 Сверка вёрстки с макетом `Typsidian Вложения.dc.html` (экраны 1a–1c) снимками `scripts/dev/browser.mjs … --opfs-vault --shot`; расхождения сверх research.md §16 исправить в `ui/src/styles/app.css`
 - [X] T068 Гейты: сборка ядра под wasm32 и native, `cargo test -p typsidian-core`, wasm-тесты `attachments_wasm`, `vault_wasm`, `placement_wasm`, `preview_wasm`, `cargo test -p typsidian-shell`, `pnpm -r typecheck`, `scripts/check-i18n.sh`, `pnpm build` — по `specs/016-attachments-paste/quickstart.md`
 - [ ] T069 Ручная проверка по `specs/016-attachments-paste/quickstart.md` на web и в desktop-сборке (шаги 1–14), включая `drop` и вставку картинки в WebKitGTK (research.md §17), замер SC-001 (снимок 5 МБ) и SC-005 (50 файлов, отмена ≤1 с), проверку SC-006 в другой оболочке (шаг 14); результаты и «не проверено» — в конец `specs/016-attachments-paste/tasks.md`
 

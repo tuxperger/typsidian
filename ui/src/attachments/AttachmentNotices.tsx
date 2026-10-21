@@ -125,7 +125,9 @@ function Summary({
   const { summary, state } = view;
   const inserted = notInserted ? 0 : summary.stored + summary.reused;
   const skipped = state.items.filter((item) => item.status.kind === "Skipped");
-  const problems = summary.failed > 0 || skipped.length > 0;
+  // Ошибка — когда файл не записан или не вставлено ничего; пропуск части
+  // файлов — обычный отчёт с красной строкой пропущенных (макет 1b).
+  const problems = summary.failed > 0 || inserted === 0;
   return (
     <div
       className={problems ? "ts-attach-panel ts-attach-panel--err" : "ts-attach-panel"}
@@ -151,6 +153,10 @@ function Summary({
                   {t("attachments.summary.savedAs", { name: status.saved_as })}
                 </li>
               );
+            }
+            // Вставленные — поимённо, как в макете 1b.
+            if (status.kind === "Stored" && !notInserted) {
+              return <li key={index}>{itemName(t, item)}</li>;
             }
             if (status.kind === "Failed") {
               return (

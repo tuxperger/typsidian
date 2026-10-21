@@ -19,6 +19,7 @@ export const sources: Translation<typeof en> = {
   "sources.tag.uncited": "не цитируется",
   "sources.tag.broken": "битая",
   "sources.insertKey": (p) => `Вставить @${p.key}`,
+  "sources.keyLabel": (p) => `ключ: ${p.key}`,
   "sources.inText": (p) => ruN(p.count, "в тексте # раз", "в тексте # раза", "в тексте # раз"),
   "sources.citing.title": "Цитируют",
   "sources.citing.none": "Этот источник пока не цитирует ни одна заметка.",

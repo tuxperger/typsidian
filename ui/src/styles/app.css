@@ -6454,6 +6454,8 @@ button.ts-diagnostics__place:focus-visible {
 .ts-outline__row--mono {
   font-family: var(--font-mono);
   font-size: 10.5px;
+  /* Объекты в макете 1a приглушены целиком — и подпись, и метка. */
+  color: var(--steel-500);
 }
 
 /* Шеврон занимает 14px и у строк без вложенных — тексты одного уровня
@@ -6511,7 +6513,7 @@ button.ts-diagnostics__place:focus-visible {
 }
 
 .ts-outline__label {
-  color: var(--orange-400);
+  color: var(--steel-500);
 }
 
 .ts-outline__label--side {
@@ -6961,6 +6963,11 @@ button.ts-diagnostics__place:focus-visible {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--steel-600);
+}
+
+/* Папка в макете 1a — с косой чертой: «План Диссертация/». */
+.ts-tab__hint::after {
+  content: "/";
 }
 
 /* Hi-vis жёлтый — только про несохранённое (handoff § Design Tokens), тот же
@@ -8973,6 +8980,11 @@ button.ts-props__chipbtn,
   align-items: flex-start;
 }
 
+/* Итог без ошибок — нейтральная панель, как «Вставлено 3 из 5» в 1b. */
+.ts-notices > .ts-attach-panel:not(.ts-attach-panel--live, .ts-attach-panel--warn, .ts-attach-panel--err) {
+  border-left-color: var(--steel-700);
+}
+
 .ts-notices > .ts-attach-panel--live {
   border-left-color: var(--orange-500);
 }
@@ -9013,11 +9025,19 @@ button.ts-props__chipbtn,
 
 .ts-attach-panel__list {
   flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
   margin: 0;
   padding: 0;
   list-style: none;
   font-family: var(--font-mono);
-  color: var(--steel-400);
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+/* Одной строкой через « · », как в макете 1b. */
+.ts-attach-panel__list > li + li::before {
+  content: "\00a0·\00a0";
 }
 
 .ts-attach-panel__list:empty {
@@ -9286,7 +9306,7 @@ button.ts-props__chipbtn,
 }
 
 .ts-sources__row--uncited .ts-sources__text {
-  color: var(--steel-400);
+  color: var(--steel-600);
 }
 
 .ts-sources__text {
@@ -9303,7 +9323,7 @@ button.ts-props__chipbtn,
 }
 
 .ts-sources__tag--uncited {
-  color: var(--amber-600);
+  color: var(--steel-500);
   white-space: nowrap;
 }
 
@@ -9343,12 +9363,13 @@ button.ts-props__chipbtn,
 }
 
 .ts-sources__authors {
-  color: var(--steel-400);
+  color: var(--steel-100);
+  font-weight: 600;
 }
 
 .ts-sources__title {
-  color: var(--steel-100);
-  font-weight: 500;
+  color: var(--steel-400);
+  font-weight: 400;
 }
 
 .ts-sources__meta {
@@ -9442,7 +9463,7 @@ button.ts-props__chipbtn,
   z-index: 40;
   display: flex;
   flex-direction: column;
-  width: 480px;
+  width: 330px;
   max-width: calc(100vw - 16px);
   max-height: 60vh;
   overflow: hidden;
@@ -9513,7 +9534,7 @@ button.ts-props__chipbtn,
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  color: var(--orange-400);
+  color: var(--steel-600);
   font-family: var(--font-mono);
 }
 

@@ -20,6 +20,7 @@ export const sources = {
   "sources.tag.uncited": "not cited",
   "sources.tag.broken": "broken",
   "sources.insertKey": (p: { key: string }) => `Insert @${p.key}`,
+  "sources.keyLabel": (p: { key: string }) => `key: ${p.key}`,
   "sources.inText": (p: { count: number }) => enN(p.count, "in text # time", "in text # times"),
   "sources.citing.title": "Cited in",
   "sources.citing.none": "No note cites this source yet.",

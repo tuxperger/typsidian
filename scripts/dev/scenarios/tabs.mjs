@@ -140,7 +140,8 @@ export default async (page) => {
   await page.type(" Дописано.");
   expect(page, await fileHas(page, "Диссертация/Введение.typ", "Дописано."), "автосохранение записало набранное");
   expect(page, (await page.text(".ts-statusbar")).includes("сохранено"), "статус-бар: сохранено");
-  expect(page, (await page.text(".ts-pane--preview")).includes("Дописано"), "предпросмотр следует за буфером");
+  // Первая сборка ждёт встроенные шрифты (005 T029) — ждать её, а не проверять сразу.
+  await page.waitFor(`document.querySelector(".ts-pane--preview")?.textContent.includes("Дописано")`, { label: "предпросмотр с правкой" });
 
   // ── US1: вкладки ───────────────────────────────────────────────────────
   await openTree(page, "Результаты");
