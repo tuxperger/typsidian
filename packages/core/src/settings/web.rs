@@ -7,9 +7,8 @@
 //! лишился бы возможности править их руками (FR-013) и видеть, где они лежат
 //! (FR-036).
 
-use super::apply::{plan, reset_to_defaults, ApplyContext, ApplyPlan, SettingsChange};
+use super::apply::{plan, reset_to_defaults, ApplyPlan, SettingsChange};
 use super::diagnostics::{self, Diagnostics};
-use super::editor_mode::{BridgeAvailability, EditorMode, OutageReason};
 use super::events::SettingsEvent;
 use super::folder_ref::{FolderRegistry, Resolved};
 use super::format::{self, FolderRefs};
@@ -400,11 +399,8 @@ impl SettingsStore for WebStore {
         self.state.clone()
     }
 
-    async fn apply(&mut self, change: &SettingsChange, context: &ApplyContext) -> ApplyPlan {
-        let mut context = context.clone();
-        context.storage_writable = self.state != StorageState::ReadOnlyForSession;
-
-        let outcome = plan(&self.settings, change, &context);
+    async fn apply(&mut self, change: &SettingsChange) -> ApplyPlan {
+        let outcome = plan(&self.settings, change);
         if outcome != ApplyPlan::Applied {
             return outcome;
         }
@@ -660,7 +656,7 @@ impl WebStore {
     pub async fn apply_js(&mut self, change: SettingsChange) -> ApplyPlan {
         // Контекст собирает вызывающая сторона: ядро настроек не имеет доступа
         // ни к редактору, ни к vault-бэкенду (research.md §9).
-        SettingsStore::apply(self, &change, &ApplyContext::unobstructed()).await
+        SettingsStore::apply(self, &change).await
     }
 
     /// Добавить папку как vault. Ссылку UI передаёт **не разбирая** её:
@@ -806,29 +802,15 @@ impl WebStore {
         super::apply::device_defaults_change(&effective)
     }
 
-    /// Диагностика раздела «Дополнительно» (FR-039).
-    ///
-    /// Состояние моста здесь не параметр, а вычисляемое значение: в вебе
-    /// полноценный режим недоступен постоянно и по одной причине — платформа не
-    /// порождает внешние процессы (research.md §7). Принимать его от UI значило
-    /// бы позволить интерфейсу назвать состояние, которого нет.
     /// Журнал приложения целиком (FR-040).
     #[wasm_bindgen(js_name = journalText)]
     pub fn journal_text_js(&self) -> String {
         SettingsStore::journal_text(self)
     }
 
+    /// Диагностика раздела «Дополнительно» (FR-039).
     #[wasm_bindgen(js_name = diagnostics)]
     pub fn diagnostics_js(&self) -> Diagnostics {
-        diagnostics::collect(
-            EditorMode::PlainInput {
-                reason: OutageReason::ExternalProcessesUnavailable,
-            },
-            BridgeAvailability::Unavailable {
-                reason: OutageReason::ExternalProcessesUnavailable,
-            },
-            SettingsStore::capabilities(self),
-            self.state.clone(),
-        )
+        diagnostics::collect(SettingsStore::capabilities(self), self.state.clone())
     }
 }

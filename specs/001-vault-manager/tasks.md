@@ -670,7 +670,7 @@ native-половина T032, T044, T063, T079, T091, T095 невыполним�
 - [X] T111 Добавить в `flake.nix` системные зависимости сборки Tauri для NixOS —
       `pkg-config`, `webkitgtk_4_1`, `libsoup_3`, `gtk3`, `librsvg`, `openssl` — и
       экспортировать `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH` в `shellHook`. Сейчас `buildInputs`
-      содержит только Rust-тулчейн, node/pnpm, chromium, sqlite и neovim, поэтому
+      содержит только Rust-тулчейн, node/pnpm, chromium и sqlite, поэтому
       `cargo tauri build` не найдёт webkit и упадёт на этапе линковки
       per plan: Project Structure (missing)
 - [X] T112 Создать `apps/desktop` — Tauri-оболочку поверх общего `ui/`: `apps/desktop/package.json`

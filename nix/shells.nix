@@ -24,7 +24,6 @@ let
     pkgs.pnpm
     pkgs.uv # для specify-cli (Spec Kit)
     pkgs.python3 # даём uv нативный, собранный под NixOS python
-    pkgs.neovim # vim-мост, headless backend
     pkgs.sqlite
     pkgs.git
 

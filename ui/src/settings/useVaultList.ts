@@ -177,14 +177,10 @@ function classify(cause: unknown): VaultActionError {
 
 function describeReject(t: Translate, kind: RejectReason["kind"]): string {
   switch (kind) {
-    case "UnresolvedConflict":
-      return t("settings.reject.unresolvedConflict");
-    case "SaveFailed":
-      return t("settings.vaults.switchSaveFailed");
     case "ValueOutOfRange":
       return t("settings.vaults.unknownRecord");
     case "StorageNotWritable":
-      return t("settings.mode.storageNotWritable");
+      return t("settings.reject.storageNotWritable");
     default: {
       const exhaustive: never = kind;
       return exhaustive;

@@ -3806,22 +3806,6 @@ input.ts-sources__url:focus {
   color: var(--steel-600);
 }
 
-/* ── Vim-режим: заглушка статуса ─────────────────────────────────────────── */
-
-/* В макете это переключатель, здесь — надпись: моста к Neovim в web-сборке
- * нет (research.md §7 фичи 001), а кликабельная пилюля утверждала бы, что
- * режим переключается. Цвет NORMAL из макета сохранён. */
-.ts-vim {
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--steel-800);
-  color: var(--steel-500);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-caps);
-}
-
 /* ── Расширенный поиск (макет «Typsidian Утилиты» § Поиск) ───────────────── */
 
 /* Лист во всю высоту, а не карточка по центру: выдача поиска — это список

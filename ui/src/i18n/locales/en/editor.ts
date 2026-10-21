@@ -13,7 +13,6 @@ export const editor = {
   "editor.panel": "Panel",
   "editor.contentLabel": (p: { name: string }) => `Contents of note ${p.name}`,
   "editor.embedsLabel": "Embedded boards",
-  "editor.vimHint": "Editor mode: the web build has no bridge to Neovim",
   "editor.fieldState": (p: { index: number; count: number }) =>
     `field ${p.index} of ${p.count} · ⇥ next · esc exit`,
   "editor.fontSize.label": "Editor font size",

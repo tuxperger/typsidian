@@ -8,8 +8,8 @@
 #![allow(dead_code)]
 
 use typsidian_core::settings::apply::{
-    plan, reset_to_defaults, route, target_for, ApplyContext, ApplyPlan, ChangeTarget,
-    LanguageChoice, RejectReason, RoutedChange, SettingsChange,
+    plan, reset_to_defaults, route, target_for, ApplyPlan, ChangeTarget, LanguageChoice,
+    RejectReason, RoutedChange, SettingsChange,
 };
 use typsidian_core::settings::format::{self, FolderRefs};
 use typsidian_core::settings::{is_valid_language_tag, Settings, Theme};
@@ -67,7 +67,7 @@ pub fn invalid_tag_rejects_the_whole_change() {
             ..SettingsChange::language(tag(bad))
         };
         assert_eq!(
-            plan(&Settings::default(), &change, &ApplyContext::unobstructed()),
+            plan(&Settings::default(), &change),
             ApplyPlan::Rejected {
                 reason: RejectReason::ValueOutOfRange
             },
@@ -77,11 +77,7 @@ pub fn invalid_tag_rejects_the_whole_change() {
     for good in ["en", "ru", "en-GB", "zh-Hant-TW", "xx"] {
         assert!(is_valid_language_tag(good), "{good}");
         assert_eq!(
-            plan(
-                &Settings::default(),
-                &SettingsChange::language(tag(good)),
-                &ApplyContext::unobstructed()
-            ),
+            plan(&Settings::default(), &SettingsChange::language(tag(good))),
             ApplyPlan::Applied,
             "{good}"
         );
@@ -95,11 +91,7 @@ pub fn stored_malformed_tag_does_not_block_other_changes() {
         ..Settings::default()
     };
     assert_eq!(
-        plan(
-            &base,
-            &SettingsChange::theme(Theme::Dark),
-            &ApplyContext::unobstructed()
-        ),
+        plan(&base, &SettingsChange::theme(Theme::Dark)),
         ApplyPlan::Applied
     );
 }

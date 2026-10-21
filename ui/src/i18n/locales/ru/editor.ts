@@ -14,7 +14,6 @@ export const editor: Translation<typeof en> = {
   "editor.panel": "Панель",
   "editor.contentLabel": (p) => `Содержимое заметки ${p.name}`,
   "editor.embedsLabel": "Вставленные доски",
-  "editor.vimHint": "Режим редактора: моста к Neovim в web-сборке нет",
   "editor.fieldState": (p) => `поле ${p.index} из ${p.count} · ⇥ следующее · esc выйти`,
   "editor.fontSize.label": "Размер шрифта редактора",
   "editor.fontSize.decrease": "Уменьшить шрифт редактора",

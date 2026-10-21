@@ -5,19 +5,13 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use typsidian_core::settings::apply::{
-    reset_to_defaults, ApplyContext, ApplyPlan, RejectReason, SettingsChange,
-};
-use typsidian_core::settings::editor_mode::{
-    stamp_of_config, BridgeAvailability, BridgeError, ConfigDiskState, EditorMode,
-    EditorModeController, FakeBridge, OutageReason,
-};
+use typsidian_core::settings::apply::{reset_to_defaults, ApplyPlan, RejectReason, SettingsChange};
 use typsidian_core::settings::events::SettingsEvent;
 use typsidian_core::settings::folder_ref::{FolderRegistry, Resolved};
 use typsidian_core::settings::format::{self, FolderRefs};
 use typsidian_core::settings::native::NativeStore;
 use typsidian_core::settings::store::{SettingsStore, StorageState, SETTINGS_FILE_NAME};
-use typsidian_core::settings::{ModePreference, Settings, Theme};
+use typsidian_core::settings::{Settings, Theme};
 
 /// Открывает хранилище в отдельном каталоге: настоящий каталог конфигурации
 /// пользователя тесты не трогают.
@@ -82,12 +76,7 @@ async fn apply_persists_values_and_they_survive_reopen() {
     let dir = TempDir::new().unwrap();
     {
         let mut store = store_in(&dir).await;
-        let plan = store
-            .apply(
-                &SettingsChange::theme(Theme::Dark),
-                &ApplyContext::unobstructed(),
-            )
-            .await;
+        let plan = store.apply(&SettingsChange::theme(Theme::Dark)).await;
         assert_eq!(plan, ApplyPlan::Applied);
     }
 
@@ -103,12 +92,7 @@ async fn out_of_range_font_size_is_rejected_with_a_reason() {
 
     for value in [7u8, 33u8] {
         assert_eq!(
-            store
-                .apply(
-                    &SettingsChange::font_size(value),
-                    &ApplyContext::unobstructed()
-                )
-                .await,
+            store.apply(&SettingsChange::font_size(value)).await,
             ApplyPlan::Rejected {
                 reason: RejectReason::ValueOutOfRange
             },
@@ -117,12 +101,7 @@ async fn out_of_range_font_size_is_rejected_with_a_reason() {
     }
     for value in [8u8, 32u8] {
         assert_eq!(
-            store
-                .apply(
-                    &SettingsChange::font_size(value),
-                    &ApplyContext::unobstructed()
-                )
-                .await,
+            store.apply(&SettingsChange::font_size(value)).await,
             ApplyPlan::Applied,
             "размер {value} должен приниматься"
         );
@@ -139,12 +118,7 @@ async fn write_is_atomic_and_leaves_no_partial_file() {
     let dir = TempDir::new().unwrap();
     let mut store = store_in(&dir).await;
     for size in [10u8, 11, 12, 13, 14] {
-        store
-            .apply(
-                &SettingsChange::font_size(size),
-                &ApplyContext::unobstructed(),
-            )
-            .await;
+        store.apply(&SettingsChange::font_size(size)).await;
     }
 
     let leftovers: Vec<String> = fs::read_dir(dir.path())
@@ -191,19 +165,9 @@ async fn reset_keeps_known_vaults_and_returns_values_to_defaults() {
         .add(vault_dir.path().to_path_buf(), "notes".to_string())
         .await
         .expect("добавление папки");
-    store
-        .apply(
-            &SettingsChange::theme(Theme::Dark),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    store.apply(&SettingsChange::theme(Theme::Dark)).await;
 
-    assert_eq!(
-        store
-            .apply(&reset_to_defaults(), &ApplyContext::unobstructed())
-            .await,
-        ApplyPlan::Applied
-    );
+    assert_eq!(store.apply(&reset_to_defaults()).await, ApplyPlan::Applied);
 
     assert_eq!(store.settings().theme, Theme::Light);
     assert_eq!(
@@ -217,45 +181,6 @@ async fn reset_keeps_known_vaults_and_returns_values_to_defaults() {
         fs::read_dir(vault_dir.path()).unwrap().count(),
         0,
         "сброс не трогает содержимое vault"
-    );
-}
-
-#[tokio::test]
-async fn mode_preference_change_follows_the_same_plan_as_reset() {
-    // FR-029…FR-032 проверяются на уровне ядра; здесь — что хранилище их
-    // соблюдает, а не обходит.
-    let dir = TempDir::new().unwrap();
-    let mut store = store_in(&dir).await;
-
-    let context = ApplyContext {
-        open_note_with_unsaved_edits: Some("note.typ".into()),
-        ..ApplyContext::unobstructed()
-    };
-    assert_eq!(
-        store
-            .apply(
-                &SettingsChange::mode_preference(ModePreference::FullBackend),
-                &context
-            )
-            .await,
-        ApplyPlan::RequiresNoteSave {
-            path: "note.typ".into()
-        }
-    );
-    // Отложенное изменение не должно осесть на диске. Файла может не быть
-    // вовсе — это тот же результат: записи не произошло.
-    let on_disk = fs::read_to_string(settings_path(&dir))
-        .ok()
-        .and_then(|text| format::parse(&text).ok())
-        .unwrap_or_default();
-    assert_eq!(
-        on_disk.editor_mode_preference,
-        ModePreference::SimplifiedEmulation
-    );
-    assert_eq!(
-        store.settings().editor_mode_preference,
-        ModePreference::SimplifiedEmulation,
-        "режим не меняется, пока заметка не сохранена"
     );
 }
 
@@ -386,10 +311,7 @@ async fn the_last_opened_vault_survives_a_restart_and_resolves_to_the_same_folde
             .unwrap();
         assert_eq!(
             store
-                .apply(
-                    &SettingsChange::current_vault(id.clone()),
-                    &ApplyContext::unobstructed()
-                )
+                .apply(&SettingsChange::current_vault(id.clone()))
                 .await,
             ApplyPlan::Applied
         );
@@ -423,10 +345,7 @@ async fn no_service_files_appear_inside_the_vault_folder() {
         .await
         .unwrap();
     store
-        .apply(
-            &SettingsChange::current_vault(id.clone()),
-            &ApplyContext::unobstructed(),
-        )
+        .apply(&SettingsChange::current_vault(id.clone()))
         .await;
     store.forget(&id).await.unwrap();
 
@@ -573,12 +492,7 @@ async fn settings_storage_lives_outside_any_vault() {
             .add(vault_dir.path().to_path_buf(), "notes".to_string())
             .await
             .unwrap();
-        store
-            .apply(
-                &SettingsChange::theme(Theme::Dark),
-                &ApplyContext::unobstructed(),
-            )
-            .await;
+        store.apply(&SettingsChange::theme(Theme::Dark)).await;
     }
 
     // Хранилище настроек удалено целиком.
@@ -598,7 +512,7 @@ async fn settings_storage_lives_outside_any_vault() {
 }
 
 #[tokio::test]
-async fn switching_vault_does_not_change_appearance_or_mode() {
+async fn switching_vault_does_not_change_appearance() {
     // FR-010, SC-007.
     let dir = TempDir::new().unwrap();
     let first_vault = TempDir::new().unwrap();
@@ -606,15 +520,11 @@ async fn switching_vault_does_not_change_appearance_or_mode() {
     let mut store = store_in(&dir).await;
 
     store
-        .apply(
-            &SettingsChange {
-                theme: Some(Theme::Dark),
-                editor_font_size: Some(20),
-                editor_mode_preference: Some(ModePreference::FullBackend),
-                ..SettingsChange::default()
-            },
-            &ApplyContext::unobstructed(),
-        )
+        .apply(&SettingsChange {
+            theme: Some(Theme::Dark),
+            editor_font_size: Some(20),
+            ..SettingsChange::default()
+        })
         .await;
 
     let first = store
@@ -625,24 +535,15 @@ async fn switching_vault_does_not_change_appearance_or_mode() {
         .add(second_vault.path().to_path_buf(), "second".to_string())
         .await
         .unwrap();
+    store.apply(&SettingsChange::current_vault(first)).await;
     store
-        .apply(
-            &SettingsChange::current_vault(first),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
-    store
-        .apply(
-            &SettingsChange::current_vault(second.clone()),
-            &ApplyContext::unobstructed(),
-        )
+        .apply(&SettingsChange::current_vault(second.clone()))
         .await;
 
     let settings = store.settings();
     assert_eq!(settings.current_vault, Some(second));
     assert_eq!(settings.theme, Theme::Dark);
     assert_eq!(settings.editor_font_size, 20);
-    assert_eq!(settings.editor_mode_preference, ModePreference::FullBackend);
 }
 
 // ---------------------------------------------------------------------------
@@ -680,12 +581,7 @@ async fn invalid_file_is_set_aside_before_the_first_write() {
     let mut store = store_in(&dir).await;
     let _ = store.poll_events().await;
 
-    store
-        .apply(
-            &SettingsChange::theme(Theme::Dark),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    store.apply(&SettingsChange::theme(Theme::Dark)).await;
 
     let events = store.poll_events().await;
     let moved_to = events.iter().find_map(|event| match event {
@@ -735,12 +631,7 @@ async fn external_edit_is_picked_up_as_values_changed() {
     // FR-013, FR-006: правка руками равноправна правке через панель.
     let dir = TempDir::new().unwrap();
     let mut store = store_in(&dir).await;
-    store
-        .apply(
-            &SettingsChange::theme(Theme::Light),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    store.apply(&SettingsChange::theme(Theme::Light)).await;
     let _ = store.poll_events().await;
 
     let path = settings_path(&dir);
@@ -795,12 +686,7 @@ async fn read_only_directory_keeps_changes_for_the_session_only() {
 
     // Изменение всё равно применяется — до конца сессии.
     assert_eq!(
-        store
-            .apply(
-                &SettingsChange::theme(Theme::Dark),
-                &ApplyContext::unobstructed()
-            )
-            .await,
+        store.apply(&SettingsChange::theme(Theme::Dark)).await,
         ApplyPlan::Applied
     );
     assert_eq!(store.settings().theme, Theme::Dark);
@@ -842,12 +728,7 @@ async fn external_change_is_reflected_within_the_budget() {
     // ≤2 с, без перезапуска и без действий пользователя.
     let dir = TempDir::new().unwrap();
     let mut store = store_in(&dir).await;
-    store
-        .apply(
-            &SettingsChange::theme(Theme::Light),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    store.apply(&SettingsChange::theme(Theme::Light)).await;
     let _ = store.poll_events().await;
 
     let path = settings_path(&dir);
@@ -883,12 +764,7 @@ async fn a_change_in_one_window_reaches_another_through_the_file() {
     let _ = window_a.poll_events().await;
     let _ = window_b.poll_events().await;
 
-    window_a
-        .apply(
-            &SettingsChange::theme(Theme::Dark),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    window_a.apply(&SettingsChange::theme(Theme::Dark)).await;
 
     let elapsed = wait_for_event(&mut window_b, std::time::Duration::from_secs(2), |event| {
         matches!(
@@ -910,313 +786,13 @@ async fn a_change_takes_effect_without_any_explicit_save_step() {
     let dir = TempDir::new().unwrap();
     let mut store = store_in(&dir).await;
 
-    store
-        .apply(
-            &SettingsChange::font_size(20),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
+    store.apply(&SettingsChange::font_size(20)).await;
 
     // Значение действует немедленно…
     assert_eq!(store.settings().editor_font_size, 20);
     // …и уже лежит на диске: отдельной команды сохранения не существует.
     let on_disk = format::parse(&fs::read_to_string(settings_path(&dir)).unwrap()).unwrap();
     assert_eq!(on_disk.editor_font_size, 20);
-}
-
-// ---------------------------------------------------------------------------
-// US3 — Видеть и менять режим редактирования (T065…T074)
-//
-// Все тесты прогоняются на `FakeBridge`: реального моста к Neovim в кодовой
-// базе не существует и в эту фичу он не входит (research.md §7, принцип V).
-// ---------------------------------------------------------------------------
-
-#[test]
-fn backend_failure_lands_in_plain_input_and_never_in_emulation() {
-    // T065, FR-035: отсутствие vim-раскладки должно быть однозначно отличимо от
-    // штатного режима, поэтому автоматический откат на эмуляцию запрещён.
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller
-        .request_mode(ModePreference::FullBackend)
-        .unwrap();
-    assert!(controller.mode().is_full_backend());
-
-    // Буфер пользователя живёт у вызывающей стороны: мост им не владеет
-    // (contracts/editor-mode-bridge.md §3), поэтому отказ процесса физически не
-    // может унести с собой введённый текст.
-    let editor_buffer = "текст, который нельзя потерять";
-    let cursor = 7usize;
-
-    controller
-        .bridge_mut()
-        .fail_backend(OutageReason::BackendStopped);
-
-    assert_eq!(
-        controller.mode(),
-        EditorMode::PlainInput {
-            reason: OutageReason::BackendStopped
-        }
-    );
-    assert_ne!(controller.mode(), EditorMode::SimplifiedEmulation);
-    assert_eq!(editor_buffer, "текст, который нельзя потерять");
-    assert_eq!(cursor, 7);
-}
-
-#[test]
-fn plain_input_is_left_only_by_an_explicit_action() {
-    // T066, FR-035: самопроизвольного восстановления не происходит.
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller
-        .request_mode(ModePreference::FullBackend)
-        .unwrap();
-    controller
-        .bridge_mut()
-        .fail_backend(OutageReason::BackendStopped);
-    let _ = controller.poll_events();
-
-    // Сколько бы раз состояние ни опрашивали, само оно не меняется.
-    for _ in 0..5 {
-        assert!(matches!(controller.mode(), EditorMode::PlainInput { .. }));
-        assert!(controller.poll_events().is_empty());
-    }
-
-    controller.leave_plain_input().unwrap();
-    assert_eq!(controller.mode(), EditorMode::SimplifiedEmulation);
-}
-
-#[test]
-fn user_can_switch_between_full_backend_and_emulation() {
-    // T067, FR-027.
-    let mut controller = EditorModeController::new(FakeBridge::available());
-
-    controller
-        .request_mode(ModePreference::FullBackend)
-        .unwrap();
-    assert!(controller.mode().is_full_backend());
-
-    controller
-        .request_mode(ModePreference::SimplifiedEmulation)
-        .unwrap();
-    assert_eq!(controller.mode(), EditorMode::SimplifiedEmulation);
-
-    let events = controller.poll_events();
-    assert!(
-        events
-            .iter()
-            .filter(|e| matches!(e, SettingsEvent::EditorModeChanged { .. }))
-            .count()
-            >= 2,
-        "каждое переключение наблюдаемо: {events:?}"
-    );
-}
-
-#[test]
-fn unavailable_backend_never_reports_full_backend() {
-    // T068, FR-034, FR-004: недоступность не выдаётся за работу.
-    let mut controller =
-        EditorModeController::new(FakeBridge::unavailable(OutageReason::BackendNotInstalled));
-
-    let result = controller.request_mode(ModePreference::FullBackend);
-
-    assert!(result.is_err(), "запрос недоступного режима отклоняется");
-    assert!(!controller.mode().is_full_backend());
-    assert_eq!(
-        controller.availability(),
-        BridgeAvailability::Unavailable {
-            reason: OutageReason::BackendNotInstalled
-        }
-    );
-}
-
-#[test]
-fn missing_config_path_is_reported_and_not_marked_applied() {
-    // T069, FR-033.
-    let dir = TempDir::new().unwrap();
-    let missing = dir.path().join("nowhere/init.lua");
-
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.set_config_path(missing.clone());
-
-    let result = controller.apply_config(stamp_of_config(&missing));
-
-    assert_eq!(result, Err(BridgeError::ConfigMissing));
-    assert!(
-        controller.applied_stamp().is_none(),
-        "конфиг не помечается применённым"
-    );
-    assert_eq!(controller.config_disk_state(), ConfigDiskState::Missing);
-}
-
-#[test]
-fn config_reverted_to_previous_content_stops_looking_changed() {
-    // T070, FR-026, research.md §8: сравнение по хэшу содержимого, а не по
-    // времени изменения, — иначе индикатор «изменён» остался бы гореть.
-    let dir = TempDir::new().unwrap();
-    let config = dir.path().join("init.lua");
-    fs::write(&config, "set number").unwrap();
-
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.set_config_path(config.clone());
-    controller.apply_config(stamp_of_config(&config)).unwrap();
-    assert_eq!(controller.config_disk_state(), ConfigDiskState::InSync);
-
-    fs::write(&config, "set nonumber").unwrap();
-    controller.observe_config(stamp_of_config(&config));
-    assert_eq!(controller.config_disk_state(), ConfigDiskState::Changed);
-
-    // Пользователь передумал и вернул прежнее содержимое до применения.
-    fs::write(&config, "set number").unwrap();
-    controller.observe_config(stamp_of_config(&config));
-    assert_eq!(
-        controller.config_disk_state(),
-        ConfigDiskState::InSync,
-        "возврат прежнего содержимого гасит признак расхождения сам"
-    );
-}
-
-#[test]
-fn deleted_config_is_reported_but_the_mode_keeps_working() {
-    // T071, FR-026: удалённый или нечитаемый конфиг не прерывает работу —
-    // полноценный режим продолжает на ранее применённом.
-    let dir = TempDir::new().unwrap();
-    let config = dir.path().join("init.lua");
-    fs::write(&config, "set number").unwrap();
-
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.set_config_path(config.clone());
-    controller
-        .request_mode(ModePreference::FullBackend)
-        .unwrap();
-    controller.apply_config(stamp_of_config(&config)).unwrap();
-
-    fs::remove_file(&config).unwrap();
-    controller.observe_config(stamp_of_config(&config));
-
-    assert_eq!(controller.config_disk_state(), ConfigDiskState::Missing);
-    assert!(
-        controller.mode().is_full_backend(),
-        "режим продолжает работать на ранее применённом конфиге"
-    );
-    assert!(
-        controller.applied_stamp().is_some(),
-        "применённый снимок не теряется вместе с файлом"
-    );
-}
-
-#[test]
-fn unreadable_config_is_distinguished_from_a_missing_one() {
-    // FR-026: «нечитаем» и «отсутствует» — разные сведения для пользователя.
-    let dir = TempDir::new().unwrap();
-    let config = dir.path().join("init.lua");
-    fs::write(&config, "set number").unwrap();
-
-    let mut controller = EditorModeController::new(FakeBridge::available());
-    controller.set_config_path(config);
-    controller.observe_config_unreadable();
-
-    assert_eq!(controller.config_disk_state(), ConfigDiskState::Unreadable);
-}
-
-#[tokio::test]
-async fn mode_change_with_a_dirty_note_asks_to_save_first() {
-    // T072, FR-029: сохранение не молчаливое — ядро возвращает инструкцию,
-    // исполняет её вызывающая сторона и сообщает пользователю.
-    let dir = TempDir::new().unwrap();
-    let mut store = store_in(&dir).await;
-    let context = ApplyContext {
-        open_note_with_unsaved_edits: Some("note.typ".into()),
-        ..ApplyContext::unobstructed()
-    };
-
-    assert_eq!(
-        store
-            .apply(
-                &SettingsChange::mode_preference(ModePreference::FullBackend),
-                &context
-            )
-            .await,
-        ApplyPlan::RequiresNoteSave {
-            path: "note.typ".into()
-        }
-    );
-}
-
-#[tokio::test]
-async fn failed_save_blocks_the_switch_and_keeps_edits() {
-    // T073, FR-030: иначе выбор «сохранить и переключить» терял бы данные ровно
-    // в том случае, ради которого он и сделан.
-    let dir = TempDir::new().unwrap();
-    let mut store = store_in(&dir).await;
-    let context = ApplyContext {
-        open_note_with_unsaved_edits: Some("note.typ".into()),
-        last_save_failed: true,
-        ..ApplyContext::unobstructed()
-    };
-
-    assert_eq!(
-        store
-            .apply(
-                &SettingsChange::mode_preference(ModePreference::FullBackend),
-                &context
-            )
-            .await,
-        ApplyPlan::Rejected {
-            reason: RejectReason::SaveFailed
-        }
-    );
-    assert_eq!(
-        store.settings().editor_mode_preference,
-        ModePreference::SimplifiedEmulation,
-        "режим не меняется"
-    );
-}
-
-#[tokio::test]
-async fn unresolved_conflict_blocks_the_switch_without_touching_the_file() {
-    // T074, FR-031 и FR-032.
-    let dir = TempDir::new().unwrap();
-    let mut store = store_in(&dir).await;
-    store
-        .apply(
-            &SettingsChange::theme(Theme::Dark),
-            &ApplyContext::unobstructed(),
-        )
-        .await;
-    let before = fs::read_to_string(settings_path(&dir)).unwrap();
-
-    let blocked = ApplyContext {
-        open_note_with_unsaved_edits: Some("note.typ".into()),
-        has_unresolved_conflict: true,
-        ..ApplyContext::unobstructed()
-    };
-    assert_eq!(
-        store
-            .apply(
-                &SettingsChange::mode_preference(ModePreference::FullBackend),
-                &blocked
-            )
-            .await,
-        ApplyPlan::Rejected {
-            reason: RejectReason::UnresolvedConflict
-        }
-    );
-    assert_eq!(
-        fs::read_to_string(settings_path(&dir)).unwrap(),
-        before,
-        "ни одной записи в файл при отказе не происходит"
-    );
-
-    // FR-032: без открытой заметки смена режима идёт немедленно, без шага
-    // сохранения.
-    assert_eq!(
-        store
-            .apply(
-                &SettingsChange::mode_preference(ModePreference::FullBackend),
-                &ApplyContext::unobstructed()
-            )
-            .await,
-        ApplyPlan::Applied
-    );
 }
 
 #[tokio::test]
@@ -1293,17 +869,12 @@ async fn chosen_language_survives_reopen_and_reset_clears_it() {
     {
         let mut store = store_in(&dir).await;
         let change = SettingsChange::language(LanguageChoice::Tag("en".to_string()));
-        assert_eq!(
-            store.apply(&change, &ApplyContext::unobstructed()).await,
-            ApplyPlan::Applied
-        );
+        assert_eq!(store.apply(&change).await, ApplyPlan::Applied);
     }
     let mut reopened = store_in(&dir).await;
     assert_eq!(reopened.settings().language.as_deref(), Some("en"));
 
-    reopened
-        .apply(&reset_to_defaults(), &ApplyContext::unobstructed())
-        .await;
+    reopened.apply(&reset_to_defaults()).await;
     let on_disk = fs::read_to_string(settings_path(&dir)).unwrap();
     assert!(!on_disk.contains("language"), "{on_disk}");
 }
@@ -1317,12 +888,7 @@ async fn the_journal_records_events_without_values_and_survives_a_restart() {
     let vault = TempDir::new().unwrap();
     {
         let mut store = store_in(&dir).await;
-        store
-            .apply(
-                &SettingsChange::theme(Theme::Dark),
-                &ApplyContext::unobstructed(),
-            )
-            .await;
+        store.apply(&SettingsChange::theme(Theme::Dark)).await;
         store
             .add(
                 vault.path().to_path_buf(),

@@ -5,7 +5,6 @@
 //! дубликатов на стороне TS не существует. Разбор на стороне UI обязан быть
 //! исчерпывающим (`never` в `default`).
 
-use super::editor_mode::{ConfigDiskState, EditorMode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -36,9 +35,4 @@ pub enum SettingsEvent {
         #[cfg_attr(target_arch = "wasm32", tsify(type = "string"))]
         moved_to: PathBuf,
     },
-    /// Состояние режима редактирования изменилось (FR-025, FR-035).
-    EditorModeChanged { mode: EditorMode },
-    /// Признак «изменён, не применён» у конфига (FR-026). UI показывает
-    /// действие применения и **не** применяет конфиг самостоятельно.
-    EditorConfigDiskStateChanged { disk_state: ConfigDiskState },
 }

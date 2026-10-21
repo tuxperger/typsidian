@@ -16,17 +16,10 @@ export const settings: Translation<typeof en> = {
     "Текущие значения стали умолчаниями. Папки без своих настроек будут открываться с ними.",
   "settings.reset.applied": "Значения вернулись к умолчаниям. Список известных vault не изменился.",
   "settings.reset.notDone": "Сброс не выполнен.",
-  "settings.reset.unresolvedConflict":
-    "Сброс отменён целиком: сначала нужно разрешить конфликт по открытой заметке. Ни одна настройка не изменилась.",
-  "settings.reset.saveFailed":
-    "Сброс отменён целиком: не удалось сохранить открытую заметку. Ни одна настройка не изменилась, правки не потеряны.",
   "settings.reset.storageNotWritable":
     "Хранилище недоступно на запись: сброс действует до конца сессии и не переживёт перезапуск.",
   "settings.reset.valueOutOfRange": "Сброс отклонён ядром как недопустимый набор значений.",
   "settings.reject.valueOutOfRange": "Значение вне допустимого диапазона — размер шрифта должен быть от 8 до 32.",
-  "settings.reject.saveFailed":
-    "Не удалось сохранить открытую заметку, поэтому режим не изменён. Правки не потеряны.",
-  "settings.reject.unresolvedConflict": "Сначала нужно разрешить конфликт по открытой заметке.",
   "settings.reject.storageNotWritable":
     "Хранилище настроек недоступно на запись: изменение действует до конца сессии.",
   "settings.notice.unreadable":
@@ -34,22 +27,10 @@ export const settings: Translation<typeof en> = {
   "settings.notice.readOnly":
     "Каталог настроек недоступен на запись: изменения действуют до конца сессии и не переживут перезапуск.",
   "settings.notice.invalidSetAside": (p) => `Испорченный файл настроек перенесён рядом: ${p.path}.`,
-  "settings.mode.saveFirst": "Сначала сохраните открытую заметку — смена режима требует этого.",
-  "settings.mode.savedBefore": (p) => `Заметка «${p.path}» сохранена перед сменой режима.`,
-  "settings.mode.saveFailed": (p) =>
-    `Не удалось сохранить «${p.path}» — режим не изменён, правки не потеряны.`,
-  "settings.mode.unresolvedConflict":
-    "Сначала нужно разрешить конфликт по открытой заметке — режим не изменён.",
-  "settings.mode.noteSaveFailed":
-    "Сохранить открытую заметку не удалось — режим не изменён, правки не потеряны.",
-  "settings.mode.valueOutOfRange": "Значение вне допустимого диапазона.",
-  "settings.mode.storageNotWritable": "Хранилище настроек недоступно на запись.",
   "settings.vaults.notSupported": "Этот браузер не умеет открывать локальные папки (нет File System Access API).",
   "settings.vaults.permissionDenied":
     "Доступ к папке не предоставлен. Попробуйте добавить её заново и разрешите доступ, когда браузер спросит.",
   "settings.vaults.failed": (p) => `Не удалось выполнить операцию: ${p.detail}`,
-  "settings.vaults.switchSaveFailed":
-    "Не удалось сохранить открытую заметку — vault не переключён, правки не потеряны.",
   "settings.vaults.unknownRecord": "Эта запись о vault больше не известна приложению.",
   "settings.store.noConfigDirectory": "Не удалось определить каталог настроек на этой платформе.",
   "settings.store.io": "Не удалось записать хранилище настроек.",
@@ -113,29 +94,6 @@ export const settings: Translation<typeof en> = {
   "settings.shortcuts.change": "Изменить",
   "settings.shortcuts.clear": "Снять",
   "settings.shortcuts.reset": "Умолчание",
-  "settings.mode.label": "Режим редактирования",
-  "settings.mode.backToEditing": "Вернуться к режиму редактирования",
-  "settings.mode.fullUnavailable": (p) => `Полноценный режим недоступен: ${p.reason}`,
-  "settings.mode.full": "Полноценный режим",
-  "settings.mode.simplified": "Упрощённая эмуляция",
-  "settings.mode.unknown": "Состояние режима редактирования ещё не определено.",
-  "settings.mode.fullActive": "Активен полноценный режим редактирования.",
-  "settings.mode.simplifiedActive": "Активна упрощённая эмуляция.",
-  "settings.mode.plainInput":
-    "Обычный текстовый ввод: полноценный режим отказал, vim-раскладка сейчас не действует.",
-  "settings.outage.noProcesses": "эта платформа не может запускать внешние процессы.",
-  "settings.outage.notInstalled": "подсистема не найдена на этом устройстве.",
-  "settings.outage.stopped": "внешний процесс завершился или перестал отвечать.",
-  "settings.outage.configMissing": "указанного конфига нет на этом устройстве.",
-  "settings.config.label": "Конфиг",
-  "settings.config.prefix": "Конфиг:",
-  "settings.config.none": "не указан",
-  "settings.config.chooseOther": "Выбрать другой",
-  "settings.config.choose": "Указать конфиг",
-  "settings.config.applied": "Применён.",
-  "settings.config.changed": "Изменён, не применён.",
-  "settings.config.missing": "Файл не найден. Ранее применённый конфиг продолжает действовать.",
-  "settings.config.unreadable": "Файл не читается. Ранее применённый конфиг продолжает действовать.",
 
   "settings.advanced.storage": "Хранилище настроек:",
   "settings.advanced.reveal": "Показать в файловом менеджере",
@@ -159,21 +117,10 @@ export const settings: Translation<typeof en> = {
   "settings.advanced.journalFailed": "Не удалось прочитать или скопировать журнал.",
   "settings.advanced.notOpen": "Хранилище ещё не открыто.",
   "settings.advanced.version": "Версия",
-  "settings.advanced.available": "доступен",
-  "settings.advanced.unavailable": (p) => `недоступен — ${p.reason}`,
   "settings.advanced.environment": "Окружение",
-  "settings.advanced.processesAvailable": "внешние процессы доступны",
-  "settings.advanced.processesUnavailable": "внешние процессы недоступны",
   "settings.advanced.storageShort": "Хранилище",
   "settings.advanced.writable": "доступно на запись",
   "settings.advanced.readOnly": "только чтение",
-  "settings.advanced.modeFull": "полноценный",
-  "settings.advanced.modeSimplified": "упрощённая эмуляция",
-  "settings.advanced.modePlain": (p) => `обычный ввод — ${p.reason}`,
-  "settings.advanced.outage.noProcesses": "платформа не запускает внешние процессы",
-  "settings.advanced.outage.notInstalled": "подсистема не установлена на этом устройстве",
-  "settings.advanced.outage.stopped": "процесс перестал отвечать",
-  "settings.advanced.outage.configMissing": "конфига нет на этом устройстве",
 
   "settings.vaults.current": "Текущий vault:",
   "settings.vaults.noneSelected": "не выбран",

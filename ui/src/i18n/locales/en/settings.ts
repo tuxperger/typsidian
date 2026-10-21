@@ -15,17 +15,10 @@ export const settings = {
     "The current values are now the defaults. Folders without their own settings will open with them.",
   "settings.reset.applied": "Values are back to defaults. The list of known vaults didn’t change.",
   "settings.reset.notDone": "Reset was not performed.",
-  "settings.reset.unresolvedConflict":
-    "Reset cancelled entirely: resolve the conflict on the open note first. No setting changed.",
-  "settings.reset.saveFailed":
-    "Reset cancelled entirely: the open note couldn’t be saved. No setting changed, your edits are not lost.",
   "settings.reset.storageNotWritable":
     "Storage isn’t writable: the reset lasts until the end of the session and won’t survive a restart.",
   "settings.reset.valueOutOfRange": "The core rejected the reset as an invalid set of values.",
   "settings.reject.valueOutOfRange": "Value out of range — the font size must be between 8 and 32.",
-  "settings.reject.saveFailed":
-    "Couldn’t save the open note, so the mode didn’t change. Your edits are not lost.",
-  "settings.reject.unresolvedConflict": "Resolve the conflict on the open note first.",
   "settings.reject.storageNotWritable":
     "The settings storage isn’t writable: the change lasts until the end of the session.",
   "settings.notice.unreadable":
@@ -34,23 +27,10 @@ export const settings = {
     "The settings folder isn’t writable: changes last until the end of the session and won’t survive a restart.",
   "settings.notice.invalidSetAside": (p: { path: string }) =>
     `The damaged settings file was moved aside: ${p.path}.`,
-  "settings.mode.saveFirst": "Save the open note first — changing the mode requires it.",
-  "settings.mode.savedBefore": (p: { path: string }) =>
-    `Note “${p.path}” was saved before changing the mode.`,
-  "settings.mode.saveFailed": (p: { path: string }) =>
-    `Couldn’t save “${p.path}” — the mode didn’t change, your edits are not lost.`,
-  "settings.mode.unresolvedConflict":
-    "Resolve the conflict on the open note first — the mode didn’t change.",
-  "settings.mode.noteSaveFailed":
-    "Saving the open note failed — the mode didn’t change, your edits are not lost.",
-  "settings.mode.valueOutOfRange": "Value out of range.",
-  "settings.mode.storageNotWritable": "The settings storage isn’t writable.",
   "settings.vaults.notSupported": "This browser can’t open local folders (no File System Access API).",
   "settings.vaults.permissionDenied":
     "Access to the folder wasn’t granted. Try adding it again and allow access when the browser asks.",
   "settings.vaults.failed": (p: { detail: string }) => `The operation failed: ${p.detail}`,
-  "settings.vaults.switchSaveFailed":
-    "Couldn’t save the open note — the vault wasn’t switched, your edits are not lost.",
   "settings.vaults.unknownRecord": "The app no longer knows this vault record.",
   "settings.store.noConfigDirectory": "Couldn’t determine the settings folder on this platform.",
   "settings.store.io": "Couldn’t write the settings storage.",
@@ -115,29 +95,6 @@ export const settings = {
   "settings.shortcuts.change": "Change",
   "settings.shortcuts.clear": "Remove",
   "settings.shortcuts.reset": "Default",
-  "settings.mode.label": "Editing mode",
-  "settings.mode.backToEditing": "Return to editing mode",
-  "settings.mode.fullUnavailable": (p: { reason: string }) => `Full mode is unavailable: ${p.reason}`,
-  "settings.mode.full": "Full mode",
-  "settings.mode.simplified": "Simplified emulation",
-  "settings.mode.unknown": "The editing mode state isn’t determined yet.",
-  "settings.mode.fullActive": "Full editing mode is active.",
-  "settings.mode.simplifiedActive": "Simplified emulation is active.",
-  "settings.mode.plainInput":
-    "Plain text input: full mode failed, the vim layout isn’t active right now.",
-  "settings.outage.noProcesses": "this platform can’t run external processes.",
-  "settings.outage.notInstalled": "the subsystem wasn’t found on this device.",
-  "settings.outage.stopped": "the external process exited or stopped responding.",
-  "settings.outage.configMissing": "the specified config doesn’t exist on this device.",
-  "settings.config.label": "Config",
-  "settings.config.prefix": "Config:",
-  "settings.config.none": "not set",
-  "settings.config.chooseOther": "Choose another",
-  "settings.config.choose": "Set config",
-  "settings.config.applied": "Applied.",
-  "settings.config.changed": "Changed, not applied.",
-  "settings.config.missing": "File not found. The previously applied config stays in effect.",
-  "settings.config.unreadable": "File can’t be read. The previously applied config stays in effect.",
 
   "settings.advanced.storage": "Settings storage:",
   "settings.advanced.reveal": "Show in file manager",
@@ -161,21 +118,10 @@ export const settings = {
   "settings.advanced.journalFailed": "The log could not be read or copied.",
   "settings.advanced.notOpen": "The storage isn’t open yet.",
   "settings.advanced.version": "Version",
-  "settings.advanced.available": "available",
-  "settings.advanced.unavailable": (p: { reason: string }) => `unavailable — ${p.reason}`,
   "settings.advanced.environment": "Environment",
-  "settings.advanced.processesAvailable": "external processes available",
-  "settings.advanced.processesUnavailable": "external processes unavailable",
   "settings.advanced.storageShort": "Storage",
   "settings.advanced.writable": "writable",
   "settings.advanced.readOnly": "read-only",
-  "settings.advanced.modeFull": "full",
-  "settings.advanced.modeSimplified": "simplified emulation",
-  "settings.advanced.modePlain": (p: { reason: string }) => `plain input — ${p.reason}`,
-  "settings.advanced.outage.noProcesses": "the platform doesn’t run external processes",
-  "settings.advanced.outage.notInstalled": "the subsystem isn’t installed on this device",
-  "settings.advanced.outage.stopped": "the process stopped responding",
-  "settings.advanced.outage.configMissing": "the config isn’t on this device",
 
   "settings.vaults.current": "Current vault:",
   "settings.vaults.noneSelected": "none selected",

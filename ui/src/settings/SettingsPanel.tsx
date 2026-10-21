@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
   ApplyPlan,
-  ModePreference,
-  OutageReason,
   Settings,
   SettingsChange,
 } from "../wasm-core/typsidian_core.js";
@@ -10,8 +8,6 @@ import type { DeviceSettingsClient } from "./device-settings-client.js";
 import { AdvancedSection } from "./AdvancedSection.js";
 import { AppearanceSection } from "./AppearanceSection.js";
 import { useAppearance } from "./applyToDocument.js";
-import { applyWithNoteSave, describeApplyOutcome } from "./applyWithNoteSave.js";
-import { KeybindingsSection } from "./KeybindingsSection.js";
 import { ShortcutsSection } from "./ShortcutsSection.js";
 import {
   changeOf,
@@ -55,27 +51,11 @@ export interface SettingsPanelProps {
    */
   confirmSwitch?: ConfirmSwitch;
   /**
-   * Сохранение открытой заметки существующим `VaultBackend::write` — исполнение
-   * инструкции `RequiresNoteSave`, вернувшейся из ядра (FR-029, research.md §9).
-   * Без него смена режима при открытой заметке с правками не завершается.
-   */
-  saveNote?: (path: string) => Promise<boolean>;
-  /**
-   * Почему полноценный режим недоступен на этом устройстве (FR-034), либо
-   * `null`, если доступен. Решение принимает ядро —
-   * `EditorModeController::availability()`; панель его только отображает
-   * (принцип I). Значение инъецируется хозяином панели по той же причине, что
-   * `confirmSwitch` и `saveNote`: `WebStore` ещё не отдаёт `BridgeAvailability`
-   * через свою wasm-границу, и придумывать ответ в UI вместо ядра нельзя.
-   */
-  fullBackendUnavailableReason?: OutageReason | null;
-  /**
    * Клиент открытого vault (фича 006). Нужен разделу «Vault», чтобы показать и
    * менять настройки, принадлежащие **vault**, а не устройству: политику
    * расположения файлов вставок и список помеченных разделов (FR-002, FR-015).
    *
-   * Инъецируется хозяином панели по той же причине, что `confirmSwitch` и
-   * `saveNote`: панель не владеет vault-бэкендом и не должна начать им владеть
+   * Инъецируется хозяином панели по той же причине, что `confirmSwitch`: панель не владеет vault-бэкендом и не должна начать им владеть
    * ради одной настройки. `null` — vault не открыт, и выбирать нечего.
    */
   vaultClient?: VaultClient | null;
@@ -105,8 +85,6 @@ export interface SettingsPanelProps {
 export function SettingsPanel({
   device,
   confirmSwitch,
-  saveNote,
-  fullBackendUnavailableReason = null,
   vaultClient = null,
   onVaultSwitched,
   preview = null,
@@ -136,7 +114,6 @@ export function SettingsPanel({
   const { t } = useI18n();
   // Итоги действий — фразами, а не строками: показанное сообщение обязано
   // перерисоваться на новом языке (фича 010, FR-014).
-  const [modeMessage, setModeMessage] = useState<Phrase | null>(null);
   const [resetMessage, setResetMessage] = useState<Phrase | null>(null);
   const [defaultsMessage, setDefaultsMessage] = useState<Phrase | null>(null);
 
@@ -188,29 +165,6 @@ export function SettingsPanel({
         ? (tr: Translate) => tr("settings.reset.applied")
         : (tr: Translate) => describeResetRejection(tr, plan),
     );
-  };
-
-  /**
-   * Смена режима идёт через двухшаговый разбор плана: ядро может потребовать
-   * сначала сохранить заметку (FR-029). Если исполнитель сохранения не
-   * передан, требование честно превращается в сообщение — молча менять режим,
-   * потеряв правки, нельзя.
-   */
-  const changeMode = async (preference: ModePreference): Promise<void> => {
-    const change = changeOf({ editor_mode_preference: preference });
-    const outcome = await applyWithNoteSave(change, {
-      apply,
-      saveNote:
-        saveNote ??
-        (async () => {
-          setModeMessage(() => (tr: Translate) => tr("settings.mode.saveFirst"));
-          return false;
-        }),
-    });
-    if (outcome) {
-      const message = describeApplyOutcome(outcome);
-      setModeMessage(() => message);
-    }
   };
 
   // Показываются и применяются **действующие** значения: устройство как слой
@@ -412,31 +366,10 @@ export function SettingsPanel({
 
         {section === "keybindings" && (
           <>
-            <KeybindingsSection
-              mode={state.editorMode}
-              configDiskState={state.configDiskState}
-              configPath={settings.editor_config_path ?? null}
-              fullBackendUnavailableReason={fullBackendUnavailableReason}
-              onChooseFullBackend={() => void changeMode("fullBackend")}
-              onChooseSimplifiedEmulation={() =>
-                void changeMode("simplifiedEmulation")
-              }
-              onPickConfig={() => {}}
-              onApplyConfig={() => {}}
-              onLeavePlainInput={() => {}}
-            />
-
-            {/* FR-029: о вынужденном сохранении заметки и об отказе сменить
-                режим пользователь узнаёт словами, а не по молчаливому
-                бездействию. */}
-            {modeMessage && <p role="status">{modeMessage(t)}</p>}
-
-            {/* Сочетания команд приложения — рядом с режимом редактирования, но
-                это разные вещи: выше настраивается, чем обрабатываются клавиши
-                внутри редактора, здесь — какими клавишами вызываются команды
-                самого приложения. Хранятся они в настройках vault, поэтому и
+            {/* Сочетания команд приложения хранятся в настройках vault, поэтому и
                 вызовы идут через `vaultSettings`, а не через `route`. */}
             <ShortcutsSection
+              standalone
               bindings={shortcuts.bindings}
               error={vaultSettings.error === null ? null : vaultSettings.error(t)}
               onAssign={(command, shortcut) =>
@@ -500,10 +433,6 @@ function describeRejection(t: Translate, state: SettingsState): string | null {
   switch (plan.reason.kind) {
     case "ValueOutOfRange":
       return t("settings.reject.valueOutOfRange");
-    case "SaveFailed":
-      return t("settings.reject.saveFailed");
-    case "UnresolvedConflict":
-      return t("settings.reject.unresolvedConflict");
     case "StorageNotWritable":
       return t("settings.reject.storageNotWritable");
     default: {
@@ -521,10 +450,6 @@ function describeRejection(t: Translate, state: SettingsState): string | null {
 function describeResetRejection(t: Translate, plan: ApplyPlan): string {
   if (plan.outcome !== "Rejected") return t("settings.reset.notDone");
   switch (plan.reason.kind) {
-    case "UnresolvedConflict":
-      return t("settings.reset.unresolvedConflict");
-    case "SaveFailed":
-      return t("settings.reset.saveFailed");
     case "StorageNotWritable":
       return t("settings.reset.storageNotWritable");
     case "ValueOutOfRange":

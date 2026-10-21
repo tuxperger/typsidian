@@ -1,10 +1,6 @@
 import { useState } from "react";
-import type {
-  Diagnostics,
-  OutageReason,
-  StoreCapabilities,
-} from "../wasm-core/typsidian_core.js";
-import { useI18n, type Translate } from "../i18n/index.js";
+import type { Diagnostics, StoreCapabilities } from "../wasm-core/typsidian_core.js";
+import { useI18n } from "../i18n/index.js";
 
 export interface AdvancedSectionProps {
   capabilities: StoreCapabilities | null;
@@ -164,32 +160,16 @@ function DiagnosticsView({
   diagnostics: Diagnostics;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const { app_version, editor_mode, editor_mode_availability, environment, storage } =
-    diagnostics;
+  const { app_version, environment, storage } = diagnostics;
 
   return (
     <dl>
       <dt>{t("settings.advanced.version")}</dt>
       <dd>{app_version}</dd>
 
-      <dt>{t("settings.mode.label")}</dt>
-      <dd>{describeMode(t, editor_mode)}</dd>
-
-      <dt>{t("settings.mode.full")}</dt>
-      <dd>
-        {editor_mode_availability.kind === "Available"
-          ? t("settings.advanced.available")
-          : t("settings.advanced.unavailable", {
-              reason: describeOutage(t, editor_mode_availability.reason),
-            })}
-      </dd>
-
       <dt>{t("settings.advanced.environment")}</dt>
       <dd>
-        {environment.target} · {environment.os_family} ·{" "}
-        {environment.can_spawn_processes
-          ? t("settings.advanced.processesAvailable")
-          : t("settings.advanced.processesUnavailable")}
+        {environment.target} · {environment.os_family}
       </dd>
 
       <dt>{t("settings.advanced.storageShort")}</dt>
@@ -201,37 +181,4 @@ function DiagnosticsView({
       </dd>
     </dl>
   );
-}
-
-function describeMode(t: Translate, mode: Diagnostics["editor_mode"]): string {
-  switch (mode.state) {
-    case "FullBackend":
-      return t("settings.advanced.modeFull");
-    case "SimplifiedEmulation":
-      return t("settings.advanced.modeSimplified");
-    case "PlainInput":
-      return t("settings.advanced.modePlain", { reason: describeOutage(t, mode.reason) });
-    default: {
-      const exhaustive: never = mode;
-      return exhaustive;
-    }
-  }
-}
-
-/** Причина отказа называется словами (FR-034), а не кодом варианта. */
-function describeOutage(t: Translate, reason: OutageReason): string {
-  switch (reason.kind) {
-    case "ExternalProcessesUnavailable":
-      return t("settings.advanced.outage.noProcesses");
-    case "BackendNotInstalled":
-      return t("settings.advanced.outage.notInstalled");
-    case "BackendStopped":
-      return t("settings.advanced.outage.stopped");
-    case "ConfigMissingOnThisDevice":
-      return t("settings.advanced.outage.configMissing");
-    default: {
-      const exhaustive: never = reason;
-      return exhaustive;
-    }
-  }
 }

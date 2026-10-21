@@ -46,8 +46,8 @@ user-invocable: true
    `**Summary**` (их читает роадмап). Не больше трёх `[NEEDS CLARIFICATION]`.
 3. **`/speckit-checklist`** — гейт качества требований; хук `before_plan` его
    предлагает. Повторяется после плана под другим углом (безопасность, офлайн).
-4. **`/speckit-clarify`** — хук `after_specify`, автоматически. Для моста к Neovim
-   обязателен (принцип V). Вопросы, на которые отвечает конституция или
+4. **`/speckit-clarify`** — хук `after_specify`, автоматически. Для работ по внешним
+   процессам обязателен (принцип V). Вопросы, на которые отвечает конституция или
    существующий код, закрывай сам и записывай в Assumptions.
 5. **Макет** — скилл `design-typsidian`, хук `before_plan`, автоматически. Фича с
    интерфейсом сначала рисуется по готовой спеке и только потом планируется:
@@ -63,7 +63,7 @@ user-invocable: true
    CRITICAL и HIGH находки исправляются в артефактах до реализации.
 9. **`/speckit-implement`** — по задачам, отмечая `[X]` по мере выполнения. Работу
    по зонам отдавать агентам: `rust-core-agent`, `frontend-agent`,
-   `tauri-shell-agent`, `nvim-bridge-agent`, `nix-env-agent`.
+   `tauri-shell-agent`, `nix-env-agent`.
 10. **`quality-gates-typsidian`** — хук `after_implement`, автоматически.
 11. **`/speckit-converge`** — хук `after_implement`: сверка кода со спекой;
     недостающее дописывается в `tasks.md` и доделывается. Отдельно проверить, что

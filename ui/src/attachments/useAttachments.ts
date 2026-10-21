@@ -10,7 +10,7 @@ import type {
   InsertMoment,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
-import { plainInputTarget } from "../templates/insertion/plainInputTarget.js";
+import { editorTarget } from "../templates/insertion/editorTarget.js";
 import { savedPath } from "./describe.js";
 import { trackSelection, type AttachmentDrop } from "./editorExtension.js";
 
@@ -179,7 +179,7 @@ export function useAttachments(
         );
         // Порт вставки 003: одна транзакция — одна единица отмены (FR-005).
         if (edit !== undefined) {
-          inserted = plainInputTarget(() => drop.place.view()).apply(edit).ok;
+          inserted = editorTarget(() => drop.place.view()).apply(edit).ok;
         }
       }
       report(view, inserted);

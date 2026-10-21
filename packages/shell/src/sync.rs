@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
-use typsidian_core::settings::apply::ApplyContext;
 use typsidian_core::settings::store::SettingsStore;
 use typsidian_core::settings::VaultId;
 use typsidian_core::sync::engine::native::NativeGitEngine;
@@ -321,7 +320,7 @@ async fn context(
         })?;
     // Тождество устройства выдаётся при первом обращении (research §4).
     if let Some(change) = sync::ensure_device_change(SettingsStore::settings(store)) {
-        store.apply(&change, &ApplyContext::unobstructed()).await;
+        store.apply(&change).await;
     }
     Ok(sync::context_for(
         SettingsStore::settings(store),
@@ -349,12 +348,7 @@ async fn persist_device_update(
     };
     let mut guard = device.0.lock().await;
     if let Ok(store) = device_store(app, &mut guard).await {
-        store
-            .apply(
-                &sync::device_sync_change(vault, update),
-                &ApplyContext::unobstructed(),
-            )
-            .await;
+        store.apply(&sync::device_sync_change(vault, update)).await;
     }
 }
 

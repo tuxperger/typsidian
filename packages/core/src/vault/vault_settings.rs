@@ -31,7 +31,7 @@ use super::sections::SectionMark;
 use super::service_dir;
 use crate::boards::placement::AssetsPlacement;
 use crate::settings::keybindings::{CommandId, KeybindingEntry, Shortcut, ShortcutProblem};
-use crate::settings::{ModePreference, Theme};
+use crate::settings::Theme;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
@@ -47,9 +47,6 @@ pub struct VaultOverrides {
     pub sections: Vec<SectionMark>,
     pub theme: Option<Theme>,
     pub editor_font_size: Option<u8>,
-    pub editor_mode_preference: Option<ModePreference>,
-    #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
-    pub editor_config_path: Option<PathBuf>,
 
     /// Ходить ли в сеть за недостающими внешними шаблонами (фича 007, FR-009).
     ///
@@ -673,10 +670,6 @@ struct SettingsTable {
     theme: Option<Theme>,
     #[serde(default)]
     editor_font_size: Option<u8>,
-    #[serde(default)]
-    editor_mode_preference: Option<ModePreference>,
-    #[serde(default)]
-    editor_config_path: Option<PathBuf>,
 }
 
 /// Разбирает содержимое файла. `None` — файл не разбирается.
@@ -722,8 +715,6 @@ impl FileShape {
                 .settings
                 .editor_font_size
                 .filter(|size| crate::settings::is_valid_font_size(*size)),
-            editor_mode_preference: self.settings.editor_mode_preference,
-            editor_config_path: self.settings.editor_config_path,
             // Негодная папка отбрасывается молча, как непригодная пометка
             // раздела: одна испорченная строка не повод объявить файл
             // нечитаемым. Экспорт тогда идёт в папку по умолчанию.
@@ -836,23 +827,10 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         "editor_font_size",
         overrides.editor_font_size.map(Value::from),
     );
-    set_or_remove(
-        &mut document,
-        SETTINGS_TABLE,
-        "editor_mode_preference",
-        overrides
-            .editor_mode_preference
-            .map(|mode| Value::from(mode_str(mode))),
-    );
-    set_or_remove(
-        &mut document,
-        SETTINGS_TABLE,
-        "editor_config_path",
-        overrides
-            .editor_config_path
-            .as_ref()
-            .map(|path| Value::from(path.to_string_lossy().into_owned())),
-    );
+    // Снятые фичей 026 ключи убираются при записи (026 FR-005).
+    for key in crate::settings::format::RETIRED_KEYS {
+        set_or_remove(&mut document, SETTINGS_TABLE, key, None);
+    }
 
     set_or_remove(
         &mut document,
@@ -1143,13 +1121,6 @@ fn theme_str(theme: Theme) -> &'static str {
     }
 }
 
-fn mode_str(preference: ModePreference) -> &'static str {
-    match preference {
-        ModePreference::FullBackend => "fullBackend",
-        ModePreference::SimplifiedEmulation => "simplifiedEmulation",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1164,8 +1135,6 @@ mod tests {
             ],
             theme: Some(Theme::Dark),
             editor_font_size: Some(16),
-            editor_mode_preference: Some(ModePreference::FullBackend),
-            editor_config_path: Some("/home/user/.config/nvim".into()),
             // Фича 007: загрузка внешних шаблонов.
             auto_download_templates: Some(false),
             template_sources: vec![TemplateSourceEntry {
@@ -1377,6 +1346,28 @@ mod tests {
     }
 
     #[test]
+    fn retired_keys_are_read_without_error_and_dropped_on_write() {
+        // 026 FR-004, FR-005: vault.json прежней версии с выбором режима и
+        // путём к конфигу открывается, тема из него действует, а запись этих
+        // ключей больше не несёт.
+        let previous = r#"{
+  "settings": {
+    "theme": "dark",
+    "editor_mode_preference": "fullBackend",
+    "editor_config_path": "/home/user/init.lua"
+  }
+}"#;
+        let parsed = parse(previous).expect("старый vault.json читается");
+        assert_eq!(parsed.theme, Some(Theme::Dark));
+
+        let rewritten = render(previous, &parsed);
+        for key in crate::settings::format::RETIRED_KEYS {
+            assert!(!rewritten.contains(key), "{key} не пишется: {rewritten}");
+        }
+        assert_eq!(parse(&rewritten).unwrap().theme, Some(Theme::Dark));
+    }
+
+    #[test]
     fn clearing_a_value_removes_its_key_and_its_empty_object() {
         let previous = render("", &sample());
         let cleared = VaultOverrides {
@@ -1385,7 +1376,6 @@ mod tests {
         };
         let rewritten = render(&previous, &cleared);
         assert!(!rewritten.contains("theme"));
-        assert!(!rewritten.contains("editor_config_path"));
         assert!(!rewritten.contains("sections"));
         assert!(
             !rewritten.contains("\"settings\""),

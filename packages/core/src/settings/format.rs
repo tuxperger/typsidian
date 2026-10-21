@@ -117,10 +117,11 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
         "editor_font_size".into(),
         Value::from(settings.editor_font_size),
     );
-    document.insert(
-        "editor_mode_preference".into(),
-        Value::from(mode_str(settings.editor_mode_preference)),
-    );
+    // Ключи, снятые прежними версиями, при записи убираются: незнакомые ключи
+    // переносятся как есть, но эти — известное прошлое, а не будущее.
+    for key in RETIRED_KEYS {
+        document.remove(*key);
+    }
 
     set_or_remove(
         &mut document,
@@ -129,14 +130,6 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
             .current_vault
             .as_ref()
             .map(|id| Value::from(id.as_str())),
-    );
-    set_or_remove(
-        &mut document,
-        "editor_config_path",
-        settings
-            .editor_config_path
-            .as_ref()
-            .map(|path| Value::from(path.to_string_lossy().into_owned())),
     );
 
     set_or_remove(
@@ -193,6 +186,11 @@ pub fn render(previous: &str, settings: &Settings, folder_refs: &FolderRefs) -> 
     text.push('\n');
     text
 }
+
+/// Ключи, которые приложение больше не пишет и убирает при записи: выбор
+/// режима редактирования и путь к конфигу внешнего редактора (фича 026,
+/// FR-005). Читаются без ошибки — разбор незнакомые ключи пропускает.
+pub const RETIRED_KEYS: &[&str] = &["editor_mode_preference", "editor_config_path"];
 
 /// Пишет значение либо убирает ключ, если значения нет.
 fn set_or_remove(document: &mut Map<String, Value>, key: &str, new_value: Option<Value>) {
@@ -263,13 +261,6 @@ fn theme_str(theme: super::Theme) -> &'static str {
     }
 }
 
-fn mode_str(preference: super::ModePreference) -> &'static str {
-    match preference {
-        super::ModePreference::FullBackend => "fullBackend",
-        super::ModePreference::SimplifiedEmulation => "simplifiedEmulation",
-    }
-}
-
 /// Новый файл настроек — со строкой-подсказкой вместо комментария-шапки.
 pub fn initial_document(settings: &Settings) -> String {
     let mut seed = Map::new();
@@ -281,7 +272,7 @@ pub fn initial_document(settings: &Settings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{ModePreference, Theme, VaultId, VaultRecord};
+    use crate::settings::{Theme, VaultId, VaultRecord};
 
     #[test]
     fn round_trip_preserves_values() {
@@ -293,8 +284,6 @@ mod tests {
                 "/work/notes".to_string(),
             )],
             current_vault: Some(VaultId::from_raw("abc")),
-            editor_mode_preference: ModePreference::FullBackend,
-            editor_config_path: Some("/home/user/init.lua".into()),
             language: Some("ru".to_string()),
             ..Settings::default()
         };
@@ -384,13 +373,33 @@ mod tests {
     fn clearing_optional_values_removes_their_keys() {
         let settings = Settings {
             current_vault: None,
-            editor_config_path: None,
             ..Settings::default()
         };
-        let previous = r#"{"current_vault": "old", "editor_config_path": "/tmp/x"}"#;
+        let previous = r#"{"current_vault": "old"}"#;
         let rewritten = render(previous, &settings, &FolderRefs::new());
         assert!(!rewritten.contains("current_vault"));
-        assert!(!rewritten.contains("editor_config_path"));
+    }
+
+    #[test]
+    fn retired_keys_are_read_without_error_and_dropped_on_write() {
+        // 026 FR-004, FR-005: файл прежней версии с выбором режима и путём к
+        // конфигу читается, прочие значения действуют, а запись этих ключей
+        // больше не несёт. Незнакомый ключ из будущего при этом переносится.
+        let previous = r#"{
+  "theme": "dark",
+  "editor_mode_preference": "fullBackend",
+  "editor_config_path": "/home/user/init.lua",
+  "from_the_future": 1
+}"#;
+        let parsed = parse(previous).expect("старый файл читается");
+        assert_eq!(parsed.theme, Theme::Dark);
+
+        let rewritten = render(previous, &parsed, &FolderRefs::new());
+        for key in RETIRED_KEYS {
+            assert!(!rewritten.contains(key), "{key} не пишется");
+        }
+        assert!(rewritten.contains("from_the_future"));
+        assert!(rewritten.contains("\"dark\""));
     }
 
     #[test]

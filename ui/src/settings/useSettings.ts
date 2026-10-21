@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   ApplyPlan,
-  ConfigDiskState,
   Diagnostics,
-  EditorMode,
   Settings,
   SettingsChange,
   SettingsEvent,
@@ -17,9 +15,9 @@ import { announceLanguageChoice } from "../i18n/device.js";
 
 // Принцип I конституции: этот хук не переизобретает логику настроек — он только
 // вызывает ядро (contracts/settings-store-trait.md) и разбирает уже готовые
-// `SettingsEvent` (contracts/frontend-settings.md). Решение о принудительном
-// сохранении, о допустимости переключения и об атомарности сброса принимает
-// ядро; здесь — исполнение возвращённой инструкции и отрисовка.
+// `SettingsEvent` (contracts/frontend-settings.md). Решение о допустимости
+// значений и об атомарности сброса принимает ядро; здесь — исполнение
+// возвращённого плана и отрисовка.
 //
 // Строится по образцу `../vault-tree/useVault.ts`.
 
@@ -43,8 +41,6 @@ export interface SettingsState {
   capabilities: StoreCapabilities | null;
   storageState: StorageState | null;
   knownVaults: VaultRecord[];
-  editorMode: EditorMode | null;
-  configDiskState: ConfigDiskState | null;
   /** Сведения раздела «Дополнительно» (FR-039). Собирает ядро, не UI. */
   diagnostics: Diagnostics | null;
   notices: StorageNotice[];
@@ -58,8 +54,6 @@ const INITIAL_STATE: SettingsState = {
   capabilities: null,
   storageState: null,
   knownVaults: [],
-  editorMode: null,
-  configDiskState: null,
   diagnostics: null,
   notices: [],
   lastPlan: null,
@@ -76,8 +70,6 @@ const NO_CHANGE: SettingsChange = {
   theme: undefined,
   editor_font_size: undefined,
   current_vault: undefined,
-  editor_mode_preference: undefined,
-  editor_config_path: undefined,
 };
 
 /** Собирает набор изменений из названных полей, остальные — «не трогать». */
@@ -117,12 +109,6 @@ export function reduceSettingsEvent(
           movedTo: event.moved_to,
         }),
       };
-    case "EditorModeChanged":
-      return { ...state, editorMode: event.mode };
-    case "EditorConfigDiskStateChanged":
-      // Показать «изменён, не применён»; применять самостоятельно нельзя
-      // (FR-026).
-      return { ...state, configDiskState: event.disk_state };
     default: {
       const exhaustive: never = event;
       return exhaustive;
@@ -138,10 +124,8 @@ function addNotice(notices: StorageNotice[], next: StorageNotice): StorageNotice
 export function useSettings(client: DeviceSettingsClient): {
   state: SettingsState;
   /**
-   * Применить изменение. Возвращает план, вернувшийся из ядра: разбор
-   * `RequiresNoteSave` — забота вызывающей стороны (contracts/
-   * frontend-settings.md), потому что сохранение заметки выполняется
-   * `VaultBackend::write`, о котором настройки ничего не знают.
+   * Применить изменение. Возвращает план, вернувшийся из ядра: отказ
+   * показывает вызывающая сторона (contracts/frontend-settings.md).
    */
   apply: (change: SettingsChange) => Promise<ApplyPlan | null>;
   /**

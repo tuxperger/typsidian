@@ -47,7 +47,6 @@ Next.js), рабочий стол и Android (`apps/desktop`, `apps/mobile`, Tau
 | `rust-core-agent` | `packages/core/**/*.rs` |
 | `frontend-agent` | `ui/`, `apps/web`, вёрстка по макету |
 | `tauri-shell-agent` | `apps/desktop`, `apps/mobile`, `src-tauri/` |
-| `nvim-bridge-agent` | мост к headless Neovim |
 | `nix-env-agent` | `flake.nix`, `nix/`, новые нативные зависимости |
 | `speckit-agent` | артефакты `specs/**` |
 | `security-review-agent` | read-only ревью vault-manager, моста, сети |

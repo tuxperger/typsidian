@@ -88,7 +88,7 @@ import { usePropertiesWorkspace } from "../note-panel/properties/usePropertiesWo
 import { TemplateGallery } from "../templates/TemplateGallery.js";
 import { SaveAsTemplateDialog } from "../templates/SaveAsTemplateDialog.js";
 import { useTemplateLibrary } from "../templates/useTemplateLibrary.js";
-import { plainInputTarget } from "../templates/insertion/plainInputTarget.js";
+import { editorTarget } from "../templates/insertion/editorTarget.js";
 import type { EditorView } from "@codemirror/view";
 import { ContextMenuProvider, copyText, useContextMenu } from "../menu/ContextMenu.js";
 import { useI18n, type MessageKey } from "../i18n/index.js";
@@ -1698,7 +1698,7 @@ function WorkspaceView({
   // Порт вставки (contracts/insertion-target.md). Пересоздаётся только вместе с
   // доступом к редактору: сама цель заимствует его лениво, в момент вставки.
   const insertion = useMemo(
-    () => (getEditorView === null ? null : plainInputTarget(getEditorView)),
+    () => (getEditorView === null ? null : editorTarget(getEditorView)),
     [getEditorView],
   );
 

@@ -3,12 +3,7 @@ import type { EditorView } from "@codemirror/view";
 import type { InsertionEdit, InsertionPoint } from "../../wasm-core/typsidian_core.js";
 import type { InsertionTarget, InsertResult } from "./index.js";
 
-// Реализация порта вставки для режима `PlainInput` (T038-T040).
-//
-// `PlainInput` разблокирован гейтом принципа V потому, что буфер в нём
-// принадлежит браузеру: ни одна операция не пересекает границу внешнего
-// процесса. `SimplifiedEmulation` и `FullBackend` реализаций не имеют и иметь
-// не будут до отдельной сессии `/speckit-clarify` по мосту к Neovim.
+// Реализация порта вставки поверх редактора заметки (T038-T040).
 //
 // # Почему одна транзакция, а не «прочитать, склеить, записать»
 //
@@ -31,7 +26,7 @@ import type { InsertionTarget, InsertResult } from "./index.js";
  * `view` — функция, а не значение: редактор пересоздаётся при смене заметки, и
  * цель, захватившая старый экземпляр, вставляла бы в размонтированный документ.
  */
-export function plainInputTarget(
+export function editorTarget(
   view: () => EditorView | null,
 ): InsertionTarget {
   return {

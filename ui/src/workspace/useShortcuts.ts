@@ -42,8 +42,6 @@ export const NOTHING_OVERRIDDEN: VaultOverrides = {
   sections: [],
   theme: undefined,
   editor_font_size: undefined,
-  editor_mode_preference: undefined,
-  editor_config_path: undefined,
   auto_download_templates: undefined,
   template_sources: [],
   keybindings: [],

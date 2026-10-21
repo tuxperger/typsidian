@@ -44,10 +44,9 @@ use typsidian_core::links;
 use typsidian_core::preview::{self, CompiledDocument, SnapshotError};
 use typsidian_core::properties;
 use typsidian_core::settings::apply::{
-    self as settings_apply, ApplyContext, ApplyPlan, ChangeTarget, RoutedChange, SettingsChange,
+    self as settings_apply, ApplyPlan, ChangeTarget, RoutedChange, SettingsChange,
 };
 use typsidian_core::settings::diagnostics::{self, Diagnostics};
-use typsidian_core::settings::editor_mode::{EditorModeBridge, NullBridge};
 use typsidian_core::settings::events::SettingsEvent;
 use typsidian_core::settings::folder_ref::{FolderRegistry, Resolved};
 use typsidian_core::settings::keybindings::{
@@ -478,10 +477,7 @@ pub async fn remember_opened_vault(
     // отклонить набор (несохранённая заметка, конфликт), относятся к смене
     // режима редактора и здесь не срабатывают.
     store
-        .apply(
-            &SettingsChange::current_vault(id.clone()),
-            &ApplyContext::unobstructed(),
-        )
+        .apply(&SettingsChange::current_vault(id.clone()))
         .await;
     Ok(id)
 }
@@ -622,17 +618,8 @@ async fn snapshot_of(store: &NativeStore) -> DeviceSnapshot {
 }
 
 /// Диагностика раздела «Дополнительно» (FR-039).
-///
-/// Моста к Neovim в оболочке пока нет, поэтому состояние режима берётся у
-/// `NullBridge` — ядро само называет причину недоступности, а не окно.
 fn native_diagnostics(store: &NativeStore) -> Diagnostics {
-    let bridge = NullBridge::default();
-    diagnostics::collect(
-        bridge.current_mode(),
-        bridge.availability(),
-        store.capabilities(),
-        store.storage_state(),
-    )
+    diagnostics::collect(store.capabilities(), store.storage_state())
 }
 
 #[tauri::command]
@@ -681,9 +668,7 @@ async fn apply_device_settings(
 ) -> Answer<AppliedSettings, StoreError> {
     let mut guard = device.0.lock().await;
     let store = device_store(&app, &mut guard).await?;
-    // Контекст — тот же, что у `WebStore.apply`: предусловия смены режима
-    // проверяет вызывающая сторона через `RequiresNoteSave` (research.md §9).
-    let plan = store.apply(&change, &ApplyContext::unobstructed()).await;
+    let plan = store.apply(&change).await;
     Ok(AppliedSettings {
         plan,
         snapshot: snapshot_of(store).await,

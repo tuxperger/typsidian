@@ -1172,11 +1172,6 @@ export function NoteEditor({
         {...(onCreateBoard ? { onCreateBoard } : {})}
         onCancel={() => setIsChoosingBoard(false)}
       />
-      {/* Статус-бар макета (handoff § Editor pane). Показывает только то, что
-          известно на самом деле: пилюля vim-режима здесь надпись, а не
-          переключатель, — моста к Neovim в web-сборке не существует
-          (research.md §7), и кликабельная пилюля утверждала бы, что режим
-          переключается. */}
       {citeError !== null && (
         <div className="ts-cite-offer ts-cite-offer--error" role="alert">
           <span>{citeError}</span>
@@ -1222,10 +1217,9 @@ export function NoteEditor({
           }}
         />
       )}
+      {/* Статус-бар макета (handoff § Editor pane): только то, что известно на
+          самом деле. Пилюли режима нет — редактор один (фича 026). */}
       <div className="ts-statusbar">
-        <span className="ts-vim" title={t("editor.vimHint")}>
-          NORMAL
-        </span>
         <span>{t("editor.caret", { line: caret.line, column: caret.column })}</span>
         <span className="ts-statusbar__minor">UTF-8</span>{/* i18n-ignore: имя кодировки */}
         {/* Состояние полей вставленного сниппета (макет «Вставка» § состояние

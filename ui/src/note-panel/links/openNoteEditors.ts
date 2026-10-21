@@ -15,8 +15,7 @@ import type { TextEdit } from "../../wasm-core/typsidian_core.js";
 // 4. Замена применяется к тому тексту, который вернул `textOf`; если текст
 //    успел измениться, ответ — `NoEditor`, а не правка со сдвигом.
 //
-// Реализация для обычного ввода — `plainEditors.ts`; режимы через мост к
-// Neovim не планируются до отдельного `/speckit-clarify` (принцип V).
+// Реализация поверх редакторов заметок — `plainEditors.ts`.
 
 export interface OpenNoteEditors {
   /** Текст заметки в редакторе; `null` — заметка в редакторе не открыта. */

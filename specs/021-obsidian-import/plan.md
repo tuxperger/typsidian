@@ -47,7 +47,7 @@ Typst (`pulldown-cmark` с расширениями Obsidian поверх нег
 | II. Паритет | PASS | Новые крейты — чистый Rust; первая задача сверяет wasm32. Источник — `VaultBackend` на таргет. Биндинги 1:1. |
 | III. Спека | PASS | — |
 | IV. TS strict | PASS | Типы — `Tsify`. |
-| V. Мост к Neovim | N/A | — |
+| V. Внешние процессы | N/A | — |
 | VI. Local-first | PASS | Результат — обычные файлы Typst. |
 | VII. Офлайн | N/A | Сети нет (FR-013). |
 | VIII. Внешние движки | N/A | — |

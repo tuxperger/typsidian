@@ -34,9 +34,6 @@ pub enum LogEvent {
     VaultSwitched,
     VaultForgotten,
     VaultUnavailable,
-    EditorModeChanged { mode: &'static str },
-    EditorConfigApplied,
-    EditorConfigUnreadable,
     ResetToDefaults,
 }
 
@@ -56,9 +53,6 @@ impl LogEvent {
             LogEvent::VaultSwitched => "VaultSwitched",
             LogEvent::VaultForgotten => "VaultForgotten",
             LogEvent::VaultUnavailable => "VaultUnavailable",
-            LogEvent::EditorModeChanged { .. } => "EditorModeChanged",
-            LogEvent::EditorConfigApplied => "EditorConfigApplied",
-            LogEvent::EditorConfigUnreadable => "EditorConfigUnreadable",
             LogEvent::ResetToDefaults => "ResetToDefaults",
         }
     }
@@ -68,7 +62,6 @@ impl LogEvent {
     pub fn detail(&self) -> Option<&'static str> {
         match self {
             LogEvent::SettingsChanged { field } => Some(field),
-            LogEvent::EditorModeChanged { mode } => Some(mode),
             _ => None,
         }
     }
@@ -204,9 +197,8 @@ impl Journal {
     }
 
     /// Событие хранилища настроек — в журнал, если оно того стоит. Внешняя
-    /// правка значений и смена состояния файла конфига редактора сюда не
-    /// идут: первое приходит на каждое сохранение соседним окном, второе —
-    /// на каждую правку конфига в чужом редакторе.
+    /// правка значений сюда не идёт: она приходит на каждое сохранение
+    /// соседним окном.
     pub fn record_event(&mut self, utc_millis: i64, event: &super::events::SettingsEvent) {
         use super::events::SettingsEvent;
         let logged = match event {
@@ -214,35 +206,22 @@ impl Journal {
             SettingsEvent::StorageRecovered { .. } => LogEvent::SettingsLoaded,
             SettingsEvent::StorageBecameReadOnly => LogEvent::StorageBecameReadOnly,
             SettingsEvent::InvalidFileSetAside { .. } => LogEvent::InvalidFileSetAside,
-            SettingsEvent::EditorModeChanged { mode } => LogEvent::EditorModeChanged {
-                mode: match mode {
-                    super::editor_mode::EditorMode::FullBackend { .. } => "FullBackend",
-                    super::editor_mode::EditorMode::SimplifiedEmulation => "SimplifiedEmulation",
-                    super::editor_mode::EditorMode::PlainInput { .. } => "PlainInput",
-                },
-            },
-            SettingsEvent::ValuesChangedExternally { .. }
-            | SettingsEvent::EditorConfigDiskStateChanged { .. } => return,
+            SettingsEvent::ValuesChangedExternally { .. } => return,
         };
         self.record(utc_millis, logged);
     }
 
     /// Применённое изменение настроек: по записи на каждое затронутое поле.
-    /// Значения не пишутся — только имена полей: путь к конфигу редактора и
-    /// адрес посредника в журнале делать нечего (FR-041).
+    /// Значения не пишутся — только имена полей: адресу посредника и
+    /// прочим значениям в журнале делать нечего (FR-041).
     pub fn record_change(&mut self, utc_millis: i64, change: &super::apply::SettingsChange) {
         // Набор вкладок (`workspace`, фича 014) и состояние колонки заметки
         // сюда намеренно не входят: иначе каждое переключение вкладки стало бы
         // строкой журнала.
-        let fields: [(&'static str, bool); 8] = [
+        let fields: [(&'static str, bool); 6] = [
             ("theme", change.theme.is_some()),
             ("editor_font_size", change.editor_font_size.is_some()),
             ("current_vault", change.current_vault.is_some()),
-            (
-                "editor_mode_preference",
-                change.editor_mode_preference.is_some(),
-            ),
-            ("editor_config_path", change.editor_config_path.is_some()),
             ("language", change.language.is_some()),
             ("device", change.device.is_some()),
             ("vault_sync", change.vault_sync.is_some()),

@@ -8,7 +8,6 @@
 
 pub mod apply;
 pub mod diagnostics;
-pub mod editor_mode;
 pub mod events;
 pub mod folder_ref;
 pub mod format;
@@ -23,7 +22,6 @@ pub mod native;
 pub mod web;
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 pub use vaults::{Availability, VaultId, VaultRecord};
 
@@ -37,21 +35,6 @@ pub enum Theme {
     #[default]
     Light,
     Dark,
-}
-
-/// **Выбор пользователя** по режиму редактирования — не текущее состояние
-/// (data-model.md). Хранить их одним полем нельзя: `PlainInput` наступает от
-/// отказа подсистемы и не должен закрепляться на следующий запуск, поэтому
-/// персистентное предпочтение и рантайм-состояние [`editor_mode::EditorMode`]
-/// разделены намеренно.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
-#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
-#[serde(rename_all = "camelCase")]
-pub enum ModePreference {
-    FullBackend,
-    #[default]
-    SimplifiedEmulation,
 }
 
 /// Режим колонки заметки (фича 013, research.md §12). Фича 015 добавила
@@ -168,12 +151,6 @@ pub struct Settings {
     pub editor_font_size: u8,
     pub known_vaults: Vec<VaultRecord>,
     pub current_vault: Option<VaultId>,
-    pub editor_mode_preference: ModePreference,
-    /// `None` не пишется вовсе: команды Tauri отдали бы его как `null`, а UI
-    /// ждёт `undefined`, как из wasm (тот же приём у `language`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(target_arch = "wasm32", tsify(type = "string | undefined"))]
-    pub editor_config_path: Option<PathBuf>,
     /// Язык интерфейса, выбранный явно (фича 010); `None` — «как в системе».
     ///
     /// Строкой, а не перечислением: какие языки поставляются, знает интерфейс,
@@ -305,8 +282,6 @@ impl Default for Settings {
             editor_font_size: DEFAULT_FONT_SIZE,
             known_vaults: Vec::new(),
             current_vault: None,
-            editor_mode_preference: ModePreference::default(),
-            editor_config_path: None,
             language: None,
             device: None,
             vault_sync: Vec::new(),
@@ -387,13 +362,6 @@ pub fn resolve(
         editor_font_size: overrides
             .editor_font_size
             .unwrap_or(device.editor_font_size),
-        editor_mode_preference: overrides
-            .editor_mode_preference
-            .unwrap_or(device.editor_mode_preference),
-        editor_config_path: overrides
-            .editor_config_path
-            .clone()
-            .or_else(|| device.editor_config_path.clone()),
         // Принадлежат устройству и слоями не перекрываются.
         known_vaults: device.known_vaults.clone(),
         current_vault: device.current_vault.clone(),
@@ -447,11 +415,6 @@ mod tests {
         assert_eq!(settings.editor_font_size, 14);
         assert_eq!(settings.current_vault, None);
         assert!(settings.known_vaults.is_empty());
-        assert_eq!(
-            settings.editor_mode_preference,
-            ModePreference::SimplifiedEmulation
-        );
-        assert_eq!(settings.editor_config_path, None);
         assert!(validate(&settings).is_ok());
     }
 
@@ -460,7 +423,6 @@ mod tests {
         // Команды Tauri отдают JSON: `null` прошёл бы в UI мимо `=== undefined`.
         let json = serde_json::to_value(Settings::default()).unwrap();
         assert!(json.get("language").is_none());
-        assert!(json.get("editor_config_path").is_none());
 
         let back: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(back, Settings::default());
@@ -507,8 +469,6 @@ mod tests {
         let device = Settings {
             theme: Theme::Light,
             editor_font_size: 14,
-            editor_mode_preference: ModePreference::SimplifiedEmulation,
-            editor_config_path: Some("/device/init.lua".into()),
             known_vaults: vec![VaultRecord::new(
                 VaultId::from_raw("a"),
                 "/notes".to_string(),
@@ -525,11 +485,6 @@ mod tests {
         let effective = resolve(&device, &overrides);
         assert_eq!(effective.theme, Theme::Dark, "перекрыто");
         assert_eq!(effective.editor_font_size, 14, "взято с устройства");
-        assert_eq!(
-            effective.editor_config_path,
-            Some("/device/init.lua".into()),
-            "взято с устройства"
-        );
         // FR-028: реестр остаётся свойством устройства при любом перекрытии.
         assert_eq!(effective.known_vaults, device.known_vaults);
         assert_eq!(effective.current_vault, device.current_vault);
@@ -549,6 +504,10 @@ mod tests {
         // Речь именно о файле, написанном **этой же** версией формата: смена
         // формата на JSON переносом с прежнего TOML не сопровождается вовсе
         // (research.md §2, пересмотрено).
+        //
+        // Ключи `editor_mode_preference` и `editor_config_path` сняты фичей 026:
+        // файл, где они записаны, читается, остальные значения действуют
+        // (026 FR-004).
         use crate::vault::vault_settings::VaultOverrides;
 
         let written_by_previous_version = r#"{
@@ -564,11 +523,6 @@ mod tests {
 
         assert_eq!(device.theme, Theme::Dark);
         assert_eq!(device.editor_font_size, 20);
-        assert_eq!(device.editor_mode_preference, ModePreference::FullBackend);
-        assert_eq!(
-            device.editor_config_path,
-            Some("/home/user/init.lua".into())
-        );
         assert_eq!(device.known_vaults.len(), 1);
         assert_eq!(device.current_vault, Some(VaultId::from_raw("a")));
 

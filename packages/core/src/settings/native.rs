@@ -6,7 +6,7 @@
 //! `HOME/.config/...` — как делал упразднённый `vault::last_vault` — неверна на
 //! macOS и Windows.
 
-use super::apply::{plan, ApplyContext, ApplyPlan, SettingsChange};
+use super::apply::{plan, ApplyPlan, SettingsChange};
 use super::events::SettingsEvent;
 use super::folder_ref::{FolderRegistry, Resolved};
 use super::format::{self, FolderRefs};
@@ -370,11 +370,8 @@ impl SettingsStore for NativeStore {
         self.settings.clone()
     }
 
-    async fn apply(&mut self, change: &SettingsChange, context: &ApplyContext) -> ApplyPlan {
-        let mut context = context.clone();
-        context.storage_writable = self.state != StorageState::ReadOnlyForSession;
-
-        let outcome = plan(&self.settings, change, &context);
+    async fn apply(&mut self, change: &SettingsChange) -> ApplyPlan {
+        let outcome = plan(&self.settings, change);
         if outcome != ApplyPlan::Applied {
             return outcome;
         }

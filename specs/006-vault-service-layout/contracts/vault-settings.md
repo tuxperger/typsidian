@@ -51,7 +51,7 @@ pub fn is_inside_service_dir(path: &Path) -> bool;
     "theme": "dark",
     "editor_font_size": 16,
     "editor_mode_preference": "fullBackend",
-    "editor_config_path": "/home/user/.config/nvim"
+    "editor_config_path": "/home/user/.config/editor/init.lua"
   }
 }
 ```

@@ -254,12 +254,6 @@ export function useVaultSettings(
         ...(change.editor_font_size !== undefined
           ? { editor_font_size: change.editor_font_size }
           : {}),
-        ...(change.editor_mode_preference !== undefined
-          ? { editor_mode_preference: change.editor_mode_preference }
-          : {}),
-        ...(change.editor_config_path !== undefined
-          ? { editor_config_path: change.editor_config_path }
-          : {}),
       });
     },
     [overrides, write],

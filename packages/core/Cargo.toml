@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# `FakeBridge` виден интеграционным тестам в tests/ только через фичу:
-# они линкуются с крейтом как с внешней зависимостью, собранной БЕЗ cfg(test)
+# Тестовые заглушки (сборки предпросмотра, движка git, хранилища настроек)
+# видны интеграционным тестам в tests/ только через фичу: они линкуются с крейтом как с внешней зависимостью, собранной БЕЗ cfg(test)
 # (research.md §15). Включается ниже через dev-dependency на самого себя.
 test-support = []
 # Встроенный набор шрифтов внутри модуля (005 T029). Нативной сборке он вшит
@@ -170,7 +170,7 @@ tempfile = "3"
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Зависимость крейта на самого себя с включённой `test-support` — так
-# интеграционные тесты в tests/ видят `FakeBridge` (research.md §15). Cargo
+# интеграционные тесты в tests/ видят тестовые заглушки (research.md §15). Cargo
 # такой цикл через dev-dependencies допускает намеренно.
 typsidian-core = { path = ".", features = ["test-support", "embedded-fonts"] }
 

@@ -5,7 +5,7 @@
 //! образцу уже работающего `VaultBackend`. Условная компиляция допустима только
 //! **внутри** реализаций; вызывающий код по платформе не ветвится.
 
-use super::apply::{ApplyContext, ApplyPlan, SettingsChange};
+use super::apply::{ApplyPlan, SettingsChange};
 use super::events::SettingsEvent;
 use super::Settings;
 use serde::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ pub trait SettingsStore: Sized {
     /// (FR-037, research.md §5). Возвращает план, вернувшийся из ядра: при
     /// [`ApplyPlan::Applied`] изменения уже на диске, при остальных исходах
     /// файл не тронут.
-    async fn apply(&mut self, change: &SettingsChange, context: &ApplyContext) -> ApplyPlan;
+    async fn apply(&mut self, change: &SettingsChange) -> ApplyPlan;
 
     fn capabilities(&self) -> StoreCapabilities;
 
