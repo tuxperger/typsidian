@@ -48,6 +48,8 @@ import type {
   IncomingItem,
   InsertMoment,
   LinkOutcome,
+  LinkHealth,
+  LinkFixRequest,
   LinkRequest,
   MentionScan,
   MentionStep,
@@ -730,6 +732,13 @@ export interface LinksClient {
    * а на диск ничего не запишет (FR-016).
    */
   linkMention(request: LinkRequest, editorText: string | null): Promise<LinkOutcome>;
+  /** Битые ссылки по целям и заметки без входящих одним вызовом (фича 028). */
+  health(openTexts: OpenText[]): Promise<LinkHealth>;
+  /**
+   * Починка ссылок одной заметки (фича 028): исходы — как у замены 027,
+   * отмена — `replaceUndo`.
+   */
+  fix(request: LinkFixRequest, editorText: string | null): Promise<ReplaceNoteOutcome>;
 }
 
 /**

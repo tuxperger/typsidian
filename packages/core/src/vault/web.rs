@@ -1265,6 +1265,8 @@ impl VaultBackend for WebBackend {
         // обязано быть одним на оба таргета, а не появиться на web задним
         // числом вместе с переименованием папок.
         let _ = super::vault_settings::move_sections(self, from, to).await;
+        // Фича 028: отметка «намеренно без ссылок» едет так же.
+        let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
 
         self.publish_links_invalidated(&[from.to_path_buf(), to.to_path_buf()])
             .await;

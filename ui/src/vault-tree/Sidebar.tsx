@@ -38,6 +38,10 @@ export interface SidebarProps {
   onCreated: (path: string) => void;
   onError: (error: VaultOperationError) => void;
   onOpenGraph: () => void;
+  /** Битых ссылок в vault (фича 028); ноль не показывается. */
+  brokenLinks?: number;
+  /** Открыть экран «Состояние ссылок». */
+  onOpenLinkHealth?: (() => void) | undefined;
   /**
    * Заготовки для второго уровня меню «+» (фича 003, FR-020).
    *
@@ -88,6 +92,8 @@ export function Sidebar({
   onCreated,
   onError,
   onOpenGraph,
+  brokenLinks = 0,
+  onOpenLinkHealth,
   templates = [],
   onOpenTemplates,
   createFromTemplate = null,
@@ -303,6 +309,17 @@ export function Sidebar({
         </span>
         )}
         <span className="ts-spacer" />
+        {/* Счётчик битых ссылок (фича 028, макет L3): ноль не показывается. */}
+        {brokenLinks > 0 && onOpenLinkHealth !== undefined && (
+          <button
+            type="button"
+            className="ts-tree-broken"
+            title={t("linkHealth.footerTitle")}
+            onClick={onOpenLinkHealth}
+          >
+            {t("linkHealth.footer", { count: brokenLinks })}
+          </button>
+        )}
         <button
           type="button"
           className="ts-btn ts-btn--ghost"

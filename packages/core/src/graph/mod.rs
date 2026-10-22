@@ -253,6 +253,44 @@ pub fn embeds_in(source: &Path, content: &str) -> Vec<PathBuf> {
     out
 }
 
+/// Вставки файлов с местами (фича 028): цель и байтовый диапазон вызова
+/// `image(…)` (без `#` перед ним), каждая запись по порядку текста, без
+/// схлопывания дублей — починке нужна каждая. Разбор тот же, что у
+/// [`embeds_in`].
+pub fn embed_sites(source: &Path, content: &str) -> Vec<(PathBuf, usize, usize)> {
+    use typst::syntax::{ast, parse, LinkedNode, SyntaxKind};
+
+    if !content.contains("image") {
+        return Vec::new();
+    }
+    let root = parse(content);
+    let mut out = Vec::new();
+    let mut stack: Vec<LinkedNode> = vec![LinkedNode::new(&root)];
+    while let Some(node) = stack.pop() {
+        if node.kind() == SyntaxKind::FuncCall {
+            let mut children = node.get().children();
+            let is_image = children
+                .next()
+                .and_then(|callee| callee.cast::<ast::Ident>())
+                .is_some_and(|name| name.get() == "image");
+            let literal = is_image
+                .then(|| children.find(|child| child.kind() == SyntaxKind::Args))
+                .flatten()
+                .and_then(|args| args.children().find(|arg| arg.kind() == SyntaxKind::Str))
+                .and_then(|arg| arg.cast::<ast::Str>())
+                .map(|text| text.get().to_string());
+            if let Some(target) = literal.and_then(|raw| resolve_embed_target(source, &raw)) {
+                let range = node.range();
+                out.push((target, range.start, range.end));
+            }
+        }
+        let before = stack.len();
+        stack.extend(node.children());
+        stack[before..].reverse();
+    }
+    out
+}
+
 /// Путь вставленного файла относительно корня vault; `None` — адрес не
 /// локальный или уводит за корень.
 fn resolve_embed_target(source: &Path, raw: &str) -> Option<PathBuf> {

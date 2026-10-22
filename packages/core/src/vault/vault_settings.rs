@@ -94,6 +94,11 @@ pub struct VaultOverrides {
     #[serde(default)]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub source_files: Vec<String>,
+    /// Заметки, отмеченные «намеренно без ссылок» (фича 028, research.md §4):
+    /// пути от корня через `/`, экран «Без входящих» их не показывает.
+    #[serde(default)]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub intentional_orphans: Vec<String>,
     /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
     ///
     /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
@@ -493,6 +498,35 @@ pub async fn move_sections<B: VaultBackend>(
     write_vault_settings(backend, &overrides).await
 }
 
+/// Переносит отметки «намеренно без ссылок» (фича 028) за переименованной
+/// заметкой или папкой — как пометки разделов в [`move_sections`].
+pub async fn move_intentional_orphans<B: VaultBackend>(
+    backend: &mut B,
+    from: &std::path::Path,
+    to: &std::path::Path,
+) -> Result<(), VaultSettingsError> {
+    let mut overrides = read_vault_settings(backend).await?;
+    let from = from.to_string_lossy().replace('\\', "/");
+    let to = to.to_string_lossy().replace('\\', "/");
+    let mut changed = false;
+    for path in &mut overrides.intentional_orphans {
+        let moved = if *path == from {
+            Some(to.clone())
+        } else {
+            path.strip_prefix(&format!("{from}/"))
+                .map(|tail| format!("{to}/{tail}"))
+        };
+        if let Some(moved) = moved {
+            *path = moved;
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+    write_vault_settings(backend, &overrides).await
+}
+
 /// Создаёт служебную папку, если её ещё нет.
 ///
 /// Вызывается при открытии vault, доступного на запись, — одинаково на обоих
@@ -548,6 +582,7 @@ const CAPTURE_TABLE: &str = "capture";
 const GRAPH_TABLE: &str = "graph";
 const ATTACHMENTS_TABLE: &str = "attachments";
 const SOURCES_TABLE: &str = "sources";
+const LINKS_TABLE: &str = "links";
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -567,6 +602,8 @@ struct FileShape {
     attachments: AttachmentsTable,
     #[serde(default)]
     sources: SourcesTable,
+    #[serde(default)]
+    links: LinksTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -589,6 +626,14 @@ struct ExportTable {
 struct SourcesTable {
     #[serde(default)]
     files: Option<Value>,
+}
+
+/// Таблица ссылок (028). Значение как `Value`, как у таблицы источников:
+/// неверное — «не задано», а не повод объявить файл нечитаемым.
+#[derive(Debug, Default, Deserialize)]
+struct LinksTable {
+    #[serde(default)]
+    intentional_orphans: Option<Value>,
 }
 
 /// Таблица вложений (016). Значения как `Value`: неверное — «не задано», а
@@ -737,6 +782,15 @@ impl FileShape {
                     .iter()
                     .filter_map(Value::as_str)
                     .filter_map(|raw| crate::sources::validate_source_file(raw).ok())
+                    .collect(),
+                _ => Vec::new(),
+            },
+            intentional_orphans: match self.links.intentional_orphans {
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|raw| raw.replace('\\', "/"))
+                    .filter(|raw| !raw.is_empty())
                     .collect(),
                 _ => Vec::new(),
             },
@@ -892,6 +946,22 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         }),
     );
 
+    set_or_remove(
+        &mut document,
+        LINKS_TABLE,
+        "intentional_orphans",
+        (!overrides.intentional_orphans.is_empty()).then(|| {
+            Value::Array(
+                overrides
+                    .intentional_orphans
+                    .iter()
+                    .cloned()
+                    .map(Value::from)
+                    .collect(),
+            )
+        }),
+    );
+
     let capture = overrides.capture.clone().unwrap_or_default();
     set_or_remove(
         &mut document,
@@ -973,6 +1043,7 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, EXPORT_TABLE);
     prune_empty_object(&mut document, CAPTURE_TABLE);
     prune_empty_object(&mut document, GRAPH_TABLE);
+    prune_empty_object(&mut document, LINKS_TABLE);
 
     let mut text =
         serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
@@ -1148,6 +1219,8 @@ mod tests {
             attachments_folder: Some("файлы/картинки".into()),
             // Фича 017: указанные YAML-файлы источников.
             source_files: vec!["lit/refs.yml".into()],
+            // Фича 028: отметки «намеренно без ссылок».
+            intentional_orphans: vec!["Заметки/Идеи.typ".into()],
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

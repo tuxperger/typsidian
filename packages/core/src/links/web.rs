@@ -63,3 +63,22 @@ pub async fn links_link_mention_js(
 ) -> LinkOutcome {
     link::link_mention(backend, &request, editor_text.as_deref()).await
 }
+
+/// Состояние ссылок vault (фича 028).
+#[wasm_bindgen(js_name = linkHealth)]
+pub async fn link_health_js(
+    backend: &WebBackend,
+    open_texts: Vec<OpenText>,
+) -> super::health::LinkHealth {
+    super::health::link_health(backend, &open_texts).await
+}
+
+/// Починка ссылок одной заметки (фича 028); отмена — `replaceUndo` 027.
+#[wasm_bindgen(js_name = linkFix)]
+pub async fn link_fix_js(
+    backend: &mut WebBackend,
+    request: super::health::LinkFixRequest,
+    editor_text: Option<String>,
+) -> crate::search::replace::ReplaceNoteOutcome {
+    super::health::fix_links(backend, &request, editor_text.as_deref()).await
+}

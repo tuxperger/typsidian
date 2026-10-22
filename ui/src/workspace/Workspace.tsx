@@ -82,6 +82,8 @@ import { GraphView, type GraphScope } from "../graph/GraphView.js";
 import { LocalGraphMode } from "../graph/LocalGraphMode.js";
 import { useGraphSettings } from "../graph/useGraphSettings.js";
 import { SearchOverlay } from "../search/SearchOverlay.js";
+import { LinkHealth } from "../link-health/LinkHealth.js";
+import { useLinkHealth } from "../link-health/useLinkHealth.js";
 import { PropertiesMode } from "../note-panel/properties/PropertiesMode.js";
 import { useNoteProperties } from "../note-panel/properties/useNoteProperties.js";
 import { usePropertiesWorkspace } from "../note-panel/properties/usePropertiesWorkspace.js";
@@ -315,6 +317,8 @@ function WorkspaceView({
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Расширенный поиск (макет «Утилиты» § Поиск): ⌘⇧F и команда палитры.
   const [searchOpen, setSearchOpen] = useState(false);
+  // Экран «Состояние ссылок» (фича 028).
+  const [healthOpen, setHealthOpen] = useState(false);
   // Поиск открыт сразу в режиме замены (фича 027, `Mod+Shift+H`).
   const [searchReplace, setSearchReplace] = useState(false);
   // Условия по свойствам, с которыми открывается поиск (клик по тегу, фича 020).
@@ -1258,6 +1262,17 @@ function WorkspaceView({
       state.accessState,
     ],
   );
+  // Состояние ссылок (фича 028): один расчёт на экран и счётчик в подвале
+  // дерева — числа совпадают по построению (SC-003).
+  const linkHealth = useLinkHealth({
+    client: state.client,
+    editors: noteEditors,
+    openTexts: () => registry?.openTexts() ?? NO_OPEN_TEXTS,
+    revision: linksRevision + notesRevision,
+    createFile: createNoteAt,
+    onChanged: bumpLinks,
+    onSettingsChanged: () => void vaultSettings.reload(),
+  });
   // Окно показа не открылось (блокировщик): тост с «Открыть ещё раз».
   const [showBlocked, setShowBlocked] = useState<{ retry: () => void } | null>(null);
   const showSession = useShowSession({
@@ -1959,6 +1974,12 @@ function WorkspaceView({
           setSearchReplace(true);
           setSearchOpen(true);
         },
+      },
+      {
+        id: "link-health",
+        ...titled("linkHealth.command"),
+        icon: "link",
+        run: () => setHealthOpen(true),
       },
       {
         id: "templates",
@@ -2812,6 +2833,8 @@ function WorkspaceView({
               onCreated={(path) => void openPath(path)}
               onError={setOperationError}
               onOpenGraph={toggleView}
+              brokenLinks={linkHealth.health?.broken_links ?? 0}
+              onOpenLinkHealth={() => setHealthOpen(true)}
               templates={templates}
               onOpenTemplates={() => setTemplatesOpen(true)}
               createFromTemplate={createFromTemplate}
@@ -3021,6 +3044,16 @@ function WorkspaceView({
             {t("properties.reindex.cancel")}
           </button>
         </div>
+      )}
+
+      {healthOpen && (
+        <LinkHealth
+          state={linkHealth}
+          notes={state.notes}
+          readOnly={state.accessState === "readOnly"}
+          onOpenPlace={(path, line) => revealPlace({ path, line, column: 1 })}
+          onClose={() => setHealthOpen(false)}
+        />
       )}
 
       {searchOpen && (

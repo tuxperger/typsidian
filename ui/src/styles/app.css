@@ -4274,6 +4274,219 @@ input.ts-sources__url:focus {
   gap: 4px;
 }
 
+/* ── Состояние ссылок (фича 028, макет L1–L3) ─────────────────────────── */
+
+.ts-health__tabs {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+}
+
+.ts-health__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 12px 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--steel-500);
+  font: 11px var(--font-mono);
+  cursor: pointer;
+}
+
+.ts-health__tab[aria-selected="true"] {
+  color: var(--steel-100);
+  border-bottom-color: var(--orange-500);
+}
+
+.ts-health__tab-n {
+  color: var(--steel-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-health__target {
+  padding: 8px 14px 10px;
+}
+
+.ts-health__target + .ts-health__target {
+  border-top: var(--border-width) solid var(--steel-850, #1d2126);
+}
+
+.ts-health__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.ts-health__name,
+.ts-health__link {
+  color: #f0a093;
+}
+
+.ts-health__name {
+  font: 600 12.5px var(--font-mono);
+}
+
+.ts-health__link {
+  background: rgba(224, 97, 79, 0.12);
+}
+
+.ts-health__kind {
+  padding: 1px 6px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: 3px;
+  color: var(--steel-500);
+  font: 9.5px var(--font-mono);
+}
+
+.ts-health__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ts-health__site {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0 3px 18px;
+  color: var(--steel-400);
+  font: 11.5px / 1.6 var(--font-mono);
+}
+
+.ts-health__src {
+  overflow: hidden;
+  color: var(--steel-300);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-health__line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--steel-600);
+  font-size: 10.5px;
+}
+
+.ts-health__x {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.ts-health__more {
+  padding-left: 18px;
+}
+
+.ts-health__picker {
+  width: 420px;
+  max-width: calc(100% - 18px);
+  margin: 6px 0 2px 18px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+.ts-health__picker-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 9px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  color: var(--steel-500);
+}
+
+.ts-health__option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--steel-400);
+  font: 11.5px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-health__option[aria-selected="true"] {
+  background: var(--steel-800);
+  color: var(--steel-100);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-health__option-path {
+  margin-left: auto;
+  color: var(--steel-600);
+  font: 10px var(--font-mono);
+}
+
+.ts-health__orphan {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 80px 70px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 14px;
+  border-bottom: var(--border-width) solid var(--steel-850, #1d2126);
+  font-size: 12px;
+}
+
+.ts-health__orphan-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  color: var(--steel-100);
+}
+
+.ts-health__badge {
+  padding: 1px 6px;
+  border: var(--border-width) solid var(--warning);
+  border-radius: 3px;
+  color: var(--hivis-500, #ffd400);
+  font: 9.5px var(--font-mono);
+}
+
+/* Счётчик в подвале дерева (L3). */
+.ts-tree-broken {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted #f0a093;
+  background: none;
+  color: #f0a093;
+  font: 10.5px var(--font-mono);
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .ts-health__site {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-left: 8px;
+  }
+
+  .ts-health__src {
+    grid-column: 1 / -1;
+  }
+
+  .ts-health__orphan {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ts-health__orphan > .ts-search__hit-meta {
+    display: none;
+  }
+}
+
 /* ── Шаблоны и сниппеты (макет «Typsidian Утилиты» § Шаблоны, фича 003) ──── */
 
 /* Лист галереи: та же геометрия, что у расширенного поиска, — оба открываются

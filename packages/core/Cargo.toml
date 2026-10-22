@@ -253,3 +253,8 @@ harness = false
 [[bench]]
 name = "replace_scale"
 harness = false
+
+# Состояние ссылок на 5 000 заметок (фича 028, T009, SC-001).
+[[bench]]
+name = "link_health_scale"
+harness = false

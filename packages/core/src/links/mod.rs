@@ -11,6 +11,7 @@
 //! их место — ответ ядра, а не таблица индекса (research.md §2).
 
 pub mod backlinks;
+pub mod health;
 pub mod link;
 pub mod mentions;
 pub mod snippet;

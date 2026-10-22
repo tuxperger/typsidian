@@ -639,8 +639,9 @@ pub async fn impact_of<B: VaultBackend>(
     }
 }
 
-/// Пометки разделов едут за папкой (FR-018). Отказ записи настроек перенос не
-/// отменяет — файлы уже переехали, как и в `rename`.
+/// Пометки разделов едут за папкой (FR-018), отметки «намеренно без ссылок»
+/// (028) — за заметкой и папкой. Отказ записи настроек перенос не отменяет —
+/// файлы уже переехали, как и в `rename`.
 pub async fn move_section_marks<B: VaultBackend>(
     backend: &mut B,
     is_folder: bool,
@@ -650,6 +651,7 @@ pub async fn move_section_marks<B: VaultBackend>(
     if is_folder {
         let _ = move_sections(backend, from, new_path).await;
     }
+    let _ = super::vault_settings::move_intentional_orphans(backend, from, new_path).await;
 }
 
 #[cfg(test)]

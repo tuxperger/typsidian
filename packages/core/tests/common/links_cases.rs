@@ -841,3 +841,274 @@ pub async fn a_link_with_a_label_points_at_the_target() {
     );
     assert!(mentions_in_text(text, "Проект Альфа").is_empty());
 }
+
+// ── Фича 028: состояние ссылок ──────────────────────────────────────────────
+
+use typsidian_core::links::health::{
+    fix_links, link_health, LinkFix, LinkFixRequest, LinkHealth, OrphanKind, TargetKind,
+};
+use typsidian_core::search::replace::{
+    digest, replace_undo, PieceKind, ReplaceNoteOutcome, UndoOutcome,
+};
+use typsidian_core::vault::vault_settings::{
+    move_intentional_orphans, read_vault_settings, write_vault_settings,
+};
+
+const INTRO: &str = "Диссертация/Введение.typ";
+const CHAPTER: &str = "Диссертация/Глава.typ";
+const METHOD: &str = "Диссертация/Методика.typ";
+const METHODOLOGY: &str = "Диссертация/Методология.typ";
+const INTRO_TEXT: &str = "по [[Методика|методике]] и [[Методика]].\n\
+                          #image(\"нет.png\")\n\
+                          #image(\"есть.png\")\n\
+                          см. [[Методология]] и [[/План.excalidraw]]\n";
+const CHAPTER_TEXT: &str = "[[Методика]] снова\n";
+
+/// Три битые цели разных видов, живая ссылка и живая вставка, сироты и входы.
+fn health_vault() -> MemoryVault {
+    MemoryVault::new()
+        .with_file(INTRO, INTRO_TEXT)
+        .with_file(CHAPTER, CHAPTER_TEXT)
+        .with_file(METHODOLOGY, "текст")
+        .with_file("Диссертация/есть.png", vec![0x89, b'P', b'N', b'G'])
+        .with_file("входящие.typ", "")
+        .with_file("дневник/2026-10-22.typ", "")
+        .with_file("Заметки/Одинокая.typ", "без ссылок")
+        .with_file("Заметки/Намеренная.typ", "")
+        .checking_expected()
+}
+
+async fn mark_intentional(vault: &mut MemoryVault, path: &str) {
+    let mut settings = read_vault_settings(vault).await.unwrap();
+    settings.intentional_orphans.push(path.to_owned());
+    write_vault_settings(vault, &settings).await.unwrap();
+}
+
+fn broken_targets(health: &LinkHealth) -> Vec<(&str, TargetKind, u32, u32)> {
+    health
+        .broken
+        .iter()
+        .map(|target| {
+            (
+                target.target.as_str(),
+                target.kind,
+                target.links,
+                target.sources,
+            )
+        })
+        .collect()
+}
+
+fn fix_request(source: &str, target: &str, text: &str, fix: LinkFix) -> LinkFixRequest {
+    LinkFixRequest {
+        source: source.to_owned(),
+        target: target.to_owned(),
+        digest: digest(text),
+        fix,
+        only: None,
+    }
+}
+
+fn to_methodology() -> LinkFix {
+    LinkFix::Redirect {
+        to: METHODOLOGY.to_owned(),
+    }
+}
+
+fn text_of(vault: &MemoryVault, path: &str) -> String {
+    String::from_utf8(vault.bytes_of(path).unwrap()).unwrap()
+}
+
+/// Группы по цели с числом ссылок и заметок, вид цели; живые ссылка и вставка
+/// не битые (FR-001, US1 AS1, Edge Cases).
+pub async fn broken_links_are_grouped_by_target() {
+    let health = link_health(&health_vault(), &[]).await;
+    assert_eq!(
+        broken_targets(&health),
+        [
+            (METHOD, TargetKind::Note, 3, 2),
+            ("Диссертация/нет.png", TargetKind::Attachment, 1, 1),
+            ("План.excalidraw", TargetKind::Board, 1, 1),
+        ]
+    );
+    assert_eq!(health.broken_links, 5);
+
+    let method = &health.broken[0];
+    assert_eq!(method.title, "Методика");
+    let notes: Vec<&str> = method.notes.iter().map(|n| n.path.as_str()).collect();
+    assert_eq!(notes, [INTRO, CHAPTER]);
+    assert_eq!(method.notes[0].digest, digest(INTRO_TEXT));
+    assert_eq!(method.sites.len(), 3);
+}
+
+/// Строка-пример: заметка, номер записи, строка и кусок с самой записью
+/// (US1 AS1, AS5).
+pub async fn sites_show_the_line_with_the_link() {
+    let health = link_health(&health_vault(), &[]).await;
+    let method = &health.broken[0];
+    let first = &method.sites[0];
+    assert_eq!(
+        (first.source.as_str(), first.source_title.as_str()),
+        (INTRO, "Введение")
+    );
+    assert_eq!((first.index, first.line), (0, 1));
+    let removed: Vec<&str> = first
+        .pieces
+        .iter()
+        .filter(|piece| piece.kind == PieceKind::Removed)
+        .map(|piece| piece.text.as_str())
+        .collect();
+    assert_eq!(removed, ["[[Методика|методике]]"]);
+    assert_eq!(first.pieces[0].text, "по ");
+
+    let second = &method.sites[1];
+    assert_eq!((second.index, second.line), (1, 1));
+    let board = &health.broken[2].sites[0];
+    assert_eq!(board.line, 4);
+}
+
+/// Открытая заметка считается по тексту редактора, а не диска.
+pub async fn open_notes_are_read_from_the_editor() {
+    let open = "[[Методика]] только\n";
+    let vault = health_vault();
+    let health = link_health(
+        &vault,
+        &[OpenText {
+            path: INTRO.to_owned(),
+            text: open.to_owned(),
+        }],
+    )
+    .await;
+    assert_eq!(broken_targets(&health), [(METHOD, TargetKind::Note, 2, 2)]);
+    assert_eq!(health.broken[0].notes[0].digest, digest(open));
+}
+
+/// Перенаправление группы: подписи сохранены, прочие ссылки и заметки не
+/// тронуты; отмена возвращает текст (FR-002, FR-003, SC-002).
+pub async fn redirect_keeps_labels_and_undoes() {
+    let mut vault = health_vault();
+    let outcome = fix_links(
+        &mut vault,
+        &fix_request(INTRO, METHOD, INTRO_TEXT, to_methodology()),
+        None,
+    )
+    .await;
+    let ReplaceNoteOutcome::Written { undo } = outcome else {
+        panic!("ждали Written, получили {outcome:?}");
+    };
+    assert_eq!(
+        text_of(&vault, INTRO),
+        INTRO_TEXT.replace(
+            "по [[Методика|методике]] и [[Методика]].",
+            "по [[Методология|методике]] и [[Методология]]."
+        )
+    );
+    assert_eq!(text_of(&vault, CHAPTER), CHAPTER_TEXT);
+    assert_eq!(vault.total_writes(), 1);
+
+    let health = link_health(&vault, &[]).await;
+    assert_eq!(health.broken[0].links, 1, "осталась ссылка из Главы");
+
+    assert_eq!(
+        replace_undo(&mut vault, &undo, None).await,
+        UndoOutcome::Restored
+    );
+    assert_eq!(text_of(&vault, INTRO), INTRO_TEXT);
+}
+
+/// «Убрать ссылку» оставляет подпись или текст цели; `only` — одна запись;
+/// вставка убирается вместе с `#` (FR-002, US1 AS4).
+pub async fn unlink_leaves_text_and_removes_embeds() {
+    let mut vault = health_vault();
+    let mut request = fix_request(INTRO, METHOD, INTRO_TEXT, LinkFix::Unlink);
+    request.only = Some(0);
+    assert!(matches!(
+        fix_links(&mut vault, &request, None).await,
+        ReplaceNoteOutcome::Written { .. }
+    ));
+    let after = text_of(&vault, INTRO);
+    assert!(
+        after.starts_with("по методике и [[Методика]].\n"),
+        "{after}"
+    );
+
+    let request = fix_request(INTRO, "Диссертация/нет.png", &after, LinkFix::Unlink);
+    assert!(matches!(
+        fix_links(&mut vault, &request, None).await,
+        ReplaceNoteOutcome::Written { .. }
+    ));
+    let after = text_of(&vault, INTRO);
+    assert!(!after.contains("нет.png"), "{after}");
+    assert!(after.contains("#image(\"есть.png\")"), "{after}");
+}
+
+/// Устаревший отпечаток — `Stale`, ничего не записано (FR-003).
+pub async fn a_changed_note_is_stale() {
+    let mut vault = health_vault();
+    let request = fix_request(INTRO, METHOD, INTRO_TEXT, to_methodology());
+    vault.replace_externally(INTRO, format!("правка\n{INTRO_TEXT}"));
+    assert_eq!(
+        fix_links(&mut vault, &request, None).await,
+        ReplaceNoteOutcome::Stale
+    );
+    assert_eq!(vault.total_writes(), 0);
+}
+
+/// Открытая заметка получает правку редактора, диск не тронут; vault только
+/// на чтение отказывает (Edge Cases, 013).
+pub async fn an_open_note_gets_an_editor_edit() {
+    let mut vault = health_vault();
+    let editor = format!("😀 несохранено\n{CHAPTER_TEXT}");
+    let request = fix_request(CHAPTER, METHOD, &editor, to_methodology());
+    let outcome = fix_links(&mut vault, &request, Some(&editor)).await;
+    let ReplaceNoteOutcome::EditorEdit { edit, undo } = outcome else {
+        panic!("ждали EditorEdit, получили {outcome:?}");
+    };
+    assert_eq!(
+        apply_utf16(&editor, &edit),
+        "😀 несохранено\n[[Методология]] снова\n"
+    );
+    assert_eq!(undo.before, editor);
+    assert_eq!(vault.total_writes(), 0);
+
+    let mut read_only = health_vault().read_only();
+    assert_eq!(
+        fix_links(&mut read_only, &request, None).await,
+        ReplaceNoteOutcome::ReadOnly
+    );
+}
+
+/// Сироты: без входящих, входы помечены, отмеченные «намеренно» скрыты и
+/// посчитаны; отметка переезжает за папкой (FR-004, US2).
+pub async fn orphans_mark_entries_and_skip_intentional() {
+    let mut vault = health_vault();
+    mark_intentional(&mut vault, "Заметки/Намеренная.typ").await;
+    let health = link_health(&vault, &[]).await;
+    let orphans: Vec<(&str, OrphanKind)> = health
+        .orphans
+        .iter()
+        .map(|orphan| (orphan.path.as_str(), orphan.kind))
+        .collect();
+    assert_eq!(
+        orphans,
+        [
+            (INTRO, OrphanKind::Note),
+            (CHAPTER, OrphanKind::Note),
+            ("Заметки/Одинокая.typ", OrphanKind::Note),
+            ("входящие.typ", OrphanKind::Entry),
+            ("дневник/2026-10-22.typ", OrphanKind::Entry),
+        ]
+    );
+    assert_eq!(health.intentional, 1);
+    let lonely = &health.orphans[2];
+    assert_eq!(
+        (lonely.title.as_str(), lonely.folder.as_str(), lonely.size),
+        ("Одинокая", "Заметки", "без ссылок".len() as u64)
+    );
+
+    move_intentional_orphans(&mut vault, Path::new("Заметки"), Path::new("Архив"))
+        .await
+        .unwrap();
+    let settings = read_vault_settings(&vault).await.unwrap();
+    assert_eq!(settings.intentional_orphans, ["Архив/Намеренная.typ"]);
+}

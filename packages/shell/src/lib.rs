@@ -962,6 +962,34 @@ async fn replace_undo(
     ))
 }
 
+/// Состояние ссылок vault (фича 028). Правила — в ядре.
+#[tauri::command]
+async fn links_health(
+    state: State<'_, Vault>,
+    open_texts: Vec<links::OpenText>,
+) -> Answer<links::health::LinkHealth, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::health::link_health(
+        backend,
+        &open_texts
+    )
+    .await))
+}
+
+/// Починка ссылок одной заметки (фича 028); отмена — `replace_undo` 027.
+#[tauri::command]
+async fn links_fix(
+    state: State<'_, Vault>,
+    request: links::health::LinkFixRequest,
+    editor_text: Option<String>,
+) -> Answer<typsidian_core::search::replace::ReplaceNoteOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(links::health::fix_links(
+        backend,
+        &request,
+        editor_text.as_deref()
+    )
+    .await))
+}
+
 /// Путь папки, открытой как vault — окну для хлебных крошек в шапке.
 ///
 /// Спрашивается у бэкенда, а не запоминается окном при выборе папки: тогда
@@ -2700,6 +2728,8 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             replace_preview,
             replace_in_note,
             replace_undo,
+            links_health,
+            links_fix,
             file_kind,
             begin_edit,
             pending_conflict,

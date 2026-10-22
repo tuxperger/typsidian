@@ -173,3 +173,43 @@ fn a_label_is_split_from_the_target() {
 async fn a_link_with_a_label_points_at_the_target() {
     cases::a_link_with_a_label_points_at_the_target().await;
 }
+
+#[tokio::test]
+async fn broken_links_are_grouped_by_target() {
+    cases::broken_links_are_grouped_by_target().await;
+}
+
+#[tokio::test]
+async fn sites_show_the_line_with_the_link() {
+    cases::sites_show_the_line_with_the_link().await;
+}
+
+#[tokio::test]
+async fn open_notes_are_read_from_the_editor() {
+    cases::open_notes_are_read_from_the_editor().await;
+}
+
+#[tokio::test]
+async fn redirect_keeps_labels_and_undoes() {
+    cases::redirect_keeps_labels_and_undoes().await;
+}
+
+#[tokio::test]
+async fn unlink_leaves_text_and_removes_embeds() {
+    cases::unlink_leaves_text_and_removes_embeds().await;
+}
+
+#[tokio::test]
+async fn a_changed_note_is_stale() {
+    cases::a_changed_note_is_stale().await;
+}
+
+#[tokio::test]
+async fn an_open_note_gets_an_editor_edit() {
+    cases::an_open_note_gets_an_editor_edit().await;
+}
+
+#[tokio::test]
+async fn orphans_mark_entries_and_skip_intentional() {
+    cases::orphans_mark_entries_and_skip_intentional().await;
+}

@@ -75,6 +75,8 @@ import type {
   InstalledTemplate,
   InstallReport,
   LinkOutcome,
+  LinkHealth,
+  LinkFixRequest,
   MentionScan,
   MentionStep,
   MentionsAvailability,
@@ -561,6 +563,9 @@ export function tauriVaultClient(
         invoke<SourceGroup[]>("links_mentions_in", { target, paths, openTexts }),
       linkMention: (request, editorText) =>
         invoke<LinkOutcome>("links_link_mention", { request, editorText }),
+      health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
+      fix: (request, editorText) =>
+        invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
     },
 
     // ── Показ слайдов (фича 019) ──────────────────────────────────────

@@ -34,6 +34,8 @@ import {
   importSurvey,
   linksBacklinksPage,
   linksLinkMention,
+  linkHealth,
+  linkFix,
   linksMentionsAvailability,
   linksMentionsCancel,
   linksMentionsIn,
@@ -415,6 +417,8 @@ export function webVaultClient(
         call(() => linksMentionsIn(backend, target, paths, openTexts)),
       linkMention: (request, editorText) =>
         call(() => linksLinkMention(backend, request, editorText)),
+      health: (openTexts) => call(() => linkHealth(backend, openTexts)),
+      fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
     },
 
     // ── Показ слайдов (фича 019) ──────────────────────────────────────

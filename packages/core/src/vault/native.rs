@@ -1713,6 +1713,8 @@ impl VaultBackend for NativeBackend {
         if renamed_a_folder {
             let _ = super::vault_settings::move_sections(self, from, to).await;
         }
+        // Фича 028: отметка «намеренно без ссылок» едет так же.
+        let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
         // FR-028/FR-030: ссылки на старое имя стали битыми, на новое — могли
         // починиться. Само подтверждение операции — забота вызывающей стороны
         // (contracts/vault-backend-trait.md), здесь только факт изменения.
