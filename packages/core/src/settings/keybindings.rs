@@ -97,6 +97,8 @@ pub enum CommandId {
     GotoDefinition,
     /// Вызвать список меток и заметок вручную (фича 018, FR-009).
     TriggerCompletion,
+    /// Поиск по vault сразу в режиме замены (фича 027, research.md §6).
+    ReplaceInVault,
 }
 
 /// Все команды в том порядке, в котором их показывает панель настроек.
@@ -137,6 +139,7 @@ pub const COMMANDS: &[CommandId] = &[
     CommandId::ToggleSources,
     CommandId::GotoDefinition,
     CommandId::TriggerCompletion,
+    CommandId::ReplaceInVault,
 ];
 
 impl CommandId {
@@ -176,6 +179,7 @@ impl CommandId {
             Self::ToggleSources => "toggle-sources",
             Self::GotoDefinition => "goto-definition",
             Self::TriggerCompletion => "trigger-completion",
+            Self::ReplaceInVault => "replace-in-vault",
         }
     }
 
@@ -268,6 +272,9 @@ impl CommandId {
             // `a` («autocomplete») среди `Mod+Alt` свободны.
             Self::GotoDefinition => (false, true, "f"),
             Self::TriggerCompletion => (false, true, "a"),
+            // Замена (фича 027): `Mod+Shift+H`, как в редакторах кода;
+            // `Mod+Alt+F` занят «Перейти к определению» 018.
+            Self::ReplaceInVault => (true, false, "h"),
         };
         Shortcut {
             mod_key: true,
@@ -877,7 +884,7 @@ mod tests {
     fn tab_commands_follow_the_note_panel_with_the_documented_defaults() {
         // Семь команд вкладок стоят перед командами более поздних фич: за ними
         // идут `ToggleOutline` (015), `StartShow` (019), `Today` (022) и `InsertImage` (016).
-        let tail = &COMMANDS[COMMANDS.len() - 15..COMMANDS.len() - 8];
+        let tail = &COMMANDS[COMMANDS.len() - 16..COMMANDS.len() - 9];
         let expected = [
             (CommandId::TabClose, "tab-close", "Mod+Alt+W"),
             (CommandId::TabNext, "tab-next", "Mod+Alt+."),
@@ -898,13 +905,13 @@ mod tests {
             assert_eq!(command.default_shortcut().to_text(), text);
         }
         // `ToggleNotePanel` остаётся на прежнем месте.
-        assert_eq!(COMMANDS[COMMANDS.len() - 16], CommandId::ToggleNotePanel);
+        assert_eq!(COMMANDS[COMMANDS.len() - 17], CommandId::ToggleNotePanel);
     }
 
     #[test]
     fn the_today_command_precedes_insert_image_with_its_default() {
         // Фича 022: «Сегодня» — перед «Вставить изображение…», сочетание свободное.
-        assert_eq!(COMMANDS[COMMANDS.len() - 6], CommandId::Today);
+        assert_eq!(COMMANDS[COMMANDS.len() - 7], CommandId::Today);
         assert_eq!(CommandId::Today.as_str(), "today");
         assert_eq!(CommandId::parse("today"), Some(CommandId::Today));
         let shortcut = CommandId::Today.default_shortcut();
@@ -922,7 +929,7 @@ mod tests {
     fn the_sources_commands_precede_the_completion_commands() {
         // Фича 017: «Вставить цитату» и «Источники» — перед командами 018.
         assert_eq!(
-            &COMMANDS[COMMANDS.len() - 4..COMMANDS.len() - 2],
+            &COMMANDS[COMMANDS.len() - 5..COMMANDS.len() - 3],
             &[CommandId::InsertCitation, CommandId::ToggleSources]
         );
         for (command, name, text, code) in [
@@ -958,7 +965,7 @@ mod tests {
     fn the_completion_commands_come_last_with_their_defaults() {
         // Фича 018: «Перейти к определению» и «Вызвать дополнение» — последние.
         assert_eq!(
-            &COMMANDS[COMMANDS.len() - 2..],
+            &COMMANDS[COMMANDS.len() - 3..COMMANDS.len() - 1],
             &[CommandId::GotoDefinition, CommandId::TriggerCompletion]
         );
         for (command, name, text, code) in [
@@ -991,9 +998,29 @@ mod tests {
     }
 
     #[test]
+    fn replace_in_vault_has_its_own_free_shortcut() {
+        // Фича 027: последняя команда, `Mod+Shift+H`, ни с кем не делится.
+        assert_eq!(COMMANDS.last(), Some(&CommandId::ReplaceInVault));
+        assert_eq!(
+            CommandId::parse("replace-in-vault"),
+            Some(CommandId::ReplaceInVault)
+        );
+        let shortcut = CommandId::ReplaceInVault.default_shortcut();
+        assert_eq!(shortcut.to_text(), "Mod+Shift+H");
+        assert_eq!(shortcut.code(), Some("KeyH".to_string()));
+        assert_eq!(shortcut.problem(), None);
+        let same: Vec<CommandId> = COMMANDS
+            .iter()
+            .copied()
+            .filter(|other| other.default_shortcut() == shortcut)
+            .collect();
+        assert_eq!(same, vec![CommandId::ReplaceInVault]);
+    }
+
+    #[test]
     fn the_insert_image_command_precedes_the_sources_commands() {
         // Фича 016: «Вставить изображение…» — перед командами 017, `Mod+Alt+I`.
-        assert_eq!(COMMANDS[COMMANDS.len() - 5], CommandId::InsertImage);
+        assert_eq!(COMMANDS[COMMANDS.len() - 6], CommandId::InsertImage);
         assert_eq!(CommandId::InsertImage.as_str(), "insert-image");
         assert_eq!(
             CommandId::parse("insert-image"),
@@ -1013,7 +1040,7 @@ mod tests {
 
     #[test]
     fn the_start_show_command_precedes_today_with_its_default() {
-        assert_eq!(COMMANDS[COMMANDS.len() - 7], CommandId::StartShow);
+        assert_eq!(COMMANDS[COMMANDS.len() - 8], CommandId::StartShow);
         assert_eq!(CommandId::StartShow.as_str(), "start-show");
         assert_eq!(CommandId::parse("start-show"), Some(CommandId::StartShow));
         let shortcut = CommandId::StartShow.default_shortcut();
@@ -1024,7 +1051,7 @@ mod tests {
 
     #[test]
     fn the_outline_command_keeps_its_default() {
-        assert_eq!(COMMANDS[COMMANDS.len() - 8], CommandId::ToggleOutline);
+        assert_eq!(COMMANDS[COMMANDS.len() - 9], CommandId::ToggleOutline);
         assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
         assert_eq!(
             CommandId::parse("toggle-outline"),

@@ -238,6 +238,11 @@ export function webVaultClient(
     brokenLinks: (path) => call(() => backend.brokenLinks(path)),
     accessState: () => call(() => backend.accessState()),
     search: (query) => call(() => backend.search(query)),
+    replacePreview: (query, openTexts) => call(() => backend.replacePreview(query, openTexts)),
+    replaceInNote: (request, editorText) =>
+      call(() => backend.replaceInNote(request, editorText ?? undefined)),
+    replaceUndo: (record, editorText) =>
+      call(() => backend.replaceUndo(record, editorText ?? undefined)),
     fileKind: async (path) => WebBackend.fileKind(path),
 
     // Берётся у ядра, а не пишется здесь литералом «ReadWrite»: значение,

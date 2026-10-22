@@ -91,6 +91,9 @@ import type {
   ResolvedBinding,
   SavedWorkspace,
   SearchResults,
+  ReplacePreview,
+  ReplaceNoteOutcome,
+  UndoOutcome,
   ShowKeymap,
   ShowState,
   SlideLabel,
@@ -363,6 +366,12 @@ export function tauriVaultClient(
     brokenLinks: (path) => invoke<string[]>("broken_links", { path }),
     accessState: () => invoke<AccessState>("access_state"),
     search: (query) => invoke<SearchResults>("search", { query }),
+    replacePreview: (query, openTexts) =>
+      invoke<ReplacePreview>("replace_preview", { query, openTexts }),
+    replaceInNote: (request, editorText) =>
+      invoke<ReplaceNoteOutcome>("replace_in_note", { request, editorText }),
+    replaceUndo: (record, editorText) =>
+      invoke<UndoOutcome>("replace_undo", { record, editorText }),
     fileKind: (path) => invoke<FileKind>("file_kind", { path }),
 
     beginEdit: async (path, buffer) => {

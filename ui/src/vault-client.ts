@@ -87,6 +87,12 @@ import type {
   VaultGraph,
   SearchQuery,
   SearchResults,
+  ReplaceQuery,
+  ReplacePreview,
+  ReplaceNoteRequest,
+  ReplaceNoteOutcome,
+  UndoRecord,
+  UndoOutcome,
   Shortcut,
   SavedWorkspace,
   ShowAction,
@@ -219,6 +225,18 @@ export interface VaultClient {
    * пришлось бы разбирать второй раз в интерфейсе.
    */
   search(query: SearchQuery): Promise<SearchResults>;
+
+  /**
+   * Замена по vault (фича 027): предпросмотр, замена в одной заметке, отмена.
+   * Правила — в ядре (`search::replace`); тексты открытых заметок передаются,
+   * чтобы места и отпечатки считались по редактору, а не по диску.
+   */
+  replacePreview(query: ReplaceQuery, openTexts: OpenText[]): Promise<ReplacePreview>;
+  replaceInNote(
+    request: ReplaceNoteRequest,
+    editorText: string | null,
+  ): Promise<ReplaceNoteOutcome>;
+  replaceUndo(record: UndoRecord, editorText: string | null): Promise<UndoOutcome>;
 
   /**
    * Чем является файл по пути (фича 002, FR-004).

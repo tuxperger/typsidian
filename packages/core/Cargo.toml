@@ -248,3 +248,8 @@ harness = false
 [[bench]]
 name = "graph_view"
 harness = false
+
+# Предпросмотр и замена по vault на 2 000 заметок (фича 027, T011, SC-001).
+[[bench]]
+name = "replace_scale"
+harness = false

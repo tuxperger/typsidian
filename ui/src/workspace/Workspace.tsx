@@ -315,6 +315,8 @@ function WorkspaceView({
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Расширенный поиск (макет «Утилиты» § Поиск): ⌘⇧F и команда палитры.
   const [searchOpen, setSearchOpen] = useState(false);
+  // Поиск открыт сразу в режиме замены (фича 027, `Mod+Shift+H`).
+  const [searchReplace, setSearchReplace] = useState(false);
   // Условия по свойствам, с которыми открывается поиск (клик по тегу, фича 020).
   const [searchConditions, setSearchConditions] = useState<Condition[]>([]);
   // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
@@ -1778,7 +1780,12 @@ function WorkspaceView({
     const onKeyDown = (event: KeyboardEvent): void => {
       if (shortcuts.matches("search", event)) {
         event.preventDefault();
+        setSearchReplace(false);
         setSearchOpen((open) => !open);
+      } else if (shortcuts.matches("replace-in-vault", event)) {
+        event.preventDefault();
+        setSearchReplace(true);
+        setSearchOpen(true);
       } else if (shortcuts.matches("templates", event)) {
         event.preventDefault();
         setTemplatesOpen((open) => !open);
@@ -1942,6 +1949,16 @@ function WorkspaceView({
         icon: "search",
         meta: shortcuts.displayOf("search"),
         run: () => setSearchOpen(true),
+      },
+      {
+        id: "replace-in-vault",
+        ...titled("replace.command"),
+        icon: "search",
+        meta: shortcuts.displayOf("replace-in-vault"),
+        run: () => {
+          setSearchReplace(true);
+          setSearchOpen(true);
+        },
       },
       {
         id: "templates",
@@ -3008,9 +3025,13 @@ function WorkspaceView({
 
       {searchOpen && (
         <SearchOverlay
+          key={searchReplace ? "replace" : "search"}
           client={state.client}
           currentNote={activeNote}
           initialConditions={searchConditions}
+          editors={noteEditors}
+          openTexts={() => registry?.openTexts() ?? NO_OPEN_TEXTS}
+          initialReplace={searchReplace}
           onInsertSelection={(conditions) => {
             setSearchOpen(false);
             setSearchConditions([]);
@@ -3023,6 +3044,7 @@ function WorkspaceView({
           }}
           onClose={() => {
             setSearchOpen(false);
+            setSearchReplace(false);
             setSearchConditions([]);
           }}
         />

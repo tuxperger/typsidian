@@ -672,6 +672,7 @@ pub mod placement_cases;
 pub mod preview_cases;
 pub mod properties_cases;
 pub mod relocate_cases;
+pub mod replace_cases;
 pub mod search_cases;
 pub mod slides_cases;
 pub mod sources_cases;

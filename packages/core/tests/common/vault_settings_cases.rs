@@ -563,7 +563,7 @@ pub fn a_punctuation_shortcut_carries_the_key_code() {
 /// сочетание не отвергает; ни одна другая команда умолчания не делит.
 pub fn the_outline_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 8],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 9],
         CommandId::ToggleOutline
     );
     assert_eq!(CommandId::ToggleOutline.as_str(), "toggle-outline");
@@ -591,7 +591,7 @@ pub fn the_outline_command_has_its_name_and_default() {
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_start_show_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 7],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 8],
         CommandId::StartShow
     );
     assert_eq!(CommandId::StartShow.as_str(), "start-show");
@@ -618,7 +618,7 @@ pub fn the_start_show_command_has_its_name_and_default() {
 /// сочетание не отвергается и не делится ни с одной другой командой.
 pub fn the_today_command_has_its_name_and_default() {
     assert_eq!(
-        keybindings::COMMANDS[keybindings::COMMANDS.len() - 6],
+        keybindings::COMMANDS[keybindings::COMMANDS.len() - 7],
         CommandId::Today
     );
     assert_eq!(CommandId::Today.as_str(), "today");

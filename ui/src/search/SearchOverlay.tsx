@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Condition,
   Note,
+  OpenText,
   PropertyKeyInfo,
+  ReplacePreview as Preview,
   SearchQuery,
   SearchResults,
   SelectionResult,
@@ -14,6 +16,9 @@ import { Icon } from "../icons/Icons.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
 import { conditionParts, valueText } from "../note-panel/properties/conditions.js";
+import type { OpenNoteEditors } from "../note-panel/links/openNoteEditors.js";
+import { ReplacePreview } from "./ReplacePreview.js";
+import { useReplace, type ReplaceState } from "./useReplace.js";
 
 // Экран расширенного поиска (макет «Typsidian Утилиты» § Поиск).
 //
@@ -32,8 +37,24 @@ export interface SearchOverlayProps {
   initialConditions?: Condition[];
   /** Mod+Enter: вставить условия блоком выборки (макет B3). */
   onInsertSelection?: (conditions: Condition[]) => void;
+  /**
+   * Замена по vault (фича 027): правки открытых заметок идут через их
+   * редакторы (порт 013), тексты редакторов — в предпросмотр.
+   */
+  editors?: OpenNoteEditors | null;
+  openTexts?: () => readonly OpenText[];
+  /** Открыть сразу в режиме замены (`Mod+Shift+H`). */
+  initialReplace?: boolean;
   onClose: () => void;
 }
+
+const NO_OPEN_TEXTS = (): readonly OpenText[] => [];
+
+/** Без порта редакторов замена выключена; заглушка только для типа хука. */
+const NO_EDITORS: OpenNoteEditors = {
+  textOf: () => null,
+  applyEdit: () => ({ ok: false, error: "NoEditor" }),
+};
 
 /** Плоский список строк выдачи — по нему ходят стрелки. */
 interface Row {
@@ -47,8 +68,13 @@ export function SearchOverlay({
   onOpenNote,
   initialConditions = [],
   onInsertSelection,
+  editors = null,
+  openTexts = NO_OPEN_TEXTS,
+  initialReplace = false,
   onClose,
 }: SearchOverlayProps): React.JSX.Element {
+  const [replaceOn, setReplaceOn] = useState(initialReplace && editors !== null);
+  const [replacement, setReplacement] = useState("");
   const [text, setText] = useState("");
   const [regex, setRegex] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -79,15 +105,34 @@ export function SearchOverlay({
   // более новый — та же причина, что и в предпросмотре (FR-009 фичи 005).
   const revision = useRef(0);
 
-  useEffect(() => {
-    const query: SearchQuery = {
+  const query: SearchQuery = useMemo(
+    () => ({
       text,
       regex,
       case_sensitive: caseSensitive,
       links_to: linksTo ?? undefined,
       ...(conditions.length > 0 ? { properties: conditions } : {}),
       mode,
-    };
+    }),
+    [text, regex, caseSensitive, linksTo, conditions, mode],
+  );
+  const replace = useReplace({
+    client,
+    editors: editors ?? NO_EDITORS,
+    openTexts,
+    query: { search: query, replacement },
+    enabled: replaceOn && editors !== null && text.trim() !== "",
+  });
+
+  useEffect(() => {
+    // Режим замены строит свою выдачу (фича 027): обычный поиск не нужен.
+    if (replaceOn) {
+      revision.current += 1;
+      setResults(null);
+      setSelection(null);
+      setBusy(false);
+      return;
+    }
     if (!text.trim() && linksTo === null) {
       setResults(null);
       setError(null);
@@ -139,7 +184,7 @@ export function SearchOverlay({
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [client, text, regex, caseSensitive, linksTo, mode, conditions]);
+  }, [client, query, text, linksTo, conditions, replaceOn]);
 
   // Ключи свойств vault - чтобы `статус:` в строке понималось как свойство.
   useEffect(() => {
@@ -183,6 +228,12 @@ export function SearchOverlay({
   const onKeyDown = (event: React.KeyboardEvent) => {
     // Escape закрывает поиск откуда угодно, а не только из поля ввода, —
     // `useDismissOnEscape` слушает окно.
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && replaceOn) {
+      // В режиме замены Mod+Enter — «Заменить отмеченные» (research.md §6).
+      event.preventDefault();
+      void replace.apply();
+      return;
+    }
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && conditions.length > 0) {
       event.preventDefault();
       onInsertSelection?.(conditions);
@@ -250,8 +301,24 @@ export function SearchOverlay({
           >
             Aa
           </button>
+          {editors !== null && (
+            <button
+              type="button"
+              className="ts-chip"
+              aria-pressed={replaceOn}
+              onClick={() => setReplaceOn((on) => !on)}
+              title={t("replace.toggleHint")}
+            >
+              <Icon name="updown" size={11} />
+              {t("replace.toggle")}
+            </button>
+          )}
           <span className="ts-search__sep" />
-          <span className="ts-search__count">{countLabel(t, results, busy)}</span>
+          <span className="ts-search__count">
+            {replaceOn
+              ? replaceCount(t, replace.preview, replace.busy)
+              : countLabel(t, results, busy)}
+          </span>
           <button
             type="button"
             className="ts-btn ts-btn--ghost"
@@ -261,6 +328,22 @@ export function SearchOverlay({
             <Icon name="x" size={14} />
           </button>
         </div>
+
+        {/* Поле замены (фича 027, макет R1). */}
+        {replaceOn && (
+          <div className="ts-replace__field">
+            <Icon name="enter" size={14} />
+            <input
+              id="ts-replace-input"
+              className="ts-search__input"
+              value={replacement}
+              placeholder={t("replace.placeholder")}
+              onChange={(event) => setReplacement(event.target.value)}
+              aria-label={t("replace.inputLabel")}
+            />
+            {regex && <span className="ts-search__hit-meta">{t("replace.groupsHint")}</span>}
+          </div>
+        )}
 
         {/* Условия по свойствам (фича 020, макет B3): фишки, все должны выполняться. */}
         {conditions.length > 0 && (
@@ -341,10 +424,25 @@ export function SearchOverlay({
         {/* Строка запроса словами — как её поняло ядро. */}
         <div className="ts-search__echo">
           <span className="ts-search__echo-label">{t("search.queryLabel")}</span>
-          <span>{echo(t, text, regex, caseSensitive, linksTo, mode)}</span>
+          <span>
+            {replaceOn && text.trim() !== ""
+              ? t("replace.echo", { from: regex ? `/${text}/` : `«${text}»`, to: replacement })
+              : echo(t, text, regex, caseSensitive, linksTo, mode)}
+          </span>
         </div>
 
         <div className="ts-search__results">
+          {replaceOn && <ReplaceStatus replace={replace} />}
+          {replaceOn && replace.preview !== null && (
+            <ReplacePreview
+              preview={replace.preview}
+              selection={replace.selection}
+              onToggleMatch={replace.toggleMatch}
+              onToggleNote={replace.toggleNote}
+              onOpen={open}
+            />
+          )}
+
           {error !== null && (
             <p className="ts-search__error" role="alert">
               {error(t)}
@@ -398,7 +496,7 @@ export function SearchOverlay({
             </div>
           )}
 
-          {error === null && results === null && selection === null && !busy && (
+          {!replaceOn && error === null && results === null && selection === null && !busy && (
             <p className="ts-search__empty">{t("search.emptyHint")}</p>
           )}
 
@@ -469,17 +567,183 @@ export function SearchOverlay({
           )}
         </div>
 
-        <div className="ts-search__hints">
-          <span>
-            <Icon name="enter" size={10} /> {t("search.open")}
-          </span>
-          <span>{t("search.navigate")}</span>
-          <span className="ts-spacer" />
-          <span>{t("search.escClose")}</span>
-        </div>
+        {replaceOn ? (
+          <div className="ts-search__hints ts-replace__foot">
+            <span>{t("replace.hintToggle")}</span>
+            <span>{t("replace.hintNote")}</span>
+            <span>{t("replace.hintApply")}</span>
+            <span className="ts-spacer" />
+            {replace.preview !== null && (
+              <span className="ts-search__count">
+                {t("replace.selectedCount", {
+                  selected: replace.selectedCount,
+                  total: replace.preview.total_matches,
+                  notes: replace.selectedNotes,
+                })}
+              </span>
+            )}
+            <button
+              type="button"
+              className="ts-btn ts-btn--accent"
+              disabled={
+                replace.preview === null ||
+                replace.selectedCount === 0 ||
+                replace.phase.kind === "running"
+              }
+              onClick={() => void replace.apply()}
+            >
+              {t("replace.apply", { count: replace.selectedCount })}
+            </button>
+          </div>
+        ) : (
+          <div className="ts-search__hints">
+            <span>
+              <Icon name="enter" size={10} /> {t("search.open")}
+            </span>
+            <span>{t("search.navigate")}</span>
+            <span className="ts-spacer" />
+            <span>{t("search.escClose")}</span>
+          </div>
+        )}
       </section>
     </div>
   );
+}
+
+/** Счётчик в шапке режима замены. */
+function replaceCount(t: Translate, preview: Preview | null, busy: boolean): string {
+  if (busy) return t("search.busy");
+  if (preview === null) return "";
+  return `${t("search.matches", { count: preview.total_matches })} · ${t("search.notes", {
+    count: preview.total_notes,
+  })}`;
+}
+
+/** Ход, итог и отказы замены (макет R2, R3). */
+function ReplaceStatus({ replace }: { replace: ReplaceState }): React.JSX.Element | null {
+  const { t } = useI18n();
+  const nothing =
+    replace.preview !== null && replace.preview.total_matches === 0 && !replace.busy ? (
+      <p className="ts-search__empty">{t("replace.nothing")}</p>
+    ) : null;
+  const panel = <ReplacePhasePanel replace={replace} />;
+  return (
+    <>
+      {panel}
+      {nothing}
+    </>
+  );
+}
+
+function ReplacePhasePanel({ replace }: { replace: ReplaceState }): React.JSX.Element | null {
+  const { t } = useI18n();
+  const { phase } = replace;
+  if (replace.error !== null) {
+    return (
+      <div className="ts-replace__panel ts-replace__panel--err" role="alert">
+        <span className="ts-replace__title">{t("replace.badPatternTitle")}</span>
+        <span className="ts-replace__meta">{replace.error(t)}</span>
+      </div>
+    );
+  }
+  if (replace.tooMany !== null) {
+    return (
+      <div className="ts-replace__panel ts-replace__panel--warn" role="status">
+        <span className="ts-replace__title">{t("replace.tooMany")}</span>
+        <span className="ts-replace__meta">
+          {t("replace.tooManyDetail", { count: replace.tooMany })}
+        </span>
+      </div>
+    );
+  }
+  if (phase.kind === "running") {
+    return (
+      <div className="ts-replace__panel ts-replace__panel--live" role="status">
+        <div className="ts-replace__row">
+          <span className="ts-replace__title">{t("replace.running")}</span>
+          <span className="ts-spacer" />
+          <button type="button" className="ts-btn" onClick={replace.stop}>
+            {t("replace.stop")}
+          </button>
+        </div>
+        <progress className="ts-replace__bar" max={phase.total} value={phase.done} />
+        <span className="ts-replace__meta">
+          {t("replace.progress", { done: phase.done, total: phase.total })}
+        </span>
+      </div>
+    );
+  }
+  if (phase.kind === "finished") {
+    const { report } = phase;
+    if (report.readOnly) {
+      return (
+        <div className="ts-replace__panel ts-replace__panel--err" role="alert">
+          <span className="ts-replace__title">{t("replace.readOnly")}</span>
+        </div>
+      );
+    }
+    const skipped: [string, string[]][] = [
+      ["replace.skippedStale", report.stale],
+      ["replace.skippedUnsaved", report.unsaved],
+      ["replace.skippedFailed", report.failed],
+    ];
+    return (
+      <div className="ts-replace__panel" role="status">
+        <div className="ts-replace__row">
+          <span className="ts-replace__title">
+            {report.stopped !== null
+              ? t("replace.stopped", report.stopped)
+              : t("replace.done", { matches: report.matches, notes: report.notes.length })}
+          </span>
+          <span className="ts-spacer" />
+          {replace.canUndo && (
+            <button type="button" className="ts-btn" onClick={() => void replace.undo()}>
+              {t("replace.undo")}
+            </button>
+          )}
+        </div>
+        {report.notes.length > 0 && (
+          <span className="ts-replace__meta">{report.notes.join(" · ")}</span>
+        )}
+        {skipped.map(([key, names]) =>
+          names.length === 0 ? null : (
+            <span key={key} className="ts-replace__meta ts-replace__meta--err">
+              {key === "replace.skippedStale"
+                ? t("replace.skippedStale", { names: names.join(", ") })
+                : key === "replace.skippedUnsaved"
+                  ? t("replace.skippedUnsaved", { names: names.join(", ") })
+                  : t("replace.skippedFailed", { names: names.join(", ") })}
+              {key === "replace.skippedStale" && (
+                <>
+                  {" · "}
+                  <button type="button" className="ts-replace__link" onClick={replace.refresh}>
+                    {t("replace.refresh")}
+                  </button>
+                </>
+              )}
+            </span>
+          ),
+        )}
+      </div>
+    );
+  }
+  if (phase.kind === "undone") {
+    const { report } = phase;
+    return report.changed.length === 0 ? (
+      <div className="ts-replace__panel" role="status">
+        <span className="ts-replace__title">{t("replace.undone", { notes: report.restored })}</span>
+      </div>
+    ) : (
+      <div className="ts-replace__panel ts-replace__panel--warn" role="status">
+        <span className="ts-replace__title">{t("replace.undoPartial")}</span>
+        <span className="ts-replace__meta">
+          {t("replace.undone", { notes: report.restored })}.{" "}
+          {t("replace.undoChanged", { names: report.changed.join(", ") })}
+        </span>
+      </div>
+    );
+  }
+  return null;
 }
 
 /** Счётчик в шапке: «14 совпадений · 6 заметок» из макета. */

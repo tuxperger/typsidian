@@ -919,6 +919,49 @@ async fn search(
     .map_err(Failure::Core))
 }
 
+/// Предпросмотр замены по vault (фича 027). Правила — в ядре.
+#[tauri::command]
+async fn replace_preview(
+    state: State<'_, Vault>,
+    query: typsidian_core::search::replace::ReplaceQuery,
+    open_texts: Vec<links::OpenText>,
+) -> Answer<
+    typsidian_core::search::replace::ReplacePreview,
+    Failure<typsidian_core::search::replace::ReplaceError>,
+> {
+    with_vault!(state, |backend| {
+        typsidian_core::search::replace::replace_preview(backend, &query, &open_texts)
+            .await
+            .map_err(Failure::Core)
+    })
+}
+
+/// Замена отмеченных совпадений одной заметки (фича 027).
+#[tauri::command]
+async fn replace_in_note(
+    state: State<'_, Vault>,
+    request: typsidian_core::search::replace::ReplaceNoteRequest,
+    editor_text: Option<String>,
+) -> Answer<typsidian_core::search::replace::ReplaceNoteOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        typsidian_core::search::replace::replace_in_note(backend, &request, editor_text.as_deref())
+            .await
+    ))
+}
+
+/// Отмена замены в одной заметке (фича 027).
+#[tauri::command]
+async fn replace_undo(
+    state: State<'_, Vault>,
+    record: typsidian_core::search::replace::UndoRecord,
+    editor_text: Option<String>,
+) -> Answer<typsidian_core::search::replace::UndoOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        typsidian_core::search::replace::replace_undo(backend, &record, editor_text.as_deref())
+            .await
+    ))
+}
+
 /// Путь папки, открытой как vault — окну для хлебных крошек в шапке.
 ///
 /// Спрашивается у бэкенда, а не запоминается окном при выборе папки: тогда
@@ -2654,6 +2697,9 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             broken_links,
             access_state,
             search,
+            replace_preview,
+            replace_in_note,
+            replace_undo,
             file_kind,
             begin_edit,
             pending_conflict,

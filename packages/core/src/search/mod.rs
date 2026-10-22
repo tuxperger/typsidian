@@ -29,6 +29,8 @@ use crate::properties::{now_ms, valid_date, PropertyValue};
 use crate::vault::backend::VaultBackend;
 use crate::vault::FileKind;
 
+pub mod replace;
+
 /// Сколько заметок попадает в ответ. Дальше — `truncated`.
 ///
 /// Предел существует ради интерфейса, а не ради скорости: список на десять
@@ -175,36 +177,7 @@ pub async fn search<B: VaultBackend>(
     }
 
     let matcher = Matcher::build(query)?;
-
-    // Фильтр по ссылкам спрашивается один раз, а не на каждую заметку: ответ
-    // от заметки не зависит, а обратные ссылки — самая дорогая операция здесь.
-    let linking: Option<Vec<String>> = match &query.links_to {
-        Some(target) => Some(
-            backend
-                .backlinks(std::path::Path::new(target))
-                .await
-                .into_iter()
-                .map(|note| note.path.to_string_lossy().into_owned())
-                .collect(),
-        ),
-        None => None,
-    };
-
-    // Условия по свойствам считаются один раз по индексу: файлы не читаются.
-    let by_properties: Option<std::collections::HashSet<String>> = if query.properties.is_empty() {
-        None
-    } else {
-        let now = now_ms();
-        Some(
-            backend
-                .indexed_notes()
-                .await
-                .into_iter()
-                .filter(|note| matches_all(note, &query.properties, now))
-                .map(|note| note.path)
-                .collect(),
-        )
-    };
+    let filters = Filters::load(backend, query).await;
 
     let mut hits: Vec<SearchHit> = Vec::new();
     let mut total_matches = 0usize;
@@ -215,10 +188,6 @@ pub async fn search<B: VaultBackend>(
             continue;
         }
         let path = note.path.to_string_lossy().into_owned();
-
-        let links_ok = linking
-            .as_ref()
-            .map(|paths| paths.iter().any(|known| known == &path));
 
         // Строка запроса пустая — по ней условия нет вовсе; иначе читаем файл.
         let text_hit = if matcher.is_some() {
@@ -234,10 +203,7 @@ pub async fn search<B: VaultBackend>(
         };
 
         let has_text = text_hit.as_ref().map(|found| found.matches > 0);
-        let properties_ok = by_properties
-            .as_ref()
-            .map(|paths| paths.contains(&path.replace('\\', "/")));
-        if !keep(has_text, links_ok, properties_ok, query.mode) {
+        if !filters.passes(&path, has_text, query.mode) {
             continue;
         }
 
@@ -260,6 +226,64 @@ pub async fn search<B: VaultBackend>(
     }
 
     Ok(group(hits, total_matches, truncated))
+}
+
+/// Фильтры запроса, кроме строки: ссылки и свойства. Считаются один раз на
+/// запрос — поиску и замене (фича 027) одинаково.
+pub(crate) struct Filters {
+    linking: Option<Vec<String>>,
+    by_properties: Option<std::collections::HashSet<String>>,
+}
+
+impl Filters {
+    pub(crate) async fn load<B: VaultBackend>(backend: &B, query: &SearchQuery) -> Self {
+        // Фильтр по ссылкам спрашивается один раз, а не на каждую заметку:
+        // ответ от заметки не зависит, а обратные ссылки — самая дорогая
+        // операция здесь.
+        let linking = match &query.links_to {
+            Some(target) => Some(
+                backend
+                    .backlinks(std::path::Path::new(target))
+                    .await
+                    .into_iter()
+                    .map(|note| note.path.to_string_lossy().into_owned())
+                    .collect(),
+            ),
+            None => None,
+        };
+        // Условия по свойствам считаются один раз по индексу: файлы не читаются.
+        let by_properties = if query.properties.is_empty() {
+            None
+        } else {
+            let now = now_ms();
+            Some(
+                backend
+                    .indexed_notes()
+                    .await
+                    .into_iter()
+                    .filter(|note| matches_all(note, &query.properties, now))
+                    .map(|note| note.path)
+                    .collect(),
+            )
+        };
+        Self {
+            linking,
+            by_properties,
+        }
+    }
+
+    /// Проходит ли заметка при известном исходе условия по строке.
+    pub(crate) fn passes(&self, path: &str, has_text: Option<bool>, mode: FilterMode) -> bool {
+        let links_ok = self
+            .linking
+            .as_ref()
+            .map(|paths| paths.iter().any(|known| known == path));
+        let properties_ok = self
+            .by_properties
+            .as_ref()
+            .map(|paths| paths.contains(&path.replace('\\', "/")));
+        keep(has_text, links_ok, properties_ok, mode)
+    }
 }
 
 /// Проходит ли заметка условия при выбранном режиме.
@@ -435,7 +459,7 @@ fn parse_word(key: &str, value: &str, known_keys: &[String]) -> Option<Condition
 }
 
 /// Папка заметки — всё до последнего разделителя.
-fn folder_of(path: &str) -> String {
+pub(crate) fn folder_of(path: &str) -> String {
     match path.rfind('/') {
         Some(cut) => path[..cut].to_owned(),
         None => String::new(),
@@ -454,10 +478,10 @@ struct Found {
 /// Подстрока — тоже регулярное выражение, из экранированной строки: иначе
 /// пришлось бы писать второй поиск совпадений и второй разбор регистра, а
 /// расходиться этим двум путям нельзя.
-struct Matcher(regex::Regex);
+pub(crate) struct Matcher(pub(crate) regex::Regex);
 
 impl Matcher {
-    fn build(query: &SearchQuery) -> Result<Option<Self>, SearchError> {
+    pub(crate) fn build(query: &SearchQuery) -> Result<Option<Self>, SearchError> {
         let text = query.text.trim();
         if text.is_empty() {
             return Ok(None);

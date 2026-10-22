@@ -33,4 +33,46 @@ export const search: Translation<typeof en> = {
   "search.echoCase": "с учётом регистра",
   "search.echoNone": "условий нет",
   "search.badPattern": (p) => `Неверное регулярное выражение: ${p.detail}`,
+  "replace.command": "Заменить в vault",
+  "replace.toggle": "Замена",
+  "replace.toggleHint": "Заменить по всему vault",
+  "replace.inputLabel": "Заменить на",
+  "replace.placeholder": "заменить на…",
+  "replace.groupsHint": "группы: $1, ${имя}",
+  "replace.echo": (p) => `замена: ${p.from} → «${p.to}»`,
+  "replace.noteMeta": (p) => `${p.selected} из ${p.total}`,
+  "replace.inEditor": "несохранённые правки — замена пойдёт в редактор",
+  "replace.selectNote": (p) => `Отметить все совпадения в «${p.name}»`,
+  "replace.selectMatch": (p) => `Заменить в строке ${p.line}`,
+  "replace.selectedCount": (p) =>
+    `отмечено ${p.selected} из ${p.total} · ${ruN(p.notes, "# заметка", "# заметки", "# заметок")}`,
+  "replace.apply": (p) => `Заменить отмеченные (${p.count})`,
+  "replace.applyShort": (p) => `Заменить (${p.count})`,
+  "replace.hintToggle": "␣ отметить",
+  "replace.hintNote": "⇧␣ вся заметка",
+  "replace.hintApply": "Mod+Enter заменить",
+  "replace.running": "Заменяется…",
+  "replace.progress": (p) =>
+    `записано ${p.done} из ${ruN(p.total, "# заметки", "# заметок", "# заметок")} · редактор доступен`,
+  "replace.stop": "Остановить",
+  "replace.stopped": (p) =>
+    `Остановлено: изменено ${p.done} из ${ruN(p.total, "# заметки", "# заметок", "# заметок")}`,
+  "replace.done": (p) =>
+    `Заменено ${p.matches} в ${ruN(p.notes, "# заметке", "# заметках", "# заметках")}`,
+  "replace.undo": "Отменить замену",
+  "replace.skippedStale": (p) => `Пропущено — изменена на диске после предпросмотра: ${p.names}`,
+  "replace.skippedUnsaved": (p) => `Пропущено — несохранённые правки вне редактора: ${p.names}`,
+  "replace.skippedFailed": (p) => `Пропущено — не удалось записать: ${p.names}`,
+  "replace.readOnly": "Vault только для чтения — ничего не заменено.",
+  "replace.refresh": "обновить предпросмотр",
+  "replace.undone": (p) =>
+    `Возвращено к тексту до замены: ${ruN(p.notes, "# заметка", "# заметки", "# заметок")}`,
+  "replace.undoPartial": "Отмена выполнена не везде",
+  "replace.undoChanged": (p) =>
+    `Изменены после замены и не тронуты: ${p.names}. Верните их вручную или через историю.`,
+  "replace.tooMany": "Слишком много для просмотра",
+  "replace.tooManyDetail": (p) =>
+    `${ruN(p.count, "# совпадение", "# совпадения", "# совпадений")}; замена показывает до 10 000. Уточните запрос или сузьте папкой и тегом.`,
+  "replace.badPatternTitle": "Выражение не разобрано",
+  "replace.nothing": "Совпадений нет — заменять нечего.",
 };

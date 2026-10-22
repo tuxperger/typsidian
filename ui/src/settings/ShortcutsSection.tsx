@@ -52,6 +52,8 @@ const COMMAND_TITLE: Record<CommandId, MessageKey> = {
   // Фича 018: переход к определению и ручной вызов дополнения.
   "goto-definition": "completion.command.goto",
   "trigger-completion": "completion.command.trigger",
+  // Фича 027: поиск сразу в режиме замены.
+  "replace-in-vault": "replace.command",
 };
 
 /**

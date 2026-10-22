@@ -1987,6 +1987,37 @@ impl WebBackend {
         crate::search::search(self, &query).await
     }
 
+    /// Предпросмотр замены по vault (фича 027): каждое совпадение с кусками
+    /// «было/станет». Открытые заметки — по тексту редактора.
+    #[wasm_bindgen(js_name = replacePreview)]
+    pub async fn replace_preview_js(
+        &self,
+        query: crate::search::replace::ReplaceQuery,
+        open_texts: Vec<crate::links::OpenText>,
+    ) -> Result<crate::search::replace::ReplacePreview, crate::search::replace::ReplaceError> {
+        crate::search::replace::replace_preview(self, &query, &open_texts).await
+    }
+
+    /// Замена отмеченных совпадений одной заметки (фича 027).
+    #[wasm_bindgen(js_name = replaceInNote)]
+    pub async fn replace_in_note_js(
+        &mut self,
+        request: crate::search::replace::ReplaceNoteRequest,
+        editor_text: Option<String>,
+    ) -> crate::search::replace::ReplaceNoteOutcome {
+        crate::search::replace::replace_in_note(self, &request, editor_text.as_deref()).await
+    }
+
+    /// Отмена замены в одной заметке (фича 027).
+    #[wasm_bindgen(js_name = replaceUndo)]
+    pub async fn replace_undo_js(
+        &mut self,
+        record: crate::search::replace::UndoRecord,
+        editor_text: Option<String>,
+    ) -> crate::search::replace::UndoOutcome {
+        crate::search::replace::replace_undo(self, &record, editor_text.as_deref()).await
+    }
+
     #[wasm_bindgen(js_name = read)]
     pub async fn read_js(&self, path: &str) -> Result<String, ReadError> {
         VaultBackend::read(self, Path::new(path)).await

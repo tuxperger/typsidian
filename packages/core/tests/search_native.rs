@@ -62,3 +62,55 @@ async fn the_links_to_filter_narrows_the_text_query() {
 async fn the_or_mode_widens_the_result() {
     cases::the_or_mode_widens_the_result().await;
 }
+
+// Замена по vault (фича 027): общая таблица `common::replace_cases`.
+
+#[tokio::test]
+async fn replace_the_preview_lists_every_match_with_before_and_after() {
+    common::replace_cases::the_preview_lists_every_match_with_before_and_after().await;
+}
+
+#[tokio::test]
+async fn replace_groups_expand_only_for_patterns() {
+    common::replace_cases::groups_expand_only_for_patterns().await;
+}
+
+#[tokio::test]
+async fn replace_a_broken_pattern_is_named() {
+    common::replace_cases::a_broken_pattern_is_named().await;
+}
+
+#[tokio::test]
+async fn replace_too_many_matches_are_refused_with_the_count() {
+    common::replace_cases::too_many_matches_are_refused_with_the_count().await;
+}
+
+#[tokio::test]
+async fn replace_only_selected_matches_are_written() {
+    common::replace_cases::only_selected_matches_are_written().await;
+}
+
+#[tokio::test]
+async fn replace_a_note_changed_after_the_preview_is_skipped() {
+    common::replace_cases::a_note_changed_after_the_preview_is_skipped().await;
+}
+
+#[tokio::test]
+async fn replace_an_open_note_gets_one_editor_edit() {
+    common::replace_cases::an_open_note_gets_one_editor_edit().await;
+}
+
+#[tokio::test]
+async fn replace_unsaved_edits_elsewhere_block_the_write() {
+    common::replace_cases::unsaved_edits_elsewhere_block_the_write().await;
+}
+
+#[tokio::test]
+async fn replace_undo_restores_untouched_notes_and_spares_changed_ones() {
+    common::replace_cases::undo_restores_untouched_notes_and_spares_changed_ones().await;
+}
+
+#[tokio::test]
+async fn replace_undo_in_an_open_note_is_an_editor_edit() {
+    common::replace_cases::undo_in_an_open_note_is_an_editor_edit().await;
+}
