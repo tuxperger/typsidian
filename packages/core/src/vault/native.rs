@@ -930,6 +930,12 @@ impl NativeBackend {
                             let Some((note, links)) = stamped.get(&abs).cloned().flatten() else {
                                 continue;
                             };
+                            // Отпечаток снят до замка индекса: удалённый за это
+                            // время файл не должен вернуться в индекс (001
+                            // FR-030) — та же проверка, что в сверке.
+                            if !abs.exists() {
+                                continue;
+                            }
                             let known_stamp = idx.get(&rel).map(|n| n.stamp.clone());
                             let is_new = known_stamp.is_none();
                             // US4/T074: конфликт вместо тихого обновления, если
@@ -1168,7 +1174,9 @@ impl NativeBackend {
         let events = self.events.clone();
         let events_ready = self.events_ready.clone();
         tokio::spawn(async move {
+            let root_for_walk = root.clone();
             let fresh = tokio::task::spawn_blocking(move || {
+                let root = root_for_walk;
                 // Если root уже недоступен на момент самой сверки (гонка
                 // между `open()` и потерей доступа сразу после него,
                 // либо просто задержка фонового планирования) — не
@@ -1204,6 +1212,13 @@ impl NativeBackend {
             // не Send через точки await.
             let mut pending = Vec::new();
             for (note, links) in &fresh {
+                // Обход шёл без замка индекса: файл, удалённый приложением
+                // после обхода, вернулся бы в индекс устаревшей записью
+                // (001 FR-030). `delete` убирает файл до замка, поэтому
+                // проверка под замком закрывает гонку.
+                if !root.join(&note.path).exists() {
+                    continue;
+                }
                 let changed = match idx.get(&note.path) {
                     Some(existing) => existing.stamp != note.stamp,
                     None => true,
