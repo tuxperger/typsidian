@@ -39,6 +39,9 @@ import {
   SpellChecker,
   embedInsert,
   bookmarksView,
+  tasksView,
+  taskToggle,
+  taskToggleAt,
   bookmarkAdd,
   bookmarkRemove,
   bookmarkRename,
@@ -453,6 +456,14 @@ export function webVaultClient(
         call(() => linksLinkMention(backend, request, editorText)),
       health: (openTexts) => call(() => linkHealth(backend, openTexts)),
       fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
+    },
+
+    // ── Задачи из заметок (фича 033) ────────────────────────────────
+    tasks: {
+      view: (filter, today) => call(() => tasksView(backend, filter, today)),
+      toggle: (request, editorText) =>
+        call(() => taskToggle(backend, request, editorText ?? undefined)),
+      toggleAt: async (text, offset) => taskToggleAt(text, offset),
     },
 
     // ── Закладки (фича 032) ─────────────────────────────────────────

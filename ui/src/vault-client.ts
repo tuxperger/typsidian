@@ -57,6 +57,10 @@ import type {
   BookmarkPlace,
   BookmarkTarget,
   BookmarksView,
+  TaskFilter,
+  TaskToggleOutcome,
+  TaskToggleRequest,
+  TasksView,
   RecoverOutcome,
   RestoreOutcome,
   SnapshotReason,
@@ -550,6 +554,11 @@ export interface VaultClient {
   /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
   readonly links: LinksClient;
 
+  // ── Задачи из заметок (фича 033) ────────────────────────────────
+
+  /** Задачи vault: разбор, индекс, фильтры и отметка — в ядре. */
+  readonly tasks: TasksClient;
+
   // ── Закладки (фича 032) ──────────────────────────────────────────
 
   /** Закладки vault: порядок, группы и доступность целей — в ядре. */
@@ -734,6 +743,16 @@ export interface SlidesClient {
   caret(slides: PageSlideInfo[], page: number): Promise<SlidePlace | undefined>;
   label(slides: PageSlideInfo[], page: number): Promise<SlideLabel>;
   keymap(): Promise<ShowKeymap>;
+}
+
+/**
+ * Задачи из заметок (фича 033). `today` — `ГГГГ-ММ-ДД` по часам устройства;
+ * `editorText` — текст открытой заметки, тогда ответ отметки — правка редактора.
+ */
+export interface TasksClient {
+  view(filter: TaskFilter, today: string): Promise<TasksView>;
+  toggle(request: TaskToggleRequest, editorText: string | null): Promise<TaskToggleOutcome>;
+  toggleAt(text: string, offset: number): Promise<TextEdit | undefined>;
 }
 
 /**

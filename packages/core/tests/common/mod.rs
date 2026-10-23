@@ -692,6 +692,7 @@ pub mod sources_cases;
 pub mod spellcheck_cases;
 pub mod structure_cases;
 pub mod sync_cases;
+pub mod tasks_cases;
 pub mod template_cases;
 pub mod textlayer_cases;
 pub mod vault_settings_cases;

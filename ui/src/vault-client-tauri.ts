@@ -87,6 +87,8 @@ import type {
   EmbedInsertion,
   AddOutcome,
   BookmarksView,
+  TasksView,
+  TaskToggleOutcome,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -584,6 +586,15 @@ export function tauriVaultClient(
       health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
       fix: (request, editorText) =>
         invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
+    },
+
+    // ── Задачи из заметок (фича 033) ────────────────────────────────
+    tasks: {
+      view: (filter, today) => invoke<TasksView>("tasks_view", { filter, today }),
+      toggle: (request, editorText) =>
+        invoke<TaskToggleOutcome>("task_toggle", { request, editorText }),
+      toggleAt: async (text, offset) =>
+        (await invoke<TextEdit | null>("task_toggle_at", { text, offset })) ?? undefined,
     },
 
     // ── Закладки (фича 032) ─────────────────────────────────────────

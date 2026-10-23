@@ -1,0 +1,43 @@
+import type { Translation } from "../define.js";
+import type { tasks as en } from "../en/tasks.js";
+
+// Задачи из заметок (фича 033): окно «Задачи» и команда редактора.
+export const tasks: Translation<typeof en> = {
+  "tasks.title": "Задачи",
+  "tasks.command": "Задачи",
+  "tasks.toggleCommand": "Переключить задачу",
+  "tasks.close": "Закрыть задачи",
+  "tasks.summary": (p) => `${p.open} невыполненных · ${p.overdue} просрочено`,
+  "tasks.groupBy": "Группировка",
+  "tasks.byNote": "по заметкам",
+  "tasks.byDue": "по сроку",
+  "tasks.filter.state": "Состояние",
+  "tasks.filter.due": "Срок",
+  "tasks.filter.folder": "Папка",
+  "tasks.filter.anyFolder": "Любая папка",
+  "tasks.filter.conditions": "Условия: тег:проект статус:черновик",
+  "tasks.state.open": "невыполненные",
+  "tasks.state.done": "выполненные",
+  "tasks.state.all": "все",
+  "tasks.due.any": "любой",
+  "tasks.due.overdue": "просрочено",
+  "tasks.due.today": "сегодня",
+  "tasks.due.week": "неделя",
+  "tasks.due.none": "без срока",
+  "tasks.group.overdue": "Просрочено",
+  "tasks.group.today": "Сегодня",
+  "tasks.group.week": "На неделе",
+  "tasks.group.later": "Позже",
+  "tasks.group.none": "Без срока",
+  "tasks.badge.overdue": (p) => `${p.date} · просрочено`,
+  "tasks.badge.today": "сегодня",
+  "tasks.line": (p) => `стр. ${p.line}`,
+  "tasks.where": (p) => `${p.note} · стр. ${p.line}`,
+  "tasks.empty": "Подходящих задач нет. Задача — пункт списка `- [ ] текст` в любой заметке.",
+  "tasks.stale": (p) =>
+    `Задачи «${p.text}» в заметке «${p.note}» больше нет — список обновлён, заметка не изменена.`,
+  "tasks.readOnly": "Vault только для чтения — задача не изменена.",
+  "tasks.failed": "Не удалось записать заметку — задача не изменена.",
+  "tasks.hints": "↑↓ задачи · Пробел отметить · ⏎ открыть · Esc закрыть",
+  "tasks.toggleNone": "Под кареткой нет пункта списка.",
+};

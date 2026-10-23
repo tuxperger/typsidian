@@ -51,6 +51,10 @@ pub const SNAPSHOTS_DIR_NAME: &str = "snapshots";
 /// строке. Не производный путь — едет с синхронизацией, как настройки vault.
 pub const DICTIONARY_FILE_NAME: &str = "dictionary.txt";
 
+/// Индекс задач (фича 033, research.md §2): задачи заметок с их отпечатками.
+/// Принадлежит устройству, поэтому входит в производные пути.
+pub const TASKS_FILE_NAME: &str = "tasks.json";
+
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
 /// Существует только ради уборки: при первом открытии vault новой версией файл
@@ -77,6 +81,11 @@ pub fn tmp_dir() -> PathBuf {
 /// Папка снимков заметок относительно корня vault (фича 029).
 pub fn snapshots_dir() -> PathBuf {
     service_dir().join(SNAPSHOTS_DIR_NAME)
+}
+
+/// Индекс задач относительно корня vault (фича 033).
+pub fn tasks_index_path() -> PathBuf {
+    service_dir().join(TASKS_FILE_NAME)
 }
 
 /// Файл кэша индекса относительно корня vault.
@@ -107,6 +116,7 @@ pub fn derived_paths() -> Vec<String> {
         format!("{SERVICE_DIR_NAME}/{CACHE_FILE_NAME}*"),
         format!("{SERVICE_DIR_NAME}/{TMP_DIR_NAME}"),
         format!("{SERVICE_DIR_NAME}/{SNAPSHOTS_DIR_NAME}"),
+        format!("{SERVICE_DIR_NAME}/{TASKS_FILE_NAME}"),
     ]
 }
 
@@ -135,7 +145,8 @@ mod tests {
             [
                 ".typsidian/cache.sqlite*",
                 ".typsidian/tmp",
-                ".typsidian/snapshots"
+                ".typsidian/snapshots",
+                ".typsidian/tasks.json"
             ]
         );
         assert!(!derived

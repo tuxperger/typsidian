@@ -35,6 +35,7 @@ import { snapshots } from "./en/snapshots.js";
 import { spellcheck } from "./en/spellcheck.js";
 import { embeds } from "./en/embeds.js";
 import { bookmarks } from "./en/bookmarks.js";
+import { tasks } from "./en/tasks.js";
 import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
@@ -68,6 +69,7 @@ export const en = {
   ...spellcheck,
   ...embeds,
   ...bookmarks,
+  ...tasks,
   ...properties,
   ...importing,
   ...capture,

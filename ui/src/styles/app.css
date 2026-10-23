@@ -10749,3 +10749,119 @@ button.ts-props__chipbtn,
   font-size: 11px;
   color: var(--danger);
 }
+
+/* ── Задачи из заметок (фича 033, макет T1, T2) ────────────────────────────── */
+
+.ts-tasks__seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ts-tasks__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+}
+
+.ts-tasks__folder {
+  width: auto;
+  min-width: 160px;
+}
+
+.ts-tasks__conditions {
+  flex: 1;
+  min-width: 200px;
+}
+
+.ts-tasks__group {
+  padding-bottom: 4px;
+}
+
+.ts-tasks__ghead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px 2px;
+}
+
+.ts-tasks__gtitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--steel-100);
+}
+
+.ts-tasks__row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 3px 14px;
+}
+
+.ts-tasks__row--sub {
+  padding-left: 40px;
+}
+
+.ts-tasks__row--on {
+  background: var(--steel-800);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-tasks__box {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--orange-500);
+}
+
+.ts-tasks__text {
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--steel-200);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+
+.ts-tasks__row--done .ts-tasks__text {
+  color: var(--steel-500);
+  text-decoration: line-through;
+}
+
+.ts-tasks__where {
+  font: 10.5px var(--font-mono);
+  color: var(--steel-500);
+  text-decoration: none;
+}
+
+.ts-tasks__due {
+  font: 10.5px var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: var(--border-width) solid var(--steel-700);
+  color: var(--steel-400);
+  white-space: nowrap;
+}
+
+.ts-tasks__due--Overdue {
+  color: var(--danger);
+  border-color: currentColor;
+}
+
+.ts-tasks__due--Today {
+  color: var(--orange-400);
+  border-color: currentColor;
+}
+
+.ts-tasks__line {
+  font: 10.5px var(--font-mono);
+  color: var(--steel-600);
+  white-space: nowrap;
+}

@@ -27,6 +27,7 @@ import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel.js";
+import { TasksScreen } from "../tasks/TasksScreen.js";
 import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
 import { useBookmarks, type BookmarkAddResult } from "../bookmarks/useBookmarks.js";
 import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
@@ -342,6 +343,8 @@ function WorkspaceView({
   const [searchQuery, setSearchQuery] = useState<SearchQuery | null>(null);
   const [searchSeq, setSearchSeq] = useState(0);
   const [revealFolder, setRevealFolder] = useState<{ path: string; seq: number } | null>(null);
+  // Окно «Задачи» (фича 033).
+  const [tasksOpen, setTasksOpen] = useState(false);
   // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
   const [selectRequest, setSelectRequest] = useState<{ id: number; conditions: Condition[] } | null>(null);
   // select.typ правили вручную и оставили как есть: предупреждение в колонке свойств.
@@ -1202,6 +1205,23 @@ function WorkspaceView({
   const triggerCompletion = useCallback(() => {
     if (openNotePath !== null) requestCompletion("trigger");
   }, [openNotePath, requestCompletion]);
+  // «Переключить задачу» (фича 033): правку строки под кареткой даёт ядро.
+  const toggleTaskAtCaret = useCallback(async () => {
+    const active = activeEditorRef.current();
+    if (active === null || state.client === null) return;
+    const { view } = active;
+    const edit = await state.client.tasks.toggleAt(
+      view.state.doc.toString(),
+      view.state.selection.main.head,
+    );
+    if (edit === undefined) {
+      contextMenu.notify(t("tasks.toggleNone"));
+      return;
+    }
+    view.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert }, userEvent: "input" });
+    view.focus();
+  }, [state.client, contextMenu, t]);
+
   // «Встроить заметку» (фича 031): ядро пишет библиотеку и даёт правки —
   // `#import` при отсутствии и `#embed("")` у каретки; затем дополнение.
   const embedNote = useCallback(async () => {
@@ -1585,6 +1605,16 @@ function WorkspaceView({
    * только что созданный файл в нём ещё не появился.
    */
   const openPath = useCallback(async (path: string) => openTab(path), [openTab]);
+
+  // Папки vault — для фильтра папки в окне задач (фича 033).
+  const taskFolders = useMemo(() => {
+    const found = new Set<string>();
+    for (const note of state.notes) {
+      const parts = note.path.split("/").slice(0, -1);
+      parts.forEach((_, index) => found.add(parts.slice(0, index + 1).join("/")));
+    }
+    return [...found].sort();
+  }, [state.notes]);
 
   // Закладки (фича 032): список перечитывается, когда меняется набор файлов
   // vault, — пути после переименования и доступность целей приходят новыми.
@@ -2219,6 +2249,24 @@ function WorkspaceView({
         });
       }
     }
+    // Фича 033. «Задачи» — всегда при открытом vault; «Переключить задачу» —
+    // у открытой заметки Typst.
+    if (state.client !== null) {
+      items.push({
+        id: "tasks",
+        ...titled("tasks.command"),
+        icon: "list",
+        run: () => setTasksOpen(true),
+      });
+    }
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push({
+        id: "toggle-task",
+        ...titled("tasks.toggleCommand"),
+        icon: "list",
+        run: () => void toggleTaskAtCaret(),
+      });
+    }
     // Фича 032. «В закладки» — у открытой заметки или доски.
     if (activePath !== null) {
       const bookmarkPath = activePath;
@@ -2546,6 +2594,7 @@ function WorkspaceView({
     openManualCapture,
     embedNote,
     addBookmark,
+    toggleTaskAtCaret,
     activePath,
     isBoardOpen,
     t,
@@ -3253,6 +3302,20 @@ function WorkspaceView({
           }}
           failing={snapshotsFailing}
           onClose={() => setHistoryPath(null)}
+        />
+      )}
+
+      {tasksOpen && state.client !== null && (
+        <TasksScreen
+          client={state.client}
+          editors={noteEditors}
+          folders={taskFolders}
+          revision={state.notes}
+          onOpen={(path, line) => {
+            setTasksOpen(false);
+            revealPlace({ path, line, column: 1 });
+          }}
+          onClose={() => setTasksOpen(false)}
         />
       )}
 

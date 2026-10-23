@@ -63,6 +63,7 @@ use typsidian_core::sources;
 use typsidian_core::spellcheck;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::structure;
+use typsidian_core::tasks;
 use typsidian_core::templates::{
     self, NameCheck, PreviewState, ReadTemplateError, SaveTemplateError, TemplateLibraryView,
 };
@@ -1100,6 +1101,39 @@ async fn snapshots_clear(state: State<'_, Vault>) -> Answer<u32, Failure<()>> {
     with_vault!(state, |backend| snapshots::snapshots_clear(backend)
         .await
         .map_err(|_| Failure::Core(())))
+}
+
+// ── Задачи из заметок (фича 033) ────────────────────────────────────────────
+
+#[tauri::command]
+async fn tasks_view(
+    filter: tasks::TaskFilter,
+    today: String,
+    state: State<'_, Vault>,
+) -> Answer<tasks::TasksView, Failure<()>> {
+    with_vault!(state, |backend| Ok(tasks::tasks_view(
+        backend, &filter, &today
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn task_toggle(
+    request: tasks::TaskToggleRequest,
+    editor_text: Option<String>,
+    state: State<'_, Vault>,
+) -> Answer<tasks::TaskToggleOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(tasks::task_toggle(
+        backend,
+        &request,
+        editor_text.as_deref()
+    )
+    .await))
+}
+
+#[tauri::command]
+fn task_toggle_at(text: String, offset: u32) -> Option<typsidian_core::elements::TextEdit> {
+    tasks::task_toggle_at(&text, offset)
 }
 
 // ── Закладки (фича 032) ─────────────────────────────────────────────────────
@@ -3096,6 +3130,9 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             syntax_session_close,
             syntax_session_spelling,
             embed_insert,
+            tasks_view,
+            task_toggle,
+            task_toggle_at,
             bookmarks_view,
             bookmark_add,
             bookmark_remove,

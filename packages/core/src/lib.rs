@@ -22,6 +22,7 @@ pub mod spellcheck;
 pub mod stamp;
 pub mod structure;
 pub mod sync;
+pub mod tasks;
 pub mod templates;
 pub(crate) mod text_offsets;
 pub mod vault;

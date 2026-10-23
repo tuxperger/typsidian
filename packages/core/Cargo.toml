@@ -280,3 +280,8 @@ harness = false
 [[bench]]
 name = "embeds_scale"
 harness = false
+
+# Окно «Задачи» на 5 000 заметок (фича 033, T008, SC-001).
+[[bench]]
+name = "tasks_scale"
+harness = false
