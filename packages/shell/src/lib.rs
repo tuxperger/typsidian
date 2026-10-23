@@ -59,6 +59,7 @@ use typsidian_core::settings::Settings;
 use typsidian_core::slides;
 use typsidian_core::snapshots;
 use typsidian_core::sources;
+use typsidian_core::spellcheck;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::structure;
 use typsidian_core::templates::{
@@ -1098,6 +1099,101 @@ async fn snapshots_clear(state: State<'_, Vault>) -> Answer<u32, Failure<()>> {
     with_vault!(state, |backend| snapshots::snapshots_clear(backend)
         .await
         .map_err(|_| Failure::Core(())))
+}
+
+// ── Проверка орфографии (фича 030) ──────────────────────────────────────────
+
+/// Проверяющий открытого vault: настройки и словарь vault (030 research.md §5).
+/// Обычный `Mutex`: его берут и синхронная команда сессии подсветки, и
+/// асинхронные — те держат его только между `await`, на копии.
+#[derive(Default)]
+pub struct Speller(std::sync::Mutex<spellcheck::SpellChecker>);
+
+impl Speller {
+    fn get(&self) -> spellcheck::SpellChecker {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn set(&self, checker: spellcheck::SpellChecker) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = checker;
+    }
+}
+
+#[tauri::command]
+async fn spell_configure(
+    state: State<'_, Vault>,
+    speller: State<'_, Speller>,
+) -> Answer<spellcheck::SpellConfig, Failure<()>> {
+    let mut checker = speller.get();
+    let config: spellcheck::SpellConfig = with_vault!(state, |backend| Ok::<_, Failure<()>>(
+        spellcheck::spell_configure(backend, &mut checker).await
+    ))?;
+    speller.set(checker);
+    Ok(config)
+}
+
+#[tauri::command]
+async fn spell_add_word(
+    word: String,
+    state: State<'_, Vault>,
+    speller: State<'_, Speller>,
+) -> Answer<spellcheck::SpellConfig, Failure<spellcheck::SpellError>> {
+    let mut checker = speller.get();
+    let config = with_vault!(state, |backend| spellcheck::spell_add_word(
+        backend,
+        &mut checker,
+        &word
+    )
+    .await
+    .map_err(Failure::Core))?;
+    speller.set(checker);
+    Ok(config)
+}
+
+#[tauri::command]
+async fn spell_remove_word(
+    word: String,
+    state: State<'_, Vault>,
+    speller: State<'_, Speller>,
+) -> Answer<spellcheck::SpellConfig, Failure<spellcheck::SpellError>> {
+    let mut checker = speller.get();
+    let config = with_vault!(state, |backend| spellcheck::spell_remove_word(
+        backend,
+        &mut checker,
+        &word
+    )
+    .await
+    .map_err(Failure::Core))?;
+    speller.set(checker);
+    Ok(config)
+}
+
+#[tauri::command]
+fn spell_suggest(word: String, speller: State<'_, Speller>) -> Vec<String> {
+    spellcheck::spell_suggest(&speller.get(), &word)
+}
+
+/// Слова с ошибками в окнах сессии подсветки — пары `[from, to)`; `None` —
+/// сессии нет (её закрыли или она разошлась с редактором).
+#[tauri::command]
+fn syntax_session_spelling(
+    id: u32,
+    windows: Vec<typsidian_core::highlight::HighlightWindow>,
+    sessions: State<'_, HighlightSessions>,
+    speller: State<'_, Speller>,
+) -> Option<Vec<u32>> {
+    let checker = speller.get();
+    let guard = sessions
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Some(guard.1.get(&id)?.spelling(&windows, &checker))
 }
 
 /// Путь папки, открытой как vault — окну для хлебных крошек в шапке.
@@ -2801,6 +2897,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(Sources::default())
         .manage(Preview::default())
         .manage(HighlightSessions::default())
+        .manage(Speller::default())
         .invoke_handler(tauri::generate_handler![
             open_vault,
             browse_root,
@@ -2886,6 +2983,11 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             syntax_session_open,
             syntax_session_update,
             syntax_session_close,
+            syntax_session_spelling,
+            spell_configure,
+            spell_add_word,
+            spell_remove_word,
+            spell_suggest,
             render_element,
             plan_element_edit,
             template_event,

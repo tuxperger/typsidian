@@ -25,6 +25,7 @@ import type { PreviewClient } from "../preview-client.js";
 import { TemplatesSection } from "./TemplatesSection.js";
 import { CaptureSection } from "./CaptureSection.js";
 import { SnapshotsSection } from "./SnapshotsSection.js";
+import { SpellcheckSection } from "./SpellcheckSection.js";
 import { useShortcuts } from "../workspace/useShortcuts.js";
 import { useI18n, type MessageKey, type Phrase, type Translate } from "../i18n/index.js";
 
@@ -379,6 +380,20 @@ export function SettingsPanel({
           </section>
         )}
 
+        {section === "spellcheck" && (
+          <section aria-label={t("spellcheck.settings.section")}>
+            <div className="ts-settings__head">
+              <h2>{t("spellcheck.settings.section")}</h2>
+              <span className="ts-settings__meta">
+                {vaultName === null
+                  ? t("settings.vaultNotOpen")
+                  : t("settings.folderSettings", { name: vaultName })}
+              </span>
+            </div>
+            <SpellcheckSection vaultSettings={vaultSettings} client={vaultClient} />
+          </section>
+        )}
+
         {section === "keybindings" && (
           <>
             {/* Сочетания команд приложения хранятся в настройках vault, поэтому и
@@ -423,6 +438,7 @@ const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
   { id: "templates", title: "settings.section.templates" },
   { id: "capture", title: "capture.settings.title" },
   { id: "snapshots", title: "snapshots.settings.section" },
+  { id: "spellcheck", title: "spellcheck.settings.section" },
   { id: "sync", title: "sync.panel.title" },
   { id: "appearance", title: "settings.section.appearance" },
   { id: "keybindings", title: "settings.section.keybindings" },
@@ -435,6 +451,7 @@ export type SettingsSection =
   | "templates"
   | "capture"
   | "snapshots"
+  | "spellcheck"
   | "sync"
   | "appearance"
   | "keybindings"

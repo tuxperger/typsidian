@@ -687,6 +687,7 @@ pub mod search_cases;
 pub mod slides_cases;
 pub mod snapshots_cases;
 pub mod sources_cases;
+pub mod spellcheck_cases;
 pub mod structure_cases;
 pub mod sync_cases;
 pub mod template_cases;

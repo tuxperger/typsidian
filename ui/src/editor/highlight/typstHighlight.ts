@@ -80,6 +80,52 @@ function decorationsOf(packed: Uint32Array, doc: Text): DecorationSet {
   return builder.finish();
 }
 
+
+// ── Орфография (фича 030) ───────────────────────────────────────────────────
+//
+// Проверка идёт по той же сессии ядра, что и раскраска: ядро знает границу
+// текста и разметки (research.md §2). Здесь только расписание — через паузу
+// после правки или прокрутки, когда сессия совпадает с текстом, — и
+// подчёркивания. Ввод проверки не ждёт (SC-002).
+
+/** Пауза после правки или прокрутки до проверки (research.md §6). */
+const SPELL_DELAY_MS = 400;
+
+const misspelledMark = Decoration.mark({ class: "ts-misspelled" });
+
+/** Подчёркнутые слова вида — меню редактора ищет в них слово под щелчком. */
+const spellMarks = new WeakMap<EditorView, DecorationSet>();
+
+/** Виды с проверкой — для `refreshSpelling`. */
+const spellViews = new Set<{ respell(): void }>();
+
+/**
+ * Перепроверить все открытые редакторы: настройки проверки или словарь vault
+ * поменялись (US2, US3).
+ */
+export function refreshSpelling(): void {
+  for (const view of spellViews) view.respell();
+}
+
+/** Подчёркнутое слово в позиции `pos`; `null` — там нет ошибки. */
+export function misspelledAt(view: EditorView, pos: number): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  spellMarks.get(view)?.between(pos, pos, (from, to) => {
+    found = { from, to };
+    return false;
+  });
+  return found;
+}
+
+function spellDecorationsOf(pairs: Uint32Array, doc: Text): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let at = 0; at + 1 < pairs.length; at += 2) {
+    const from = pairs[at] ?? 0;
+    const to = Math.min(pairs[at + 1] ?? 0, doc.length);
+    if (from < to) builder.add(from, to, misspelledMark);
+  }
+  return builder.finish();
+}
 export function typstHighlight(client: Client): Extension {
   return ViewPlugin.fromClass(
     class {
@@ -94,6 +140,12 @@ export function typstHighlight(client: Client): Extension {
       /** Запрос назначен на ближайшую микрозадачу, но ещё не ушёл. */
       private queued = false;
       private destroyed = false;
+      /** Подчёркивания орфографии (030). */
+      spelling: DecorationSet = Decoration.none;
+      /** Правки с начала запроса проверки в пути; `null` — запроса нет. */
+      private spellSince: ChangeSet | null = null;
+      private spellTimer: ReturnType<typeof setTimeout> | null = null;
+      private readonly spellHandle = { respell: () => this.armSpelling(0) };
 
       constructor(readonly view: EditorView) {
         const { doc } = view.state;
@@ -102,6 +154,8 @@ export function typstHighlight(client: Client): Extension {
         // Синхронная сессия красит заметку до первой отрисовки (SC-003).
         if (this.session.updateNow !== undefined) this.applyNow();
         else this.schedule();
+        spellViews.add(this.spellHandle);
+        this.armSpelling(0);
       }
 
       update(update: ViewUpdate): void {
@@ -109,7 +163,11 @@ export function typstHighlight(client: Client): Extension {
           this.decorations = this.decorations.map(update.changes);
           this.unsent = this.unsent.compose(update.changes);
           if (this.since !== null) this.since = this.since.compose(update.changes);
+          this.spelling = this.spelling.map(update.changes);
+          spellMarks.set(this.view, this.spelling);
+          if (this.spellSince !== null) this.spellSince = this.spellSince.compose(update.changes);
         }
+        if (update.docChanged || update.viewportChanged) this.armSpelling(SPELL_DELAY_MS);
         if (!update.docChanged && !update.viewportChanged) return;
         if (this.session.updateNow !== undefined) this.applyNow();
         else this.schedule();
@@ -205,12 +263,55 @@ export function typstHighlight(client: Client): Extension {
         if (this.stale) this.schedule();
       }
 
+      /**
+       * Проверка через `delay` мс. Пока сессия не догнала редактор (правки не
+       * отправлены или раскраска в пути), ждём ещё — ответ проверки должен
+       * относиться к тексту сессии.
+       */
+      private armSpelling(delay: number): void {
+        if (this.spellTimer !== null) clearTimeout(this.spellTimer);
+        this.spellTimer = setTimeout(() => {
+          this.spellTimer = null;
+          if (this.destroyed) return;
+          if (!this.unsent.empty || this.since !== null || this.spellSince !== null) {
+            this.armSpelling(SPELL_DELAY_MS / 4);
+            return;
+          }
+          void this.requestSpelling();
+        }, delay);
+      }
+
+      private async requestSpelling(): Promise<void> {
+        const { doc } = this.view.state;
+        this.spellSince = ChangeSet.empty(doc.length);
+        let pairs: Uint32Array | undefined;
+        try {
+          pairs = await this.session.spelling(windowsOf(this.view));
+        } catch {
+          pairs = undefined;
+        }
+        if (this.destroyed) return;
+        const since = this.spellSince;
+        this.spellSince = null;
+        if (pairs === undefined) return;
+        this.spelling = spellDecorationsOf(pairs, doc).map(since);
+        spellMarks.set(this.view, this.spelling);
+        this.view.dispatch({ effects: answered.of(null) });
+      }
+
       destroy(): void {
         this.destroyed = true;
+        spellViews.delete(this.spellHandle);
+        if (this.spellTimer !== null) clearTimeout(this.spellTimer);
+        spellMarks.delete(this.view);
         this.session.close();
       }
     },
-    { decorations: (plugin) => plugin.decorations },
+    {
+      decorations: (plugin) => plugin.decorations,
+      provide: (plugin) =>
+        EditorView.decorations.of((view) => view.plugin(plugin)?.spelling ?? Decoration.none),
+    },
   );
 }
 

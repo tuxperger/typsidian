@@ -51,6 +51,7 @@ import type {
   LinkHealth,
   NoteHistory,
   DeletedNote,
+  SpellConfig,
   RecoverOutcome,
   RestoreOutcome,
   SnapshotReason,
@@ -169,6 +170,12 @@ export interface HighlightSession {
     length: number,
     windows: HighlightWindow[],
   ) => Uint32Array | undefined;
+  /**
+   * Слова с ошибками в окнах (фича 030): пары `[from, to)` в UTF-16 текста,
+   * который сессия получила последним `update`. `undefined` — ответа нет
+   * (сессия закрыта или занята), редактор спросит снова.
+   */
+  spelling(windows: HighlightWindow[]): Promise<Uint32Array | undefined>;
   close(): void;
 }
 
@@ -538,6 +545,11 @@ export interface VaultClient {
   /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
   readonly links: LinksClient;
 
+  // ── Проверка орфографии (фича 030) ──────────────────────────────────
+
+  /** Настройки проверки, словарь vault и подсказки: правила — в ядре. */
+  readonly spelling: SpellingClient;
+
   // ── Снимки заметок (фича 029) ───────────────────────────────────────
 
   /** Снимки, история, возврат и удалённые заметки: правила — в ядре. */
@@ -725,6 +737,19 @@ export interface SlidesClient {
  * различия, возврат и восстановление решает ядро (`snapshots`); клиент зовёт
  * его в нужные моменты. Время берёт сама граница — часы устройства.
  */
+/**
+ * Проверка орфографии (фича 030, contracts/core-spellcheck-api.md). Отказ
+ * правки словаря — исключение со значением `SpellError`.
+ */
+export interface SpellingClient {
+  /** Перечитать настройки vault и словарь vault; на web — и загрузить словари. */
+  configure(): Promise<SpellConfig>;
+  addWord(word: string): Promise<SpellConfig>;
+  removeWord(word: string): Promise<SpellConfig>;
+  /** Исправления слова, до пяти. */
+  suggest(word: string): Promise<string[]>;
+}
+
 export interface SnapshotsClient {
   /** Снимок заметки, если пора; пропуск и отказ — штатные ответы. */
   take(path: string, text: string, reason: SnapshotReason): Promise<TakeOutcome>;

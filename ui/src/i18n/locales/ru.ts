@@ -25,6 +25,7 @@ import { sync } from "./ru/sync.js";
 import { links } from "./ru/links.js";
 import { slides } from "./ru/slides.js";
 import { snapshots } from "./ru/snapshots.js";
+import { spellcheck } from "./ru/spellcheck.js";
 import { properties } from "./ru/properties.js";
 import { importing } from "./ru/import.js";
 import { capture } from "./ru/capture.js";
@@ -55,6 +56,7 @@ export const ru: Catalog = {
   ...links,
   ...slides,
   ...snapshots,
+  ...spellcheck,
   ...properties,
   ...importing,
   ...capture,

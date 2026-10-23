@@ -188,3 +188,42 @@ export function editorMenuItems(
       : []),
   ];
 }
+
+/**
+ * Пункты орфографии над обычным меню (фича 030, макет O1, O2): исправления
+ * подчёркнутого слова и «Добавить в словарь». Исправление — обычная правка
+ * редактора: её отменяет Ctrl+Z, автосохранение видит её как ввод.
+ */
+export function spellingMenuItems(
+  view: EditorView,
+  range: { from: number; to: number },
+  suggestions: readonly string[],
+  addWord: (word: string) => void,
+): ContextMenuItem[] {
+  const { t } = currentI18n();
+  const word = view.state.sliceDoc(range.from, range.to);
+  const fixes: ContextMenuItem[] =
+    suggestions.length === 0
+      ? [{ label: t("spellcheck.menu.none"), disabled: true, run: () => {} }]
+      : suggestions.map((suggestion) => ({
+          label: suggestion,
+          run: () => {
+            // Слово могло измениться, пока меню было открыто: правится только
+            // то же самое слово на том же месте.
+            if (view.state.sliceDoc(range.from, range.to) !== word) return;
+            view.dispatch({
+              changes: { from: range.from, to: range.to, insert: suggestion },
+              selection: { anchor: range.from + suggestion.length },
+              userEvent: "input",
+            });
+            view.focus();
+          },
+        }));
+  return [
+    { label: t("spellcheck.menu.fix", { word }), disabled: true, run: () => {} },
+    ...fixes,
+    { kind: "separator" },
+    { label: t("spellcheck.menu.addWord"), run: () => addWord(word) },
+    { kind: "separator" },
+  ];
+}

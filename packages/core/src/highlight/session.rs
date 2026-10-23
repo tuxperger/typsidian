@@ -66,6 +66,16 @@ impl HighlightSession {
         walk::highlight_source(&self.source, windows)
     }
 
+    /// Слова с ошибками в окнах (фича 030): пары `[from, to)` в UTF-16. Разбор —
+    /// дерево сессии, тот же, что у раскраски (research.md §2).
+    pub fn spelling(
+        &self,
+        windows: &[HighlightWindow],
+        checker: &crate::spellcheck::SpellChecker,
+    ) -> Vec<u32> {
+        checker.misspelled_in_source(&self.source, windows)
+    }
+
     /// Правки и раскраска одним вызовом — так их зовут клиенты: на Tauri это
     /// один обход IPC вместо двух. `None` — сессия разошлась с редактором.
     pub fn update(

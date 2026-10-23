@@ -16,6 +16,7 @@ pub mod settings;
 pub mod slides;
 pub mod snapshots;
 pub mod sources;
+pub mod spellcheck;
 pub mod stamp;
 pub mod structure;
 pub mod sync;

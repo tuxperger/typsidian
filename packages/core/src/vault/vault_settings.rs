@@ -106,6 +106,12 @@ pub struct VaultOverrides {
     /// (фича 029, FR-001). `None` — 5.
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub snapshot_interval_minutes: Option<u32>,
+    /// Проверять ли орфографию (фича 030, US3). `None` — да.
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub spellcheck_enabled: Option<bool>,
+    /// Языки проверки, коды `ru`, `en` (фича 030, FR-004). `None` — оба.
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub spellcheck_languages: Option<Vec<String>>,
     /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
     ///
     /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
@@ -591,6 +597,10 @@ const ATTACHMENTS_TABLE: &str = "attachments";
 const SOURCES_TABLE: &str = "sources";
 const LINKS_TABLE: &str = "links";
 const SNAPSHOTS_TABLE: &str = "snapshots";
+const SPELLCHECK_TABLE: &str = "spellcheck";
+
+/// Языки проверки орфографии, которые знает ядро (фича 030, data-model.md).
+pub const SPELLCHECK_LANGUAGES: [&str; 2] = ["ru", "en"];
 
 /// Пределы настроек снимков (фича 029, data-model.md): значение вне них —
 /// «не задано», как и прочие негодные значения файла.
@@ -619,6 +629,8 @@ struct FileShape {
     links: LinksTable,
     #[serde(default)]
     snapshots: SnapshotsTable,
+    #[serde(default)]
+    spellcheck: SpellcheckTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -658,6 +670,31 @@ struct SnapshotsTable {
     keep_days: Option<Value>,
     #[serde(default)]
     interval_minutes: Option<Value>,
+}
+
+/// Таблица орфографии (030). Значения как `Value`: неверное — «не задано».
+#[derive(Debug, Default, Deserialize)]
+struct SpellcheckTable {
+    #[serde(default)]
+    enabled: Option<Value>,
+    #[serde(default)]
+    languages: Option<Value>,
+}
+
+/// Языки из таблицы: известные коды по порядку `SPELLCHECK_LANGUAGES`, без
+/// повторов; не список или ни одного известного — «не задано».
+fn spell_languages(value: Option<&Value>) -> Option<Vec<String>> {
+    let listed: Vec<&str> = value?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let known: Vec<String> = SPELLCHECK_LANGUAGES
+        .iter()
+        .filter(|code| listed.contains(code))
+        .map(|code| (*code).to_owned())
+        .collect();
+    (!known.is_empty()).then_some(known)
 }
 
 /// Число из таблицы в пределах; иначе «не задано».
@@ -831,6 +868,8 @@ impl FileShape {
                 self.snapshots.interval_minutes.as_ref(),
                 &SNAPSHOT_INTERVAL_MINUTES,
             ),
+            spellcheck_enabled: self.spellcheck.enabled.as_ref().and_then(Value::as_bool),
+            spellcheck_languages: spell_languages(self.spellcheck.languages.as_ref()),
             capture: self.capture.into_overrides(),
             graph: self.graph.as_ref().and_then(graph_from_value),
             auto_download_templates: self.templates.auto_download,
@@ -1011,6 +1050,22 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         "interval_minutes",
         overrides.snapshot_interval_minutes.map(Value::from),
     );
+    set_or_remove(
+        &mut document,
+        SPELLCHECK_TABLE,
+        "enabled",
+        overrides.spellcheck_enabled.map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        SPELLCHECK_TABLE,
+        "languages",
+        overrides
+            .spellcheck_languages
+            .as_ref()
+            .and_then(|languages| spell_languages(Some(&Value::from(languages.clone()))))
+            .map(Value::from),
+    );
 
     let capture = overrides.capture.clone().unwrap_or_default();
     set_or_remove(
@@ -1095,6 +1150,7 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, GRAPH_TABLE);
     prune_empty_object(&mut document, LINKS_TABLE);
     prune_empty_object(&mut document, SNAPSHOTS_TABLE);
+    prune_empty_object(&mut document, SPELLCHECK_TABLE);
 
     let mut text =
         serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
@@ -1275,6 +1331,9 @@ mod tests {
             // Фича 029: срок и интервал снимков.
             snapshot_keep_days: Some(30),
             snapshot_interval_minutes: Some(10),
+            // Фича 030: орфография.
+            spellcheck_enabled: Some(false),
+            spellcheck_languages: Some(vec!["en".into()]),
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

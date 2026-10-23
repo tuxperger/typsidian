@@ -25,6 +25,7 @@ import {
 } from "../vault-tree/useVault.js";
 import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
+import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
 import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 
 import { defaultNewBoardName } from "../vault-tree/VaultTreeActions.js";
@@ -552,6 +553,17 @@ function WorkspaceView({
   // Android хранилища устройства нет).
   const vaultSettings = useVaultSettings(clientForConflicts);
   const shortcuts = useShortcuts(clientForConflicts, vaultSettings.overrides);
+
+  // Проверка орфографии (фича 030): проверяющий читает настройки и словарь
+  // vault при открытии vault и после каждой смены его настроек (здесь, в
+  // разделе «Орфография» или снаружи), затем редакторы перепроверяются.
+  useEffect(() => {
+    if (clientForConflicts === null) return;
+    void clientForConflicts.spelling
+      .configure()
+      .then(() => refreshSpelling())
+      .catch(() => undefined);
+  }, [clientForConflicts, vaultSettings.overrides]);
 
   // Настройки графа (фича 025) общие для экрана графа и режима колонки: ключ `graph` в vault.json.
   const graphSettings = useGraphSettings(vaultSettings.overrides, vaultSettings.setGraph);

@@ -39,8 +39,8 @@ import {
 import { parseSnippet, type SnippetFieldState } from "./snippet.js";
 import type { EditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 import { useContextMenu } from "../menu/ContextMenu.js";
-import { editorMenuItems, placeCaretAt } from "./editorContextMenu.js";
-import { typstHighlightFor } from "./highlight/typstHighlight.js";
+import { editorMenuItems, placeCaretAt, spellingMenuItems } from "./editorContextMenu.js";
+import { misspelledAt, refreshSpelling, typstHighlightFor } from "./highlight/typstHighlight.js";
 import {
   attachmentExtension,
   type AttachmentDrop,
@@ -1067,8 +1067,7 @@ export function NoteEditor({
           const view = editorRef.current?.view();
           if (!view || event.shiftKey) return;
           placeCaretAt(view, event.clientX, event.clientY);
-          contextMenu.open(
-            event,
+          const items = () =>
             editorMenuItems(view, {
               openInsertMenu,
               // Позиция — свежая, после `placeCaretAt`: состояние `caret`
@@ -1086,8 +1085,32 @@ export function NoteEditor({
               insertShortcut: shortcuts.displayOf("insert-menu"),
               gotoDefinition: completionEnabled ? () => void goToDefinition() : undefined,
               gotoShortcut: shortcuts.displayOf("goto-definition"),
-            }),
-          );
+            });
+          // Щелчок по подчёркнутому слову (фича 030): сверху исправления. Подсказки
+          // ядро считает заметное время — меню открывается, когда они готовы.
+          const at = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          const misspelled = at === null ? null : misspelledAt(view, at);
+          if (misspelled === null) {
+            contextMenu.open(event, items());
+            return;
+          }
+          event.preventDefault();
+          const { clientX, clientY } = event;
+          const word = view.state.sliceDoc(misspelled.from, misspelled.to);
+          void client.spelling
+            .suggest(word)
+            .catch(() => [])
+            .then((suggestions) =>
+              contextMenu.open(new MouseEvent("contextmenu", { clientX, clientY }), [
+                ...spellingMenuItems(view, misspelled, suggestions, (added) => {
+                  void client.spelling
+                    .addWord(added)
+                    .then(() => refreshSpelling())
+                    .catch(() => contextMenu.notify(t("spellcheck.addFailed")));
+                }),
+                ...items(),
+              ]),
+            );
         }}
         onFieldState={setFieldState}
         {...(fontSize ? { onZoom: fontSize.step } : {})}

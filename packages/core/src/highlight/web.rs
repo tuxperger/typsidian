@@ -29,4 +29,14 @@ impl SyntaxSessionJs {
             .update(&edits, length, &windows)
             .map(|spans| spans.packed)
     }
+
+    /// Слова с ошибками в окнах — пары `[from, to)` (фича 030). Правки сессия
+    /// уже получила в `update`: проверка идёт по её тексту.
+    pub fn spelling(
+        &self,
+        windows: Vec<HighlightWindow>,
+        checker: &crate::spellcheck::web::SpellCheckerJs,
+    ) -> Vec<u32> {
+        self.0.spelling(&windows, checker.inner())
+    }
 }

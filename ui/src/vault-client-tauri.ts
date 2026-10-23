@@ -83,6 +83,7 @@ import type {
   SnapshotReason,
   SnapshotUsage,
   TakeOutcome,
+  SpellConfig,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -511,6 +512,13 @@ export function tauriVaultClient(
           });
           return packed === null ? undefined : Uint32Array.from(packed);
         },
+        spelling: async (windows) => {
+          const pairs = await invoke<number[] | null>("syntax_session_spelling", {
+            id: await id,
+            windows,
+          });
+          return pairs === null ? undefined : Uint32Array.from(pairs);
+        },
         close: () => {
           void id.then((session) => invoke("syntax_session_close", { id: session }));
         },
@@ -573,6 +581,15 @@ export function tauriVaultClient(
       health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
       fix: (request, editorText) =>
         invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
+    },
+
+    // ── Проверка орфографии (фича 030) ──────────────────────────────
+    // Словари вшиты в нативное ядро; проверяющий — состояние оболочки.
+    spelling: {
+      configure: () => invoke<SpellConfig>("spell_configure"),
+      addWord: (word) => invoke<SpellConfig>("spell_add_word", { word }),
+      removeWord: (word) => invoke<SpellConfig>("spell_remove_word", { word }),
+      suggest: (word) => invoke<string[]>("spell_suggest", { word }),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

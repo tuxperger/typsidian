@@ -36,6 +36,8 @@ import {
   linksLinkMention,
   linkHealth,
   linkFix,
+  SpellChecker,
+  type SpellConfig,
   snapshotTake,
   snapshotHistory,
   snapshotDiff,
@@ -78,6 +80,7 @@ import {
   type VaultRecord,
   type VaultEvent,
 } from "./wasm-core/typsidian_core.js";
+import { ensureDictionaries } from "./spellcheck/dictionaries.js";
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import { createWasmCallQueue, type WasmCallQueue } from "./wasm-call-queue.js";
@@ -216,6 +219,10 @@ export function webVaultClient(
     queue.run(withSnapshotRefresh(op));
   const callInternal = <T>(op: () => T | Promise<T>): Promise<T> =>
     queue.runInternal(withSnapshotRefresh(op));
+
+  // Проверяющий орфографии открытого vault (фича 030): настройки и словарь
+  // vault. Сессии подсветки берут его в `spelling`.
+  const speller = new SpellChecker();
 
   const flushRegistry = createFlushRegistry(() => call(() => backend.unresolvedEditPaths()));
 
@@ -373,6 +380,14 @@ export function webVaultClient(
       return {
         update: async (edits, length, windows) => session?.update(edits, length, windows),
         updateNow: (edits, length, windows) => session?.update(edits, length, windows),
+        spelling: async (windows) => {
+          try {
+            return session?.spelling(windows, speller);
+          } catch {
+            // Проверяющий занят перенастройкой — редактор спросит снова.
+            return undefined;
+          }
+        },
         close: () => {
           session?.free();
           session = null;
@@ -428,6 +443,20 @@ export function webVaultClient(
         call(() => linksLinkMention(backend, request, editorText)),
       health: (openTexts) => call(() => linkHealth(backend, openTexts)),
       fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
+    },
+
+    // ── Проверка орфографии (фича 030) ──────────────────────────────
+    spelling: {
+      configure: async (): Promise<SpellConfig> => {
+        const config = await call(() => speller.configure(backend));
+        // Словари едут файлами рядом с модулем; без сети и кэша язык просто
+        // не проверяется, а не считает каждое слово ошибкой.
+        await ensureDictionaries(config.languages).catch(() => undefined);
+        return config;
+      },
+      addWord: (word) => call(() => speller.addWord(backend, word)),
+      removeWord: (word) => call(() => speller.removeWord(backend, word)),
+      suggest: async (word) => speller.suggest(word),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

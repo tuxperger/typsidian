@@ -60,6 +60,8 @@ export interface VaultSettingsState {
   setCapture: (capture: CaptureOverrides) => Promise<boolean>;
   /** Срок и интервал снимков заметок (фича 029); `undefined` — умолчание ядра. */
   setSnapshots: (next: { keepDays: number | undefined; intervalMinutes: number | undefined }) => Promise<boolean>;
+  /** Проверка орфографии (фича 030): включена ли и языки; `undefined` — умолчание ядра. */
+  setSpellcheck: (next: { enabled: boolean; languages: string[] | undefined }) => Promise<boolean>;
   /** Настройки графа связей (фича 025): таблица `graph` целиком, чужие ключи ядро не трогает. */
   setGraph: (graph: GraphSettings) => Promise<boolean>;
   /**
@@ -188,6 +190,20 @@ export function useVaultSettings(
       return written;
     },
     [overrides, write, reload],
+  );
+
+  const setSpellcheck = useCallback(
+    async (next: { enabled: boolean; languages: string[] | undefined }) => {
+      if (overrides === null) return false;
+      // Умолчания (включено, оба языка) — отсутствие ключа, а не значение в нём.
+      const { spellcheck_enabled: _enabled, spellcheck_languages: _languages, ...rest } = overrides;
+      return write({
+        ...rest,
+        ...(next.enabled ? {} : { spellcheck_enabled: false }),
+        ...(next.languages === undefined ? {} : { spellcheck_languages: next.languages }),
+      });
+    },
+    [overrides, write],
   );
 
   const setSnapshots = useCallback(
@@ -353,6 +369,7 @@ export function useVaultSettings(
     setExportFolder,
     setCapture,
     setSnapshots,
+    setSpellcheck,
     setGraph,
     setSourceFiles,
     setAttachments,
