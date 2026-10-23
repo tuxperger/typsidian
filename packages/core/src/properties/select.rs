@@ -817,6 +817,24 @@ pub(crate) fn form_source(
 
 // ── Строка #import ─────────────────────────────────────────────────────────
 
+/// Байт, куда встаёт строка `#import` библиотеки приложения: после записи
+/// свойств (она остаётся первым элементом), иначе — в начало. Общее для
+/// библиотек выборки (020) и встраивания (031).
+pub(crate) fn import_position(linked: &LinkedNode, text: &str) -> usize {
+    match find_records(linked).records.first() {
+        Some(record) => {
+            let rest = &text[record.range.end..];
+            record.range.end
+                + if rest.starts_with("\r\n") {
+                    2
+                } else {
+                    usize::from(rest.starts_with('\n'))
+                }
+        }
+        None => 0,
+    }
+}
+
 /// Правка, добавляющая `#import` библиотеки, если его ещё нет. Строка встаёт
 /// после записи свойств (она остаётся первым элементом), иначе — в начало.
 pub fn select_import_edits(text: &str) -> Vec<TextEdit> {
@@ -830,19 +848,7 @@ pub fn select_import_edits(text: &str) -> Vec<TextEdit> {
     if imported {
         return Vec::new();
     }
-    let at = match find_records(&linked).records.first() {
-        Some(record) => {
-            let rest = &text[record.range.end..];
-            record.range.end
-                + if rest.starts_with("\r\n") {
-                    2
-                } else {
-                    usize::from(rest.starts_with('\n'))
-                }
-        }
-        None => 0,
-    };
-    let at16 = utf16_at(text, at);
+    let at16 = utf16_at(text, import_position(&linked, text));
     vec![TextEdit {
         from: at16,
         to: at16,

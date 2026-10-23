@@ -164,6 +164,9 @@ struct Site {
     /// Как написана цель.
     raw: String,
     embed: bool,
+    /// Встраивание заметки `#embed("…")` (031): весь вызов. Диапазон сайта —
+    /// путь в кавычках.
+    call: Option<(usize, usize)>,
 }
 
 /// Все записи ссылок и вставок заметки по порядку текста.
@@ -179,6 +182,7 @@ fn sites_of(source: &Path, text: &str) -> Vec<Site> {
                 label: site.label,
                 raw: site.raw,
                 embed: false,
+                call: site.call,
             })
         })
         .collect();
@@ -192,6 +196,7 @@ fn sites_of(source: &Path, text: &str) -> Vec<Site> {
                 label: None,
                 raw: String::new(),
                 embed: true,
+                call: None,
             }),
     );
     out.sort_by_key(|site| site.start);
@@ -438,6 +443,24 @@ fn fix_text(source: &Path, text: &str, request: &LinkFixRequest) -> Option<(Stri
     let mut last = first;
     for site in &chosen {
         // Вставка `#image(...)` уходит вместе со знаком `#` перед вызовом.
+        // Встраивание заметки (031): перенаправление меняет только путь в
+        // кавычках — `#раздел` остаётся; «убрать» удаляет весь вызов.
+        if let Some((call_start, call_end)) = site.call {
+            match &redirect {
+                Some(link) => {
+                    out.push_str(&text[cursor..site.start]);
+                    out.push_str(link.trim_start_matches("[[").trim_end_matches("]]"));
+                    cursor = site.end;
+                    last = site.end;
+                }
+                None => {
+                    out.push_str(&text[cursor..call_start]);
+                    cursor = call_end;
+                    last = call_end;
+                }
+            }
+            continue;
+        }
         let start = if site.embed && site.start > 0 && text.as_bytes()[site.start - 1] == b'#' {
             site.start - 1
         } else {
@@ -459,10 +482,10 @@ fn fix_text(source: &Path, text: &str, request: &LinkFixRequest) -> Option<(Stri
         last = site.end;
     }
     out.push_str(&text[cursor..]);
-    let first = if chosen[0].embed && first > 0 && text.as_bytes()[first - 1] == b'#' {
-        first - 1
-    } else {
-        first
+    let first = match (chosen[0].call, &redirect) {
+        (Some((call_start, _)), None) => call_start,
+        _ if chosen[0].embed && first > 0 && text.as_bytes()[first - 1] == b'#' => first - 1,
+        _ => first,
     };
     Some((out, first, last))
 }
@@ -580,6 +603,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(out, "по [[Методика|методике]] и Методика.");
+    }
+
+    #[test]
+    fn a_note_embed_is_redirected_keeping_its_section_or_removed() {
+        // Фича 031: путь в кавычках меняется, `#раздел` остаётся; «убрать» —
+        // весь вызов.
+        let text = "до #embed(\"Методика#Выборка\") после";
+        let redirect = request(
+            "Диссертация/Методика.typ",
+            LinkFix::Redirect {
+                to: "Диссертация/Методология.typ".into(),
+            },
+            None,
+        );
+        let (out, _, _) = fix_text(Path::new(SOURCE), text, &redirect).unwrap();
+        assert_eq!(out, "до #embed(\"Методология#Выборка\") после");
+        let unlink = request("Диссертация/Методика.typ", LinkFix::Unlink, None);
+        let (out, _, _) = fix_text(Path::new(SOURCE), text, &unlink).unwrap();
+        assert_eq!(out, "до  после");
     }
 
     #[test]

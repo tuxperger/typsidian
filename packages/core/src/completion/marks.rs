@@ -185,6 +185,38 @@ pub async fn reference_marks<B: VaultBackend>(
         }
     }
 
+    // Встраивания (031, US2): заметка есть, а раздела или метки нет.
+    let source = Path::new(&request.note_path);
+    let lines = typst::syntax::Lines::new(request.text.as_str());
+    for call in crate::embeds::calls(&request.text) {
+        let target = crate::embeds::parse_target(&call.raw);
+        let part = match &target.part {
+            crate::embeds::EmbedPart::Whole => continue,
+            crate::embeds::EmbedPart::Section(name) => name.clone(),
+            crate::embeds::EmbedPart::Label(name) => format!("<{name}>"),
+        };
+        let Some(path) = resolve_link_target(source, &target.note) else {
+            continue;
+        };
+        let Ok(text) = backend.read(&path).await else {
+            continue;
+        };
+        if crate::embeds::extract(&text, &target.part).is_some() {
+            continue;
+        }
+        let hash = call.raw.find('#').map_or(0, |at| at + 1);
+        let from = call.string.start + hash;
+        marks.push(ReferenceMark {
+            kind: MarkKind::MissingEmbedPart {
+                target: target.note.clone(),
+                part,
+            },
+            from: lines.byte_to_utf16(from).unwrap_or(0) as u32,
+            to: lines.byte_to_utf16(call.string.end).unwrap_or(0) as u32,
+            line: lines.byte_to_line(from).unwrap_or(0) as u32 + 1,
+        });
+    }
+
     // По порядку текста и без пересечений: одна запись — одна отметка.
     marks.sort_by_key(|mark| (mark.from, mark.to));
     let mut end = 0;

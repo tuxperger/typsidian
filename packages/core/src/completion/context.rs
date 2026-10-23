@@ -17,6 +17,9 @@ pub enum Trigger {
     Label,
     /// `[[цель`; `closed` — сразу за кареткой уже стоит `]]`.
     Note { closed: bool },
+    /// Строка цели `#embed("…")` (031): до `#` — заметка, после — раздел или
+    /// метка заметки [`CaretContext::embed_note`].
+    Embed { part: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +29,8 @@ pub struct CaretContext {
     pub from: u32,
     pub to: u32,
     pub query: String,
+    /// Заметка цели встраивания, когда набирается её раздел или метка.
+    pub embed_note: String,
 }
 
 /// Знак, который может стоять в имени метки после `@`.
@@ -51,6 +56,11 @@ pub fn at_in(
     let caret = byte_at(text, offset as usize);
     let line_start = text[..caret].rfind('\n').map_or(0, |at| at + 1);
     let before = &text[line_start..caret];
+
+    // Строка цели встраивания (031): `embed("` и до каретки нет кавычки.
+    if let Some(embed) = embed_context(root, text, line_start, before, caret, offset) {
+        return Ok(embed);
+    }
 
     // Ссылка на метку: `@` и после него только знаки имени.
     let name_start = before
@@ -93,6 +103,42 @@ pub fn at_in(
         from: utf16_at(text, query_byte) as u32,
         to: offset.min(utf16_at(text, text.len()) as u32),
         query: text[query_byte..caret].to_owned(),
+        embed_note: String::new(),
+    })
+}
+
+/// Каретка в строке первого аргумента `embed("…")`: лист у кавычки — строка
+/// (или незакрытая строка), а не текст разметки.
+fn embed_context(
+    root: &SyntaxNode,
+    text: &str,
+    line_start: usize,
+    before: &str,
+    caret: usize,
+    offset: u32,
+) -> Option<CaretContext> {
+    const OPEN: &str = "embed(\"";
+    let open = before.rfind(OPEN)?;
+    let inner = &before[open + OPEN.len()..];
+    if inner.contains('"') {
+        return None;
+    }
+    let quote = line_start + open + OPEN.len() - 1;
+    let linked = LinkedNode::new(root);
+    let leaf = linked.leaf_at(quote + 1, Side::After)?;
+    if !matches!(leaf.kind(), SyntaxKind::Str | SyntaxKind::Error) {
+        return None;
+    }
+    let (part, embed_note, query_byte) = match inner.find('#') {
+        Some(hash) => (true, inner[..hash].trim().to_owned(), quote + 1 + hash + 1),
+        None => (false, String::new(), quote + 1),
+    };
+    Some(CaretContext {
+        target: Trigger::Embed { part },
+        from: utf16_at(text, query_byte) as u32,
+        to: offset.min(utf16_at(text, text.len()) as u32),
+        query: text[query_byte..caret].to_owned(),
+        embed_note,
     })
 }
 

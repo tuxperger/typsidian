@@ -47,16 +47,24 @@ impl PreviewWorld {
 
     /// Задаёт входы сборки `sys.inputs` (фича 020, research.md §8).
     ///
-    /// Приложение кладёт в них результаты блоков `#select(…)`: одной
-    /// JSON-строкой под ключом [`crate::properties::SELECT_INPUT_KEY`]. Без
-    /// входов (`None`) словарь пуст — так же, как у стороннего `typst compile`.
+    /// `inputs` — JSON-объект «ключ → строка»: результаты блоков `#select(…)`
+    /// под [`crate::properties::SELECT_INPUT_KEY`] (020) и ответы встраиваний
+    /// под [`crate::embeds::EMBED_INPUT_KEY`] (031), каждое значение — своя
+    /// JSON-строка. Без входов (`None`) словарь пуст — так же, как у стороннего
+    /// `typst compile`.
     pub fn with_inputs(mut self, inputs: Option<&str>) -> Self {
-        if let Some(json) = inputs {
+        let entries: Option<serde_json::Map<String, serde_json::Value>> =
+            inputs.and_then(|json| serde_json::from_str(json).ok());
+        if let Some(entries) = entries {
             let mut dict = typst::foundations::Dict::new();
-            dict.insert(
-                crate::properties::SELECT_INPUT_KEY.into(),
-                typst::foundations::Value::Str(json.into()),
-            );
+            for (key, value) in entries {
+                if let serde_json::Value::String(value) = value {
+                    dict.insert(
+                        key.as_str().into(),
+                        typst::foundations::Value::Str(value.into()),
+                    );
+                }
+            }
             self.library =
                 LazyHash::new(<Library as LibraryExt>::builder().with_inputs(dict).build());
         }

@@ -243,7 +243,33 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
     // Входы блоков выборки (фича 020, research.md §8): считаются по индексу
     // свойств один раз на сборку. Предпросмотр и экспорт идут через этот цикл,
     // поэтому PDF получает ровно те же строки, что и предпросмотр.
-    let inputs = crate::properties::compile_inputs(backend, source_text).await;
+    let select = crate::properties::compile_inputs(backend, source_text).await;
+
+    // Встраивания (фича 031, research.md §2): встроенные заметки и разделы —
+    // виртуальными файлами в снимок рядом с исходной заметкой, ответы целей —
+    // входом сборки. Библиотеку `embed.typ` сборка получает и тогда, когда её
+    // файла в vault ещё нет.
+    let embeds = crate::embeds::plan(backend, note_path, source_text).await;
+    for (path, text) in &embeds.files {
+        if let Ok(id) = DependencySnapshot::file_id(path) {
+            snapshot.insert(id, Bytes::new(text.as_bytes().to_vec()));
+        }
+    }
+    if embeds.inputs.is_some() {
+        if let Ok(id) = DependencySnapshot::file_id(crate::embeds::LIBRARY_PATH) {
+            if backend
+                .file_mark(std::path::Path::new(crate::embeds::LIBRARY_PATH))
+                .await
+                .is_none()
+            {
+                snapshot.insert(
+                    id,
+                    Bytes::new(crate::embeds::LIBRARY_TEXT.as_bytes().to_vec()),
+                );
+            }
+        }
+    }
+    let inputs = compile_inputs_json(select, embeds.inputs);
 
     // Причины отказов копятся между проходами: файл, который не прочитался,
     // на следующем проходе уже не запрашивается, а его имя обязано дойти до
@@ -295,7 +321,13 @@ pub(crate) async fn compile_collecting_failures<B: VaultBackend, E: CompileExecu
             packages.absorb(&returned);
             packages.remember_vault_files(note_path, &returned, &marks);
             let (mut document, pdf) = with_font_problems((document, pdf));
-            document.dependencies = vault_dependencies(main, &returned, &failures);
+            document.dependencies = vault_dependencies(main, &returned, &failures)
+                .into_iter()
+                .filter(|path| !is_embed_file(path))
+                .chain(embeds.sources.iter().cloned())
+                .collect();
+            document.dependencies.sort();
+            document.dependencies.dedup();
             return Ok((document, pdf, failures));
         }
 
@@ -1072,4 +1104,34 @@ pub fn time_slides_collect(
     let elapsed = started.elapsed();
     std::hint::black_box(info);
     Some(elapsed)
+}
+
+/// Входы сборки одним JSON-объектом «ключ → строка» (`PreviewWorld::with_inputs`).
+fn compile_inputs_json(select: Option<String>, embed: Option<String>) -> Option<String> {
+    let mut entries = serde_json::Map::new();
+    if let Some(select) = select {
+        entries.insert(
+            crate::properties::SELECT_INPUT_KEY.to_owned(),
+            serde_json::Value::String(select),
+        );
+    }
+    if let Some(embed) = embed {
+        entries.insert(
+            crate::embeds::EMBED_INPUT_KEY.to_owned(),
+            serde_json::Value::String(embed),
+        );
+    }
+    (!entries.is_empty())
+        .then(|| serde_json::to_string(&serde_json::Value::Object(entries)).ok())
+        .flatten()
+}
+
+/// Виртуальный файл встройки (031): в зависимостях его нет — следить за ним
+/// нечем, вместо него в зависимостях встроенная заметка.
+fn is_embed_file(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .and_then(|name| name.strip_suffix(".typ"))
+        .and_then(|stem| stem.rsplit_once(".embed-"))
+        .is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
 }

@@ -33,6 +33,7 @@ import { links } from "./en/links.js";
 import { slides } from "./en/slides.js";
 import { snapshots } from "./en/snapshots.js";
 import { spellcheck } from "./en/spellcheck.js";
+import { embeds } from "./en/embeds.js";
 import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
@@ -64,6 +65,7 @@ export const en = {
   ...slides,
   ...snapshots,
   ...spellcheck,
+  ...embeds,
   ...properties,
   ...importing,
   ...capture,

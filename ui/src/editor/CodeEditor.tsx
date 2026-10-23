@@ -193,7 +193,11 @@ const viewListener: Extension = EditorView.updateListener.of((update) => {
     const head = update.state.selection.main.head;
     if (typed && head > 0) {
       const last = update.state.doc.sliceString(Math.max(0, head - 2), head);
-      if (last.endsWith("@") || last === "[[") callbacks.onCompletionTrigger(head);
+      // Встраивание (031): открывающая кавычка `embed("` и `#` раздела в ней.
+      const lineStart = update.state.doc.lineAt(head).from;
+      const before = update.state.doc.sliceString(lineStart, head);
+      const inEmbed = /embed\("[^"]*$/.test(before) && /["#]$/.test(before);
+      if (last.endsWith("@") || last === "[[" || inEmbed) callbacks.onCompletionTrigger(head);
     }
   }
 });

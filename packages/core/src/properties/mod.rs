@@ -38,6 +38,7 @@ pub use query::{
     SelectionRow, SortKey, Ymd,
 };
 pub use read::read;
+pub(crate) use select::import_position;
 pub use select::{
     compile_inputs, ensure_select_library, inputs_digest, select_blocks, select_import_edits,
     select_inputs, select_library, LibraryStatus, SelectBlock, SelectLibrary, SELECT_INPUT_KEY,

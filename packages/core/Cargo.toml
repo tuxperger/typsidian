@@ -275,3 +275,8 @@ harness = false
 [[bench]]
 name = "spellcheck_scale"
 harness = false
+
+# План встраиваний заметки с 10 встраиваниями (фича 031, T008, SC-001).
+[[bench]]
+name = "embeds_scale"
+harness = false

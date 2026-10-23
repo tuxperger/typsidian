@@ -1191,6 +1191,28 @@ function WorkspaceView({
   const triggerCompletion = useCallback(() => {
     if (openNotePath !== null) requestCompletion("trigger");
   }, [openNotePath, requestCompletion]);
+  // «Встроить заметку» (фича 031): ядро пишет библиотеку и даёт правки —
+  // `#import` при отсутствии и `#embed("")` у каретки; затем дополнение.
+  const embedNote = useCallback(async () => {
+    const active = activeEditorRef.current();
+    if (active === null || state.client === null) return;
+    const { view } = active;
+    try {
+      const inserted = await state.client.embeds.insert(
+        view.state.doc.toString(),
+        view.state.selection.main.head,
+      );
+      view.dispatch({
+        changes: inserted.edits.map((edit) => ({ from: edit.from, to: edit.to, insert: edit.insert })),
+        selection: { anchor: inserted.caret },
+        userEvent: "input",
+      });
+      view.focus();
+      requestCompletion("trigger");
+    } catch {
+      contextMenu.notify(t("embeds.insertFailed"));
+    }
+  }, [state.client, requestCompletion, contextMenu, t]);
   const gotoDefinition = useCallback(() => {
     if (openNotePath !== null) requestCompletion("goto");
   }, [openNotePath, requestCompletion]);
@@ -2144,6 +2166,15 @@ function WorkspaceView({
         });
       }
     }
+    // Фича 031. «Встроить заметку» — у открытой заметки Typst.
+    if (view === "workspace" && outlineNotePath !== null) {
+      items.push({
+        id: "embed-note",
+        ...titled("embeds.command"),
+        icon: "plus",
+        run: () => void embedNote(),
+      });
+    }
     // Фича 016. «Вставить изображение…» — у открытой заметки Typst; в vault
     // только на чтение пачка отвечает отказом с причиной (FR-024).
     if (view === "workspace" && outlineNotePath !== null) {
@@ -2446,6 +2477,7 @@ function WorkspaceView({
     dailyOpenPrevious,
     dailyOpenNext,
     openManualCapture,
+    embedNote,
     activePath,
     isBoardOpen,
     t,

@@ -1101,6 +1101,22 @@ async fn snapshots_clear(state: State<'_, Vault>) -> Answer<u32, Failure<()>> {
         .map_err(|_| Failure::Core(())))
 }
 
+// ── Встраивание заметок (фича 031) ──────────────────────────────────────────
+
+/// «Встроить заметку»: библиотека в vault, `#import` и `#embed("")` у каретки.
+#[tauri::command]
+async fn embed_insert(
+    text: String,
+    offset: u32,
+    state: State<'_, Vault>,
+) -> Answer<typsidian_core::embeds::EmbedInsertion, Failure<()>> {
+    with_vault!(state, |backend| typsidian_core::embeds::insert_embed(
+        backend, &text, offset
+    )
+    .await
+    .map_err(|_| Failure::Core(())))
+}
+
 // ── Проверка орфографии (фича 030) ──────────────────────────────────────────
 
 /// Проверяющий открытого vault: настройки и словарь vault (030 research.md §5).
@@ -2984,6 +3000,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             syntax_session_update,
             syntax_session_close,
             syntax_session_spelling,
+            embed_insert,
             spell_configure,
             spell_add_word,
             spell_remove_word,

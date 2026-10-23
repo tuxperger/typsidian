@@ -125,6 +125,8 @@ pub enum GroupKind {
     Labels,
     Sources,
     Notes,
+    /// Разделы заметки цели встраивания (031).
+    Sections,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +149,10 @@ pub enum ItemDetail {
     Note {
         folder: String,
         same_folder: bool,
+    },
+    /// Раздел заметки цели встраивания (031): уровень заголовка.
+    Section {
+        level: u8,
     },
 }
 
@@ -231,6 +237,18 @@ pub async fn completions<B: VaultBackend>(
                 notes::candidates(&request.note_path, &notes, &caret.query, closed),
             )
         }
+        // Встраивание (031): заметки до `#`, разделы и метки цели после.
+        context::Trigger::Embed { part: false } => {
+            let notes = backend.list().await;
+            (
+                CompletionTarget::Note,
+                notes::candidates(&request.note_path, &notes, &caret.query, true),
+            )
+        }
+        context::Trigger::Embed { part: true } => (
+            CompletionTarget::Label,
+            embed_parts(backend, &request.note_path, &caret.embed_note, &caret.query).await,
+        ),
     };
     CompletionList {
         target,
@@ -336,6 +354,11 @@ pub enum MarkKind {
     LinkOutsideVault {
         target: String,
     },
+    /// Встраивание (031): заметка есть, а раздела или метки в ней нет.
+    MissingEmbedPart {
+        target: String,
+        part: String,
+    },
     DuplicateLabel {
         name: String,
         others: Vec<DuplicatePlace>,
@@ -391,4 +414,63 @@ pub(crate) fn match_tier(name: &str, query: &str) -> Option<(u8, Vec<(u32, u32)>
         2
     };
     Some((tier, vec![(start, start + length)]))
+}
+
+/// Разделы и метки заметки цели встраивания (031, US1 AS4): вставка —
+/// текст заголовка или `<метка>`.
+async fn embed_parts<B: VaultBackend>(
+    backend: &B,
+    note_path: &str,
+    note: &str,
+    query: &str,
+) -> Vec<CompletionGroup> {
+    let Some(path) = crate::graph::resolve_link_target(std::path::Path::new(note_path), note)
+    else {
+        return Vec::new();
+    };
+    let Ok(text) = backend.read(&path).await else {
+        return Vec::new();
+    };
+    let structure = crate::structure::parse(&text);
+    let preview = |part: &str| format!("#embed(\"{note}#{part}\")");
+    let sections: Vec<CompletionItem> = structure
+        .headings
+        .iter()
+        .filter_map(|heading| {
+            let (_, matched) = match_tier(&heading.text, query)?;
+            Some(CompletionItem {
+                label: heading.text.clone(),
+                matched,
+                detail: ItemDetail::Section {
+                    level: heading.level,
+                },
+                insert: heading.text.clone(),
+                preview: preview(&heading.text),
+            })
+        })
+        .collect();
+    let labels: Vec<CompletionItem> = structure
+        .labels
+        .iter()
+        .filter_map(|label| {
+            let (_, matched) = match_tier(&label.name, query)?;
+            let insert = format!("<{}>", label.name);
+            Some(CompletionItem {
+                label: label.name.clone(),
+                matched,
+                detail: ItemDetail::Label {
+                    label_kind: label.kind,
+                    text: label.text.clone(),
+                    file: None,
+                    duplicate: false,
+                },
+                preview: preview(&insert),
+                insert,
+            })
+        })
+        .collect();
+    let mut groups = Vec::new();
+    labels::push_group(&mut groups, GroupKind::Sections, sections);
+    labels::push_group(&mut groups, GroupKind::Labels, labels);
+    groups
 }

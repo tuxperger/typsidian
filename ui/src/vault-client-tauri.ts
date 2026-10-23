@@ -84,6 +84,7 @@ import type {
   SnapshotUsage,
   TakeOutcome,
   SpellConfig,
+  EmbedInsertion,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -581,6 +582,11 @@ export function tauriVaultClient(
       health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
       fix: (request, editorText) =>
         invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
+    },
+
+    // ── Встраивание заметок (фича 031) ──────────────────────────────
+    embeds: {
+      insert: (text, offset) => invoke<EmbedInsertion>("embed_insert", { text, offset }),
     },
 
     // ── Проверка орфографии (фича 030) ──────────────────────────────

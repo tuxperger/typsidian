@@ -37,6 +37,7 @@ import {
   linkHealth,
   linkFix,
   SpellChecker,
+  embedInsert,
   type SpellConfig,
   snapshotTake,
   snapshotHistory,
@@ -443,6 +444,11 @@ export function webVaultClient(
         call(() => linksLinkMention(backend, request, editorText)),
       health: (openTexts) => call(() => linkHealth(backend, openTexts)),
       fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
+    },
+
+    // ── Встраивание заметок (фича 031) ──────────────────────────────
+    embeds: {
+      insert: (text, offset) => call(() => embedInsert(backend, text, offset)),
     },
 
     // ── Проверка орфографии (фича 030) ──────────────────────────────

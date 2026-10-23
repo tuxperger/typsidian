@@ -28,9 +28,13 @@ pub struct LinkSite {
     /// Отображаемый текст из записи `[[путь|текст]]`; `None`, если `|` нет или
     /// после неё пусто.
     pub label: Option<String>,
-    /// Диапазон всей записи вместе со скобками `[[…]]`, в байтах текста.
+    /// Диапазон всей записи вместе со скобками `[[…]]`, в байтах текста. У
+    /// встраивания — путь заметки внутри кавычек, без `#раздела`.
     pub byte_start: usize,
     pub byte_end: usize,
+    /// Встраивание `#embed("…")` (фича 031): весь вызов, с `#`. У `[[…]]` —
+    /// `None`.
+    pub call: Option<(usize, usize)>,
 }
 
 /// Все ссылки заметки с их местами, в порядке следования в тексте.
@@ -65,6 +69,7 @@ pub fn link_sites(content: &str) -> Vec<LinkSite> {
                         label,
                         byte_start: i,
                         byte_end,
+                        call: None,
                     });
                 }
                 i = byte_end;
@@ -73,6 +78,25 @@ pub fn link_sites(content: &str) -> Vec<LinkSite> {
         }
         i += 1;
     }
+    // Встраивания — тоже ссылки (031, research.md §4): индекс, связи, граф,
+    // перенос и «Состояние ссылок» видят их без своего разбора.
+    for call in crate::embeds::calls(content) {
+        let note_end = call.raw.find('#').unwrap_or(call.raw.len());
+        let note = &call.raw[..note_end];
+        let trimmed = note.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let start = call.string.start + (note.len() - note.trim_start().len());
+        sites.push(LinkSite {
+            raw: trimmed.to_owned(),
+            label: None,
+            byte_start: start,
+            byte_end: start + trimmed.len(),
+            call: Some((call.call.start, call.call.end)),
+        });
+    }
+    sites.sort_by_key(|site| site.byte_start);
     sites
 }
 

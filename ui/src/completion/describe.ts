@@ -17,6 +17,8 @@ export function groupTitle(t: Translate, kind: GroupKind): string {
       return t("completion.group.sources");
     case "Notes":
       return t("completion.group.notes");
+    case "Sections":
+      return t("embeds.group.sections");
   }
 }
 
@@ -62,6 +64,13 @@ export function itemFacts(
             : `/${detail.folder}/`,
         duplicate: false,
       };
+    case "Section":
+      return {
+        tag: t("embeds.kind.section"),
+        text: "",
+        side: "=".repeat(detail.level),
+        duplicate: false,
+      };
   }
 }
 
@@ -97,6 +106,11 @@ export function markText(t: Translate, kind: MarkKind): { title: string; detail:
       return {
         title: t("completion.mark.outside", { target: kind.target }),
         detail: t("completion.mark.outsideDetail"),
+      };
+    case "MissingEmbedPart":
+      return {
+        title: t("embeds.mark.missingPart", { target: kind.target, part: kind.part }),
+        detail: t("embeds.mark.missingPartDetail"),
       };
     case "DuplicateLabel": {
       const places = kind.others
