@@ -28,6 +28,7 @@ import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel.js";
 import { TasksScreen } from "../tasks/TasksScreen.js";
+import { SlidesExportDialog } from "../slides/SlidesExportDialog.js";
 import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
 import { useBookmarks, type BookmarkAddResult } from "../bookmarks/useBookmarks.js";
 import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
@@ -80,7 +81,7 @@ import {
   SPLIT_MIN,
   usePaneLayout,
 } from "./usePaneLayout.js";
-import { hintWith, useShortcuts } from "./useShortcuts.js";
+import { hintWith, NOTHING_OVERRIDDEN, useShortcuts } from "./useShortcuts.js";
 import { EditorGroups } from "./tabs/EditorGroups.js";
 import { OpenNotesSheet } from "./tabs/OpenNotesSheet.js";
 import type { WorkspaceTabsStore } from "./tabs/tabs-store.js";
@@ -345,6 +346,8 @@ function WorkspaceView({
   const [revealFolder, setRevealFolder] = useState<{ path: string; seq: number } | null>(null);
   // Окно «Задачи» (фича 033).
   const [tasksOpen, setTasksOpen] = useState(false);
+  // Окно «Экспорт презентации» (фича 035).
+  const [slidesExportOpen, setSlidesExportOpen] = useState(false);
   // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
   const [selectRequest, setSelectRequest] = useState<{ id: number; conditions: Condition[] } | null>(null);
   // select.typ правили вручную и оставили как есть: предупреждение в колонке свойств.
@@ -2249,6 +2252,15 @@ function WorkspaceView({
         });
       }
     }
+    // Фича 035. «Экспорт презентации» — у открытой заметки Typst.
+    if (view === "workspace" && outlineNotePath !== null && previewClient !== null) {
+      items.push({
+        id: "slides-export",
+        ...titled("slides.export.command"),
+        icon: "download",
+        run: () => setSlidesExportOpen(true),
+      });
+    }
     // Фича 033. «Задачи» — всегда при открытом vault; «Переключить задачу» —
     // у открытой заметки Typst.
     if (state.client !== null) {
@@ -2856,6 +2868,7 @@ function WorkspaceView({
               shortcut={shortcuts.displayOf("start-show")}
               active={showSession.active}
               onStart={startShow}
+              onExport={() => setSlidesExportOpen(true)}
             />
           )}
 
@@ -3302,6 +3315,16 @@ function WorkspaceView({
           }}
           failing={snapshotsFailing}
           onClose={() => setHistoryPath(null)}
+        />
+      )}
+
+      {slidesExportOpen && previewClient !== null && openNotePath !== null && (
+        <SlidesExportDialog
+          client={previewClient}
+          notePath={openNotePath}
+          text={() => noteEditors.textOf(openNotePath)}
+          overrides={vaultSettings.overrides ?? NOTHING_OVERRIDDEN}
+          onClose={() => setSlidesExportOpen(false)}
         />
       )}
 

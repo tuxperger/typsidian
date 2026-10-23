@@ -13,6 +13,8 @@ export interface ShowMenuProps {
   /** Идёт показ: кнопка не запускает второй. */
   active: boolean;
   onStart: (from: "caret" | "first", withPresenter: boolean) => void;
+  /** «Экспорт презентации…» (фича 035); не передан — пункта нет. */
+  onExport?: (() => void) | undefined;
 }
 
 interface Item {
@@ -28,7 +30,13 @@ interface Item {
  * Кнопка «Показ» с меню вариантов запуска (A1). Основное действие — «с текущего
  * слайда»; стрелка раскрывает «с начала» и «сразу с видом докладчика».
  */
-export function ShowMenu({ canPresent, shortcut, active, onStart }: ShowMenuProps): React.JSX.Element {
+export function ShowMenu({
+  canPresent,
+  shortcut,
+  active,
+  onStart,
+  onExport,
+}: ShowMenuProps): React.JSX.Element {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +78,16 @@ export function ShowMenu({ canPresent, shortcut, active, onStart }: ShowMenuProp
             title: "slides.menu.withPresenter" as const,
             hint: "slides.menu.withPresenterHint" as const,
             run: () => onStart("caret", true),
+          },
+        ]
+      : []),
+    ...(onExport !== undefined
+      ? [
+          {
+            id: "export",
+            icon: "download" as const,
+            title: "slides.export.menu" as const,
+            run: onExport,
           },
         ]
       : []),

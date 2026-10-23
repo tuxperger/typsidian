@@ -7,6 +7,8 @@ import type {
   ExportReport,
   ExportFormat,
   SiteLabels,
+  SlidesExportReport,
+  SlidesExportRequest,
   InstalledTemplate,
   InstallReport,
   LinkedIndex,
@@ -127,6 +129,13 @@ export interface PreviewClient {
     site: string[],
     labels: SiteLabels,
   ): Promise<ExportReport>;
+  /** Экспорт презентации (фича 035): PDF, PDF с заметками, pdfpc, PNG или SVG. */
+  exportSlides(
+    notePath: string,
+    text: string | null,
+    overrides: VaultOverrides,
+    request: SlidesExportRequest,
+  ): Promise<SlidesExportReport>;
   /** Оглавление сайта HTML; ответ — путь `index.html`. */
   exportSiteIndex(overrides: VaultOverrides, site: string[], labels: SiteLabels): Promise<string>;
   /** Zip страниц сайта — только web, где файлы скачивают (FR-005). */

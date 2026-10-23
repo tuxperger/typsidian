@@ -1,4 +1,5 @@
 import type { Entries } from "../define.js";
+import { enN } from "../define.js";
 
 // Режим показа слайдов (`slides.*`) — фича 019.
 export const slides = {
@@ -60,4 +61,33 @@ export const slides = {
 
   // ── Android (A8) ───────────────────────────────────────────────────
   "slides.overlay.exit": "Exit",
+
+  // ── Export (feature 035) ───────────────────────────────────────────
+  "slides.export.menu": "Export presentation…",
+  "slides.export.command": "Export presentation",
+  "slides.export.title": "Export presentation",
+  "slides.export.close": "Close",
+  "slides.export.format": "Format",
+  "slides.export.pdf": "Slides PDF",
+  "slides.export.pdfHint": "a page per slide",
+  "slides.export.notes": "PDF with notes pages",
+  "slides.export.notesHint": "the slide and the speaker notes under it",
+  "slides.export.pdfpc": "PDF for pdfpc",
+  "slides.export.pdfpcHint": "all steps and a .pdfpc notes file next to it",
+  "slides.export.png": "PNG images",
+  "slides.export.pngHint": "a file per slide in a .slides folder",
+  "slides.export.svg": "SVG images",
+  "slides.export.svgHint": "vector, a file per slide",
+  "slides.export.steps": "Steps",
+  "slides.export.lastStep": "last step",
+  "slides.export.allSteps": "all steps",
+  "slides.export.scale": "Scale",
+  "slides.export.start": "Export",
+  "slides.export.running": "Exporting…",
+  "slides.export.done": (p: { count: number }) => `Done: ${enN(p.count, "# page", "# pages")}`,
+  "slides.export.more": (p: { count: number }) => `and ${p.count} more`,
+  "slides.export.failed": "The presentation didn’t build — nothing was written.",
+  "slides.export.noSlides": "The presentation has no pages.",
+  "slides.export.writeFailed": "Couldn’t write the files to the export folder.",
+  "slides.export.folder": "Files go to the export folder of the vault",
 } as const satisfies Entries;

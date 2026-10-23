@@ -1,4 +1,5 @@
 import type { Translation } from "../define.js";
+import { ruN } from "../define.js";
 import type { slides as en } from "../en/slides.js";
 
 // Режим показа слайдов (`slides.*`) — фича 019.
@@ -60,4 +61,33 @@ export const slides: Translation<typeof en> = {
 
   // ── Android (A8) ───────────────────────────────────────────────────
   "slides.overlay.exit": "Выйти",
+
+  // ── Экспорт (фича 035) ─────────────────────────────────────────────
+  "slides.export.menu": "Экспорт презентации…",
+  "slides.export.command": "Экспорт презентации",
+  "slides.export.title": "Экспорт презентации",
+  "slides.export.close": "Закрыть",
+  "slides.export.format": "Формат",
+  "slides.export.pdf": "PDF слайдов",
+  "slides.export.pdfHint": "страница на слайд",
+  "slides.export.notes": "PDF со страницами заметок",
+  "slides.export.notesHint": "слайд и заметки докладчика под ним",
+  "slides.export.pdfpc": "PDF для pdfpc",
+  "slides.export.pdfpcHint": "все шаги и файл заметок .pdfpc рядом",
+  "slides.export.png": "Картинки PNG",
+  "slides.export.pngHint": "файл на слайд в папке .slides",
+  "slides.export.svg": "Картинки SVG",
+  "slides.export.svgHint": "векторные, файл на слайд",
+  "slides.export.steps": "Шаги",
+  "slides.export.lastStep": "последний шаг",
+  "slides.export.allSteps": "все шаги",
+  "slides.export.scale": "Масштаб",
+  "slides.export.start": "Экспортировать",
+  "slides.export.running": "Экспортирую…",
+  "slides.export.done": (p) => `Готово: ${ruN(p.count, "# страница", "# страницы", "# страниц")}`,
+  "slides.export.more": (p) => `и ещё ${p.count}`,
+  "slides.export.failed": "Презентация не собралась — ничего не записано.",
+  "slides.export.noSlides": "В презентации нет страниц.",
+  "slides.export.writeFailed": "Не удалось записать файлы в папку экспорта.",
+  "slides.export.folder": "Файлы — в папке экспорта vault",
 };

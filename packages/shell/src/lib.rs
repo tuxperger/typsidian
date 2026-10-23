@@ -1877,6 +1877,30 @@ async fn export_pdf(
     .await))
 }
 
+/// Экспорт презентации (фича 035): тот же движок, что у PDF.
+#[tauri::command]
+async fn export_slides(
+    state: State<'_, Vault>,
+    engine: State<'_, Preview>,
+    note_path: String,
+    text: Option<String>,
+    overrides: VaultOverrides,
+    request: typsidian_core::slides::export::SlidesExportRequest,
+) -> Answer<typsidian_core::slides::export::SlidesExportReport, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        typsidian_core::slides::export::export_slides(
+            backend,
+            &engine.packages,
+            &note_path,
+            text.as_deref(),
+            engine.fonts.clone(),
+            &overrides,
+            &request,
+        )
+        .await
+    ))
+}
+
 /// Экспортирует заметку страницей HTML (фича 034): тот же движок, что у PDF.
 #[tauri::command]
 async fn export_html(
@@ -3203,6 +3227,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             preview_installed_templates,
             export_pdf,
             export_html,
+            export_slides,
             export_site_index,
             export_batch_with_format,
             export_candidates,

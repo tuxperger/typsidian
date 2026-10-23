@@ -688,6 +688,7 @@ pub mod relocate_cases;
 pub mod replace_cases;
 pub mod search_cases;
 pub mod slides_cases;
+pub mod slides_export_cases;
 pub mod snapshots_cases;
 pub mod sources_cases;
 pub mod spellcheck_cases;

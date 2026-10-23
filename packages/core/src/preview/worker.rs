@@ -17,8 +17,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use super::compile::{
-    CompileExecutor, CompileJob, CompileOutput, CompiledDocument, ExecutorError, PdfMeta, Render,
-    BUILD_TIME_LIMIT_SECS,
+    CompileExecutor, CompileJob, CompileOutput, CompiledDocument, ExecutorError, ImagesSpec,
+    PdfMeta, Render, BUILD_TIME_LIMIT_SECS,
 };
 use super::fonts::FontSet;
 use super::packages::parse_spec;
@@ -74,6 +74,12 @@ struct JobHeader {
     /// Нужна страница HTML (фича 034).
     #[serde(default)]
     html: bool,
+    /// Только эти страницы PDF (фича 035).
+    #[serde(default)]
+    pdf_pages: Option<Vec<u32>>,
+    /// Картинки страниц: масштаб PNG (`None` — SVG) и страницы (фича 035).
+    #[serde(default)]
+    images: Option<(Option<f32>, Vec<u32>)>,
     /// Входы блоков выборки (фича 020): JSON-строка для `sys.inputs`.
     #[serde(default)]
     inputs: Option<String>,
@@ -118,8 +124,16 @@ fn encode_job(job: &CompileJob, builtin_fonts: usize) -> Result<JsValue, JsValue
         revision: job.revision,
         files: ids.iter().map(|id| FileKey::of(*id)).collect(),
         pdf_ident: match &job.render {
-            Render::Pages | Render::Html => None,
+            Render::Pages | Render::Html | Render::Images(_) => None,
             Render::Pdf(meta) => Some(meta.ident.clone()),
+        },
+        pdf_pages: match &job.render {
+            Render::Pdf(meta) => meta.pages.clone(),
+            _ => None,
+        },
+        images: match &job.render {
+            Render::Images(spec) => Some((spec.png_scale, spec.pages.clone())),
+            _ => None,
         },
         html: matches!(job.render, Render::Html),
         inputs: job.inputs.clone(),
@@ -179,10 +193,14 @@ pub fn run_compile_job(message: JsValue) -> Result<JsValue, JsValue> {
                 .iter()
                 .map(|bytes| Bytes::new(js_sys::Uint8Array::new(&bytes).to_vec())),
         );
-    let render = match (header.pdf_ident, header.html) {
-        (_, true) => Render::Html,
-        (None, false) => Render::Pages,
-        (Some(ident), false) => Render::Pdf(PdfMeta { ident }),
+    let render = match (header.pdf_ident, header.html, header.images) {
+        (_, true, _) => Render::Html,
+        (_, false, Some((png_scale, pages))) => Render::Images(ImagesSpec { png_scale, pages }),
+        (None, false, None) => Render::Pages,
+        (Some(ident), false, None) => Render::Pdf(PdfMeta {
+            ident,
+            pages: header.pdf_pages,
+        }),
     };
 
     let output = CompileJob {

@@ -753,6 +753,8 @@ function webPreviewClient(
     // через очередь: они пишут и читают файлы vault.
     exportHtml: (notePath, text, overrides, site, labels) =>
       withFonts(() => engine.exportHtml(backend, notePath, text ?? undefined, overrides, site, labels)),
+    exportSlides: (notePath, text, overrides, request) =>
+      withFonts(() => engine.exportSlides(backend, notePath, text ?? undefined, overrides, request)),
     exportSiteIndex: (overrides, site, labels) =>
       call(() => exportSiteIndex(backend, overrides, site, labels)),
     exportSiteArchive: (overrides, site) =>

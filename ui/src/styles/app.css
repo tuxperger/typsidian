@@ -10885,3 +10885,58 @@ button.ts-props__chipbtn,
   font: 10.5px var(--font-mono);
   color: var(--warning);
 }
+
+/* ── Экспорт презентации (фича 035, макет P1) ─────────────────────────────── */
+
+.ts-slides-export {
+  max-width: 560px;
+}
+
+.ts-slides-export__formats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+}
+
+.ts-slides-export__format {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 7px 10px;
+  border: var(--border-width) solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ts-slides-export__format input {
+  accent-color: var(--orange-500);
+  margin-top: 3px;
+}
+
+.ts-slides-export__format--on {
+  border-color: var(--orange-500);
+  background: rgba(255, 106, 0, 0.08);
+}
+
+.ts-slides-export__name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--steel-100);
+}
+
+.ts-slides-export__hint {
+  display: block;
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-slides-export__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+}

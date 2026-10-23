@@ -15,6 +15,7 @@
 
 pub(crate) mod collect;
 pub mod deck;
+pub mod export;
 pub mod keys;
 #[cfg(target_arch = "wasm32")]
 pub mod web;

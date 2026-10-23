@@ -279,6 +279,28 @@ impl PreviewEngine {
         .await
     }
 
+    /// Экспорт презентации (фича 035): тот же движок, что у PDF.
+    #[wasm_bindgen(js_name = exportSlides)]
+    pub async fn export_slides_js(
+        &self,
+        backend: &mut crate::vault::web::WebBackend,
+        note_path: &str,
+        source_text: Option<String>,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+        request: crate::slides::export::SlidesExportRequest,
+    ) -> crate::slides::export::SlidesExportReport {
+        crate::slides::export::export_slides(
+            backend,
+            &self.packages,
+            note_path,
+            source_text.as_deref(),
+            self.fonts.clone(),
+            &overrides,
+            &request,
+        )
+        .await
+    }
+
     /// Установить шаблон по явному запросу пользователя (FR-010).
     ///
     /// Выключатель автозагрузки здесь не спрашивается намеренно: выключен

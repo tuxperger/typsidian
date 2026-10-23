@@ -119,6 +119,28 @@ pub fn compile_note(
     .0)
 }
 
+/// Собирает документ из готовых файлов без vault (фича 035: страницы заметок
+/// докладчика из SVG слайдов). Файлы — пути относительно корня и байты.
+pub(crate) fn compile_composed(
+    main_path: &str,
+    source_text: &str,
+    files: &[(String, Vec<u8>)],
+    fonts: FontSet,
+    render: &Render,
+) -> Result<(CompiledDocument, PdfBytes), SnapshotError> {
+    let main = DependencySnapshot::file_id(main_path)?;
+    let mut snapshot = DependencySnapshot::new();
+    snapshot.insert(main, Bytes::new(source_text.as_bytes().to_vec()));
+    for (path, bytes) in files {
+        snapshot.insert(
+            DependencySnapshot::file_id(path)?,
+            Bytes::new(bytes.clone()),
+        );
+    }
+    let (document, bytes, _) = compile_with(main, main_path, snapshot, 0, fonts, render, None);
+    Ok((document, bytes))
+}
+
 /// Собирает заметку, догружая связанные файлы через vault (T014-T015).
 ///
 /// Чередование обязательно: какие файлы нужны документу, известно только из
@@ -194,6 +216,9 @@ pub(crate) enum Render {
     /// Страница HTML — для экспорта (фича 034). Байты страницы приходят на
     /// место байтов PDF.
     Html,
+    /// Картинки страниц — для экспорта слайдов (фича 035): упакованный буфер
+    /// на месте байтов PDF, см. [`pack_files`].
+    Images(ImagesSpec),
 }
 
 /// Метаданные PDF, которые задаёт приложение, а не документ (009/research.md §2).
@@ -202,6 +227,49 @@ pub(crate) struct PdfMeta {
     /// Стабильный идентификатор документа между экспортами одной заметки —
     /// путь заметки в vault.
     pub ident: String,
+    /// Только эти страницы (с нуля); `None` — все (фича 035).
+    pub pages: Option<Vec<u32>>,
+}
+
+/// Какие страницы и чем рисовать (фича 035): PNG с масштабом или SVG.
+#[derive(Debug, Clone)]
+pub(crate) struct ImagesSpec {
+    /// Точек на пункт для PNG; `None` — SVG.
+    pub png_scale: Option<f32>,
+    pub pages: Vec<u32>,
+}
+
+/// Несколько файлов одним буфером: число, затем длина и байты каждого.
+pub(crate) fn pack_files(files: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = (files.len() as u32).to_le_bytes().to_vec();
+    for file in files {
+        out.extend_from_slice(&(file.len() as u32).to_le_bytes());
+        out.extend_from_slice(file);
+    }
+    out
+}
+
+/// Обратно к файлам; испорченный буфер — пустой список.
+pub(crate) fn unpack_files(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let read = |at: usize| -> Option<usize> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize)
+    };
+    let Some(count) = read(0) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(count);
+    let mut at = 4;
+    for _ in 0..count {
+        let Some(len) = read(at) else {
+            return Vec::new();
+        };
+        let Some(file) = bytes.get(at + 4..at + 4 + len) else {
+            return Vec::new();
+        };
+        out.push(file.to_vec());
+        at += 4 + len;
+    }
+    out
 }
 
 /// Байты PDF последнего прохода. `None` — документ не собран или вывод был
@@ -976,6 +1044,31 @@ fn compile_with(
         },
         // HTML собирается своим путём выше (`compile_html`).
         (Ok(_), Render::Html) => (CompileOutcome::Failed, Vec::new(), None),
+        (Ok(document), Render::Images(spec)) => {
+            let pages = document.pages();
+            let files: Vec<Vec<u8>> = spec
+                .pages
+                .iter()
+                .filter_map(|index| pages.get(*index as usize))
+                .map(|page| match spec.png_scale {
+                    Some(scale) => typst_render::render(
+                        page,
+                        &typst_render::RenderOptions {
+                            pixel_per_pt: typst::utils::Scalar::new(f64::from(scale)),
+                            ..typst_render::RenderOptions::default()
+                        },
+                    )
+                    .encode_png()
+                    .unwrap_or_default(),
+                    None => typst_svg::svg(page, &typst_svg::SvgOptions::default()).into_bytes(),
+                })
+                .collect();
+            (
+                CompileOutcome::Succeeded,
+                Vec::new(),
+                Some(pack_files(&files)),
+            )
+        }
         (Err(errors), _) => {
             diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
             (CompileOutcome::Failed, Vec::new(), None)
@@ -1011,6 +1104,18 @@ fn pdf_options(meta: &PdfMeta) -> typst_pdf::PdfOptions {
         ident: typst::foundations::Smart::Custom(meta.ident.clone()),
         creator: typst::foundations::Smart::Custom(Some(PDF_CREATOR.to_owned())),
         timestamp: None,
+        // Размеченный PDF несовместим с подмножеством страниц (`typst-pdf`):
+        // у слайдов (035) разметка выключается, у обычного экспорта — нет.
+        tagged: meta.pages.is_none(),
+        page_ranges: meta.pages.as_ref().map(|pages| {
+            typst::layout::PageRanges::new(
+                pages
+                    .iter()
+                    .filter_map(|index| std::num::NonZeroUsize::new(*index as usize + 1))
+                    .map(|number| Some(number)..=Some(number))
+                    .collect(),
+            )
+        }),
         ..typst_pdf::PdfOptions::default()
     }
 }

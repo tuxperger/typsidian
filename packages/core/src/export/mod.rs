@@ -150,6 +150,7 @@ pub async fn export_note_pdf<B: VaultBackend>(
 
     let render = Render::Pdf(PdfMeta {
         ident: note_path.to_owned(),
+        pages: None,
     });
     let built = build_with_templates(
         &InlineExecutor,

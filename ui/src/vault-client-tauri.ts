@@ -89,6 +89,7 @@ import type {
   BookmarksView,
   TasksView,
   TaskToggleOutcome,
+  SlidesExportReport,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -292,6 +293,8 @@ function tauriPreviewClient(): PreviewClient {
       invoke<ExportCandidate[]>("export_candidates", { overrides }),
     exportHtml: (notePath, text, overrides, site, labels) =>
       invoke<ExportReport>("export_html", { notePath, text, overrides, site, labels }),
+    exportSlides: (notePath, text, overrides, request) =>
+      invoke<SlidesExportReport>("export_slides", { notePath, text, overrides, request }),
     exportSiteIndex: (overrides, site, labels) =>
       invoke<string>("export_site_index", { overrides, site, labels }),
     // Фича 015: без состояния оболочки — прогоны страниц приходят из окна.
