@@ -4457,6 +4457,245 @@ input.ts-sources__url:focus {
   font: 9.5px var(--font-mono);
 }
 
+/* ── Снимки заметок (фича 029, макет S1–S4) ───────────────────────────── */
+
+.ts-history__title {
+  color: var(--steel-100);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ts-history__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-history__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.ts-history__list {
+  overflow-y: auto;
+  padding: 6px 0;
+  border-right: var(--border-width) solid var(--steel-800);
+}
+
+.ts-history__day {
+  padding: 9px 14px 4px;
+  color: var(--steel-500);
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ts-history__snap {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 14px;
+  border: 0;
+  background: none;
+  color: var(--steel-300);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-history__snap[aria-selected="true"] {
+  background: var(--steel-800);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-history__snap--current {
+  cursor: default;
+}
+
+.ts-history__snap--current .ts-history__time {
+  color: var(--orange-400);
+}
+
+.ts-history__time {
+  color: var(--steel-100);
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-history__why {
+  overflow: hidden;
+  color: var(--steel-500);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-history__git {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: 3px;
+  color: var(--steel-300);
+  font: 9.5px var(--font-mono);
+}
+
+.ts-history__delta {
+  font: 10.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-history__added {
+  color: var(--success, #63b47f);
+}
+
+.ts-history__removed {
+  color: #f0a093;
+}
+
+.ts-history__diff {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.ts-history__dhead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 9px 14px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  color: var(--steel-500);
+  font: 11px var(--font-mono);
+}
+
+.ts-history__lines {
+  padding: 6px 0 12px;
+  overflow-x: auto;
+  color: var(--steel-400);
+  font: 12px / 1.65 var(--font-mono);
+}
+
+.ts-history__line {
+  display: grid;
+  grid-template-columns: 38px 16px minmax(0, 1fr);
+  padding: 0 14px;
+  white-space: pre-wrap;
+}
+
+.ts-history__line--Local {
+  background: rgba(224, 97, 79, 0.12);
+  color: #f0a093;
+}
+
+.ts-history__line--External {
+  background: rgba(99, 180, 127, 0.12);
+  color: #a6e0b9;
+}
+
+.ts-history__line--gap {
+  color: var(--steel-600);
+  font-size: 10.5px;
+}
+
+.ts-history__n {
+  padding-right: 8px;
+  color: var(--steel-600);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ts-history__git-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 14px;
+}
+
+.ts-deleted__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 100px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: var(--border-width) solid var(--steel-850, #1d2126);
+  font-size: 12px;
+}
+
+.ts-deleted__name {
+  display: flex;
+  flex-direction: column;
+  color: var(--steel-100);
+}
+
+.ts-deleted__rename {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 8px 14px 10px;
+}
+
+.ts-deleted__field {
+  min-width: min(280px, 100%);
+  height: 30px;
+  padding: 0 9px;
+  border: var(--border-width) solid var(--orange-500);
+  border-radius: var(--radius-md);
+  background: var(--steel-900);
+  color: var(--steel-100);
+  font: 12px var(--font-mono);
+}
+
+.ts-snapshots__num {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--steel-500);
+  font: 12px var(--font-mono);
+}
+
+.ts-snapshots__num input {
+  width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+  .ts-history__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ts-history__list {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: var(--border-width) solid var(--steel-800);
+  }
+
+  .ts-history__line {
+    grid-template-columns: 14px minmax(0, 1fr);
+    padding: 0 10px;
+  }
+
+  .ts-history__n {
+    display: none;
+  }
+
+  .ts-deleted__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ts-deleted__row > .ts-search__hit-meta {
+    display: none;
+  }
+}
+
 /* Счётчик в подвале дерева (L3). */
 .ts-tree-broken {
   padding: 0;

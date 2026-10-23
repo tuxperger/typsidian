@@ -258,3 +258,8 @@ harness = false
 [[bench]]
 name = "link_health_scale"
 harness = false
+
+# История из 200 снимков и снимок заметки на 10 000 строк (фича 029, T011, SC-001, SC-003).
+[[bench]]
+name = "snapshots_scale"
+harness = false

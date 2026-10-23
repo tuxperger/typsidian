@@ -99,6 +99,13 @@ pub struct VaultOverrides {
     #[serde(default)]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub intentional_orphans: Vec<String>,
+    /// Сколько дней хранить снимки заметок (фича 029, FR-005). `None` — 7.
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub snapshot_keep_days: Option<u32>,
+    /// Не чаще какого интервала, в минутах, снимать заметку при сохранении
+    /// (фича 029, FR-001). `None` — 5.
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub snapshot_interval_minutes: Option<u32>,
     /// Настройки быстрого захвата и ежедневных заметок (фича 022, FR-010).
     ///
     /// `None` — ничего не задано, в файле таблицы `capture` нет; умолчания
@@ -583,6 +590,12 @@ const GRAPH_TABLE: &str = "graph";
 const ATTACHMENTS_TABLE: &str = "attachments";
 const SOURCES_TABLE: &str = "sources";
 const LINKS_TABLE: &str = "links";
+const SNAPSHOTS_TABLE: &str = "snapshots";
+
+/// Пределы настроек снимков (фича 029, data-model.md): значение вне них —
+/// «не задано», как и прочие негодные значения файла.
+pub const SNAPSHOT_KEEP_DAYS: std::ops::RangeInclusive<u32> = 1..=365;
+pub const SNAPSHOT_INTERVAL_MINUTES: std::ops::RangeInclusive<u32> = 1..=120;
 
 /// Форма файла для serde. Отдельно от [`VaultOverrides`], потому что на диске
 /// значения разложены по двум таблицам, а в API нужен один плоский набор.
@@ -604,6 +617,8 @@ struct FileShape {
     sources: SourcesTable,
     #[serde(default)]
     links: LinksTable,
+    #[serde(default)]
+    snapshots: SnapshotsTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -634,6 +649,23 @@ struct SourcesTable {
 struct LinksTable {
     #[serde(default)]
     intentional_orphans: Option<Value>,
+}
+
+/// Таблица снимков (029). Значения как `Value`: неверное — «не задано».
+#[derive(Debug, Default, Deserialize)]
+struct SnapshotsTable {
+    #[serde(default)]
+    keep_days: Option<Value>,
+    #[serde(default)]
+    interval_minutes: Option<Value>,
+}
+
+/// Число из таблицы в пределах; иначе «не задано».
+fn bounded(value: Option<&Value>, range: &std::ops::RangeInclusive<u32>) -> Option<u32> {
+    value
+        .and_then(Value::as_u64)
+        .and_then(|raw| u32::try_from(raw).ok())
+        .filter(|raw| range.contains(raw))
 }
 
 /// Таблица вложений (016). Значения как `Value`: неверное — «не задано», а
@@ -794,6 +826,11 @@ impl FileShape {
                     .collect(),
                 _ => Vec::new(),
             },
+            snapshot_keep_days: bounded(self.snapshots.keep_days.as_ref(), &SNAPSHOT_KEEP_DAYS),
+            snapshot_interval_minutes: bounded(
+                self.snapshots.interval_minutes.as_ref(),
+                &SNAPSHOT_INTERVAL_MINUTES,
+            ),
             capture: self.capture.into_overrides(),
             graph: self.graph.as_ref().and_then(graph_from_value),
             auto_download_templates: self.templates.auto_download,
@@ -962,6 +999,19 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
         }),
     );
 
+    set_or_remove(
+        &mut document,
+        SNAPSHOTS_TABLE,
+        "keep_days",
+        overrides.snapshot_keep_days.map(Value::from),
+    );
+    set_or_remove(
+        &mut document,
+        SNAPSHOTS_TABLE,
+        "interval_minutes",
+        overrides.snapshot_interval_minutes.map(Value::from),
+    );
+
     let capture = overrides.capture.clone().unwrap_or_default();
     set_or_remove(
         &mut document,
@@ -1044,6 +1094,7 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, CAPTURE_TABLE);
     prune_empty_object(&mut document, GRAPH_TABLE);
     prune_empty_object(&mut document, LINKS_TABLE);
+    prune_empty_object(&mut document, SNAPSHOTS_TABLE);
 
     let mut text =
         serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
@@ -1221,6 +1272,9 @@ mod tests {
             source_files: vec!["lit/refs.yml".into()],
             // Фича 028: отметки «намеренно без ссылок».
             intentional_orphans: vec!["Заметки/Идеи.typ".into()],
+            // Фича 029: срок и интервал снимков.
+            snapshot_keep_days: Some(30),
+            snapshot_interval_minutes: Some(10),
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

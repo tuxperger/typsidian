@@ -1730,6 +1730,8 @@ impl VaultBackend for NativeBackend {
         }
         // Фича 028: отметка «намеренно без ссылок» едет так же.
         let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
+        // Фича 029: история снимков едет за заметкой.
+        let _ = crate::snapshots::move_snapshots(self, from, to).await;
         // FR-028/FR-030: ссылки на старое имя стали битыми, на новое — могли
         // починиться. Само подтверждение операции — забота вызывающей стороны
         // (contracts/vault-backend-trait.md), здесь только факт изменения.
@@ -1748,6 +1750,8 @@ impl VaultBackend for NativeBackend {
         if !full.exists() {
             return Err(DeleteError::NotFound);
         }
+        // Фича 029: снимок и отметка «удалена» — до того, как файла не станет.
+        crate::snapshots::before_delete(self, path, crate::properties::now_ms()).await;
         let trashed = move_to_trash(&full);
         if !trashed {
             std::fs::remove_file(&full).map_err(|_| DeleteError::Io)?;
@@ -1758,6 +1762,17 @@ impl VaultBackend for NativeBackend {
         }
         self.publish_links_invalidated(&[path.to_path_buf()]).await;
         Ok(())
+    }
+
+    async fn remove_service_file(&mut self, path: &Path) -> Result<(), WriteError> {
+        if self.write_denied() || !super::service_dir::is_inside_service_dir(path) {
+            return Err(WriteError::AccessDenied);
+        }
+        match std::fs::remove_file(self.root_path.join(path)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(WriteError::Io),
+        }
     }
 
     async fn move_targets(&self, from: &Path, query: &str) -> Vec<MoveTarget> {

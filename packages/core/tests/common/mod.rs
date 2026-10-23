@@ -543,6 +543,16 @@ impl VaultBackend for MemoryVault {
         Ok(())
     }
 
+    async fn remove_service_file(&mut self, path: &Path) -> Result<(), WriteError> {
+        if self.access_state != AccessState::ReadWrite
+            || !typsidian_core::vault::service_dir::is_inside_service_dir(path)
+        {
+            return Err(WriteError::AccessDenied);
+        }
+        self.files.borrow_mut().remove(path);
+        Ok(())
+    }
+
     /// Перенос здесь не моделируется: у памяти нет ни папок, ни индекса, а
     /// сценарии фичи 023 идут по настоящим backend (`relocate_cases`). Двойник
     /// отвечает как backend, у которого нечего переносить.
@@ -675,6 +685,7 @@ pub mod relocate_cases;
 pub mod replace_cases;
 pub mod search_cases;
 pub mod slides_cases;
+pub mod snapshots_cases;
 pub mod sources_cases;
 pub mod structure_cases;
 pub mod sync_cases;

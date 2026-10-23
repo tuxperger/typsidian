@@ -24,6 +24,7 @@ import { shell } from "./ru/shell.js";
 import { sync } from "./ru/sync.js";
 import { links } from "./ru/links.js";
 import { slides } from "./ru/slides.js";
+import { snapshots } from "./ru/snapshots.js";
 import { properties } from "./ru/properties.js";
 import { importing } from "./ru/import.js";
 import { capture } from "./ru/capture.js";
@@ -53,6 +54,7 @@ export const ru: Catalog = {
   ...sync,
   ...links,
   ...slides,
+  ...snapshots,
   ...properties,
   ...importing,
   ...capture,

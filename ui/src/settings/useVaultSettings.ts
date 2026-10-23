@@ -58,6 +58,8 @@ export interface VaultSettingsState {
    * Пустые поля ядро читает как «не задано».
    */
   setCapture: (capture: CaptureOverrides) => Promise<boolean>;
+  /** Срок и интервал снимков заметок (фича 029); `undefined` — умолчание ядра. */
+  setSnapshots: (next: { keepDays: number | undefined; intervalMinutes: number | undefined }) => Promise<boolean>;
   /** Настройки графа связей (фича 025): таблица `graph` целиком, чужие ключи ядро не трогает. */
   setGraph: (graph: GraphSettings) => Promise<boolean>;
   /**
@@ -186,6 +188,22 @@ export function useVaultSettings(
       return written;
     },
     [overrides, write, reload],
+  );
+
+  const setSnapshots = useCallback(
+    async (next: { keepDays: number | undefined; intervalMinutes: number | undefined }) => {
+      if (overrides === null) return false;
+      // Умолчание — отсутствие ключа, а не `undefined` в нём.
+      const { snapshot_keep_days: _keep, snapshot_interval_minutes: _interval, ...rest } = overrides;
+      return write({
+        ...rest,
+        ...(next.keepDays === undefined ? {} : { snapshot_keep_days: next.keepDays }),
+        ...(next.intervalMinutes === undefined
+          ? {}
+          : { snapshot_interval_minutes: next.intervalMinutes }),
+      });
+    },
+    [overrides, write],
   );
 
   const setAttachments = useCallback(
@@ -334,6 +352,7 @@ export function useVaultSettings(
     setTemplateSources,
     setExportFolder,
     setCapture,
+    setSnapshots,
     setGraph,
     setSourceFiles,
     setAttachments,

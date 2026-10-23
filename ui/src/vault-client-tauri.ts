@@ -76,6 +76,13 @@ import type {
   InstallReport,
   LinkOutcome,
   LinkHealth,
+  NoteHistory,
+  DeletedNote,
+  RecoverOutcome,
+  RestoreOutcome,
+  SnapshotReason,
+  SnapshotUsage,
+  TakeOutcome,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -566,6 +573,20 @@ export function tauriVaultClient(
       health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
       fix: (request, editorText) =>
         invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
+    },
+
+    // ── Снимки заметок (фича 029) ─────────────────────────────────────
+    snapshots: {
+      take: (path, text, reason) => invoke<TakeOutcome>("snapshot_take", { path, text, reason }),
+      history: (path) => invoke<NoteHistory>("snapshot_history", { path }),
+      diff: (id, against) => invoke<DiffLine[]>("snapshot_diff", { id, against }),
+      text: (id) => invoke<string | null>("snapshot_text", { id }),
+      restore: (path, id, editorText) =>
+        invoke<RestoreOutcome>("snapshot_restore", { path, id, editorText }),
+      deleted: () => invoke<DeletedNote[]>("snapshot_deleted_notes"),
+      recover: (path, asPath) => invoke<RecoverOutcome>("snapshot_recover_note", { path, asPath }),
+      usage: () => invoke<SnapshotUsage>("snapshot_usage"),
+      clear: () => invoke<number>("snapshots_clear"),
     },
 
     // ── Показ слайдов (фича 019) ──────────────────────────────────────

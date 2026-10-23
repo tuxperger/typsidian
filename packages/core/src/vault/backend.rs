@@ -365,6 +365,17 @@ pub trait VaultBackend: Sized {
     async fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError>;
     async fn delete(&mut self, path: &Path) -> Result<(), DeleteError>;
 
+    /// Удаляет файл служебной папки мимо корзины (фича 029, research.md §3).
+    ///
+    /// `delete` отправляет файл в корзину ОС — для заметки пользователя это
+    /// защита, а истёкшие снимки засоряли бы корзину сотнями файлов. Путь вне
+    /// служебной папки — отказ `AccessDenied`: этим методом заметку не удалить.
+    /// Файла уже нет — не ошибка. Умолчание отказывает: backend, который не
+    /// умеет удалять, оставляет истёкшие снимки на месте, и только.
+    async fn remove_service_file(&mut self, _path: &Path) -> Result<(), WriteError> {
+        Err(WriteError::Io)
+    }
+
     /// Папки, которые могут принять `from`, в порядке показа (фича 023, FR-012,
     /// FR-022); `query` — фильтр, пустой — все. Правила — в
     /// [`crate::vault::relocate::move_targets`].
@@ -611,6 +622,10 @@ impl<B: VaultBackend> VaultBackend for ReadOnly<B> {
 
     async fn delete(&mut self, _path: &Path) -> Result<(), DeleteError> {
         Err(DeleteError::AccessDenied)
+    }
+
+    async fn remove_service_file(&mut self, _path: &Path) -> Result<(), WriteError> {
+        Err(WriteError::AccessDenied)
     }
 
     async fn move_targets(&self, from: &Path, query: &str) -> Vec<MoveTarget> {

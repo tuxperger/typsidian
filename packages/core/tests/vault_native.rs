@@ -1786,3 +1786,42 @@ async fn list_images_walks_the_vault_or_one_folder_like_the_web_backend() {
     );
     assert!(backend.list_images(Some(Path::new("нет"))).await.is_empty());
 }
+
+#[tokio::test]
+async fn delete_and_rename_keep_note_snapshots() {
+    // Фича 029: снимок перед удалением и перенос истории делает сам backend —
+    // их не обходит ни одна оболочка.
+    use typsidian_core::snapshots::{
+        deleted_notes, recover_note, snapshot_history, RecoverOutcome,
+    };
+    let dir = TempDir::new().unwrap();
+    write_note(dir.path(), "a.typ", "первая версия");
+    let mut backend = NativeBackend::open(dir.path()).await.unwrap();
+
+    backend
+        .rename(Path::new("a.typ"), Path::new("b.typ"))
+        .await
+        .unwrap();
+    backend.delete(Path::new("b.typ")).await.unwrap();
+    let now = typsidian_core::properties::now_ms();
+    let deleted = deleted_notes(&backend, now).await;
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].path, "b.typ");
+    assert!(!dir.path().join("b.typ").exists());
+    assert!(dir.path().join(".typsidian/snapshots/index.json").exists());
+
+    assert_eq!(
+        recover_note(&mut backend, "b.typ", None).await,
+        RecoverOutcome::Recovered {
+            path: "b.typ".into()
+        }
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("b.typ")).unwrap(),
+        "первая версия"
+    );
+    assert_eq!(
+        snapshot_history(&backend, "b.typ", now).await.entries.len(),
+        1
+    );
+}

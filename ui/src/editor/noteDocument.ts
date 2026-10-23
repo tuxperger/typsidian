@@ -1,5 +1,5 @@
 import { ChangeSet, Text } from "@codemirror/state";
-import type { ReadError } from "../wasm-core/typsidian_core.js";
+import type { ReadError, SnapshotReason } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import type { Phrase } from "../i18n/index.js";
 
@@ -107,6 +107,8 @@ export interface NoteDocumentHooks {
   onDirtyChange?: (path: string, dirty: boolean) => void;
   /** Состояние поменялось — реестр решает, не выгрузить ли документ. */
   onSettled?: (document: NoteDocument) => void;
+  /** Повод для снимка заметки (фича 029): решает ли ядро его делать — его дело. */
+  onSnapshot?: (path: string, text: string, reason: SnapshotReason) => void;
 }
 
 const LINE_BREAK = /\r\n?|\n/;
@@ -216,6 +218,9 @@ export class NoteDocumentImpl implements NoteDocument {
       // Прочитанное с диска — не правка: говорится, что именно этот текст сейчас
       // в файле, иначе первое же открытие заметки перезаписывало бы её тем же.
       this.saved = text;
+      // Снимок (029 FR-001): исходное состояние при открытии, новое — после
+      // внешнего изменения файла.
+      this.hooks.onSnapshot?.(path, text, replaceViews ? "External" : "Open");
       this.buffer = text;
       this.publish({ text: this.doc.toString(), read: "ready", save: { state: "Clean" } });
     } catch (cause) {
@@ -404,6 +409,7 @@ export class NoteDocumentImpl implements NoteDocument {
       this.saved = buffer;
       this.announced = false;
       this.hooks.onSaved?.(path);
+      this.hooks.onSnapshot?.(path, buffer, "Save");
       // Пока шла запись, могли успеть набрать ещё: тогда остаётся «есть
       // несохранённое», а не «сохранено».
       this.setSave(this.buffer === buffer ? { state: "Clean" } : { state: "Dirty" });
@@ -419,6 +425,10 @@ export class NoteDocumentImpl implements NoteDocument {
 
   /** Выгрузка: таймер и регистрация. Вызывается реестром, когда документ никому не нужен. */
   dispose(): void {
+    // Снимок при закрытии (029 FR-001): то, что лежит на диске.
+    if (this.current.read === "ready" && this.saved !== null) {
+      this.hooks.onSnapshot?.(this.path, this.saved, "Close");
+    }
     this.disposed = true;
     this.cancelTimer();
     this.cancelAnnounce();

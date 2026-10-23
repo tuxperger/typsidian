@@ -43,6 +43,10 @@ pub const PACKAGES_DIR_NAME: &str = "packages";
 /// оставшийся после сбоя файл не попадается пользователю на глаза.
 pub const TMP_DIR_NAME: &str = "tmp";
 
+/// Снимки заметок (фича 029, research.md §1): опись и тексты снимков.
+/// Принадлежат устройству, поэтому входят в производные пути.
+pub const SNAPSHOTS_DIR_NAME: &str = "snapshots";
+
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
 /// Существует только ради уборки: при первом открытии vault новой версией файл
@@ -64,6 +68,11 @@ pub fn vault_settings_path() -> PathBuf {
 /// Папка временных файлов записи относительно корня vault.
 pub fn tmp_dir() -> PathBuf {
     service_dir().join(TMP_DIR_NAME)
+}
+
+/// Папка снимков заметок относительно корня vault (фича 029).
+pub fn snapshots_dir() -> PathBuf {
+    service_dir().join(SNAPSHOTS_DIR_NAME)
 }
 
 /// Файл кэша индекса относительно корня vault.
@@ -93,6 +102,7 @@ pub fn derived_paths() -> Vec<String> {
     vec![
         format!("{SERVICE_DIR_NAME}/{CACHE_FILE_NAME}*"),
         format!("{SERVICE_DIR_NAME}/{TMP_DIR_NAME}"),
+        format!("{SERVICE_DIR_NAME}/{SNAPSHOTS_DIR_NAME}"),
     ]
 }
 
@@ -116,7 +126,14 @@ mod tests {
     #[test]
     fn derived_paths_cover_caches_but_not_settings() {
         let derived = derived_paths();
-        assert_eq!(derived, [".typsidian/cache.sqlite*", ".typsidian/tmp"]);
+        assert_eq!(
+            derived,
+            [
+                ".typsidian/cache.sqlite*",
+                ".typsidian/tmp",
+                ".typsidian/snapshots"
+            ]
+        );
         assert!(!derived
             .iter()
             .any(|path| path.contains(VAULT_SETTINGS_FILE_NAME)));

@@ -14,6 +14,7 @@ pub mod properties;
 pub mod search;
 pub mod settings;
 pub mod slides;
+pub mod snapshots;
 pub mod sources;
 pub mod stamp;
 pub mod structure;

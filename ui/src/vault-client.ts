@@ -49,6 +49,13 @@ import type {
   InsertMoment,
   LinkOutcome,
   LinkHealth,
+  NoteHistory,
+  DeletedNote,
+  RecoverOutcome,
+  RestoreOutcome,
+  SnapshotReason,
+  SnapshotUsage,
+  TakeOutcome,
   LinkFixRequest,
   LinkRequest,
   MentionScan,
@@ -531,6 +538,11 @@ export interface VaultClient {
   /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
   readonly links: LinksClient;
 
+  // ── Снимки заметок (фича 029) ───────────────────────────────────────
+
+  /** Снимки, история, возврат и удалённые заметки: правила — в ядре. */
+  readonly snapshots: SnapshotsClient;
+
   // ── Показ слайдов (фича 019) ────────────────────────────────────────
 
   /** Колода показа: чистые функции ядра над сведениями о страницах сборки. */
@@ -708,6 +720,28 @@ export interface SlidesClient {
  * `openTexts` — тексты заметок, открытых в редакторе: места и фрагменты для них
  * считаются по буферу, а не по диску (research.md §10).
  */
+/**
+ * Локальные снимки заметок (фича 029). Пора ли снимать, срок хранения,
+ * различия, возврат и восстановление решает ядро (`snapshots`); клиент зовёт
+ * его в нужные моменты. Время берёт сама граница — часы устройства.
+ */
+export interface SnapshotsClient {
+  /** Снимок заметки, если пора; пропуск и отказ — штатные ответы. */
+  take(path: string, text: string, reason: SnapshotReason): Promise<TakeOutcome>;
+  /** История заметки, новые первыми. */
+  history(path: string): Promise<NoteHistory>;
+  /** Различия снимка с текстом; пусто — снимка нет. */
+  diff(id: string, against: string): Promise<DiffLine[]>;
+  text(id: string): Promise<string | null>;
+  /** Вернуть снимок; `editorText` — текст открытой заметки, тогда ответ — правка редактора. */
+  restore(path: string, id: string, editorText: string | null): Promise<RestoreOutcome>;
+  deleted(): Promise<DeletedNote[]>;
+  recover(path: string, asPath: string | null): Promise<RecoverOutcome>;
+  usage(): Promise<SnapshotUsage>;
+  /** Удалить все снимки vault; ответ — сколько удалено. */
+  clear(): Promise<number>;
+}
+
 export interface LinksClient {
   /** Порция обратных ссылок; источники ближайшие по папке — первыми. */
   backlinksPage(

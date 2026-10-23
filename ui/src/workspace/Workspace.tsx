@@ -84,6 +84,8 @@ import { useGraphSettings } from "../graph/useGraphSettings.js";
 import { SearchOverlay } from "../search/SearchOverlay.js";
 import { LinkHealth } from "../link-health/LinkHealth.js";
 import { useLinkHealth } from "../link-health/useLinkHealth.js";
+import { NoteHistory } from "../snapshots/NoteHistory.js";
+import { RecentlyDeleted } from "../snapshots/RecentlyDeleted.js";
 import { PropertiesMode } from "../note-panel/properties/PropertiesMode.js";
 import { useNoteProperties } from "../note-panel/properties/useNoteProperties.js";
 import { usePropertiesWorkspace } from "../note-panel/properties/usePropertiesWorkspace.js";
@@ -319,6 +321,11 @@ function WorkspaceView({
   const [searchOpen, setSearchOpen] = useState(false);
   // Экран «Состояние ссылок» (фича 028).
   const [healthOpen, setHealthOpen] = useState(false);
+  // Снимки заметок (фича 029): окно истории, недавно удалённые, отказ записи снимков.
+  const [historyPath, setHistoryPath] = useState<string | null>(null);
+  const [deletedOpen, setDeletedOpen] = useState(false);
+  const [snapshotsFailing, setSnapshotsFailing] = useState(false);
+  const [failingDismissed, setFailingDismissed] = useState(false);
   // Поиск открыт сразу в режиме замены (фича 027, `Mod+Shift+H`).
   const [searchReplace, setSearchReplace] = useState(false);
   // Условия по свойствам, с которыми открывается поиск (клик по тегу, фича 020).
@@ -686,6 +693,18 @@ function WorkspaceView({
               sourcesEventRef.current?.({ type: "NoteUpdated", path });
             },
             onDirtyChange: () => tabsRefreshRef.current?.(),
+            // Снимок (фича 029): пора ли, решает ядро; отказ записи показывается
+            // предупреждением, набор текста он не задерживает (SC-001).
+            onSnapshot: (path, text, reason) => {
+              void state.client?.snapshots
+                .take(path, text, reason)
+                .then((outcome) => {
+                  const failing = outcome.kind === "Failed" && outcome.why === "Io";
+                  setSnapshotsFailing(failing);
+                  if (!failing) setFailingDismissed(false);
+                })
+                .catch(() => undefined);
+            },
           }),
     [state.client, bumpLinks],
   );
@@ -1981,6 +2000,22 @@ function WorkspaceView({
         icon: "link",
         run: () => setHealthOpen(true),
       },
+      ...(activePath !== null && !isBoardOpen
+        ? [
+            {
+              id: "note-history",
+              ...titled("snapshots.command"),
+              icon: "refresh" as const,
+              run: () => setHistoryPath(activePath),
+            },
+          ]
+        : []),
+      {
+        id: "recently-deleted",
+        ...titled("snapshots.deletedCommand"),
+        icon: "file",
+        run: () => setDeletedOpen(true),
+      },
       {
         id: "templates",
         ...titled("workspace.templates"),
@@ -2399,6 +2434,8 @@ function WorkspaceView({
     dailyOpenPrevious,
     dailyOpenNext,
     openManualCapture,
+    activePath,
+    isBoardOpen,
     t,
     tEn,
   ]);
@@ -2753,6 +2790,23 @@ function WorkspaceView({
         />
         <BulkChangeIndicator active={state.bulkChangeDepth > 0} />
         <ErrorBanner error={operationError} onDismiss={() => setOperationError(null)} />
+        {snapshotsFailing && !failingDismissed && (
+          <div className="ts-replace__panel ts-replace__panel--warn" role="status">
+            <div className="ts-replace__row">
+              <span className="ts-replace__title">{t("snapshots.failing")}</span>
+              <span className="ts-spacer" />
+              <button
+                type="button"
+                className="ts-btn ts-btn--ghost"
+                aria-label={t("linkHealth.dismiss")}
+                onClick={() => setFailingDismissed(true)}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+            <span className="ts-replace__meta">{t("snapshots.failingHint")}</span>
+          </div>
+        )}
         {showBlocked !== null && (
           <div role="alert">
             <p>{t("slides.blocked")}</p>
@@ -3044,6 +3098,47 @@ function WorkspaceView({
             {t("properties.reindex.cancel")}
           </button>
         </div>
+      )}
+
+      {historyPath !== null && state.client !== null && (
+        <NoteHistory
+          client={state.client}
+          path={historyPath}
+          editors={noteEditors}
+          gitHistory={
+            sync !== null &&
+            (syncOverview?.history.kind === "Local" || syncOverview?.history.kind === "Mirror")
+              ? (path) => sync.client.history(path, null, 30).then((page) => page.snapshots)
+              : null
+          }
+          onOpenGit={(path) => {
+            setHistoryPath(null);
+            openFileHistory(path);
+          }}
+          onOpenDeleted={() => {
+            setHistoryPath(null);
+            setDeletedOpen(true);
+          }}
+          failing={snapshotsFailing}
+          onClose={() => setHistoryPath(null)}
+        />
+      )}
+
+      {deletedOpen && state.client !== null && (
+        <RecentlyDeleted
+          client={state.client}
+          keepDays={vaultSettings.overrides?.snapshot_keep_days ?? 7}
+          readOnly={state.accessState === "readOnly"}
+          onOpenHistory={(path) => {
+            setDeletedOpen(false);
+            setHistoryPath(path);
+          }}
+          onRecovered={(path) => {
+            void refresh();
+            void openPath(path);
+          }}
+          onClose={() => setDeletedOpen(false)}
+        />
       )}
 
       {healthOpen && (

@@ -24,6 +24,7 @@ import type { VaultClient } from "../vault-client.js";
 import type { PreviewClient } from "../preview-client.js";
 import { TemplatesSection } from "./TemplatesSection.js";
 import { CaptureSection } from "./CaptureSection.js";
+import { SnapshotsSection } from "./SnapshotsSection.js";
 import { useShortcuts } from "../workspace/useShortcuts.js";
 import { useI18n, type MessageKey, type Phrase, type Translate } from "../i18n/index.js";
 
@@ -364,6 +365,20 @@ export function SettingsPanel({
           </section>
         )}
 
+        {section === "snapshots" && (
+          <section aria-label={t("snapshots.settings.section")}>
+            <div className="ts-settings__head">
+              <h2>{t("snapshots.settings.section")}</h2>
+              <span className="ts-settings__meta">
+                {vaultName === null
+                  ? t("settings.vaultNotOpen")
+                  : t("settings.folderSettings", { name: vaultName })}
+              </span>
+            </div>
+            <SnapshotsSection vaultSettings={vaultSettings} client={vaultClient} />
+          </section>
+        )}
+
         {section === "keybindings" && (
           <>
             {/* Сочетания команд приложения хранятся в настройках vault, поэтому и
@@ -407,6 +422,7 @@ const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
   { id: "vault", title: "settings.section.vault" },
   { id: "templates", title: "settings.section.templates" },
   { id: "capture", title: "capture.settings.title" },
+  { id: "snapshots", title: "snapshots.settings.section" },
   { id: "sync", title: "sync.panel.title" },
   { id: "appearance", title: "settings.section.appearance" },
   { id: "keybindings", title: "settings.section.keybindings" },
@@ -418,6 +434,7 @@ export type SettingsSection =
   | "vault"
   | "templates"
   | "capture"
+  | "snapshots"
   | "sync"
   | "appearance"
   | "keybindings"

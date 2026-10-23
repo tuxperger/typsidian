@@ -31,6 +31,7 @@ import { shell } from "./en/shell.js";
 import { sync } from "./en/sync.js";
 import { links } from "./en/links.js";
 import { slides } from "./en/slides.js";
+import { snapshots } from "./en/snapshots.js";
 import { properties } from "./en/properties.js";
 import { importing } from "./en/import.js";
 import { capture } from "./en/capture.js";
@@ -60,6 +61,7 @@ export const en = {
   ...sync,
   ...links,
   ...slides,
+  ...snapshots,
   ...properties,
   ...importing,
   ...capture,

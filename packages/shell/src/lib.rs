@@ -57,6 +57,7 @@ use typsidian_core::settings::store::{SettingsStore, StorageState, StoreCapabili
 use typsidian_core::settings::vaults::{VaultId, VaultRecord};
 use typsidian_core::settings::Settings;
 use typsidian_core::slides;
+use typsidian_core::snapshots;
 use typsidian_core::sources;
 use typsidian_core::stamp::FileStamp;
 use typsidian_core::structure;
@@ -988,6 +989,115 @@ async fn links_fix(
         editor_text.as_deref()
     )
     .await))
+}
+
+// ── Снимки заметок (фича 029). Правила — в ядре, время — часы устройства. ──
+
+#[tauri::command]
+async fn snapshot_take(
+    state: State<'_, Vault>,
+    path: String,
+    text: String,
+    reason: snapshots::SnapshotReason,
+) -> Answer<snapshots::TakeOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::snapshot_take(
+        backend,
+        &path,
+        &text,
+        reason,
+        typsidian_core::properties::now_ms()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn snapshot_history(
+    state: State<'_, Vault>,
+    path: String,
+) -> Answer<snapshots::NoteHistory, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::snapshot_history(
+        backend,
+        &path,
+        typsidian_core::properties::now_ms()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn snapshot_diff(
+    state: State<'_, Vault>,
+    id: String,
+    against: String,
+) -> Answer<Vec<typsidian_core::vault::conflict::DiffLine>, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::snapshot_diff(
+        backend, &id, &against
+    )
+    .await
+    .unwrap_or_default()))
+}
+
+#[tauri::command]
+async fn snapshot_text(state: State<'_, Vault>, id: String) -> Answer<Option<String>, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        snapshots::snapshot_text(backend, &id).await
+    ))
+}
+
+#[tauri::command]
+async fn snapshot_restore(
+    state: State<'_, Vault>,
+    path: String,
+    id: String,
+    editor_text: Option<String>,
+) -> Answer<snapshots::RestoreOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::snapshot_restore(
+        backend,
+        &path,
+        &id,
+        editor_text.as_deref(),
+        typsidian_core::properties::now_ms()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn snapshot_deleted_notes(
+    state: State<'_, Vault>,
+) -> Answer<Vec<snapshots::DeletedNote>, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::deleted_notes(
+        backend,
+        typsidian_core::properties::now_ms()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn snapshot_recover_note(
+    state: State<'_, Vault>,
+    path: String,
+    as_path: Option<String>,
+) -> Answer<snapshots::RecoverOutcome, Failure<()>> {
+    with_vault!(state, |backend| Ok(snapshots::recover_note(
+        backend,
+        &path,
+        as_path.as_deref()
+    )
+    .await))
+}
+
+#[tauri::command]
+async fn snapshot_usage(state: State<'_, Vault>) -> Answer<snapshots::SnapshotUsage, Failure<()>> {
+    with_vault!(
+        state,
+        |backend| Ok(snapshots::snapshot_usage(backend).await)
+    )
+}
+
+#[tauri::command]
+async fn snapshots_clear(state: State<'_, Vault>) -> Answer<u32, Failure<()>> {
+    with_vault!(state, |backend| snapshots::snapshots_clear(backend)
+        .await
+        .map_err(|_| Failure::Core(())))
 }
 
 /// Путь папки, открытой как vault — окну для хлебных крошек в шапке.
@@ -2730,6 +2840,15 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             replace_undo,
             links_health,
             links_fix,
+            snapshot_take,
+            snapshot_history,
+            snapshot_diff,
+            snapshot_text,
+            snapshot_restore,
+            snapshot_deleted_notes,
+            snapshot_recover_note,
+            snapshot_usage,
+            snapshots_clear,
             file_kind,
             begin_edit,
             pending_conflict,

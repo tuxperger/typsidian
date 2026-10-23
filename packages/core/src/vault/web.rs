@@ -1267,6 +1267,8 @@ impl VaultBackend for WebBackend {
         let _ = super::vault_settings::move_sections(self, from, to).await;
         // Фича 028: отметка «намеренно без ссылок» едет так же.
         let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
+        // Фича 029: история снимков едет за заметкой.
+        let _ = crate::snapshots::move_snapshots(self, from, to).await;
 
         self.publish_links_invalidated(&[from.to_path_buf(), to.to_path_buf()])
             .await;
@@ -1288,6 +1290,8 @@ impl VaultBackend for WebBackend {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // Фича 029: снимок и отметка «удалена» — до того, как файла не станет.
+        crate::snapshots::before_delete(self, path, crate::properties::now_ms()).await;
         let remove_fn = Reflect::get(&parent_handle, &JsValue::from_str("removeEntry"))
             .map_err(|_| DeleteError::Io)?;
         let remove_fn: js_sys::Function = remove_fn.dyn_into().map_err(|_| DeleteError::Io)?;
@@ -1300,6 +1304,32 @@ impl VaultBackend for WebBackend {
         self.index.remove(path);
         self.cache.remove_note(path).await;
         self.publish_links_invalidated(&[path.to_path_buf()]).await;
+        Ok(())
+    }
+
+    async fn remove_service_file(&mut self, path: &Path) -> Result<(), WriteError> {
+        // Паритет с `NativeBackend::remove_service_file`.
+        if self.write_denied() || !super::service_dir::is_inside_service_dir(path) {
+            return Err(WriteError::AccessDenied);
+        }
+        let Some(parent_handle) = (match path.parent() {
+            Some(p) if p != Path::new("") => self.find_folder_handle(p).await,
+            _ => Some(self.root_handle.clone()),
+        }) else {
+            return Ok(());
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let remove_fn = Reflect::get(&parent_handle, &JsValue::from_str("removeEntry"))
+            .map_err(|_| WriteError::Io)?;
+        let remove_fn: js_sys::Function = remove_fn.dyn_into().map_err(|_| WriteError::Io)?;
+        let promise = remove_fn
+            .call1(&parent_handle, &JsValue::from_str(&name))
+            .map_err(|_| WriteError::Io)?;
+        // Файла уже нет (`NotFoundError`) — не ошибка, как и на native.
+        let _ = JsFuture::from(js_sys::Promise::from(promise)).await;
         Ok(())
     }
 

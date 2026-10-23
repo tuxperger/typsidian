@@ -36,6 +36,15 @@ import {
   linksLinkMention,
   linkHealth,
   linkFix,
+  snapshotTake,
+  snapshotHistory,
+  snapshotDiff,
+  snapshotText,
+  snapshotRestore,
+  snapshotDeletedNotes,
+  snapshotRecoverNote,
+  snapshotUsage,
+  snapshotsClear,
   linksMentionsAvailability,
   linksMentionsCancel,
   linksMentionsIn,
@@ -419,6 +428,20 @@ export function webVaultClient(
         call(() => linksLinkMention(backend, request, editorText)),
       health: (openTexts) => call(() => linkHealth(backend, openTexts)),
       fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
+    },
+
+    // ── Снимки заметок (фича 029) ─────────────────────────────────────
+    snapshots: {
+      take: (path, text, reason) => call(() => snapshotTake(backend, path, text, reason)),
+      history: (path) => call(() => snapshotHistory(backend, path)),
+      diff: (id, against) => call(() => snapshotDiff(backend, id, against)),
+      text: async (id) => (await call(() => snapshotText(backend, id))) ?? null,
+      restore: (path, id, editorText) =>
+        call(() => snapshotRestore(backend, path, id, editorText ?? undefined)),
+      deleted: () => call(() => snapshotDeletedNotes(backend)),
+      recover: (path, asPath) => call(() => snapshotRecoverNote(backend, path, asPath ?? undefined)),
+      usage: () => call(() => snapshotUsage(backend)),
+      clear: () => call(() => snapshotsClear(backend)),
     },
 
     // ── Показ слайдов (фича 019) ──────────────────────────────────────
