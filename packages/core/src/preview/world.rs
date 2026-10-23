@@ -25,6 +25,8 @@ pub struct PreviewWorld {
     fonts: Vec<Font>,
     main: FileId,
     snapshot: DependencySnapshot,
+    /// Сборка для HTML (фича 034).
+    html: bool,
 }
 
 impl PreviewWorld {
@@ -42,6 +44,7 @@ impl PreviewWorld {
             fonts,
             main,
             snapshot,
+            html: false,
         }
     }
 
@@ -52,6 +55,20 @@ impl PreviewWorld {
     /// под [`crate::embeds::EMBED_INPUT_KEY`] (031), каждое значение — своя
     /// JSON-строка. Без входов (`None`) словарь пуст — так же, как у стороннего
     /// `typst compile`.
+    /// Сборка для HTML (фича 034): библиотека с возможностью `html`.
+    /// Звать до [`Self::with_inputs`] — та строит библиотеку заново.
+    pub fn with_html(mut self, html: bool) -> Self {
+        self.html = html;
+        if html {
+            self.library = LazyHash::new(
+                <Library as LibraryExt>::builder()
+                    .with_features([typst::Feature::Html].into_iter().collect())
+                    .build(),
+            );
+        }
+        self
+    }
+
     pub fn with_inputs(mut self, inputs: Option<&str>) -> Self {
         let entries: Option<serde_json::Map<String, serde_json::Value>> =
             inputs.and_then(|json| serde_json::from_str(json).ok());
@@ -65,8 +82,14 @@ impl PreviewWorld {
                     );
                 }
             }
-            self.library =
-                LazyHash::new(<Library as LibraryExt>::builder().with_inputs(dict).build());
+            self.library = LazyHash::new(if self.html {
+                <Library as LibraryExt>::builder()
+                    .with_inputs(dict)
+                    .with_features([typst::Feature::Html].into_iter().collect())
+                    .build()
+            } else {
+                <Library as LibraryExt>::builder().with_inputs(dict).build()
+            });
         }
         self
     }

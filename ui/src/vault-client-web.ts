@@ -21,6 +21,9 @@ import {
   exportBatchStart,
   exportBatchView,
   exportCandidates,
+  exportSiteIndex,
+  exportSiteArchive,
+  exportBatchWithFormat,
   importBegin,
   importFinish,
   ImportSource,
@@ -746,6 +749,14 @@ function webPreviewClient(
       withFonts(() => engine.exportPdf(backend, notePath, text, overrides)),
     exportCandidates: (overrides) =>
       call(() => exportCandidates(backend, overrides)),
+    // Фича 034: страница HTML — метод движка, как PDF; оглавление и архив —
+    // через очередь: они пишут и читают файлы vault.
+    exportHtml: (notePath, text, overrides, site, labels) =>
+      withFonts(() => engine.exportHtml(backend, notePath, text ?? undefined, overrides, site, labels)),
+    exportSiteIndex: (overrides, site, labels) =>
+      call(() => exportSiteIndex(backend, overrides, site, labels)),
+    exportSiteArchive: (overrides, site) =>
+      call(() => exportSiteArchive(backend, overrides, site)),
     // Фича 015: свободная функция, vault не трогает — мимо очереди.
     locateHeading: async (runs, outline, key) => previewLocateHeading(runs, outline, key) ?? null,
     // Переходы пакета не трогают vault — вызываются напрямую, мимо очереди:
@@ -754,6 +765,7 @@ function webPreviewClient(
       start: async (paths, stopOnError, overrides) =>
         exportBatchStart(paths, stopOnError, overrides),
       next: async (state) => exportBatchNext(state),
+      withFormat: async (state, format) => exportBatchWithFormat(state, format),
       record: async (state, report, elapsedMs) =>
         exportBatchRecord(state, report, Math.round(elapsedMs)),
       skip: async (state, notePath) => exportBatchSkip(state, notePath),

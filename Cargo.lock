@@ -6837,6 +6837,7 @@ dependencies = [
  "typsidian-core",
  "typst",
  "typst-assets",
+ "typst-html",
  "typst-layout",
  "typst-pdf",
  "typst-svg",

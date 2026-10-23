@@ -1,4 +1,5 @@
 import type { Translation } from "../define.js";
+import { ruN } from "../define.js";
 import type { exporting as en } from "../en/export.js";
 
 export const exporting: Translation<typeof en> = {
@@ -14,6 +15,14 @@ export const exporting: Translation<typeof en> = {
   "export.center.vaultRoot": "корень vault",
   "export.center.format": "формат",
   "export.center.formatNote": "как в предпросмотре · шрифты встраиваются",
+  "export.html.formatNote": "страница на заметку, оглавление index.html; ссылки внутри набора работают, вложения встроены",
+  "export.html.outputNote": "страница на заметку, папки заметок сохраняются; оглавление — index.html",
+  "export.html.contents": "Оглавление",
+  "export.html.outside": "вне экспорта",
+  "export.html.archive": "Скачать архив (zip)",
+  "export.html.archiveFailed": "Не удалось собрать архив — страницы лежат в папке экспорта.",
+  "export.html.asImages": (p) =>
+    `${ruN(p.count, "# конструкция", "# конструкции", "# конструкций")} рисунком: ${p.names}`,
   "export.center.output": "вывод",
   "export.center.folderHint": "Папка экспорта меняется в настройках vault",
   "export.center.change": "изменить",

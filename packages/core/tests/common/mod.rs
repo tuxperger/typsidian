@@ -673,6 +673,7 @@ pub mod embeds_cases;
 pub mod export_cases;
 pub mod graph_cases;
 pub mod highlight_cases;
+pub mod html_export_cases;
 pub mod import_cases;
 pub mod install_cases;
 pub mod language_cases;

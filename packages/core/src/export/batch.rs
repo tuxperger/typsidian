@@ -29,6 +29,25 @@ pub struct BatchState {
     pub phase: BatchPhase,
     /// Куда пишутся файлы — для итога (FR-023).
     pub export_folder: String,
+    /// Формат пакета (фича 034): PDF или страницы HTML.
+    #[serde(default)]
+    pub format: ExportFormat,
+}
+
+/// Формат экспорта (фича 034).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum ExportFormat {
+    #[default]
+    Pdf,
+    Html,
+}
+
+/// Тот же пакет в другом формате (фича 034).
+pub fn with_format(mut state: BatchState, format: ExportFormat) -> BatchState {
+    state.format = format;
+    state
 }
 
 /// Одна заметка пакета.
@@ -129,6 +148,7 @@ pub fn start(paths: Vec<String>, stop_on_error: bool, overrides: &VaultOverrides
         stop_on_error,
         phase,
         export_folder: export_folder(overrides),
+        format: ExportFormat::Pdf,
     }
 }
 

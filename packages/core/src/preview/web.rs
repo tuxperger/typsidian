@@ -254,6 +254,31 @@ impl PreviewEngine {
         .await
     }
 
+    /// Экспортирует заметку страницей HTML (фича 034): тот же движок, что у
+    /// PDF. `site` — пути всех заметок экспорта, `labels` — подписи навигации.
+    #[wasm_bindgen(js_name = exportHtml)]
+    pub async fn export_html_js(
+        &self,
+        backend: &mut crate::vault::web::WebBackend,
+        note_path: &str,
+        source_text: Option<String>,
+        overrides: crate::vault::vault_settings::VaultOverrides,
+        site: Vec<String>,
+        labels: crate::export::SiteLabels,
+    ) -> crate::export::ExportReport {
+        crate::export::export_note_html(
+            backend,
+            &self.packages,
+            note_path,
+            source_text.as_deref(),
+            self.fonts.clone(),
+            &overrides,
+            &site,
+            &labels,
+        )
+        .await
+    }
+
     /// Установить шаблон по явному запросу пользователя (FR-010).
     ///
     /// Выключатель автозагрузки здесь не спрашивается намеренно: выключен

@@ -1,4 +1,5 @@
 import type { Entries } from "../define.js";
+import { enN } from "../define.js";
 
 export const exporting = {
   "export.center.title": "Export center",
@@ -14,6 +15,14 @@ export const exporting = {
   "export.center.vaultRoot": "vault root",
   "export.center.format": "format",
   "export.center.formatNote": "same as the preview · fonts are embedded",
+  "export.html.formatNote": "a page per note, contents in index.html; links between exported notes work, attachments are embedded",
+  "export.html.outputNote": "a page per note, note folders are kept; contents in index.html",
+  "export.html.contents": "Contents",
+  "export.html.outside": "not exported",
+  "export.html.archive": "Download archive (zip)",
+  "export.html.archiveFailed": "Couldn’t build the archive — the pages are in the export folder.",
+  "export.html.asImages": (p: { count: number; names: string }) =>
+    `${enN(p.count, "# construct", "# constructs")} as images: ${p.names}`,
   "export.center.output": "output",
   "export.center.folderHint": "The export folder is changed in the vault settings",
   "export.center.change": "change",

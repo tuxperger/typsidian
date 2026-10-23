@@ -290,6 +290,10 @@ function tauriPreviewClient(): PreviewClient {
       invoke<ExportReport>("export_pdf", { notePath, text, overrides }),
     exportCandidates: (overrides) =>
       invoke<ExportCandidate[]>("export_candidates", { overrides }),
+    exportHtml: (notePath, text, overrides, site, labels) =>
+      invoke<ExportReport>("export_html", { notePath, text, overrides, site, labels }),
+    exportSiteIndex: (overrides, site, labels) =>
+      invoke<string>("export_site_index", { overrides, site, labels }),
     // Фича 015: без состояния оболочки — прогоны страниц приходят из окна.
     locateHeading: (runs, outline, key) =>
       invoke<ResolvedAnchor | null>("preview_locate_heading", { runs, outline, key }),
@@ -297,6 +301,8 @@ function tauriPreviewClient(): PreviewClient {
       start: (paths, stopOnError, overrides) =>
         invoke<BatchState>("export_batch_start", { paths, stopOnError, overrides }),
       next: (state) => invoke<BatchStep>("export_batch_next", { state }),
+      withFormat: (state, format) =>
+        invoke<BatchState>("export_batch_with_format", { state, format }),
       record: (state, report, elapsedMs) =>
         invoke<BatchState>("export_batch_record", {
           state,

@@ -13,6 +13,7 @@
 pub mod batch;
 pub mod candidates;
 pub mod folder;
+pub mod html;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;
@@ -29,9 +30,12 @@ use crate::vault::backend::{ReadError, VaultBackend, WriteError};
 use crate::vault::vault_settings::VaultOverrides;
 use crate::vault::FolderAccess;
 
-pub use batch::{BatchJob, BatchPhase, BatchState, BatchStep, BatchSummary, BatchView, JobStatus};
+pub use batch::{
+    BatchJob, BatchPhase, BatchState, BatchStep, BatchSummary, BatchView, ExportFormat, JobStatus,
+};
 pub use candidates::{candidates, ExportCandidate, NotExportable};
 pub use folder::{export_folder, pdf_path, validate_folder, ExportFolderProblem};
+pub use html::{export_note_html, export_site_archive, export_site_index, html_path, SiteLabels};
 
 /// Чем закончился экспорт одной заметки (data-model.md «ExportReport»).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +50,10 @@ pub struct ExportReport {
     /// Те же диагностики, что показывает предпросмотр (FR-008, FR-016). При
     /// `Written` — только предупреждения.
     pub diagnostics: Vec<Diagnostic>,
+    /// HTML (фича 034): элементы, выведенные рисунком, потому что HTML-вывод их
+    /// пропускает (FR-003). У PDF пусто.
+    #[serde(default)]
+    pub as_images: Vec<String>,
 }
 
 /// Исход экспорта. Отказ — вариант значения, а не ошибка вызова: в пакете
@@ -122,6 +130,7 @@ pub async fn export_note_pdf<B: VaultBackend>(
         pdf_path: target.to_string_lossy().replace('\\', "/"),
         outcome,
         diagnostics,
+        as_images: Vec::new(),
     };
 
     let owned;

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BatchState,
   BatchView,
+  ExportFormat,
   ExportReport,
+  SiteLabels,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
@@ -55,7 +57,20 @@ export interface ExportControl {
   batch: BatchView | null;
   /** Пакет ещё что-то делает. */
   batchRunning: boolean;
-  startBatch: (paths: string[], stopOnError: boolean) => void;
+  /**
+   * Пакет экспорта. `Html` (фича 034): отмеченные заметки — сайт; ссылки
+   * между ними ведут на страницы, в конце пишется оглавление.
+   */
+  startBatch: (
+    paths: string[],
+    stopOnError: boolean,
+    format?: ExportFormat,
+    labels?: SiteLabels,
+  ) => void;
+  /** Записанные страницы последнего пакета HTML; `null` — пакет был не HTML. */
+  site: string[] | null;
+  /** Zip страниц последнего пакета HTML (web, FR-005); `null` — недоступно. */
+  siteArchive: (() => Promise<Uint8Array>) | null;
   skip: (notePath: string) => void;
   cancel: () => void;
   clearBatch: () => void;
@@ -78,6 +93,7 @@ export function useExport(
   const [last, setLast] = useState<SingleExport | null>(null);
   const [recent, setRecent] = useState<RecentExport[]>([]);
   const [batch, setBatch] = useState<BatchView | null>(null);
+  const [site, setSite] = useState<string[] | null>(null);
 
   const remember = useCallback((report: ExportReport, elapsedMs: number) => {
     const bytes = writtenBytes(report);
@@ -138,13 +154,20 @@ export function useExport(
   const running = batch !== null && !batch.is_over;
 
   const startBatch = useCallback(
-    (paths: string[], stopOnError: boolean) => {
+    (paths: string[], stopOnError: boolean, format: ExportFormat = "Pdf", labels?: SiteLabels) => {
       if (client === null || running) return; // FR-024: один пакет за раз
       const generation = generationRef.current;
       const ops = client.exportBatch;
+      const siteLabels = format === "Html" ? labels : undefined;
+      const html = siteLabels !== undefined;
+      const written: string[] = [];
+      setSite(html ? [] : null);
 
       void (async () => {
-        const initial = await ops.start(paths, stopOnError, settingsRef.current);
+        const initial = await ops.withFormat(
+          await ops.start(paths, stopOnError, settingsRef.current),
+          format,
+        );
         if (generationRef.current !== generation) return;
         stateRef.current = initial;
         setBatch(await ops.view(initial));
@@ -162,12 +185,16 @@ export function useExport(
           const started = performance.now();
           let report: ExportReport;
           try {
-            report = await client.exportPdf(next, text, settingsRef.current);
+            report =
+              siteLabels !== undefined
+                ? await client.exportHtml(next, text, settingsRef.current, paths, siteLabels)
+              : await client.exportPdf(next, text, settingsRef.current);
           } catch (cause) {
             report = thrown(next, cause);
           }
           const elapsedMs = performance.now() - started;
           remember(report, elapsedMs);
+          if (html && report.outcome.kind === "Written") written.push(next);
           await mutate(async (state) => ({
             // Итог прежнего vault в пакет нового не попадает.
             state:
@@ -181,6 +208,15 @@ export function useExport(
           // между заметками ввод, перерисовка и «Отменить» обязаны успеть
           // обработаться (research.md §6).
           await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        // Сайт (фича 034): оглавление по записанным страницам, если их больше одной.
+        if (siteLabels !== undefined && generationRef.current === generation) {
+          if (written.length > 1) {
+            await client
+              .exportSiteIndex(settingsRef.current, written, siteLabels)
+              .catch(() => undefined);
+          }
+          setSite([...written]);
         }
       })();
     },
@@ -230,6 +266,8 @@ export function useExport(
     batch,
     batchRunning: running,
     startBatch,
+    site,
+    siteArchive: archiveOf(client, site, settingsRef),
     skip,
     cancel,
     clearBatch,
@@ -251,5 +289,17 @@ function thrown(notePath: string, cause: unknown): ExportReport {
     pdf_path: "",
     outcome: { kind: "CompileFailed" },
     diagnostics: [{ severity: "Error", message, location: undefined }],
+    as_images: [],
   };
+}
+
+/** Zip сайта для скачивания (web, фича 034): нет архива у оболочки или страниц — `null`. */
+function archiveOf(
+  client: PreviewClient | null,
+  site: string[] | null,
+  settings: { current: VaultOverrides },
+): (() => Promise<Uint8Array>) | null {
+  const archive = client?.exportSiteArchive;
+  if (archive === undefined || site === null || site.length === 0) return null;
+  return () => archive(settings.current, site);
 }

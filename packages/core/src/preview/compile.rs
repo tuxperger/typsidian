@@ -191,6 +191,9 @@ pub(crate) enum Render {
     Pages,
     /// Файл PDF — для экспорта (фича 009).
     Pdf(PdfMeta),
+    /// Страница HTML — для экспорта (фича 034). Байты страницы приходят на
+    /// место байтов PDF.
+    Html,
 }
 
 /// Метаданные PDF, которые задаёт приложение, а не документ (009/research.md §2).
@@ -930,7 +933,12 @@ fn compile_with(
     render: &Render,
     inputs: Option<&str>,
 ) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
-    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts()).with_inputs(inputs);
+    let world = PreviewWorld::new(main, snapshot, fonts.into_fonts())
+        .with_html(matches!(render, Render::Html))
+        .with_inputs(inputs);
+    if matches!(render, Render::Html) {
+        return compile_html(world, main, note_path, revision);
+    }
     let compiled = typst::compile::<PagedDocument>(&world);
     // Кэш мемоизации компилятора между сборками сохраняется — на нём держится
     // скорость пересборки по мере набора (FR-008), — но без вытеснения он
@@ -966,6 +974,8 @@ fn compile_with(
                 (CompileOutcome::Failed, Vec::new(), None)
             }
         },
+        // HTML собирается своим путём выше (`compile_html`).
+        (Ok(_), Render::Html) => (CompileOutcome::Failed, Vec::new(), None),
         (Err(errors), _) => {
             diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
             (CompileOutcome::Failed, Vec::new(), None)
@@ -1134,4 +1144,52 @@ fn is_embed_file(path: &str) -> bool {
         .and_then(|name| name.strip_suffix(".typ"))
         .and_then(|stem| stem.rsplit_once(".embed-"))
         .is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Сборка страницы HTML (фича 034, research.md §1): тот же мир, что у PDF, но
+/// документ — `HtmlDocument`, а вывод — текст страницы на месте байтов PDF.
+fn compile_html(
+    world: PreviewWorld,
+    main: FileId,
+    note_path: &str,
+    revision: u64,
+) -> (CompiledDocument, PdfBytes, DependencySnapshot) {
+    let compiled = typst::compile::<typst_html::HtmlDocument>(&world);
+    typst::comemo::evict(MEMO_MAX_AGE);
+    let mut diagnostics: Vec<Diagnostic> = compiled
+        .warnings
+        .iter()
+        .map(|d| translate(&world, main, d))
+        .collect();
+    let (outcome, html) = match compiled.output {
+        Ok(document) => {
+            match typst_html::html(&document, &typst_html::HtmlOptions { pretty: true }) {
+                Ok(text) => (CompileOutcome::Succeeded, Some(text.into_bytes())),
+                Err(errors) => {
+                    diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
+                    (CompileOutcome::Failed, None)
+                }
+            }
+        }
+        Err(errors) => {
+            diagnostics.extend(errors.iter().map(|d| translate(&world, main, d)));
+            (CompileOutcome::Failed, None)
+        }
+    };
+    sort_by_location(&mut diagnostics);
+    (
+        CompiledDocument {
+            revision,
+            note_path: note_path.to_owned(),
+            outcome,
+            pages: Vec::new(),
+            diagnostics,
+            dependencies: Vec::new(),
+            anchor: None,
+            slides: Vec::new(),
+            evidence: None,
+        },
+        html,
+        world.into_snapshot(),
+    )
 }

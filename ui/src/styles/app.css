@@ -10865,3 +10865,23 @@ button.ts-props__chipbtn,
   color: var(--steel-600);
   white-space: nowrap;
 }
+
+/* ── Экспорт в HTML (фича 034, макет H1) ───────────────────────────────────── */
+
+/* Неотмеченный формат — приглушённо; отмеченный — стиль 009 выше. */
+.ts-export__seg-item {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.ts-export__seg-item:not([aria-current="true"]) {
+  border-color: var(--steel-700);
+  background: none;
+  color: var(--steel-400);
+}
+
+.ts-export__images {
+  margin-left: 8px;
+  font: 10.5px var(--font-mono);
+  color: var(--warning);
+}

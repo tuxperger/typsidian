@@ -5,6 +5,8 @@ import type {
   CompiledDocument,
   ExportCandidate,
   ExportReport,
+  ExportFormat,
+  SiteLabels,
   InstalledTemplate,
   InstallReport,
   LinkedIndex,
@@ -115,6 +117,22 @@ export interface PreviewClient {
   exportCandidates(overrides: VaultOverrides): Promise<ExportCandidate[]>;
 
   /**
+   * Страница HTML заметки (фича 034): тот же движок, что у PDF. `site` — пути
+   * всех заметок экспорта, `labels` — подписи навигации из переводов.
+   */
+  exportHtml(
+    notePath: string,
+    text: string | null,
+    overrides: VaultOverrides,
+    site: string[],
+    labels: SiteLabels,
+  ): Promise<ExportReport>;
+  /** Оглавление сайта HTML; ответ — путь `index.html`. */
+  exportSiteIndex(overrides: VaultOverrides, site: string[], labels: SiteLabels): Promise<string>;
+  /** Zip страниц сайта — только web, где файлы скачивают (FR-005). */
+  exportSiteArchive?: (overrides: VaultOverrides, site: string[]) => Promise<Uint8Array>;
+
+  /**
    * Где в собранном документе заголовок пункта оглавления (фича 015, FR-004):
    * поиск по текстовому слою страниц. `null` — не нашёлся, предпросмотр не
    * двигается. Сборку не запускает.
@@ -143,4 +161,6 @@ export interface ExportBatchOps {
   skip(state: BatchState, notePath: string): Promise<BatchState>;
   cancel(state: BatchState): Promise<BatchState>;
   view(state: BatchState): Promise<BatchView>;
+  /** Тот же пакет в другом формате (фича 034). */
+  withFormat(state: BatchState, format: ExportFormat): Promise<BatchState>;
 }

@@ -5,6 +5,7 @@ import type {
   BatchJob,
   DiagnosticLocation,
   ExportCandidate,
+  ExportFormat,
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
@@ -53,6 +54,9 @@ export function ExportCenter({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [stopOnError, setStopOnError] = useState(false);
+  // Формат пакета (фича 034): PDF или страницы HTML.
+  const [format, setFormat] = useState<ExportFormat>("Pdf");
+  const [archiveError, setArchiveError] = useState(false);
   const anchor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -130,6 +134,8 @@ export function ExportCenter({
     exporter.startBatch(
       exportable.filter((path) => selected.has(path)),
       stopOnError,
+      format,
+      { contents: t("export.html.contents"), outside: t("export.html.outside") },
     );
   };
 
@@ -215,12 +221,23 @@ export function ExportCenter({
             <div className="ts-export__side-scroll">
               <div className="ts-export__field">
                 <span className="ts-export__label">{t("export.center.format")}</span>
-                <div className="ts-export__seg">
-                  <span className="ts-export__seg-item" aria-current="true">
-                    PDF
-                  </span>
+                <div className="ts-export__seg" role="group" aria-label={t("export.center.format")}>
+                  {(["Pdf", "Html"] as const).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className="ts-export__seg-item"
+                      aria-current={format === id ? "true" : undefined}
+                      disabled={running}
+                      onClick={() => setFormat(id)}
+                    >
+                      {id === "Pdf" ? "PDF" : "HTML"}
+                    </button>
+                  ))}
                 </div>
-                <span className="ts-export__note">{t("export.center.formatNote")}</span>
+                <span className="ts-export__note">
+                  {format === "Pdf" ? t("export.center.formatNote") : t("export.html.formatNote")}
+                </span>
               </div>
 
               <div className="ts-export__field">
@@ -237,7 +254,9 @@ export function ExportCenter({
                     {t("export.center.change")}
                   </button>
                 </div>
-                <span className="ts-export__note">{t("export.center.outputNote")}</span>
+                <span className="ts-export__note">
+                  {format === "Pdf" ? t("export.center.outputNote") : t("export.html.outputNote")}
+                </span>
               </div>
 
               <div className="ts-export__field">
@@ -299,6 +318,28 @@ export function ExportCenter({
                         {batch.summary.not_exported > 0 &&
                           t("export.summary.notExported", { count: batch.summary.not_exported })}
                         {t("export.summary.folder", { folder: batchFolder })}
+                      </p>
+                    )}
+                    {batch.is_over && exporter.siteArchive !== null && (
+                      <button
+                        type="button"
+                        className="ts-btn"
+                        onClick={() => {
+                          const archive = exporter.siteArchive;
+                          if (archive === null) return;
+                          setArchiveError(false);
+                          void archive()
+                            .then((bytes) => downloadArchive(bytes, `${batchFolder}.zip`))
+                            .catch(() => setArchiveError(true));
+                        }}
+                      >
+                        <Icon name="download" size={12} />
+                        {t("export.html.archive")}
+                      </button>
+                    )}
+                    {archiveError && (
+                      <p className="ts-export__summary" role="alert">
+                        {t("export.html.archiveFailed")}
                       </p>
                     )}
                   </div>
@@ -422,6 +463,14 @@ function ExportRow({
           : status === undefined
             ? ""
             : jobLabel(i18n, status, job?.report, job?.elapsed_ms)}
+        {(job?.report?.as_images ?? []).length > 0 && (
+          <span className="ts-export__images">
+            {t("export.html.asImages", {
+              count: (job?.report?.as_images ?? []).length,
+              names: (job?.report?.as_images ?? []).join(", "),
+            })}
+          </span>
+        )}
         {status === "Queued" && (
           <button type="button" className="ts-export__skip" onClick={onSkip}>
             {t("export.row.skip")}
@@ -483,4 +532,14 @@ function groupByFolder(rows: ExportCandidate[]): [string, ExportCandidate[]][] {
     else groups.set(row.folder, [row]);
   }
   return [...groups.entries()];
+}
+
+/** Скачивание архива сайта (web, фича 034): файл через ссылку на `Blob`. */
+function downloadArchive(bytes: Uint8Array, name: string): void {
+  const url = URL.createObjectURL(new Blob([bytes.slice()], { type: "application/zip" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

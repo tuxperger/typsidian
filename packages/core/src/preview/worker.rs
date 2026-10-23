@@ -71,6 +71,9 @@ struct JobHeader {
     files: Vec<FileKey>,
     /// Идентификатор PDF; `None` — нужны страницы.
     pdf_ident: Option<String>,
+    /// Нужна страница HTML (фича 034).
+    #[serde(default)]
+    html: bool,
     /// Входы блоков выборки (фича 020): JSON-строка для `sys.inputs`.
     #[serde(default)]
     inputs: Option<String>,
@@ -115,9 +118,10 @@ fn encode_job(job: &CompileJob, builtin_fonts: usize) -> Result<JsValue, JsValue
         revision: job.revision,
         files: ids.iter().map(|id| FileKey::of(*id)).collect(),
         pdf_ident: match &job.render {
-            Render::Pages => None,
+            Render::Pages | Render::Html => None,
             Render::Pdf(meta) => Some(meta.ident.clone()),
         },
+        html: matches!(job.render, Render::Html),
         inputs: job.inputs.clone(),
     };
     let files = bytes_array(
@@ -175,9 +179,10 @@ pub fn run_compile_job(message: JsValue) -> Result<JsValue, JsValue> {
                 .iter()
                 .map(|bytes| Bytes::new(js_sys::Uint8Array::new(&bytes).to_vec())),
         );
-    let render = match header.pdf_ident {
-        None => Render::Pages,
-        Some(ident) => Render::Pdf(PdfMeta { ident }),
+    let render = match (header.pdf_ident, header.html) {
+        (_, true) => Render::Html,
+        (None, false) => Render::Pages,
+        (Some(ident), false) => Render::Pdf(PdfMeta { ident }),
     };
 
     let output = CompileJob {

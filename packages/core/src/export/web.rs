@@ -58,3 +58,32 @@ pub fn export_batch_cancel_js(state: BatchState) -> BatchState {
 pub fn export_batch_view_js(state: BatchState) -> BatchView {
     batch::view(state)
 }
+
+/// Тот же пакет в другом формате (фича 034).
+#[wasm_bindgen(js_name = exportBatchWithFormat)]
+pub fn export_batch_with_format_js(state: BatchState, format: super::ExportFormat) -> BatchState {
+    batch::with_format(state, format)
+}
+
+/// Оглавление сайта HTML (фича 034); отказ записи — исключение.
+#[wasm_bindgen(js_name = exportSiteIndex)]
+pub async fn export_site_index_js(
+    backend: &mut WebBackend,
+    overrides: VaultOverrides,
+    site: Vec<String>,
+    labels: super::SiteLabels,
+) -> Result<String, JsValue> {
+    super::export_site_index(backend, &overrides, &site, &labels)
+        .await
+        .map_err(|error| JsValue::from_str(&format!("{error:?}")))
+}
+
+/// Zip страниц сайта для скачивания (фича 034, FR-005).
+#[wasm_bindgen(js_name = exportSiteArchive)]
+pub async fn export_site_archive_js(
+    backend: &WebBackend,
+    overrides: VaultOverrides,
+    site: Vec<String>,
+) -> Vec<u8> {
+    super::export_site_archive(backend, &overrides, &site).await
+}

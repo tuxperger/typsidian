@@ -230,6 +230,7 @@ fn report_for(path: &str, outcome: ExportOutcome) -> ExportReport {
         pdf_path: format!("export/{path}"),
         outcome,
         diagnostics: Vec::new(),
+        as_images: Vec::new(),
     }
 }
 

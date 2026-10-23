@@ -1877,6 +1877,53 @@ async fn export_pdf(
     .await))
 }
 
+/// Экспортирует заметку страницей HTML (фича 034): тот же движок, что у PDF.
+#[tauri::command]
+async fn export_html(
+    state: State<'_, Vault>,
+    engine: State<'_, Preview>,
+    note_path: String,
+    text: Option<String>,
+    overrides: VaultOverrides,
+    site: Vec<String>,
+    labels: export::SiteLabels,
+) -> Answer<export::ExportReport, Failure<()>> {
+    with_vault!(state, |backend| Ok(export::export_note_html(
+        backend,
+        &engine.packages,
+        &note_path,
+        text.as_deref(),
+        engine.fonts.clone(),
+        &overrides,
+        &site,
+        &labels,
+    )
+    .await))
+}
+
+/// Оглавление сайта HTML (фича 034).
+#[tauri::command]
+async fn export_site_index(
+    state: State<'_, Vault>,
+    overrides: VaultOverrides,
+    site: Vec<String>,
+    labels: export::SiteLabels,
+) -> Answer<String, Failure<export::ExportWriteProblem>> {
+    with_vault!(state, |backend| export::export_site_index(
+        backend, &overrides, &site, &labels
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+fn export_batch_with_format(
+    state: export::BatchState,
+    format: export::ExportFormat,
+) -> export::BatchState {
+    export::batch::with_format(state, format)
+}
+
 #[tauri::command]
 async fn export_candidates(
     state: State<'_, Vault>,
@@ -3155,6 +3202,9 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             preview_install_template,
             preview_installed_templates,
             export_pdf,
+            export_html,
+            export_site_index,
+            export_batch_with_format,
             export_candidates,
             export_batch_start,
             sources_refresh,
