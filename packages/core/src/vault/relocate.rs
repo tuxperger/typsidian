@@ -653,6 +653,7 @@ pub async fn move_section_marks<B: VaultBackend>(
     }
     let _ = super::vault_settings::move_intentional_orphans(backend, from, new_path).await;
     let _ = crate::snapshots::move_snapshots(backend, from, new_path).await;
+    let _ = crate::bookmarks::move_bookmarks(backend, from, new_path).await;
 }
 
 #[cfg(test)]

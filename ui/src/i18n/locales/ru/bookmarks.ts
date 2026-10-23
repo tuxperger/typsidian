@@ -1,0 +1,35 @@
+import type { Translation } from "../define.js";
+import type { bookmarks as en } from "../en/bookmarks.js";
+
+// Закладки (фича 032): панель над деревом, меню, окно поиска.
+export const bookmarks: Translation<typeof en> = {
+  "bookmarks.title": "Закладки",
+  "bookmarks.group": "группа",
+  "bookmarks.newGroup": "Новая группа",
+  "bookmarks.empty": "Закрепите заметку, раздел, поиск или папку: «В закладки» в меню дерева, вкладки, оглавления или в окне поиска.",
+  "bookmarks.missing": "недоступна",
+  "bookmarks.sectionMissing": "нет раздела",
+  "bookmarks.missingHint": "Закреплённое удалено — уберите закладку кнопкой ✕.",
+  "bookmarks.sub.section": (p) => `${p.note} · раздел`,
+  "bookmarks.sub.search": "поиск",
+  "bookmarks.sub.linksTo": (p) => `ссылается на ${p.note}`,
+  "bookmarks.sub.folder": "папка",
+  "bookmarks.menu.open": "Открыть",
+  "bookmarks.menu.rename": "Переименовать…",
+  "bookmarks.menu.toGroup": (p) => `В группу «${p.name}»`,
+  "bookmarks.menu.outOfGroup": "Из группы",
+  "bookmarks.menu.up": "Выше",
+  "bookmarks.menu.down": "Ниже",
+  "bookmarks.menu.remove": "Убрать из закладок",
+  "bookmarks.menu.deleteGroup": "Удалить группу",
+  "bookmarks.error.readOnly": "Vault только для чтения — закладки не изменены.",
+  "bookmarks.error.io": "Не удалось сохранить закладки в настройках vault.",
+  "bookmarks.add": "В закладки",
+  "bookmarks.outline.jump": "Перейти к заголовку",
+  "bookmarks.added": (p) => `«${p.name}» — в закладках`,
+  "bookmarks.exists": (p) => `«${p.name}» уже в закладках`,
+  "bookmarks.command": "В закладки: эта заметка",
+  "bookmarks.search.add": "В закладки",
+  "bookmarks.search.done": "В закладках",
+  "bookmarks.search.hint": "Сохранить поиск со всеми условиями",
+};

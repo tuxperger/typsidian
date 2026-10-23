@@ -35,6 +35,7 @@ use typsidian_core::boards::{
     self, Board, BoardEvent, CreateBoardError, Embed, EmbedError, EmbedPlan, EmbedRef,
     ReadBoardError, SnapshotWriteError, WriteBoardError,
 };
+use typsidian_core::bookmarks;
 use typsidian_core::capture;
 use typsidian_core::completion;
 use typsidian_core::export;
@@ -1099,6 +1100,100 @@ async fn snapshots_clear(state: State<'_, Vault>) -> Answer<u32, Failure<()>> {
     with_vault!(state, |backend| snapshots::snapshots_clear(backend)
         .await
         .map_err(|_| Failure::Core(())))
+}
+
+// ── Закладки (фича 032) ─────────────────────────────────────────────────────
+
+type BookmarkAnswer = Answer<bookmarks::BookmarksView, Failure<bookmarks::BookmarkError>>;
+
+#[tauri::command]
+async fn bookmarks_view(state: State<'_, Vault>) -> Answer<bookmarks::BookmarksView, Failure<()>> {
+    with_vault!(
+        state,
+        |backend| Ok(bookmarks::bookmarks_view(backend).await)
+    )
+}
+
+#[tauri::command]
+async fn bookmark_add(
+    target: bookmarks::BookmarkTarget,
+    name: Option<String>,
+    state: State<'_, Vault>,
+) -> Answer<bookmarks::AddOutcome, Failure<bookmarks::BookmarkError>> {
+    with_vault!(state, |backend| bookmarks::bookmark_add(
+        backend, target, name
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_remove(id: String, state: State<'_, Vault>) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_remove(backend, &id)
+        .await
+        .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_rename(id: String, name: String, state: State<'_, Vault>) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_rename(
+        backend, &id, &name
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_move(
+    id: String,
+    place: bookmarks::BookmarkPlace,
+    state: State<'_, Vault>,
+) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_move(
+        backend, &id, &place
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_group_create(name: String, state: State<'_, Vault>) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_group_create(
+        backend, &name
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_group_rename(
+    id: String,
+    name: String,
+    state: State<'_, Vault>,
+) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_group_rename(
+        backend, &id, &name
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_group_toggle(id: String, state: State<'_, Vault>) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_group_toggle(
+        backend, &id
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+#[tauri::command]
+async fn bookmark_group_delete(id: String, state: State<'_, Vault>) -> BookmarkAnswer {
+    with_vault!(state, |backend| bookmarks::bookmark_group_delete(
+        backend, &id
+    )
+    .await
+    .map_err(Failure::Core))
 }
 
 // ── Встраивание заметок (фича 031) ──────────────────────────────────────────
@@ -3001,6 +3096,15 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             syntax_session_close,
             syntax_session_spelling,
             embed_insert,
+            bookmarks_view,
+            bookmark_add,
+            bookmark_remove,
+            bookmark_rename,
+            bookmark_move,
+            bookmark_group_create,
+            bookmark_group_rename,
+            bookmark_group_toggle,
+            bookmark_group_delete,
             spell_configure,
             spell_add_word,
             spell_remove_word,

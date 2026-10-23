@@ -38,6 +38,15 @@ import {
   linkFix,
   SpellChecker,
   embedInsert,
+  bookmarksView,
+  bookmarkAdd,
+  bookmarkRemove,
+  bookmarkRename,
+  bookmarkMove,
+  bookmarkGroupCreate,
+  bookmarkGroupRename,
+  bookmarkGroupToggle,
+  bookmarkGroupDelete,
   type SpellConfig,
   snapshotTake,
   snapshotHistory,
@@ -444,6 +453,19 @@ export function webVaultClient(
         call(() => linksLinkMention(backend, request, editorText)),
       health: (openTexts) => call(() => linkHealth(backend, openTexts)),
       fix: (request, editorText) => call(() => linkFix(backend, request, editorText ?? undefined)),
+    },
+
+    // ── Закладки (фича 032) ─────────────────────────────────────────
+    bookmarks: {
+      view: () => call(() => bookmarksView(backend)),
+      add: (target, name) => call(() => bookmarkAdd(backend, target, name ?? undefined)),
+      remove: (id) => call(() => bookmarkRemove(backend, id)),
+      rename: (id, name) => call(() => bookmarkRename(backend, id, name)),
+      move: (id, place) => call(() => bookmarkMove(backend, id, place)),
+      groupCreate: (name) => call(() => bookmarkGroupCreate(backend, name)),
+      groupRename: (id, name) => call(() => bookmarkGroupRename(backend, id, name)),
+      groupToggle: (id) => call(() => bookmarkGroupToggle(backend, id)),
+      groupDelete: (id) => call(() => bookmarkGroupDelete(backend, id)),
     },
 
     // ── Встраивание заметок (фича 031) ──────────────────────────────

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type {
+  BookmarkTarget,
   CreateError,
   DeleteError,
   Note,
@@ -141,6 +142,8 @@ const TreeExtrasContext = createContext<{
   conflictPaths?: ReadonlySet<string>;
   /** «Переместить в…» (фича 023, FR-021). */
   onMoveTo?: (entry: { path: string; name: string }) => void;
+  /** «В закладки» (фича 032). */
+  onBookmark?: (target: BookmarkTarget, name: string) => void;
 }>({});
 
 /** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
@@ -222,6 +225,8 @@ export interface VaultTreeActionsProps {
    * Не передан — пункта в меню нет.
    */
   onMoveTo?: ((entry: { path: string; name: string }) => void) | undefined;
+  /** «В закладки» для заметки и папки (фича 032). Не передан — пункта нет. */
+  onBookmark?: ((target: BookmarkTarget, name: string) => void) | undefined;
 }
 
 type MenuTarget =
@@ -644,7 +649,8 @@ function NoteRow({
   const isBusy = actions.state.pendingPath !== null;
   const isOpen = useContext(OpenPathContext) === note.path.toString();
   const contextMenu = useContextMenu();
-  const { onInsertLink, onFileHistory, conflictPaths, onMoveTo } = useContext(TreeExtrasContext);
+  const { onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark } =
+    useContext(TreeExtrasContext);
   const { t } = useI18n();
   const moveEntry = { path: note.path.toString(), name: note.name };
   const hasConflict = conflictPaths?.has(note.path.toString()) ?? false;
@@ -683,6 +689,15 @@ function NoteRow({
             : []),
           ...(onFileHistory
             ? [{ label: t("sync.tree.fileHistory"), run: () => onFileHistory(note) }]
+            : []),
+          ...(onBookmark && !isBoard(note)
+            ? [
+                {
+                  label: t("bookmarks.add"),
+                  run: () =>
+                    onBookmark({ kind: "Note", path: note.path.toString() }, note.name),
+                },
+              ]
             : []),
           { kind: "separator" },
           copyPathItem(t, note.path.toString(), contextMenu.notify),
@@ -796,7 +811,7 @@ function FolderRow({
   const isBusy = actions.state.pendingPath !== null;
   const contextMenu = useContextMenu();
   const { t } = useI18n();
-  const { onMoveTo } = useContext(TreeExtrasContext);
+  const { onMoveTo, onBookmark } = useContext(TreeExtrasContext);
   const moveEntry = { path: folder.path, name: folder.name };
 
   return (
@@ -826,6 +841,14 @@ function FolderRow({
                 {
                   label: isSection ? t("tree.section.unmark") : t("tree.section.mark"),
                   run: () => actions.onToggleSection?.(folder.path, !isSection),
+                },
+              ]
+            : []),
+          ...(onBookmark
+            ? [
+                {
+                  label: t("bookmarks.add"),
+                  run: () => onBookmark({ kind: "Folder", path: folder.path }, folder.name),
                 },
               ]
             : []),
@@ -980,6 +1003,7 @@ export function VaultTreeActions({
   onFileHistory,
   conflictPaths,
   onMoveTo,
+  onBookmark,
 }: VaultTreeActionsProps): React.JSX.Element {
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
@@ -991,8 +1015,9 @@ export function VaultTreeActions({
       ...(onFileHistory ? { onFileHistory } : {}),
       ...(conflictPaths ? { conflictPaths } : {}),
       ...(onMoveTo ? { onMoveTo } : {}),
+      ...(onBookmark ? { onBookmark } : {}),
     }),
-    [onInsertLink, onFileHistory, conflictPaths, onMoveTo],
+    [onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark],
   );
 
   return (

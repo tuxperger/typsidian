@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod boards;
+pub mod bookmarks;
 pub mod capture;
 pub mod completion;
 pub mod elements;

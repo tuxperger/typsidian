@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import type { GroupSlot, TabId, TabView } from "../../wasm-core/typsidian_core.js";
+import { useBookmarkActions } from "../../bookmarks/BookmarkActions.js";
 import { Icon } from "../../icons/Icons.js";
 import { useContextMenu, type ContextMenuItem } from "../../menu/ContextMenu.js";
 import { useI18n } from "../../i18n/index.js";
@@ -116,6 +117,8 @@ function TabStripView(props: TabStripProps): React.JSX.Element {
     return value === "" ? {} : { shortcut: value };
   };
 
+  // «В закладки» (фича 032) — из контекста рабочей области.
+  const bookmarkActions = useBookmarkActions();
   const openMenu = (event: React.MouseEvent, tab: TabView): void => {
     const items: ContextMenuItem[] = [
       {
@@ -153,6 +156,15 @@ function TabStripView(props: TabStripProps): React.JSX.Element {
         run: () => props.onCycle("Previous"),
       },
     ];
+    if (bookmarkActions !== null) {
+      items.push(
+        { kind: "separator" },
+        {
+          label: t("bookmarks.add"),
+          run: () => bookmarkActions.add({ kind: "Note", path: tab.path }, tab.title),
+        },
+      );
+    }
     contextMenu.open(event, items);
   };
 

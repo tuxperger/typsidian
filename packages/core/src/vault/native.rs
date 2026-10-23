@@ -1732,6 +1732,8 @@ impl VaultBackend for NativeBackend {
         let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
         // Фича 029: история снимков едет за заметкой.
         let _ = crate::snapshots::move_snapshots(self, from, to).await;
+        // Фича 032: закладки едут за заметкой или папкой.
+        let _ = crate::bookmarks::move_bookmarks(self, from, to).await;
         // FR-028/FR-030: ссылки на старое имя стали битыми, на новое — могли
         // починиться. Само подтверждение операции — забота вызывающей стороны
         // (contracts/vault-backend-trait.md), здесь только факт изменения.

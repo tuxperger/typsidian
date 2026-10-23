@@ -53,6 +53,10 @@ import type {
   DeletedNote,
   SpellConfig,
   EmbedInsertion,
+  AddOutcome,
+  BookmarkPlace,
+  BookmarkTarget,
+  BookmarksView,
   RecoverOutcome,
   RestoreOutcome,
   SnapshotReason,
@@ -546,6 +550,11 @@ export interface VaultClient {
   /** Обратные ссылки и упоминания: одна поверхность на всех оболочках (FR-020). */
   readonly links: LinksClient;
 
+  // ── Закладки (фича 032) ──────────────────────────────────────────
+
+  /** Закладки vault: порядок, группы и доступность целей — в ядре. */
+  readonly bookmarks: BookmarksClient;
+
   // ── Встраивание заметок (фича 031) ───────────────────────────────
 
   /** «Встроить заметку»: библиотека в vault, `#import` и `#embed("")` у каретки. */
@@ -725,6 +734,22 @@ export interface SlidesClient {
   caret(slides: PageSlideInfo[], page: number): Promise<SlidePlace | undefined>;
   label(slides: PageSlideInfo[], page: number): Promise<SlideLabel>;
   keymap(): Promise<ShowKeymap>;
+}
+
+/**
+ * Закладки (фича 032). Каждая правка отдаёт новый вид; отказ — исключение
+ * со значением `BookmarkError`.
+ */
+export interface BookmarksClient {
+  view(): Promise<BookmarksView>;
+  add(target: BookmarkTarget, name: string | null): Promise<AddOutcome>;
+  remove(id: string): Promise<BookmarksView>;
+  rename(id: string, name: string): Promise<BookmarksView>;
+  move(id: string, place: BookmarkPlace): Promise<BookmarksView>;
+  groupCreate(name: string): Promise<BookmarksView>;
+  groupRename(id: string, name: string): Promise<BookmarksView>;
+  groupToggle(id: string): Promise<BookmarksView>;
+  groupDelete(id: string): Promise<BookmarksView>;
 }
 
 /**

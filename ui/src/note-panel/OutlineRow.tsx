@@ -1,5 +1,7 @@
 "use client";
 
+import { useBookmarkActions } from "../bookmarks/BookmarkActions.js";
+import { useContextMenu } from "../menu/ContextMenu.js";
 import { memo, useRef, useState } from "react";
 import type { OutlineRow as Row } from "../wasm-core/typsidian_core.js";
 import { useI18n } from "../i18n/index.js";
@@ -33,6 +35,8 @@ export const OutlineRow = memo(function OutlineRow({
 }: OutlineRowProps): React.JSX.Element {
   const { t } = useI18n();
   const heading = row.kind === "Heading";
+  const bookmarkActions = useBookmarkActions();
+  const contextMenu = useContextMenu();
   const text = row.segments.map((segment) => segment.text).join("");
   const prefix =
     row.kind === "Figure"
@@ -84,7 +88,18 @@ export const OutlineRow = memo(function OutlineRow({
       onPointerCancel={cancelHold}
       onContextMenu={(event) => {
         // Долгое нажатие на телефоне вызывает ещё и системное меню.
-        if (holdDone.current) event.preventDefault();
+        if (holdDone.current) {
+          event.preventDefault();
+          return;
+        }
+        // «В закладки» у заголовка (фича 032).
+        const section = bookmarkActions?.section ?? null;
+        if (heading && section !== null) {
+          contextMenu.open(event, [
+            { label: t("bookmarks.outline.jump"), run: () => onJump(row) },
+            { label: t("bookmarks.add"), run: () => section(text) },
+          ]);
+        }
       }}
       onClick={() => {
         // Отпущенное удержание — не переход.

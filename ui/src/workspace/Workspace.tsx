@@ -26,14 +26,20 @@ import {
 import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
+import { BookmarksPanel } from "../bookmarks/BookmarksPanel.js";
+import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
+import { useBookmarks, type BookmarkAddResult } from "../bookmarks/useBookmarks.js";
 import { useEditorFontSizeControl } from "../settings/useEditorFontSizeControl.js";
 
 import { defaultNewBoardName } from "../vault-tree/VaultTreeActions.js";
 import { Sidebar } from "../vault-tree/Sidebar.js";
 import type {
+  BookmarkRow,
+  BookmarkTarget,
   Condition,
   OpenText,
   OutlineRow as OutlineRowView,
+  SearchQuery,
   TextPlace,
   WorkspaceView,
 } from "../wasm-core/typsidian_core.js";
@@ -331,6 +337,11 @@ function WorkspaceView({
   const [searchReplace, setSearchReplace] = useState(false);
   // Условия по свойствам, с которыми открывается поиск (клик по тегу, фича 020).
   const [searchConditions, setSearchConditions] = useState<Condition[]>([]);
+  // Поиск из закладки (фича 032): его условия и номер открытия — окно
+  // пересоздаётся с запросом закладки, даже если уже было открыто.
+  const [searchQuery, setSearchQuery] = useState<SearchQuery | null>(null);
+  const [searchSeq, setSearchSeq] = useState(0);
+  const [revealFolder, setRevealFolder] = useState<{ path: string; seq: number } | null>(null);
   // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
   const [selectRequest, setSelectRequest] = useState<{ id: number; conditions: Condition[] } | null>(null);
   // select.typ правили вручную и оставили как есть: предупреждение в колонке свойств.
@@ -1575,6 +1586,48 @@ function WorkspaceView({
    */
   const openPath = useCallback(async (path: string) => openTab(path), [openTab]);
 
+  // Закладки (фича 032): список перечитывается, когда меняется набор файлов
+  // vault, — пути после переименования и доступность целей приходят новыми.
+  const bookmarks = useBookmarks(state.client, state.notes);
+  const addBookmarkTo = bookmarks.add;
+  const addBookmark = useCallback(
+    async (target: BookmarkTarget, name: string): Promise<BookmarkAddResult> => {
+      const result = await addBookmarkTo(target, null);
+      if (result === "added") contextMenu.notify(t("bookmarks.added", { name }));
+      if (result === "exists") contextMenu.notify(t("bookmarks.exists", { name }));
+      return result;
+    },
+    [addBookmarkTo, contextMenu, t],
+  );
+  const openBookmark = useCallback(
+    (row: BookmarkRow) => {
+      const target = row.bookmark.target;
+      switch (target.kind) {
+        case "Note":
+          void openPath(target.path);
+          break;
+        case "Section":
+          if (row.place !== undefined) {
+            revealPlace({ path: target.path, line: row.place[0], column: row.place[1] });
+          } else {
+            void openPath(target.path);
+          }
+          break;
+        case "Search":
+          setSearchConditions([]);
+          setSearchReplace(false);
+          setSearchQuery(target.query);
+          setSearchSeq((seq) => seq + 1);
+          setSearchOpen(true);
+          break;
+        case "Folder":
+          setRevealFolder((previous) => ({ path: target.path, seq: (previous?.seq ?? 0) + 1 }));
+          break;
+      }
+    },
+    [openPath, revealPlace],
+  );
+
   // Отчёт импорта (фича 021) записан ядром, но список заметок узнаёт о нём по
   // событию чуть позже: открытие ждёт его появления (до 3 с), иначе вкладка не откроется.
   const notesRef = useRef(state.notes);
@@ -2166,6 +2219,20 @@ function WorkspaceView({
         });
       }
     }
+    // Фича 032. «В закладки» — у открытой заметки или доски.
+    if (activePath !== null) {
+      const bookmarkPath = activePath;
+      items.push({
+        id: "bookmark-note",
+        ...titled("bookmarks.command"),
+        icon: "bookmark",
+        run: () =>
+          void addBookmark(
+            { kind: "Note", path: bookmarkPath },
+            bookmarkPath.replace(/^.*\//, "").replace(/\.typ$/, ""),
+          ),
+      });
+    }
     // Фича 031. «Встроить заметку» — у открытой заметки Typst.
     if (view === "workspace" && outlineNotePath !== null) {
       items.push({
@@ -2478,6 +2545,7 @@ function WorkspaceView({
     dailyOpenNext,
     openManualCapture,
     embedNote,
+    addBookmark,
     activePath,
     isBoardOpen,
     t,
@@ -2524,7 +2592,17 @@ function WorkspaceView({
     );
   }
 
+  // «В закладки» для меню вкладки и строк оглавления (фича 032).
+  const bookmarkActions: BookmarkActions = {
+    add: (target, name) => void addBookmark(target, name),
+    section:
+      outlineNotePath === null
+        ? null
+        : (heading) => void addBookmark({ kind: "Section", path: outlineNotePath, heading }, heading),
+  };
+
   return (
+    <BookmarkActionsContext.Provider value={bookmarkActions}>
     <main className="ts-app">
       {/* Определения иконок монтируются один раз на всё приложение; всё
           остальное ссылается на них через `<use>`. */}
@@ -2944,6 +3022,16 @@ function WorkspaceView({
                   : undefined
               }
               conflictPaths={conflictPaths}
+              onBookmark={(target, name) => void addBookmark(target, name)}
+              revealFolder={revealFolder}
+              bookmarksPanel={
+                <BookmarksPanel
+                  bookmarks={bookmarks}
+                  readOnly={state.accessState === "readOnly"}
+                  activePath={activePath}
+                  onOpen={openBookmark}
+                />
+              }
             />
 
             {/* Граница панели и остального окна. Стоит и при открытой доске:
@@ -3197,10 +3285,15 @@ function WorkspaceView({
 
       {searchOpen && (
         <SearchOverlay
-          key={searchReplace ? "replace" : "search"}
+          key={`${searchReplace ? "replace" : "search"}-${searchSeq}`}
           client={state.client}
           currentNote={activeNote}
           initialConditions={searchConditions}
+          initialQuery={searchQuery}
+          onBookmark={async (query) => {
+            const name = query.text.trim() === "" ? t("bookmarks.sub.search") : query.text.trim();
+            return (await addBookmark({ kind: "Search", query }, name)) !== "failed";
+          }}
           editors={noteEditors}
           openTexts={() => registry?.openTexts() ?? NO_OPEN_TEXTS}
           initialReplace={searchReplace}
@@ -3218,6 +3311,7 @@ function WorkspaceView({
             setSearchOpen(false);
             setSearchReplace(false);
             setSearchConditions([]);
+            setSearchQuery(null);
           }}
         />
       )}
@@ -3392,6 +3486,7 @@ function WorkspaceView({
         onDismissError={conflicts.dismissError}
       />
     </main>
+    </BookmarkActionsContext.Provider>
   );
 }
 

@@ -45,6 +45,10 @@ export interface SearchOverlayProps {
   openTexts?: () => readonly OpenText[];
   /** Открыть сразу в режиме замены (`Mod+Shift+H`). */
   initialReplace?: boolean;
+  /** Запрос, с которым поиск открыт: закладка-поиск (фича 032). */
+  initialQuery?: SearchQuery | null;
+  /** «В закладки» (фича 032): сохранить текущий запрос; ответ — добавлен ли он. */
+  onBookmark?: ((query: SearchQuery) => Promise<boolean>) | undefined;
   onClose: () => void;
 }
 
@@ -71,21 +75,28 @@ export function SearchOverlay({
   editors = null,
   openTexts = NO_OPEN_TEXTS,
   initialReplace = false,
+  initialQuery = null,
+  onBookmark,
   onClose,
 }: SearchOverlayProps): React.JSX.Element {
   const [replaceOn, setReplaceOn] = useState(initialReplace && editors !== null);
   const [replacement, setReplacement] = useState("");
-  const [text, setText] = useState("");
-  const [regex, setRegex] = useState(false);
-  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [text, setText] = useState(initialQuery?.text ?? "");
+  const [regex, setRegex] = useState(initialQuery?.regex ?? false);
+  const [caseSensitive, setCaseSensitive] = useState(initialQuery?.case_sensitive ?? false);
+  // «Ссылается на …» из закладки: та заметка, а не открытая сейчас.
+  const [savedLinksTo, setSavedLinksTo] = useState<string | null>(initialQuery?.links_to ?? null);
+  const [bookmarked, setBookmarked] = useState(false);
   const [linksToCurrent, setLinksToCurrent] = useState(false);
-  const [mode, setMode] = useState<"And" | "Or">("And");
+  const [mode, setMode] = useState<"And" | "Or">(initialQuery?.mode ?? "And");
   const [results, setResults] = useState<SearchResults | null>(null);
   const [error, setError] = useState<Phrase | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(0);
   // Условия по свойствам (фича 020): фишки над результатами, все сразу.
-  const [conditions, setConditions] = useState<Condition[]>(initialConditions);
+  const [conditions, setConditions] = useState<Condition[]>(
+    initialQuery?.properties ?? initialConditions,
+  );
   const [selection, setSelection] = useState<SelectionResult | null>(null);
   const [knownKeys, setKnownKeys] = useState<string[]>([]);
   const { lang } = useI18n();
@@ -99,7 +110,7 @@ export function SearchOverlay({
   const currentPath = currentNote?.path.toString() ?? null;
   // Чип живёт, только пока есть на что ссылаться: закрытая заметка сделала бы
   // фильтр беспредметным, а включённым он бы остался.
-  const linksTo = linksToCurrent ? currentPath : null;
+  const linksTo = linksToCurrent ? currentPath : savedLinksTo;
 
   // Монотонная версия запроса: ответ на устаревший текст не должен вытеснить
   // более новый — та же причина, что и в предпросмотре (FR-009 фичи 005).
@@ -313,6 +324,19 @@ export function SearchOverlay({
               {t("replace.toggle")}
             </button>
           )}
+          {onBookmark !== undefined && (
+            <button
+              type="button"
+              className="ts-chip"
+              aria-pressed={bookmarked}
+              disabled={query.text.trim() === "" && conditions.length === 0 && linksTo === null}
+              onClick={() => void onBookmark(query).then(() => setBookmarked(true))}
+              title={t("bookmarks.search.hint")}
+            >
+              <Icon name="bookmark" size={11} />
+              {bookmarked ? t("bookmarks.search.done") : t("bookmarks.search.add")}
+            </button>
+          )}
           <span className="ts-search__sep" />
           <span className="ts-search__count">
             {replaceOn
@@ -389,7 +413,10 @@ export function SearchOverlay({
               className="ts-chip"
               aria-pressed={linksToCurrent}
               disabled={currentPath === null}
-              onClick={() => setLinksToCurrent((on) => !on)}
+              onClick={() => {
+                setSavedLinksTo(null);
+                setLinksToCurrent((on) => !on);
+              }}
               title={
                 currentPath === null ? t("search.linksToDisabled") : t("search.linksToHint")
               }

@@ -1269,6 +1269,8 @@ impl VaultBackend for WebBackend {
         let _ = super::vault_settings::move_intentional_orphans(self, from, to).await;
         // Фича 029: история снимков едет за заметкой.
         let _ = crate::snapshots::move_snapshots(self, from, to).await;
+        // Фича 032: закладки едут за заметкой или папкой.
+        let _ = crate::bookmarks::move_bookmarks(self, from, to).await;
 
         self.publish_links_invalidated(&[from.to_path_buf(), to.to_path_buf()])
             .await;

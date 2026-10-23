@@ -1825,3 +1825,37 @@ async fn delete_and_rename_keep_note_snapshots() {
         1
     );
 }
+
+#[tokio::test]
+async fn rename_moves_bookmarks() {
+    // Фича 032: переименование в backend везёт закладку — её не обходит ни
+    // одна оболочка (SC-002).
+    use typsidian_core::bookmarks::{bookmark_add, bookmarks_view, BookmarkTarget, ViewEntry};
+    let dir = TempDir::new().unwrap();
+    write_note(dir.path(), "a.typ", "= А\n");
+    let mut backend = NativeBackend::open(dir.path()).await.unwrap();
+    bookmark_add(
+        &mut backend,
+        BookmarkTarget::Note {
+            path: "a.typ".into(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    backend
+        .rename(Path::new("a.typ"), Path::new("b.typ"))
+        .await
+        .unwrap();
+    let view = bookmarks_view(&backend).await;
+    let ViewEntry::Item { row } = &view.entries[0] else {
+        panic!("закладка");
+    };
+    assert_eq!(
+        row.bookmark.target,
+        BookmarkTarget::Note {
+            path: "b.typ".into()
+        }
+    );
+    assert_eq!(row.bookmark.name, "b");
+}

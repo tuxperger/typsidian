@@ -10565,3 +10565,187 @@ button.ts-props__chipbtn,
   color: var(--steel-600);
   font-size: 11.5px;
 }
+
+/* ── Закладки (фича 032, макет B1) ─────────────────────────────────────────── */
+
+.ts-bookmarks {
+  display: flex;
+  flex-direction: column;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  padding-bottom: 4px;
+}
+
+.ts-bookmarks__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px 8px;
+}
+
+.ts-bookmarks__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--steel-500);
+  cursor: pointer;
+}
+
+/* Шеврон смотрит вправо; раскрытое — вниз, как у папок дерева. */
+.ts-bookmarks__toggle[aria-expanded="true"] svg,
+.ts-bookmarks__chev:not(.ts-bookmarks__chev--closed) svg {
+  transform: rotate(90deg);
+}
+
+.ts-bookmarks__count {
+  font-weight: 400;
+  color: var(--steel-600);
+}
+
+.ts-bookmarks__new {
+  font-size: 10.5px;
+}
+
+.ts-bookmarks__empty {
+  margin: 0;
+  padding: 4px 14px 8px;
+  color: var(--steel-600);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.ts-bookmarks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.ts-bookmarks__list--inner {
+  padding-left: 14px;
+  max-height: none;
+}
+
+.ts-bookmarks__row {
+  display: flex;
+  align-items: center;
+}
+
+.ts-bookmarks__row--drop {
+  box-shadow: inset 0 2px 0 var(--orange-500);
+}
+
+.ts-bookmarks__item {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: none;
+  padding: 4px 10px 4px 14px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--steel-200);
+  cursor: pointer;
+}
+
+.ts-bookmarks__item:hover,
+.ts-bookmarks__item:focus-visible {
+  background: var(--steel-900);
+  outline: none;
+}
+
+.ts-bookmarks__item--active {
+  background: var(--steel-800);
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-bookmarks__item svg {
+  color: var(--steel-500);
+}
+
+.ts-bookmarks__item--missing .ts-bookmarks__name {
+  color: var(--steel-500);
+  text-decoration: line-through;
+  text-decoration-color: var(--steel-600);
+}
+
+.ts-bookmarks__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ts-bookmarks__name,
+.ts-bookmarks__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-bookmarks__sub {
+  font: 10.5px var(--font-mono);
+  color: var(--steel-500);
+}
+
+.ts-bookmarks__flag {
+  font: 9.5px var(--font-mono);
+  color: var(--warning);
+  border: var(--border-width) solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.ts-bookmarks__remove {
+  padding: 2px 6px;
+}
+
+.ts-bookmarks__ghead {
+  display: flex;
+  align-items: center;
+}
+
+.ts-bookmarks__gtoggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--steel-300);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-bookmarks__chev {
+  display: inline-flex;
+  color: var(--steel-500);
+}
+
+.ts-bookmarks__tail {
+  height: 6px;
+}
+
+.ts-bookmarks__edit {
+  flex: 1;
+  margin: 2px 10px;
+}
+
+.ts-bookmarks__error {
+  margin: 0;
+  padding: 4px 14px;
+  font-size: 11px;
+  color: var(--danger);
+}

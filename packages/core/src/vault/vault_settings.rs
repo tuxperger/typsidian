@@ -99,6 +99,11 @@ pub struct VaultOverrides {
     #[serde(default)]
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub intentional_orphans: Vec<String>,
+    /// Закладки (фича 032): заметки, разделы, поиски, папки и группы, по
+    /// порядку панели. Негодная запись файла пропускается.
+    #[serde(default)]
+    #[cfg_attr(target_arch = "wasm32", tsify(optional))]
+    pub bookmarks: Vec<crate::bookmarks::BookmarkEntry>,
     /// Сколько дней хранить снимки заметок (фича 029, FR-005). `None` — 7.
     #[cfg_attr(target_arch = "wasm32", tsify(optional))]
     pub snapshot_keep_days: Option<u32>,
@@ -598,6 +603,7 @@ const SOURCES_TABLE: &str = "sources";
 const LINKS_TABLE: &str = "links";
 const SNAPSHOTS_TABLE: &str = "snapshots";
 const SPELLCHECK_TABLE: &str = "spellcheck";
+const BOOKMARKS_TABLE: &str = "bookmarks";
 
 /// Языки проверки орфографии, которые знает ядро (фича 030, data-model.md).
 pub const SPELLCHECK_LANGUAGES: [&str; 2] = ["ru", "en"];
@@ -631,6 +637,8 @@ struct FileShape {
     snapshots: SnapshotsTable,
     #[serde(default)]
     spellcheck: SpellcheckTable,
+    #[serde(default)]
+    bookmarks: BookmarksTable,
     /// Настройки графа (025): разбираются по полям, см. [`graph_from_value`].
     #[serde(default)]
     graph: Option<Value>,
@@ -670,6 +678,14 @@ struct SnapshotsTable {
     keep_days: Option<Value>,
     #[serde(default)]
     interval_minutes: Option<Value>,
+}
+
+/// Таблица закладок (032): записи как `Value` — негодная пропускается, а
+/// не делает файл нечитаемым.
+#[derive(Debug, Default, Deserialize)]
+struct BookmarksTable {
+    #[serde(default)]
+    entries: Option<Value>,
 }
 
 /// Таблица орфографии (030). Значения как `Value`: неверное — «не задано».
@@ -869,6 +885,13 @@ impl FileShape {
                 &SNAPSHOT_INTERVAL_MINUTES,
             ),
             spellcheck_enabled: self.spellcheck.enabled.as_ref().and_then(Value::as_bool),
+            bookmarks: match self.bookmarks.entries {
+                Some(Value::Array(entries)) => entries
+                    .into_iter()
+                    .filter_map(|entry| serde_json::from_value(entry).ok())
+                    .collect(),
+                _ => Vec::new(),
+            },
             spellcheck_languages: spell_languages(self.spellcheck.languages.as_ref()),
             capture: self.capture.into_overrides(),
             graph: self.graph.as_ref().and_then(graph_from_value),
@@ -1052,6 +1075,14 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     );
     set_or_remove(
         &mut document,
+        BOOKMARKS_TABLE,
+        "entries",
+        (!overrides.bookmarks.is_empty())
+            .then(|| serde_json::to_value(&overrides.bookmarks).ok())
+            .flatten(),
+    );
+    set_or_remove(
+        &mut document,
         SPELLCHECK_TABLE,
         "enabled",
         overrides.spellcheck_enabled.map(Value::from),
@@ -1151,6 +1182,7 @@ pub fn render(previous: &str, overrides: &VaultOverrides) -> String {
     prune_empty_object(&mut document, LINKS_TABLE);
     prune_empty_object(&mut document, SNAPSHOTS_TABLE);
     prune_empty_object(&mut document, SPELLCHECK_TABLE);
+    prune_empty_object(&mut document, BOOKMARKS_TABLE);
 
     let mut text =
         serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_else(|_| "{}".to_string());
@@ -1334,6 +1366,34 @@ mod tests {
             // Фича 030: орфография.
             spellcheck_enabled: Some(false),
             spellcheck_languages: Some(vec!["en".into()]),
+            // Фича 032: закладка и группа с поиском.
+            bookmarks: vec![
+                crate::bookmarks::BookmarkEntry::Item {
+                    bookmark: crate::bookmarks::Bookmark {
+                        id: "a1".into(),
+                        name: "Введение".into(),
+                        target: crate::bookmarks::BookmarkTarget::Note {
+                            path: "Диссертация/Введение.typ".into(),
+                        },
+                    },
+                },
+                crate::bookmarks::BookmarkEntry::Group {
+                    id: "g1".into(),
+                    name: "Глава 2".into(),
+                    collapsed: true,
+                    items: vec![crate::bookmarks::Bookmark {
+                        id: "s1".into(),
+                        name: "теплопроводн".into(),
+                        target: crate::bookmarks::BookmarkTarget::Search {
+                            query: crate::search::SearchQuery {
+                                text: "теплопроводн".into(),
+                                case_sensitive: true,
+                                ..Default::default()
+                            },
+                        },
+                    }],
+                },
+            ],
             capture: Some(crate::capture::CaptureOverrides {
                 inbox: Some("Заметки/входящие.typ".into()),
                 daily_folder: Some("Дневник".into()),

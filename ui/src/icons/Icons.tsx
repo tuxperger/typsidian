@@ -34,6 +34,7 @@ export type IconName =
   | "quote"
   | "link"
   | "tag"
+  | "bookmark"
   | "text"
   | "page"
   | "layout"
@@ -346,6 +347,17 @@ export function IconSprite(): React.JSX.Element {
             stroke="currentColor"
             strokeWidth="2"
             strokeLinecap="round"
+          />
+        </symbol>
+
+        {/* Закладка (фича 032): флажок того же штриха, что у соседних. */}
+        <symbol id="i-bookmark" viewBox="0 0 24 24">
+          <path
+            d="M6 3h12v18l-6-4-6 4z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
           />
         </symbol>
 

@@ -27,6 +27,7 @@ import { slides } from "./ru/slides.js";
 import { snapshots } from "./ru/snapshots.js";
 import { spellcheck } from "./ru/spellcheck.js";
 import { embeds } from "./ru/embeds.js";
+import { bookmarks } from "./ru/bookmarks.js";
 import { properties } from "./ru/properties.js";
 import { importing } from "./ru/import.js";
 import { capture } from "./ru/capture.js";
@@ -59,6 +60,7 @@ export const ru: Catalog = {
   ...snapshots,
   ...spellcheck,
   ...embeds,
+  ...bookmarks,
   ...properties,
   ...importing,
   ...capture,

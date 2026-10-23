@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons/Icons.js";
 import { useI18n } from "../i18n/index.js";
 import type { VaultClient } from "../vault-client.js";
-import type { Note, PathChange, Template } from "../wasm-core/typsidian_core.js";
+import type { BookmarkTarget, Note, PathChange, Template } from "../wasm-core/typsidian_core.js";
 import { BacklinksConfirmDialog } from "./BacklinksConfirmDialog.js";
 import { MoveNotice } from "./MoveNotice.js";
 import { MoveToDialog } from "./MoveToDialog.js";
@@ -80,6 +80,12 @@ export interface SidebarProps {
   moveToRequest?: { entry: MoveEntryRef; revision: number } | null;
   /** Запрос принят — иначе панель, показанная заново, открыла бы окно ещё раз. */
   onMoveToRequestHandled?: (() => void) | undefined;
+  /** Раздел «Закладки» над деревом (фича 032). */
+  bookmarksPanel?: React.ReactNode;
+  /** «В закладки» из меню заметки и папки (фича 032). */
+  onBookmark?: ((target: BookmarkTarget, name: string) => void) | undefined;
+  /** Раскрыть папку в дереве и показать её (закладка-папка, фича 032). */
+  revealFolder?: { path: string; seq: number } | null;
 }
 
 export function Sidebar({
@@ -104,6 +110,9 @@ export function Sidebar({
   onPathsMoved,
   moveToRequest = null,
   onMoveToRequestHandled,
+  bookmarksPanel,
+  onBookmark,
+  revealFolder = null,
 }: SidebarProps): React.JSX.Element {
   const { t } = useI18n();
   const [filter, setFilter] = useState("");
@@ -133,6 +142,24 @@ export function Sidebar({
     sections,
     onToggleSection: toggleSection,
   });
+
+  // Закладка-папка (фича 032): раскрыть её и предков, показать строку.
+  const revealSeq = revealFolder?.seq ?? 0;
+  const revealPath = revealFolder?.path ?? null;
+  const { expand } = actions;
+  useEffect(() => {
+    if (revealPath === null) return undefined;
+    const parts = revealPath.split("/");
+    parts.forEach((_, index) => expand(parts.slice(0, index + 1).join("/")));
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(
+        `.ts-tree__folder[data-drag-path="${CSS.escape(revealPath)}"]`,
+      );
+      row?.scrollIntoView({ block: "nearest" });
+      row?.querySelector<HTMLElement>("button")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [revealPath, revealSeq, expand]);
 
   // Перенос в дереве (фича 023): один путь для жеста, «Переместить в…» и
   // отмены. Что допустимо и что сломается, решает ядро.
@@ -222,6 +249,8 @@ export function Sidebar({
         />
       </div>
 
+      {bookmarksPanel}
+
       {/* Правый клик по пустому месту дерева — создание в корне. Строки
           заметок и папок открывают своё меню и до этого обработчика событие
           не пускают. */}
@@ -252,6 +281,7 @@ export function Sidebar({
           onFileHistory={onFileHistory}
           conflictPaths={conflictPaths}
           onMoveTo={setMoveTo}
+          onBookmark={onBookmark}
         />
       </nav>
 

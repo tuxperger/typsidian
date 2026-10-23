@@ -85,6 +85,8 @@ import type {
   TakeOutcome,
   SpellConfig,
   EmbedInsertion,
+  AddOutcome,
+  BookmarksView,
   LinkFixRequest,
   MentionScan,
   MentionStep,
@@ -582,6 +584,19 @@ export function tauriVaultClient(
       health: (openTexts) => invoke<LinkHealth>("links_health", { openTexts }),
       fix: (request, editorText) =>
         invoke<ReplaceNoteOutcome>("links_fix", { request, editorText }),
+    },
+
+    // ── Закладки (фича 032) ─────────────────────────────────────────
+    bookmarks: {
+      view: () => invoke<BookmarksView>("bookmarks_view"),
+      add: (target, name) => invoke<AddOutcome>("bookmark_add", { target, name }),
+      remove: (id) => invoke<BookmarksView>("bookmark_remove", { id }),
+      rename: (id, name) => invoke<BookmarksView>("bookmark_rename", { id, name }),
+      move: (id, place) => invoke<BookmarksView>("bookmark_move", { id, place }),
+      groupCreate: (name) => invoke<BookmarksView>("bookmark_group_create", { name }),
+      groupRename: (id, name) => invoke<BookmarksView>("bookmark_group_rename", { id, name }),
+      groupToggle: (id) => invoke<BookmarksView>("bookmark_group_toggle", { id }),
+      groupDelete: (id) => invoke<BookmarksView>("bookmark_group_delete", { id }),
     },
 
     // ── Встраивание заметок (фича 031) ──────────────────────────────

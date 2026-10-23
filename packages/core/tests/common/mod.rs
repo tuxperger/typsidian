@@ -665,6 +665,7 @@ impl VaultBackend for MemoryVault {
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
 pub mod attachment_cases;
+pub mod bookmarks_cases;
 pub mod capture_cases;
 pub mod completion_cases;
 pub mod element_cases;
