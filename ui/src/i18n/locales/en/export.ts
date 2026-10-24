@@ -72,5 +72,6 @@ export const exporting = {
   "export.toast.failed": (p: { reason: string }) => `Export failed: ${p.reason}`,
   "export.toast.toError": "Go to error",
   "export.toast.openCenter": "Export center",
+  "export.toast.download": "Download",
   "export.toast.close": "Close message",
 } as const satisfies Entries;

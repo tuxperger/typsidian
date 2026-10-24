@@ -1,5 +1,6 @@
-import { invoke } from "./tauri-invoke.js";
-import { listen } from "@tauri-apps/api/event";
+import type { InvokeArgs } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "./tauri-invoke.js";
+import { listen as tauriListen } from "@tauri-apps/api/event";
 import { createFlushRegistry, type VaultClient } from "./vault-client.js";
 import type { PreviewClient } from "./preview-client.js";
 import type { SyncClient } from "./sync/sync-client.js";
@@ -141,6 +142,24 @@ import type {
 // (`apps/desktop` — нативный диалог ОС, `apps/mobile` — свой обзор папок), и
 // именно им отличаются оболочки. Общее начинается с пути: см. `openVaultAt`.
 
+/**
+ * Транспорт команд: `invoke` и `listen` Tauri — или те же вызовы по HTTP к серверу
+ * (фича 037, research.md §6, `server/remote-invoke.ts`). Клиент ниже не знает, какой
+ * из них под ним: команды и их ответы одни и те же (`packages/host`).
+ */
+export interface ShellTransport {
+  invoke: <T = void>(command: string, args?: InvokeArgs) => Promise<T>;
+  listen: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
+}
+
+/** Команды и события окна Tauri. */
+export const tauriTransport: ShellTransport = {
+  invoke: tauriInvoke,
+  listen: (event, handler) => tauriListen(event, handler),
+};
+
+const { invoke } = tauriTransport;
+
 /** Имя события, которым оболочка отдаёт окну пачку `VaultEvent`. */
 const VAULT_EVENTS = "vault://events";
 
@@ -264,7 +283,8 @@ interface LastVaultRecord {
  * делят одно заимствование на границе wasm-bindgen; здесь такой границы нет, и
  * очередь была бы обрядом без причины.
  */
-function tauriPreviewClient(): PreviewClient {
+export function tauriPreviewClient(transport: ShellTransport = tauriTransport): PreviewClient {
+  const { invoke } = transport;
   return {
     dependencyMark: (paths) => invoke<string>("preview_dependency_mark", { paths }),
     completionLinkedIndex: (notePath, dependencies) =>
@@ -352,7 +372,9 @@ function kindOf(cause: unknown): string | null {
 export function tauriVaultClient(
   boardWriteProfile: BoardWriteProfile,
   rootName: string,
+  transport: ShellTransport = tauriTransport,
 ): VaultClient {
+  const { invoke, listen } = transport;
   // Снимок «есть ли что терять» для `beforeunload`, где ждать промис нельзя.
   //
   // Обновляется двумя путями: пессимистично — сразу при объявлении правок, и

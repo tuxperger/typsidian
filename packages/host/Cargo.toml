@@ -1,0 +1,19 @@
+[package]
+name = "typsidian-host"
+version = "0.1.0"
+edition = "2021"
+description = "Команды ядра для открытого vault — общие для оболочки Tauri и сервера"
+
+# Одна реализация команд на две оболочки (фича 037, research.md §1): оболочка
+# Tauri (`packages/shell`) оборачивает их в `#[tauri::command]`, сервер
+# (`apps/server`) вызывает по имени через `dispatch`. Tauri здесь нет — серверу
+# незачем тянуть WebKit и GTK.
+
+[lib]
+name = "typsidian_host"
+
+[dependencies]
+typsidian-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "fs", "time"] }

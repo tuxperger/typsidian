@@ -302,11 +302,95 @@ vault без неё работает как раньше, а отключени�
 Настройки автоснимков и автообмена — в разделе «Синхронизация» панели настроек; команды
 можно переназначить в разделе «Кейбиндинги».
 
+## Свой сервер (web)
+
+Web-версия работает двумя способами
+([`specs/037-server-mode`](specs/037-server-mode/spec.md)): с папкой на устройстве, как
+раньше, или на своём сервере — с входом и vault, которые лежат на сервере обычными папками.
+Стартовый экран web предлагает оба; «Сервер» доступен, когда страница открыта с адреса, где
+отвечает `typsidian-server`.
+
+- **Аккаунты** заводит администратор на машине сервера — регистрации нет. Вход паролем
+  (argon2id, не короче 12 знаков) и, если настроен, через провайдера OpenID Connect
+  (Keycloak, Authentik…): пользователь провайдера сопоставляется аккаунту только по привязке
+  `(issuer, sub)`, которую задал администратор.
+- **Vault** аккаунта — `<данные>/users/<id аккаунта>/<имя>/`: создать, переименовать,
+  удалить (в корзину `<данные>/trash/`, откуда администратор может вернуть). Чужой vault
+  недостижим и выглядит как несуществующий.
+- **Работа** — та же рабочая область и те же команды ядра, что на рабочем столе
+  (`packages/host`): дерево, правка, предпросмотр, поиск, связи, граф, экспорт (файл можно
+  скачать), снимки, задачи, закладки, установка шаблонов. Правка из одной вкладки или
+  изменение файла прямо на диске сервера приходит в другие вкладки само.
+- **Связь пропала** — баннер «Нет связи с сервером», правка остаётся в редакторе и
+  сохраняется, когда связь вернётся. Сессия истекла — вход поверх рабочей области, и после
+  него ждущие правки сохраняются.
+- **Сессии** — 30 дней без действий; список входов, завершение любого и «Выйти на всех
+  устройствах» — в настройках, раздел «Аккаунт». Смена пароля завершает остальные сессии.
+- Пока нет на сервере: синхронизации git и Syncthing (011) и импорта из папки Obsidian.
+
+```bash
+# Сборка: сервер и статика web-версии
+nix build .#server                               # или: cargo build -p typsidian-server --release
+pnpm build:wasm && pnpm --filter @typsidian/ui build
+pnpm --filter @typsidian/web build:server        # → apps/web/out
+
+# Аккаунты (пароль спрашивается; из stdin — для скриптов)
+typsidian-server --data /var/lib/typsidian user add anna --name "Анна"
+typsidian-server --data /var/lib/typsidian user link-oidc anna \
+    --issuer https://id.example.org/realms/team --subject 2c1f…
+typsidian-server --data /var/lib/typsidian user list      # block, unblock, passwd, delete
+
+# Запуск
+typsidian-server --config /etc/typsidian/server.toml serve --static apps/web/out
+```
+
+`server.toml`:
+
+```toml
+listen = "127.0.0.1:8787"
+data = "/var/lib/typsidian"
+public_url = "https://notes.example.org"   # внешний адрес за прокси
+session_idle_days = 30
+static_dir = "/srv/typsidian/web"
+trust_proxy = true                          # адрес клиента — из X-Forwarded-For
+
+[oidc]                                      # необязательно
+issuer = "https://id.example.org/realms/team"
+client_id = "typsidian"
+label = "Authentik"                         # подпись кнопки входа
+# client_secret — лучше переменной TYPSIDIAN_OIDC_CLIENT_SECRET
+```
+
+Cookie сессии — `Secure`, поэтому снаружи сервер работает только за HTTPS: без `public_url`
+с `https://` он слушает лишь loopback. Обратный прокси (nginx) не должен буферизовать поток
+событий — сервер сам отдаёт `X-Accel-Buffering: no`:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name notes.example.org;
+    client_max_body_size 256m;              # вложения
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 1h;              # поток событий vault
+    }
+}
+```
+
+В разработке: `cargo run -p typsidian-server -- --data /tmp/ts-data serve` и `pnpm dev` —
+`next dev` проксирует `/api` на `127.0.0.1:8787` (другой адрес — `TYPSIDIAN_SERVER`).
+Журнал сервера — входы, выходы, отказы и ошибки с логином и адресом; ни текста, ни имён
+заметок, ни паролей, ни токенов в нём нет.
+
 ## Структура репозитория
 
 ```
 packages/core/        Rust-ядро: vault/, boards/, settings/, graph/. Единственное
                       место бизнес-логики. Тесты — и cargo, и wasm-bindgen-test.
+packages/host/        Команды ядра для открытого vault без Tauri — одна реализация
+                      для оболочки Tauri и сервера; dispatch.rs генерируется.
 packages/shell/       Команды Tauri поверх ядра, общие для desktop и mobile.
                       Не приложение: точку входа, плагины и tauri.conf.json
                       добавляет оболочка.
@@ -314,7 +398,9 @@ ui/                   Общий React-UI (@typsidian/ui): workspace, дерев
                       редактор, полотно доски, панель настроек, CSS-токены.
                       Здесь же три реализации VaultClient: web (WASM),
                       tauri (общая для обеих нативных оболочек) и интерфейс.
-apps/web/             Web-клиент на Next.js 16.
+apps/web/             Web-клиент на Next.js 16: папка на устройстве или свой сервер.
+apps/server/          Сервер web-версии (axum): вход, сессии, свои vault, команды
+                      ядра по HTTP, события по SSE.
 apps/desktop/         Desktop-оболочка на Tauri 2 + Vite.
 apps/mobile/          Android-оболочка на Tauri 2 + Vite. gen/android/ —
                       проект Gradle, коммитится (в нём есть свои правки).

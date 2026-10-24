@@ -17,6 +17,8 @@ export interface ExportToastProps {
   onReveal: (place: DiagnosticLocation) => void;
   /** Открыть Центр экспорта — там список недавних файлов (FR-007). */
   onOpenCenter: () => void;
+  /** Скачать файл — vault на своём сервере (фича 037). */
+  downloadUrl?: string;
 }
 
 /**
@@ -28,6 +30,7 @@ export function ExportToast({
   onDismiss,
   onReveal,
   onOpenCenter,
+  downloadUrl,
 }: ExportToastProps): React.JSX.Element {
   const i18n = useI18n();
   const { t } = i18n;
@@ -71,6 +74,11 @@ export function ExportToast({
         >
           {t("export.toast.toError")}
         </button>
+      )}
+      {ok && downloadUrl !== undefined && (
+        <a className="ts-btn ts-btn--outline" href={downloadUrl} download>
+          {t("export.toast.download")}
+        </a>
       )}
       {ok && (
         <button type="button" className="ts-btn ts-btn--quiet" onClick={onOpenCenter}>

@@ -16,6 +16,16 @@ pub mod web;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Путь лежит внутри vault: относительный, без `..`, только обычные компоненты.
+///
+/// Граница корня для каждой файловой операции бэкенда (контракт
+/// vault-backend-trait, конституция XI): `root.join("/etc/passwd")` заменил бы
+/// корень целиком, а `..` вывел бы из него — к файлам машины или, на сервере
+/// (фича 037), к vault другого аккаунта. Пути приходят от клиента как есть.
+pub fn is_inside(path: &Path) -> bool {
+    sections::normalize(path).is_some()
+}
+
 /// Расширение текстовой заметки.
 pub const NOTE_EXTENSION: &str = "typ";
 /// Расширение доски для рисования (фича 002, research.md §2).
@@ -390,5 +400,20 @@ mod image_file_tests {
     #[test]
     fn board_snapshots_are_images_too() {
         assert!(is_image_file(Path::new("Доска.assets/снимок.svg")));
+    }
+}
+
+#[cfg(test)]
+mod inside_tests {
+    use super::is_inside;
+    use std::path::Path;
+
+    #[test]
+    fn only_relative_paths_without_parent_steps_are_inside() {
+        assert!(is_inside(Path::new("a.typ")));
+        assert!(is_inside(Path::new("./папка/a.typ")));
+        assert!(!is_inside(Path::new("../a.typ")));
+        assert!(!is_inside(Path::new("a/../../b")));
+        assert!(!is_inside(Path::new("/etc/passwd")));
     }
 }

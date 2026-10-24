@@ -1,0 +1,239 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ContextMenuProvider } from "../menu/ContextMenu.js";
+import type { BoardWriteProfile } from "../wasm-core/typsidian_core.js";
+import { tauriPreviewClient, tauriVaultClient } from "../vault-client-tauri.js";
+import type { LastVault, VaultOpenResult } from "../vault-tree/useVault.js";
+import { AccountSection } from "./AccountSection.js";
+import { ConnectionBanner, useConnectionState } from "./ConnectionBanner.js";
+import { createServerConnection, type ServerConnection } from "./connection.js";
+import { remoteTransport } from "./remote-invoke.js";
+import {
+  currentSession,
+  logout,
+  serverInfo,
+  vaultFileUrl,
+  type ServerInfo,
+  type ServerSession,
+} from "./server-api.js";
+import { ServerLogin, type LoginNotice } from "./ServerLogin.js";
+import { VaultList } from "./VaultList.js";
+
+// Серверный режим web (фича 037): вход → «Мои vault» → рабочая область над vault на
+// сервере. Рабочая область та же, что с папкой на устройстве; её собирает оболочка
+// (`apps/web`) — сюда приходит только способ открыть vault и раздел «Аккаунт».
+
+/** Открыть vault на сервере: клиент Tauri поверх HTTP (research.md §6). */
+export async function openServerVault(
+  vault: string,
+  connection: ServerConnection,
+): Promise<VaultOpenResult> {
+  const transport = remoteTransport(vault, connection);
+  let profile: BoardWriteProfile;
+  try {
+    profile = await transport.invoke<BoardWriteProfile>("board_write_profile");
+  } catch {
+    return { ok: false, error: { kind: "FolderNotFound" } };
+  }
+  return {
+    ok: true,
+    client: {
+      ...tauriVaultClient(profile, vault, transport),
+      fileUrl: (path) => vaultFileUrl(vault, path),
+    },
+    preview: tauriPreviewClient(transport),
+  };
+}
+
+export interface ServerWorkspaceArgs {
+  vault: string;
+  /** `lastVault` рабочей области: открывает выбранный vault сразу. */
+  lastVault: () => Promise<LastVault | null>;
+  /** «Открыть vault…» рабочей области — назад к списку. */
+  openVaultFolder: () => Promise<VaultOpenResult>;
+  /** Раздел «Аккаунт» настроек. */
+  account: React.ReactNode;
+}
+
+export interface ServerAppProps {
+  /** «← Папка на устройстве». */
+  onDeviceMode: () => void;
+  renderWorkspace: (args: ServerWorkspaceArgs) => React.ReactNode;
+}
+
+/** Последний открытый vault этого браузера: перезагрузка возвращает в него (US1 AS5). */
+const LAST_VAULT_KEY = "typsidian.serverVault";
+
+function lastVaultName(): string | null {
+  try {
+    return localStorage.getItem(LAST_VAULT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberVault(name: string | null): void {
+  try {
+    if (name === null) localStorage.removeItem(LAST_VAULT_KEY);
+    else localStorage.setItem(LAST_VAULT_KEY, name);
+  } catch {
+    // Хранилище недоступно — после перезагрузки откроется список.
+  }
+}
+
+type Screen =
+  | { kind: "loading" }
+  | { kind: "login"; info: ServerInfo; notice?: LoginNotice }
+  | { kind: "vaults"; info: ServerInfo; session: ServerSession }
+  | { kind: "workspace"; info: ServerInfo; session: ServerSession; vault: string };
+
+/** Итог возврата от провайдера входа (`?login=…`), один раз. */
+function takeLoginNotice(): LoginNotice | undefined {
+  if (typeof location === "undefined") return undefined;
+  const params = new URLSearchParams(location.search);
+  const value = params.get("login");
+  if (value === null) return undefined;
+  params.delete("login");
+  const query = params.toString();
+  history.replaceState(null, "", location.pathname + (query === "" ? "" : `?${query}`));
+  if (value === "unknown") return "unknownAccount";
+  return "oidcFailed";
+}
+
+export function ServerApp({ onDeviceMode, renderWorkspace }: ServerAppProps): React.JSX.Element {
+  const [screen, setScreen] = useState<Screen>({ kind: "loading" });
+  const [connection, setConnection] = useState<ServerConnection | null>(null);
+
+  const signedIn = useCallback((info: ServerInfo, session: ServerSession) => {
+    setConnection(createServerConnection(session));
+    const last = lastVaultName();
+    setScreen(
+      last === null
+        ? { kind: "vaults", info, session }
+        : { kind: "workspace", info, session, vault: last },
+    );
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const info = (await serverInfo()) ?? { name: "", password: true };
+      const notice = takeLoginNotice();
+      const me = await currentSession();
+      if (me.ok && me.value !== null) signedIn(info, me.value);
+      else setScreen({ kind: "login", info, ...(notice === undefined ? {} : { notice }) });
+    })();
+  }, [signedIn]);
+
+  const toLogin = useCallback((info: ServerInfo) => {
+    setConnection(null);
+    setScreen({ kind: "login", info });
+  }, []);
+
+  if (screen.kind === "loading") return <main className="ts-server-screen" />;
+
+  if (screen.kind === "login") {
+    return (
+      <main className="ts-server-screen">
+        <ServerLogin
+          info={screen.info}
+          {...(screen.notice === undefined ? {} : { notice: screen.notice })}
+          onSignedIn={(session) => signedIn(screen.info, session)}
+          onBack={onDeviceMode}
+        />
+      </main>
+    );
+  }
+
+  if (screen.kind === "vaults" || connection === null) {
+    const session = screen.session;
+    return (
+      <ContextMenuProvider>
+        <VaultList
+          session={session}
+          onOpen={(vault) => {
+            rememberVault(vault);
+            setScreen({ kind: "workspace", info: screen.info, session, vault });
+          }}
+          onLogout={() => void logout(session).then(() => toLogin(screen.info))}
+        />
+      </ContextMenuProvider>
+    );
+  }
+
+  return (
+    <ServerWorkspace
+      key={screen.vault}
+      screen={screen}
+      connection={connection}
+      renderWorkspace={renderWorkspace}
+      onVaults={() => {
+        rememberVault(null);
+        setScreen({ kind: "vaults", info: screen.info, session: screen.session });
+      }}
+      onSignedOut={() => toLogin(screen.info)}
+    />
+  );
+}
+
+function ServerWorkspace({
+  screen,
+  connection,
+  renderWorkspace,
+  onVaults,
+  onSignedOut,
+}: {
+  screen: Extract<Screen, { kind: "workspace" }>;
+  connection: ServerConnection;
+  renderWorkspace: ServerAppProps["renderWorkspace"];
+  onVaults: () => void;
+  onSignedOut: () => void;
+}): React.JSX.Element {
+  const state = useConnectionState(connection);
+  const { vault, info } = screen;
+  const args = useMemo<ServerWorkspaceArgs>(
+    () => ({
+      vault,
+      lastVault: async () => ({
+        label: vault,
+        readyToOpen: true,
+        // Vault пропал (удалён в другой вкладке) — назад к списку.
+        open: async () => {
+          const opened = await openServerVault(vault, connection);
+          if (!opened.ok) onVaults();
+          return opened;
+        },
+      }),
+      openVaultFolder: async () => {
+        onVaults();
+        return { ok: false, error: { kind: "PickerCancelled" } };
+      },
+      account: <AccountSection connection={connection} onSignedOut={onSignedOut} />,
+    }),
+    [vault, connection, onVaults, onSignedOut],
+  );
+  return (
+    <>
+      <ConnectionBanner connection={connection} />
+      {renderWorkspace(args)}
+      {state.kind === "signedOut" && (
+        // Вход потерян посреди работы: рабочая область остаётся под экраном входа,
+        // и ждущие вызовы (с несохранённым текстом) продолжатся после него.
+        <div className="ts-server-overlay">
+          <ServerLogin
+            info={info}
+            notice="expired"
+            initialLogin={connection.session().login}
+            onSignedIn={(session) => {
+              if (session.login !== connection.session().login) {
+                location.reload();
+                return;
+              }
+              connection.resume(session);
+            }}
+          />
+        </div>
+      )}
+    </>
+  );
+}

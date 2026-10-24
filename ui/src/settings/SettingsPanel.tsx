@@ -82,6 +82,8 @@ export interface SettingsPanelProps {
   sync?: SyncControl | null;
   /** Жест «создать vault из удалённого репозитория» (011 FR-013). */
   onCloneVault?: (() => void) | null;
+  /** Раздел «Аккаунт» — vault на своём сервере (фича 037, макет S4). */
+  account?: React.ReactNode;
 }
 
 export function SettingsPanel({
@@ -92,6 +94,7 @@ export function SettingsPanel({
   preview = null,
   sync = null,
   onCloneVault = null,
+  account,
 }: SettingsPanelProps): React.JSX.Element {
   const {
     state,
@@ -113,6 +116,10 @@ export function SettingsPanel({
   // Открытый раздел. «Vault» по умолчанию — первый пункт макета и то, с чего
   // начинается работа: без выбранной папки остальные разделы не о чем.
   const [section, setSection] = useState<SettingsSection>("vault");
+  const sections =
+    account === undefined
+      ? SECTIONS
+      : [{ id: "account" as const, title: "server.account.section" as const }, ...SECTIONS];
   const { t } = useI18n();
   // Итоги действий — фразами, а не строками: показанное сообщение обязано
   // перерисоваться на новом языке (фича 010, FR-014).
@@ -229,7 +236,7 @@ export function SettingsPanel({
           длинного свитка пользователь просто не найдёт. */}
       <nav className="ts-settings__nav" aria-label={t("settings.sections")}>
         <span className="ts-eyebrow">{t("workspace.settings")}</span>
-        {SECTIONS.map((item) => (
+        {sections.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -380,6 +387,8 @@ export function SettingsPanel({
           </section>
         )}
 
+        {section === "account" && account}
+
         {section === "spellcheck" && (
           <section aria-label={t("spellcheck.settings.section")}>
             <div className="ts-settings__head">
@@ -447,6 +456,7 @@ const SECTIONS: { id: SettingsSection; title: MessageKey }[] = [
 
 /** Какой раздел показан. */
 export type SettingsSection =
+  | "account"
   | "vault"
   | "templates"
   | "capture"

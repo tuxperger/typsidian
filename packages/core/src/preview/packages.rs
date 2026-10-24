@@ -285,8 +285,13 @@ pub fn unpack(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, InstallError> {
         })?;
         let path = contained_path(&raw)?;
 
+        // Не больше, чем осталось до предела (+1 — чтобы превышение было видно):
+        // запись-«бомба» не распаковывается в память целиком (фича 037).
         let mut bytes = Vec::new();
+        let room = (ARCHIVE_SIZE_LIMIT - total) as u64 + 1;
         entry
+            .by_ref()
+            .take(room)
             .read_to_end(&mut bytes)
             .map_err(|_| InstallError::ArchiveRejected {
                 reason: ArchiveProblem::EntryUnreadable,
@@ -691,10 +696,56 @@ pub async fn fetch(url: &str) -> Result<Vec<u8>, InstallError> {
         });
     }
 
+    // Предел — до чтения тела: ответ на гигабайты не должен попасть в память
+    // (на сервере, фича 037, это отказ всем аккаунтам сразу).
+    let too_large = || InstallError::ArchiveRejected {
+        reason: ArchiveProblem::TooLarge,
+    };
+    if response
+        .content_length()
+        .is_some_and(|length| length > ARCHIVE_SIZE_LIMIT as u64)
+    {
+        return Err(too_large());
+    }
+    read_limited(response, url, too_large).await
+}
+
+/// Тело ответа не больше [`ARCHIVE_SIZE_LIMIT`]: по частям, с отказом на первой
+/// лишней. В браузере частей нет — там предел держит `Content-Length` выше и
+/// проверка после чтения.
+#[cfg(not(target_arch = "wasm32"))]
+async fn read_limited(
+    mut response: reqwest::Response,
+    url: &str,
+    too_large: impl Fn() -> InstallError,
+) -> Result<Vec<u8>, InstallError> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| classify_transport(error, url))?
+    {
+        if bytes.len() + chunk.len() > ARCHIVE_SIZE_LIMIT {
+            return Err(too_large());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_limited(
+    response: reqwest::Response,
+    url: &str,
+    too_large: impl Fn() -> InstallError,
+) -> Result<Vec<u8>, InstallError> {
     let bytes = response
         .bytes()
         .await
         .map_err(|error| classify_transport(error, url))?;
+    if bytes.len() > ARCHIVE_SIZE_LIMIT {
+        return Err(too_large());
+    }
     Ok(bytes.to_vec())
 }
 

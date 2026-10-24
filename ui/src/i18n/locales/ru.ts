@@ -36,6 +36,7 @@ import { attachments } from "./ru/attachments.js";
 import { sources } from "./ru/sources.js";
 import { completion } from "./ru/completion.js";
 import { outline } from "./ru/outline.js";
+import { server } from "./ru/server.js";
 
 export const ru: Catalog = {
   ...common,
@@ -70,4 +71,5 @@ export const ru: Catalog = {
   ...sources,
   ...completion,
   ...outline,
+  ...server,
 };

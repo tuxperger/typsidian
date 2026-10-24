@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
   "packages/core",
+  "packages/host",
   "packages/shell",
+  "apps/server",
   "apps/desktop/src-tauri",
   "apps/mobile/src-tauri",
 ]

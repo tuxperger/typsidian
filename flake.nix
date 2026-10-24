@@ -18,6 +18,7 @@
   #   wasm-bindgen.nix  CLI ровно той версии, что в Cargo.lock
   #   shells.nix        `nix develop`, `nix develop .#android`
   #   desktop.nix       пакет оболочки рабочего стола — `nix build`
+  #   server.nix        сервер web-версии — `nix build .#server`
   outputs =
     {
       self,
@@ -37,10 +38,15 @@
           inherit pkgs gui wasmBindgenCli;
           rust = toolchain.rustToolchainWith [ ];
         };
+
+        server = import ./nix/server.nix {
+          inherit pkgs;
+          rust = toolchain.rustToolchainWith [ ];
+        };
       in
       {
         packages = {
-          inherit desktop;
+          inherit desktop server;
           default = desktop;
           wasm-bindgen-cli = wasmBindgenCli;
         };
@@ -57,6 +63,11 @@
             program = pkgs.lib.getExe self.packages.${system}.desktop;
           };
           default = desktop;
+          server = {
+            type = "app";
+            meta.description = "Typsidian — сервер web-версии";
+            program = pkgs.lib.getExe self.packages.${system}.server;
+          };
         };
 
         devShells = import ./nix/shells.nix {

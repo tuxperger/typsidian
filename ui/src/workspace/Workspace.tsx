@@ -274,6 +274,11 @@ export interface WorkspaceProps {
    * Не передан — приёма нет, а команды «Во входящие» и «Сегодня» работают везде.
    */
   captureSource?: CaptureSource;
+  /**
+   * Дополнение экрана приветствия от оболочки (фича 037): web с папкой на
+   * устройстве предлагает здесь перейти на свой сервер.
+   */
+  welcomeExtra?: React.ReactNode;
 }
 
 /**
@@ -318,6 +323,7 @@ function WorkspaceView({
   imageSources = NO_IMAGE_SOURCES,
   pickImportSource,
   captureSource,
+  welcomeExtra,
 }: WorkspaceProps): React.JSX.Element {
   const contextMenu = useContextMenu();
   const { t, tEn, lang, formatNumber } = useI18n();
@@ -2644,6 +2650,7 @@ function WorkspaceView({
             onClone={openClone ?? undefined}
           />
           {cloneDialog}
+          {welcomeExtra}
         </main>
         {/* Лист захвата без vault (макет D3) стоит рядом с экраном приветствия, а не
             внутри: стили приветствия окрасили бы его текст. */}
@@ -3029,6 +3036,9 @@ function WorkspaceView({
             onDismiss={exporter.dismissLast}
             onReveal={revealPlace}
             onOpenCenter={() => setExportOpen(true)}
+            {...(state.client?.fileUrl === undefined
+              ? {}
+              : { downloadUrl: state.client.fileUrl(exporter.last.report.pdf_path) })}
           />
         )}
       </div>

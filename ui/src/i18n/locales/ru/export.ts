@@ -70,5 +70,6 @@ export const exporting: Translation<typeof en> = {
   "export.toast.failed": (p) => `Экспорт не удался: ${p.reason}`,
   "export.toast.toError": "К ошибке",
   "export.toast.openCenter": "Центр экспорта",
+  "export.toast.download": "Скачать",
   "export.toast.close": "Закрыть сообщение",
 };

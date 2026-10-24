@@ -1859,3 +1859,63 @@ async fn rename_moves_bookmarks() {
     );
     assert_eq!(row.bookmark.name, "b");
 }
+
+/// Фича 037: пути из аргументов команд не выводят из корня vault — ни абсолютные, ни
+/// с `..` (на сервере это чужие vault и файлы машины).
+#[tokio::test]
+async fn paths_outside_the_vault_are_refused() {
+    let parent = TempDir::new().unwrap();
+    let root = parent.path().join("vault");
+    fs::create_dir_all(&root).unwrap();
+    write_note(&root, "a.typ", "своя");
+    write_note(parent.path(), "neighbour/secret.typ", "чужое");
+    let secret = parent.path().join("neighbour/secret.typ");
+    let mut backend = NativeBackend::open(&root).await.unwrap();
+
+    let outside = [
+        PathBuf::from("../neighbour/secret.typ"),
+        secret.clone(),
+        PathBuf::from("sub/../../neighbour/secret.typ"),
+    ];
+    for path in &outside {
+        assert_eq!(
+            backend.read(path).await,
+            Err(ReadError::NotFound),
+            "{path:?}"
+        );
+        assert!(backend.read_bytes(path).await.is_err(), "{path:?}");
+        assert_eq!(
+            backend.write(path, "взлом", None).await,
+            Err(WriteError::AccessDenied),
+            "{path:?}"
+        );
+        assert_eq!(
+            backend.write_bytes(path, b"x").await,
+            Err(WriteError::AccessDenied)
+        );
+        assert_eq!(
+            backend.delete(path).await,
+            Err(DeleteError::NotFound),
+            "{path:?}"
+        );
+        assert_eq!(
+            backend.rename(path, Path::new("b.typ")).await,
+            Err(RenameError::NotFound),
+            "{path:?}"
+        );
+    }
+    assert_eq!(
+        backend.create(Path::new("../x.typ")).await,
+        Err(CreateError::InvalidName)
+    );
+    assert_eq!(
+        backend
+            .rename(Path::new("a.typ"), Path::new("../moved.typ"))
+            .await,
+        Err(RenameError::InvalidName)
+    );
+    assert_eq!(fs::read_to_string(&secret).unwrap(), "чужое");
+    assert!(!parent.path().join("x.typ").exists());
+    assert!(!parent.path().join("moved.typ").exists());
+    assert_eq!(backend.read(Path::new("./a.typ")).await.unwrap(), "своя");
+}

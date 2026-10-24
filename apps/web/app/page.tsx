@@ -1,5 +1,5 @@
-import { VaultWorkspace } from "./VaultWorkspace";
+import { WebApp } from "./WebApp";
 
 export default function Page(): React.JSX.Element {
-  return <VaultWorkspace />;
+  return <WebApp />;
 }

@@ -43,6 +43,7 @@ import { attachments } from "./en/attachments.js";
 import { sources } from "./en/sources.js";
 import { completion } from "./en/completion.js";
 import { outline } from "./en/outline.js";
+import { server } from "./en/server.js";
 
 export const en = {
   ...common,
@@ -77,6 +78,7 @@ export const en = {
   ...sources,
   ...completion,
   ...outline,
+  ...server,
 } as const;
 
 /** Набор переводов одного языка: те же ключи и те же параметры, что у эталона. */

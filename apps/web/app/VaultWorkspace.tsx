@@ -2,7 +2,6 @@
 
 import { DeviceI18nProvider } from "@typsidian/ui/i18n/device.js";
 import { SettingsPanel } from "@typsidian/ui/settings/SettingsPanel.js";
-import { webDeviceSettings } from "@typsidian/ui/settings/device-settings-web.js";
 import {
   cloneWebVault,
   lastWebVault,
@@ -11,20 +10,7 @@ import {
   webImportPicker,
 } from "@typsidian/ui/vault-client-web.js";
 import { Workspace } from "@typsidian/ui/workspace/Workspace.js";
-import { webTabsStore } from "@typsidian/ui/workspace/tabs/tabs-store-web.js";
-import { createWebShowHost } from "@typsidian/ui/slides/show-channel-web.js";
-
-/**
- * Хранилище настроек устройства — `WebStore` поверх OPFS. Один объект на
- * страницу: панель подписывается на него эффектами.
- */
-const device = webDeviceSettings();
-
-/** Набор вкладок vault на устройстве (фича 014): тот же `WebStore`, что и у настроек. */
-const tabsStore = webTabsStore();
-
-/** Хозяин окон показа слайдов (фича 019): `window.open` + `BroadcastChannel`. */
-const showHost = createWebShowHost();
+import { device, showHost, tabsStore } from "./web-device";
 
 /** Выбор исходной папки импорта из Obsidian (фича 021): `showDirectoryPicker` в режиме чтения. */
 const importPicker = webImportPicker();
@@ -43,10 +29,16 @@ const importPicker = webImportPicker();
  * `WebBackend` и обязана делить с ним очередь вызовов ядра, поэтому оба
  * клиента приходят из `openWebVault` уже связанными.
  */
-export function VaultWorkspace(): React.JSX.Element {
+export function VaultWorkspace({
+  welcomeExtra,
+}: {
+  /** Переход на свой сервер с экрана приветствия (фича 037). */
+  welcomeExtra?: React.ReactNode;
+}): React.JSX.Element {
   return (
     <DeviceI18nProvider device={device}>
       <Workspace
+        welcomeExtra={welcomeExtra}
         openVaultFolder={openWebVault}
         // FR-007: последний открытый vault предлагается на экране приветствия.
         // Хендл папки хранит `WebStore` в IndexedDB; разрешение на неё

@@ -60,6 +60,18 @@ fn move_to_trash(_path: &Path) -> bool {
     false
 }
 
+/// Перенос в свою корзину (фича 037). Не вышло — `false`, и файл удаляется, как
+/// при отсутствии системной корзины.
+fn move_to_own_trash(dir: &Path, path: &Path, full: &Path) -> bool {
+    let flat = path
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("__");
+    let target = dir.join(format!("{}-{}", crate::properties::now_ms(), flat));
+    std::fs::create_dir_all(dir).is_ok() && std::fs::rename(full, target).is_ok()
+}
+
 /// Записывает файл так, что на месте цели в любой момент лежит либо прежнее
 /// содержимое целиком, либо новое целиком (009 FR-030, research.md §4).
 ///
@@ -72,6 +84,9 @@ fn move_to_trash(_path: &Path) -> bool {
 /// (внутрь vault смонтировано что-то своё), временный файл кладётся рядом с
 /// целью под скрытым именем — `rename` в пределах одной папки атомарен всегда.
 pub(crate) fn write_atomically(root: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if !super::is_inside(path) {
+        return Err(std::io::ErrorKind::PermissionDenied.into());
+    }
     let target = root.join(path);
     let tmp_dir = root.join(super::service_dir::tmp_dir());
     std::fs::create_dir_all(&tmp_dir)?;
@@ -605,6 +620,9 @@ fn walk_images(root: &Path) -> Vec<crate::vault::ImageFile> {
 /// (`.attachments`): её назвал пользователь, и скрытость тут не правило обхода.
 fn images_in_folder(root: &Path, folder: &Path) -> Vec<crate::vault::ImageFile> {
     let mut found = Vec::new();
+    if !super::is_inside(folder) {
+        return found;
+    }
     let Ok(entries) = std::fs::read_dir(root.join(folder)) else {
         return found;
     };
@@ -725,6 +743,10 @@ pub struct NativeBackend {
     /// создаёт эту папку, поэтому спросить позже — значит всегда получить
     /// `true` и никогда не сообщить пользователю об утрате настроек.
     service_dir_existed: bool,
+    /// Своя корзина вместо системной (фича 037): на сервере удалённые заметки
+    /// аккаунта кладутся в папку данных сервера, а не в корзину его пользователя ОС,
+    /// где смешались бы с чужими. `None` — системная корзина, как на рабочем столе.
+    trash_dir: Option<PathBuf>,
     _watcher: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, FileIdMap>>,
     _access_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -756,6 +778,7 @@ impl NativeBackend {
             events: Arc::new(StdMutex::new(VecDeque::new())),
             events_ready: Arc::new(tokio::sync::Notify::new()),
             service_dir_existed: true,
+            trash_dir: None,
             _watcher: None,
             _access_task: None,
         })
@@ -1158,6 +1181,12 @@ impl NativeBackend {
     /// вместо того чтобы опрашивать ядро по таймеру: обнаружение на native
     /// push-овое, и превращать его в поллинг на границе процесса значило бы
     /// добавить задержку, которой в самом ядре нет.
+    /// Удалённое — в эту папку, а не в системную корзину (фича 037). Имя в ней:
+    /// время, затем путь заметки в vault с `__` вместо разделителей.
+    pub fn set_trash_dir(&mut self, dir: PathBuf) {
+        self.trash_dir = Some(dir);
+    }
+
     pub fn events_ready(&self) -> Arc<tokio::sync::Notify> {
         self.events_ready.clone()
     }
@@ -1406,6 +1435,7 @@ impl VaultBackend for NativeBackend {
             events: Arc::new(StdMutex::new(VecDeque::new())),
             events_ready: Arc::new(tokio::sync::Notify::new()),
             service_dir_existed,
+            trash_dir: None,
             _watcher: None,
             _access_task: None,
         };
@@ -1476,11 +1506,17 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn is_symlink(&self, path: &Path) -> bool {
+        if !super::is_inside(path) {
+            return false;
+        }
         std::fs::symlink_metadata(self.root_path.join(path))
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
     }
 
     async fn file_mark(&self, path: &Path) -> Option<(u64, i64)> {
+        if !super::is_inside(path) {
+            return None;
+        }
         let metadata = std::fs::metadata(self.root_path.join(path)).ok()?;
         if !metadata.is_file() {
             return None;
@@ -1498,6 +1534,9 @@ impl VaultBackend for NativeBackend {
     async fn folder_access(&self, folder: &Path) -> crate::vault::FolderAccess {
         use crate::vault::{FolderAccess, FolderProblem};
 
+        if !super::is_inside(folder) {
+            return FolderAccess::Absent;
+        }
         let full = self.root_path.join(folder);
         let metadata = match std::fs::metadata(&full) {
             Ok(metadata) => metadata,
@@ -1538,6 +1577,9 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn read(&self, path: &Path) -> Result<String, ReadError> {
+        if !super::is_inside(path) {
+            return Err(ReadError::NotFound);
+        }
         let full = self.root_path.join(path);
         // Порог проверяется по метаданным, ДО чтения: весь смысл предела в
         // том, чтобы не втягивать в память файл, который мы всё равно
@@ -1559,6 +1601,9 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn read_bytes(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        if !super::is_inside(path) {
+            return Err(ReadError::NotFound);
+        }
         let full = self.root_path.join(path);
         // Тот же порядок проверок, что и в `read`: предел по метаданным до
         // чтения, отсутствие файла — отдельной причиной.
@@ -1572,6 +1617,9 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
+        if !super::is_inside(path) {
+            return Err(ReadError::NotFound);
+        }
         std::fs::read(self.root_path.join(path)).map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => ReadError::NotFound,
             _ => ReadError::Io,
@@ -1579,7 +1627,7 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn write_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), WriteError> {
-        if self.write_denied() {
+        if self.write_denied() || !super::is_inside(path) {
             return Err(WriteError::AccessDenied);
         }
         // Индекс и таблица ссылок не трогаются: байтами пишется то, что в
@@ -1610,7 +1658,7 @@ impl VaultBackend for NativeBackend {
         content: &str,
         expected: Option<FileStamp>,
     ) -> Result<(), WriteError> {
-        if self.write_denied() {
+        if self.write_denied() || !super::is_inside(path) {
             return Err(WriteError::AccessDenied);
         }
         let full = self.root_path.join(path);
@@ -1646,7 +1694,7 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn ensure_folder(&mut self, path: &Path) -> Result<(), WriteError> {
-        if self.write_denied() {
+        if self.write_denied() || !super::is_inside(path) {
             return Err(WriteError::AccessDenied);
         }
         std::fs::create_dir_all(self.root_path.join(path)).map_err(|_| WriteError::Io)
@@ -1665,6 +1713,7 @@ impl VaultBackend for NativeBackend {
         // самим `root_path`) ошибочно читался бы как «конфликт имён» вместо
         // «недопустимое имя».
         let name = valid_note_name(path)
+            .filter(|_| super::is_inside(path))
             .ok_or(CreateError::InvalidName)?
             .to_string();
         let full = self.root_path.join(path);
@@ -1697,8 +1746,11 @@ impl VaultBackend for NativeBackend {
         }
         // FR-013: тот же порядок, что и в `create` — имя валидируется прежде
         // любой проверки существования на диске.
-        if valid_note_name(to).is_none() {
+        if valid_note_name(to).is_none() || !super::is_inside(to) {
             return Err(RenameError::InvalidName);
+        }
+        if !super::is_inside(from) {
+            return Err(RenameError::NotFound);
         }
         let full_from = self.root_path.join(from);
         let full_to = self.root_path.join(to);
@@ -1748,13 +1800,19 @@ impl VaultBackend for NativeBackend {
         if self.write_denied() {
             return Err(DeleteError::AccessDenied);
         }
+        if !super::is_inside(path) {
+            return Err(DeleteError::NotFound);
+        }
         let full = self.root_path.join(path);
         if !full.exists() {
             return Err(DeleteError::NotFound);
         }
         // Фича 029: снимок и отметка «удалена» — до того, как файла не станет.
         crate::snapshots::before_delete(self, path, crate::properties::now_ms()).await;
-        let trashed = move_to_trash(&full);
+        let trashed = match &self.trash_dir {
+            Some(dir) => move_to_own_trash(dir, path, &full),
+            None => move_to_trash(&full),
+        };
         if !trashed {
             std::fs::remove_file(&full).map_err(|_| DeleteError::Io)?;
         }
@@ -1767,7 +1825,10 @@ impl VaultBackend for NativeBackend {
     }
 
     async fn remove_service_file(&mut self, path: &Path) -> Result<(), WriteError> {
-        if self.write_denied() || !super::service_dir::is_inside_service_dir(path) {
+        if self.write_denied()
+            || !super::is_inside(path)
+            || !super::service_dir::is_inside_service_dir(path)
+        {
             return Err(WriteError::AccessDenied);
         }
         match std::fs::remove_file(self.root_path.join(path)) {

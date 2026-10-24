@@ -18,6 +18,7 @@ name = "typsidian_shell"
 [dependencies]
 tauri = { version = "2", features = [] }
 typsidian-core = { path = "../core" }
+typsidian-host = { path = "../host" }
 serde = { version = "1", features = ["derive"] }
 # `fs` — ради обзора папок устройства (выбор vault на Android): каталог с
 # тысячей записей читается заметное время, и делать это синхронной командой

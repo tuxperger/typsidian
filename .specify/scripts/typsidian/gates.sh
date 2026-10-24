@@ -2,8 +2,9 @@
 # Гейты качества проекта (конституция, «Рабочий процесс и гейты качества»).
 #
 # Usage: gates.sh [fast|core|ui|all]   (по умолчанию: fast)
-#   fast  fmt --check + хардкод интерфейса + cargo check ядра под оба таргета
-#   core  fast + cargo test + wasm-bindgen-test в браузере (Definition of done ядра)
+#   fast  fmt --check + хардкод интерфейса + cargo check ядра под оба таргета,
+#         свежесть обёрток команд host, cargo check host и сервера
+#   core  fast + cargo test (ядро, host, сервер) + wasm-bindgen-test в браузере
 #   ui    свежий wasm → сборка ui → tsc --noEmit по всем пакетам
 #   all   core + ui
 #
@@ -42,11 +43,14 @@ fast() {
     step "i18n (хардкод интерфейса)" scripts/check-i18n.sh
     step "check (native)" run cargo check -p typsidian-core --all-targets
     step "check (wasm32)" run cargo check -p typsidian-core --target wasm32-unknown-unknown
+    step "обёртки команд (host)" run node scripts/dev/gen-host-dispatch.mjs --check
+    step "check (host, server)" run cargo check -p typsidian-host -p typsidian-server --all-targets
 }
 
 core() {
     fast
     step "cargo test (native)" run cargo test -p typsidian-core
+    step "cargo test (host, server)" run cargo test -p typsidian-host -p typsidian-server
     step "wasm-bindgen-test (chrome)" run wasm-pack test --headless --chrome packages/core
 }
 

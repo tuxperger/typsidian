@@ -1,0 +1,44 @@
+[package]
+name = "typsidian-server"
+version = "0.1.0"
+edition = "2021"
+description = "Сервер Typsidian: вход, свои vault на диске сервера и команды ядра по HTTP"
+
+# Серверный режим web (фича 037). Работа с vault — команды `typsidian-host`, те же,
+# что у оболочки Tauri (конституция «Архитектурные ограничения → Сервер»); здесь —
+# транспорт, аккаунты, сессии и изоляция (конституция XI).
+
+[[bin]]
+name = "typsidian-server"
+path = "src/main.rs"
+
+[lib]
+name = "typsidian_server"
+
+[dependencies]
+typsidian-core = { path = "../../packages/core" }
+typsidian-host = { path = "../../packages/host" }
+anyhow = "1"
+argon2 = { version = "0.5", features = ["std"] }
+axum = { version = "0.8", features = ["macros"] }
+blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+rand = "0.8"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.7", default-features = false, features = ["sqlite", "runtime-tokio", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal", "net"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"
+chrono = "0.4"
+tower = { version = "0.5", features = ["util"] }
