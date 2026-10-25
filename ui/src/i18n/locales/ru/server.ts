@@ -76,4 +76,25 @@ export const server: Translation<typeof en> = {
   "server.connection.offline": "Нет связи с сервером — правки сохранятся, когда связь вернётся.",
   "server.connection.retryIn": (p) => `Повтор через ${p.seconds} с`,
   "server.connection.retry": "Повторить",
+  "server.demo.try": "Попробовать без регистрации",
+  "server.demo.terms": (p) =>
+    `Свой vault с примерами на ${p.minutes} мин. Ничего вводить не нужно; потом vault и все правки удаляются.`,
+  "server.demo.starting": "Готовим ваш vault…",
+  "server.demo.tooMany": (p) =>
+    `С этого адреса за последний час начато слишком много демо. Попробуйте через ${p.minutes} мин.`,
+  "server.demo.failed": "Демо не запустилось. Попробуйте чуть позже.",
+  "server.demo.busy": "Сейчас в демо слишком много посетителей. Попробуйте через несколько минут.",
+  "server.demo.left": (p) => `демо · осталось ${p.minutes} мин`,
+  "server.demo.leftClock": (p) => `демо · осталось ${p.clock}`,
+  "server.demo.over": "демо · время вышло",
+  "server.demo.usage": (p) => `Демо-объём: ${p.used} из ${p.quota} МБ`,
+  "server.demo.full": (p) =>
+    `Превышен демо-объём: ${p.quota} МБ. Удалите крупные вложения или файлы экспорта, чтобы сохранить снова.`,
+  "server.demo.soon": (p) =>
+    `Демо закончится через ${p.clock}. Правки после этого не сохранятся; нужное скачайте экспортом.`,
+  "server.demo.soonOk": "Понятно",
+  "server.demo.endedTitle": "Демо закончилось",
+  "server.demo.ended": (p) =>
+    `Прошло ${p.minutes} мин: ваш vault и все правки удалены с сервера. Можно начать заново — с чистой копией примеров.`,
+  "server.demo.again": "Начать заново",
 };

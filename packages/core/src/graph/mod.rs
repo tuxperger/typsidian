@@ -213,7 +213,15 @@ pub fn link_text(source: &Path, target: &Path) -> Option<String> {
 /// Исходящие ссылки заметки `source` как пути относительно корня vault.
 /// Порядок первого появления сохраняется, дубли схлопываются: таблица `links`
 /// хранит факт связи, а не число упоминаний.
+///
+/// Ссылки есть только у текстовых заметок. Доска — JSON Excalidraw, и в нём
+/// `[[…]]` — массив точек линии (`"points":[[0,0],[120,0]]`), а не ссылка:
+/// иначе каждая стрелка на доске была бы битой ссылкой (найдено на демо-vault
+/// фичи 039).
 pub fn links_in(source: &Path, content: &str) -> Vec<PathBuf> {
+    if source.extension().and_then(|ext| ext.to_str()) != Some(NOTE_EXTENSION) {
+        return Vec::new();
+    }
     let mut out: Vec<PathBuf> = Vec::new();
     for raw in extract_links(content) {
         if let Some(target) = resolve_link_target(source, &raw) {

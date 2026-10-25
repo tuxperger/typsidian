@@ -75,4 +75,26 @@ export const server = {
   "server.connection.offline": "No connection to the server — edits will be saved when it returns.",
   "server.connection.retryIn": (p: { seconds: number }) => `Retrying in ${p.seconds} s`,
   "server.connection.retry": "Retry",
+  "server.demo.try": "Try without signing up",
+  "server.demo.terms": (p: { minutes: number }) =>
+    `Your own vault with examples for ${p.minutes} min. Nothing to enter; afterwards the vault and all edits are deleted.`,
+  "server.demo.starting": "Preparing your vault…",
+  "server.demo.tooMany": (p: { minutes: number }) =>
+    `Too many demos have been started from this address in the last hour. Try again in ${p.minutes} min.`,
+  "server.demo.failed": "The demo could not be started. Try again a bit later.",
+  "server.demo.busy": "The demo has too many visitors right now. Try again in a few minutes.",
+  "server.demo.left": (p: { minutes: number }) => `demo · ${p.minutes} min left`,
+  "server.demo.leftClock": (p: { clock: string }) => `demo · ${p.clock} left`,
+  "server.demo.over": "demo · time is up",
+  "server.demo.usage": (p: { used: string; quota: string }) =>
+    `Demo storage: ${p.used} of ${p.quota} MB`,
+  "server.demo.full": (p: { quota: number }) =>
+    `Demo storage is full: ${p.quota} MB. Delete large attachments or exported files to save again.`,
+  "server.demo.soon": (p: { clock: string }) =>
+    `The demo ends in ${p.clock}. Edits after that will not be saved; download what you need with export.`,
+  "server.demo.soonOk": "Got it",
+  "server.demo.endedTitle": "The demo has ended",
+  "server.demo.ended": (p: { minutes: number }) =>
+    `${p.minutes} min have passed: your vault and all edits have been deleted from the server. You can start again with a fresh copy of the examples.`,
+  "server.demo.again": "Start again",
 } satisfies Entries;

@@ -8,6 +8,7 @@ import type { LastVault, VaultOpenResult } from "../vault-tree/useVault.js";
 import type { SyncClient } from "../sync/sync-client.js";
 import { openServerSync } from "../sync/sync-client-tauri.js";
 import { AccountSection } from "./AccountSection.js";
+import { DemoOverlays, DemoPill } from "./DemoStatus.js";
 import { ConnectionBanner, useConnectionState } from "./ConnectionBanner.js";
 import { createServerConnection, type ServerConnection } from "./connection.js";
 import { remoteTransport } from "./remote-invoke.js";
@@ -63,8 +64,10 @@ export interface ServerWorkspaceArgs {
   lastVault: () => Promise<LastVault | null>;
   /** «Открыть vault…» рабочей области — назад к списку. */
   openVaultFolder: () => Promise<VaultOpenResult>;
-  /** Раздел «Аккаунт» настроек. */
-  account: React.ReactNode;
+  /** Раздел «Аккаунт» настроек; на демо-сервере его нет (фича 039). */
+  account?: React.ReactNode;
+  /** Состояние в шапке рабочей области: остаток демо (фича 039). */
+  headerStatus?: React.ReactNode;
 }
 
 export interface ServerAppProps {
@@ -72,6 +75,9 @@ export interface ServerAppProps {
   onDeviceMode: () => void;
   renderWorkspace: (args: ServerWorkspaceArgs) => React.ReactNode;
 }
+
+/** Vault гостя демо-сервера — имя задаёт сервер (`apps/server/src/demo.rs`). */
+const DEMO_VAULT = "Демо"; // i18n-ignore: имя папки на сервере, а не текст
 
 /** Последний открытый vault этого браузера: перезагрузка возвращает в него (US1 AS5). */
 const LAST_VAULT_KEY = "typsidian.serverVault";
@@ -118,6 +124,11 @@ export function ServerApp({ onDeviceMode, renderWorkspace }: ServerAppProps): Re
 
   const signedIn = useCallback((info: ServerInfo, session: ServerSession) => {
     setConnection(createServerConnection(session));
+    // Гость демо-сервера сразу в своём единственном vault (фича 039).
+    if (info.demo !== undefined) {
+      setScreen({ kind: "workspace", info, session, vault: DEMO_VAULT });
+      return;
+    }
     const last = lastVaultName();
     setScreen(
       last === null
@@ -201,7 +212,10 @@ function ServerWorkspace({
   onSignedOut: () => void;
 }): React.JSX.Element {
   const state = useConnectionState(connection);
-  const { vault, info } = screen;
+  const { vault, info, session } = screen;
+  // Гость демо-сервера (фича 039): ни списка vault, ни раздела «Аккаунт», ни
+  // повторного входа — вместо них остаток времени и окно окончания.
+  const demo = info.demo !== undefined && session.expiresAt !== undefined;
   const args = useMemo<ServerWorkspaceArgs>(
     () => ({
       vault,
@@ -211,23 +225,32 @@ function ServerWorkspace({
         // Vault пропал (удалён в другой вкладке) — назад к списку.
         open: async () => {
           const opened = await openServerVault(vault, connection);
-          if (!opened.ok) onVaults();
+          if (!opened.ok && !demo) onVaults();
           return opened;
         },
       }),
       openVaultFolder: async () => {
-        onVaults();
+        if (!demo) onVaults();
         return { ok: false, error: { kind: "PickerCancelled" } };
       },
-      account: <AccountSection connection={connection} onSignedOut={onSignedOut} />,
+      ...(demo
+        ? { headerStatus: <DemoPill expiresAt={session.expiresAt ?? 0} /> }
+        : { account: <AccountSection connection={connection} onSignedOut={onSignedOut} /> }),
     }),
-    [vault, connection, onVaults, onSignedOut],
+    [vault, connection, onVaults, onSignedOut, demo, session.expiresAt],
   );
   return (
     <>
       <ConnectionBanner connection={connection} />
       {renderWorkspace(args)}
-      {state.kind === "signedOut" && (
+      {demo && info.demo !== undefined && (
+        <DemoOverlays
+          demo={info.demo}
+          expiresAt={session.expiresAt ?? 0}
+          ended={state.kind === "signedOut"}
+        />
+      )}
+      {!demo && state.kind === "signedOut" && (
         // Вход потерян посреди работы: рабочая область остаётся под экраном входа,
         // и ждущие вызовы (с несохранённым текстом) продолжатся после него.
         <div className="ts-server-overlay">

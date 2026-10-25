@@ -49,6 +49,8 @@ export function describeSyncError(t: Translate, error: SyncError): string {
       return t("sync.error.inProgressOperation");
     case "ExchangeRunning":
       return t("sync.error.exchangeRunning");
+    case "RemoteUnavailable":
+      return t("sync.error.remoteUnavailable");
     case "PullConflictsPending":
       return t("sync.error.pullConflictsPending");
     case "NoHistory":

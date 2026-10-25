@@ -273,6 +273,15 @@ pub async fn require_session(
         Ok(None) => return ApiError::Unauthenticated.into_response(),
         Err(error) => return ApiError::Internal(error).into_response(),
     };
+    // Гость демо-сервера после срока не работает и до уборки (фича 039).
+    if account.expires_at.is_some_and(|at| at <= now()) {
+        return ApiError::DemoExpired.into_response();
+    }
+    // Демо-сервер — только гости: старые сессии аккаунтов этой папки данных не
+    // работают (ревью безопасности 039, Н4).
+    if state.config.demo_mode && account.expires_at.is_none() {
+        return ApiError::Unauthenticated.into_response();
+    }
     let safe = matches!(*request.method(), Method::GET | Method::HEAD);
     if !safe {
         let header = request
@@ -310,13 +319,33 @@ pub struct Info {
     name: String,
     password: bool,
     oidc: Option<String>,
+    /// Демо-сервер (фича 039): входа нет, только гости.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    demo: Option<DemoInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DemoInfo {
+    ttl_minutes: u32,
+    quota_mb: u32,
 }
 
 pub async fn info(State(state): State<Shared>) -> Json<Info> {
+    let demo = state.config.demo_mode;
     Json(Info {
         name: state.config.name.clone(),
-        password: true,
-        oidc: state.config.oidc.as_ref().map(|oidc| oidc.label.clone()),
+        password: !demo,
+        oidc: state
+            .config
+            .oidc
+            .as_ref()
+            .filter(|_| !demo)
+            .map(|oidc| oidc.label.clone()),
+        demo: demo.then(|| DemoInfo {
+            ttl_minutes: state.config.demo.ttl_minutes,
+            quota_mb: state.config.demo.quota_mb,
+        }),
     })
 }
 
@@ -333,6 +362,9 @@ pub struct Me {
     display_name: String,
     has_password: bool,
     csrf: String,
+    /// Гость демо-сервера: когда vault будет удалён (секунды Unix).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<i64>,
 }
 
 fn me_of(authed: &Authed) -> Me {
@@ -341,6 +373,7 @@ fn me_of(authed: &Authed) -> Me {
         display_name: authed.account.display_name.clone(),
         has_password: authed.account.password_hash.is_some(),
         csrf: authed.session.csrf.clone(),
+        expires_at: authed.account.expires_at,
     }
 }
 

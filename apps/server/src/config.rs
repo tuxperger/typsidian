@@ -23,6 +23,45 @@ fn default_oidc_label() -> String {
     "OpenID Connect".to_owned()
 }
 
+/// Настройки демо-сервера (`[demo]`, фича 039).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DemoConfig {
+    /// Сколько живёт гость с создания.
+    pub ttl_minutes: u32,
+    /// Наибольший объём vault гостя.
+    pub quota_mb: u32,
+    /// Сколько гостей можно завести с одного адреса за час.
+    pub per_ip_per_hour: u32,
+    /// Сколько гостей живёт одновременно: у каждого открытый vault со своим
+    /// наблюдателем, а их предел на сервер — 256 (`vaults::MAX_OPEN`).
+    pub max_guests: u32,
+    /// Своя папка-образец; нет — встроенный демо-vault.
+    pub vault: Option<PathBuf>,
+}
+
+impl Default for DemoConfig {
+    fn default() -> Self {
+        DemoConfig {
+            ttl_minutes: 60,
+            quota_mb: 50,
+            per_ip_per_hour: 5,
+            max_guests: 200,
+            vault: None,
+        }
+    }
+}
+
+impl DemoConfig {
+    pub fn ttl_secs(&self) -> i64 {
+        i64::from(self.ttl_minutes.max(1)) * 60
+    }
+
+    pub fn quota_bytes(&self) -> u64 {
+        u64::from(self.quota_mb.max(1)) * 1024 * 1024
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -49,6 +88,12 @@ pub struct Config {
     /// пользователь направлял бы запросы сервера в его же сеть.
     pub sync_private_remotes: bool,
     pub oidc: Option<OidcConfig>,
+    /// Демо-режим (фича 039): только гости. Включается флагом `serve --demo`
+    /// или `TYPSIDIAN_DEMO=1`, а не файлом — см. research.md §1.
+    #[serde(skip)]
+    pub demo_mode: bool,
+    /// Настройки демо; без демо-режима ничего не включают.
+    pub demo: DemoConfig,
 }
 
 impl Default for Config {
@@ -64,6 +109,8 @@ impl Default for Config {
             template_sources: false,
             sync_private_remotes: false,
             oidc: None,
+            demo_mode: false,
+            demo: DemoConfig::default(),
         }
     }
 }
@@ -87,6 +134,9 @@ impl Config {
         }
         if let Ok(value) = std::env::var("TYPSIDIAN_PUBLIC_URL") {
             config.public_url = Some(value);
+        }
+        if std::env::var("TYPSIDIAN_DEMO").is_ok_and(|value| value == "1") {
+            config.demo_mode = true;
         }
         if let Ok(value) = std::env::var("TYPSIDIAN_STATIC") {
             config.static_dir = Some(PathBuf::from(value));

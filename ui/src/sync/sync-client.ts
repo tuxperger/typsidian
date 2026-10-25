@@ -208,6 +208,7 @@ const SYNC_ERROR_KINDS: ReadonlySet<string> = new Set<SyncError["kind"]>([
   "KeeperDisputed",
   "InProgressOperation",
   "ExchangeRunning",
+  "RemoteUnavailable",
   "PullConflictsPending",
   "NoHistory",
   "HistoryExists",

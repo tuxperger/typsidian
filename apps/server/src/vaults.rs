@@ -72,6 +72,9 @@ pub async fn open_vault(state: &Shared, account_id: &str, name: &str) -> ApiResu
 pub struct OpenVault {
     pub host: Host,
     pub events: broadcast::Sender<Arc<serde_json::Value>>,
+    /// Записи гостя демо-сервера — по одной: квота проверяется под этим
+    /// замком, и параллельные записи не проходят её вместе (фича 039).
+    pub demo_write: Mutex<()>,
     last_used: std::sync::Mutex<Instant>,
     /// Пока жив — жива и пересылка событий; закрытие vault её останавливает.
     _alive: watch::Sender<()>,
@@ -102,7 +105,7 @@ pub struct OpenVaults(Mutex<HashMap<Key, Arc<OnceCell<Arc<OpenVault>>>>>);
 const IDLE_CLOSE: Duration = Duration::from_secs(10 * 60);
 /// Открытых vault на весь сервер: у каждого свой наблюдатель за папкой, а предел
 /// наблюдателей ОС общий для процесса (принцип VII — не деградировать молча).
-const MAX_OPEN: usize = 256;
+pub const MAX_OPEN: usize = 256;
 
 impl OpenVaults {
     /// Открытый vault; `trash` — куда класть удалённые заметки, `sync` —
@@ -143,6 +146,7 @@ impl OpenVaults {
                 let open = Arc::new(OpenVault {
                     host,
                     events,
+                    demo_write: Mutex::new(()),
                     last_used: std::sync::Mutex::new(Instant::now()),
                     _alive: alive,
                 });

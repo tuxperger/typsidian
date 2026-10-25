@@ -11299,3 +11299,104 @@ button.ts-props__chipbtn,
   padding: var(--space-4);
   background: rgba(10, 12, 13, 0.82);
 }
+
+/* ── Демо-сервер (фича 039, макет D1–D5) ─────────────────────────────────── */
+
+.ts-server-demo__try {
+  height: 38px;
+}
+
+.ts-demo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--orange-600);
+  border-radius: var(--radius-sm);
+  color: var(--orange-200);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ts-demo-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orange-500);
+}
+
+.ts-demo-pill__meter {
+  width: 40px;
+  height: 4px;
+  background: var(--steel-800);
+}
+
+.ts-demo-pill__meter i {
+  display: block;
+  height: 100%;
+  background: var(--steel-400);
+}
+
+.ts-demo-pill--late {
+  border-color: var(--amber-600);
+  color: var(--hivis-400);
+}
+
+.ts-demo-pill--late .ts-demo-pill__dot {
+  background: var(--amber-600);
+}
+
+.ts-demo-pill--full .ts-demo-pill__meter i {
+  background: var(--red-600);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ts-demo-pill--late .ts-demo-pill__dot {
+    animation: ts-demo-blink 1.6s steps(2) infinite;
+  }
+}
+
+@keyframes ts-demo-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.ts-demo-strip {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + var(--ts-header-h));
+  left: 0;
+  right: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: 7px max(12px, env(safe-area-inset-right, 0px)) 7px max(12px, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, var(--amber-600) 12%, var(--steel-950));
+  border-bottom: var(--border-width) solid color-mix(in srgb, var(--amber-600) 40%, transparent);
+  color: var(--steel-100);
+  font-size: 12px;
+}
+
+.ts-demo-strip span {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-demo-toast {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+  z-index: 1000;
+  width: min(360px, calc(100% - 32px));
+  padding: 12px 14px;
+  background: var(--steel-900);
+  border: var(--border-width) solid var(--steel-700);
+  border-left: 2px solid var(--red-600);
+  color: var(--steel-200);
+  font-size: 12px;
+}

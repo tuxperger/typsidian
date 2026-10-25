@@ -12,6 +12,23 @@ export interface ServerInfo {
   password: boolean;
   /** Подпись кнопки провайдера входа; нет — провайдер не настроен. */
   oidc?: string;
+  /** Демо-сервер (фича 039): входа нет, только гости. */
+  demo?: ServerDemo;
+}
+
+/** Условия демо-сервера. */
+export interface ServerDemo {
+  ttlMinutes: number;
+  quotaMb: number;
+}
+
+/** Событие окна: транспорт получил отказ по демо-квоте (фича 039). */
+export const DEMO_QUOTA_EVENT = "typsidian-demo-quota";
+
+/** Объём vault гостя, байты. */
+export interface DemoUsage {
+  used: number;
+  quota: number;
 }
 
 /** Текущий аккаунт и CSRF-токен его сессии. */
@@ -20,6 +37,8 @@ export interface ServerSession {
   displayName: string;
   hasPassword: boolean;
   csrf: string;
+  /** Гость демо-сервера: когда vault будет удалён (секунды Unix). */
+  expiresAt?: number;
 }
 
 export interface ServerVault {
@@ -47,6 +66,10 @@ export type ServerFailure =
   | { kind: "TooManyAttempts"; retry_after_s: number }
   | { kind: "Invalid"; field: string; reason: string }
   | { kind: "UnknownAccount" }
+  | { kind: "DemoExpired" }
+  | { kind: "TooManyDemos"; retry_after_s: number }
+  | { kind: "DemoFull" }
+  | { kind: "DemoQuota"; quota_mb: number }
   | { kind: "Internal" }
   /** Сервер недоступен (сеть, прокси, сервер остановлен). */
   | { kind: "Offline" };
@@ -117,7 +140,12 @@ export async function serverInfo(): Promise<ServerInfo | null> {
 /** Текущая сессия; `null` — входа нет (или он истёк). */
 export async function currentSession(): Promise<ServerResult<ServerSession | null>> {
   const result = await request<ServerSession>("GET", "/api/me");
-  if (!result.ok && result.failure.kind === "Unauthenticated") return { ok: true, value: null };
+  if (
+    !result.ok &&
+    (result.failure.kind === "Unauthenticated" || result.failure.kind === "DemoExpired")
+  ) {
+    return { ok: true, value: null };
+  }
   return result;
 }
 
@@ -125,6 +153,15 @@ export function login(loginName: string, password: string): Promise<ServerResult
   return request<ServerSession>("POST", "/api/login", {
     body: { login: loginName, password },
   });
+}
+
+/** Гость демо-сервера (фича 039): временный аккаунт, его vault и сессия. */
+export function demoStart(): Promise<ServerResult<ServerSession & { vault: string }>> {
+  return request<ServerSession & { vault: string }>("POST", "/api/demo/start", { body: {} });
+}
+
+export function demoUsage(): Promise<ServerResult<DemoUsage>> {
+  return request<DemoUsage>("GET", "/api/demo/usage");
 }
 
 /** Адрес начала входа через провайдера: переход страницы, а не запрос. */

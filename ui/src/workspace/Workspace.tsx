@@ -255,6 +255,12 @@ export interface WorkspaceProps {
    */
   showHost?: ShowHost;
   /**
+   * Состояние оболочки в шапке, рядом с индикатором синхронизации: на
+   * демо-сервере — остаток времени и объёма гостя (фича 039). Не передано —
+   * ничего.
+   */
+  headerStatus?: React.ReactNode;
+  /**
    * Источники изображений оболочки (фича 016, research.md §2): камера и
    * галерея есть только на телефоне. Умолчание — ни одного: «Вставить
    * изображение…» тогда сразу открывает выбор файлов.
@@ -324,6 +330,7 @@ function WorkspaceView({
   pickImportSource,
   captureSource,
   welcomeExtra,
+  headerStatus,
 }: WorkspaceProps): React.JSX.Element {
   const contextMenu = useContextMenu();
   const { t, tEn, lang, formatNumber } = useI18n();
@@ -2836,6 +2843,7 @@ function WorkspaceView({
           {/* Индикатор синхронизации (011 FR-035): в шапке, а не в статус-баре
               редактора — того нет при открытой доске и в графе, а состояние
               обмена должно быть видно всегда. */}
+          {headerStatus}
           {sync !== null && (
             <SyncIndicator
               sync={sync}

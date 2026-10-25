@@ -166,6 +166,11 @@ async fn the_server_rejects_addresses_of_the_server_itself() {
 }
 
 #[wasm_bindgen_test]
+async fn a_shell_without_remote_refuses_connect_and_exchange() {
+    cases::a_shell_without_remote_refuses_connect_and_exchange().await;
+}
+
+#[wasm_bindgen_test]
 async fn settings_survive_in_vault_json_next_to_other_keys() {
     cases::settings_survive_in_vault_json_next_to_other_keys().await;
 }

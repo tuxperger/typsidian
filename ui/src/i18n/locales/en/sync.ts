@@ -63,6 +63,7 @@ export const sync = {
     `History is kept by the device “${p.device}”. Snapshots from here need a confirmation.`,
   "sync.error.keeperDisputed":
     "Two devices claim to be the history keeper. Choose the keeper before taking snapshots.",
+  "sync.error.remoteUnavailable": "A remote repository is not available here.",
   "sync.error.exchangeRunning": "An exchange with the remote repository is already running — wait for it to finish.",
   "sync.error.inProgressOperation":
     "An operation started outside the app (merge, rebase…) is unfinished in the history. Finish or abort it with git first.",
@@ -255,6 +256,7 @@ export const sync = {
   "sync.remote.url": "Repository address",
   "sync.remote.urlHintSsh": "https://… with a token, or an ssh address — the keys of your system are used.",
   "sync.remote.urlHintNoSsh": "https://… with a token. Access by ssh keys is not available in this app build.",
+  "sync.remote.unavailable": "A remote repository is not available in the demo. Version history works within the demo.",
   "sync.remote.urlHintServer":
     "https://… with a token. Only external HTTPS addresses work on the server: ssh, folders and addresses of the server’s internal network are not used.",
   "sync.remote.user": "User name",

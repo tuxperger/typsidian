@@ -15,8 +15,9 @@ export function ServerWorkspace({ onDeviceMode }: { onDeviceMode: () => void }):
   return (
     <ServerApp
       onDeviceMode={onDeviceMode}
-      renderWorkspace={({ lastVault, openVaultFolder, account }) => (
+      renderWorkspace={({ lastVault, openVaultFolder, account, headerStatus }) => (
         <Workspace
+          headerStatus={headerStatus}
           openVaultFolder={openVaultFolder}
           lastVault={lastVault}
           device={device}

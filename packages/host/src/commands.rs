@@ -1778,12 +1778,24 @@ pub fn element_at(text: String, offset: usize) -> typsidian_core::elements::Elem
     typsidian_core::elements::element_at(&text, offset)
 }
 
+/// Предел открытых сессий подсветки на окно: редакторов на экране — единицы.
+const MAX_HIGHLIGHT_SESSIONS: usize = 32;
+
 pub fn syntax_session_open(text: String, sessions: &HighlightSessions) -> u32 {
     let mut guard = sessions
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (next, map) = &mut *guard;
+    // Сессий на окно (vault на сервере) не больше предела: самая старая
+    // закрывается — её редактор при следующей правке откроет новую (фича 039:
+    // на демо-сервере сессии открывает аноним).
+    while map.len() >= MAX_HIGHLIGHT_SESSIONS {
+        let Some(oldest) = map.keys().min().copied() else {
+            break;
+        };
+        map.remove(&oldest);
+    }
     *next = next.wrapping_add(1);
     map.insert(
         *next,

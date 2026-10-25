@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { useI18n } from "../i18n/index.js";
 import {
+  demoStart,
   login,
   oidcStartUrl,
+  type ServerDemo,
   type ServerFailure,
   type ServerInfo,
   type ServerSession,
@@ -27,7 +29,81 @@ export interface ServerLoginProps {
   onBack?: () => void;
 }
 
-export function ServerLogin({
+export function ServerLogin(props: ServerLoginProps): React.JSX.Element {
+  // Демо-сервер (фича 039, макет D1): входа в профиль нет — только гость.
+  if (props.info.demo !== undefined) {
+    return (
+      <DemoLogin
+        demo={props.info.demo}
+        onSignedIn={props.onSignedIn}
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+      />
+    );
+  }
+  return <PasswordLogin {...props} />;
+}
+
+function DemoLogin({
+  demo,
+  onSignedIn,
+  onBack,
+}: {
+  demo: ServerDemo;
+  onSignedIn: (session: ServerSession) => void;
+  onBack?: () => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [failure, setFailure] = useState<ServerFailure | null>(null);
+  const [busy, setBusy] = useState(false);
+  const host = typeof location === "undefined" ? "" : location.host;
+
+  const start = async (): Promise<void> => {
+    setBusy(true);
+    setFailure(null);
+    const result = await demoStart();
+    setBusy(false);
+    if (result.ok) onSignedIn(result.value);
+    else setFailure(result.failure);
+  };
+
+  return (
+    <div className="ts-server-card">
+      <h1 className="ts-server-card__brand">
+        <span className="ts-wordmark__slash">/</span>typsidian
+      </h1>
+      <p className="ts-server-card__host">{host}</p>
+      {failure !== null && (
+        <div className="ts-server-alert" role="alert">
+          {failure.kind === "TooManyDemos"
+            ? t("server.demo.tooMany", {
+                minutes: Math.max(1, Math.ceil(failure.retry_after_s / 60)),
+              })
+            : failure.kind === "DemoFull"
+              ? t("server.demo.busy")
+              : failure.kind === "Offline"
+                ? t("server.login.offline")
+                : t("server.demo.failed")}
+        </div>
+      )}
+      <button
+        type="button"
+        className="ts-btn ts-btn--accent ts-server-card__wide ts-server-demo__try"
+        disabled={busy || failure?.kind === "TooManyDemos"}
+        onClick={() => void start()}
+      >
+        {busy ? t("server.demo.starting") : t("server.demo.try")}
+      </button>
+      <p className="ts-server-card__lead">{t("server.demo.terms", { minutes: demo.ttlMinutes })}</p>
+      {onBack !== undefined && (
+        <button type="button" className="ts-btn ts-btn--quiet" onClick={onBack}>
+          {t("server.login.back")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PasswordLogin({
   info,
   notice,
   initialLogin = "",

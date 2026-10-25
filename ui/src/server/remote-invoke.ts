@@ -13,7 +13,7 @@ import { withoutNullFields } from "../tauri-invoke.js";
 import type { ShellTransport } from "../vault-client-tauri.js";
 import type { Note, VaultEvent } from "../wasm-core/typsidian_core.js";
 import type { ServerConnection } from "./connection.js";
-import { unreachable, vaultPath } from "./server-api.js";
+import { DEMO_QUOTA_EVENT, unreachable, vaultPath } from "./server-api.js";
 
 const VAULT_EVENTS = "vault://events";
 const REINDEX_PROGRESS = "properties://reindex-progress";
@@ -94,7 +94,13 @@ export function remoteTransport(vault: string, connection: ServerConnection): Sh
         // Пустое тело — команда без ответа.
       }
       const result = withoutNullFields(value);
-      if (!response.ok) throw result;
+      if (!response.ok) {
+        // Демо-объём исчерпан (фича 039): отказ видит не только вызвавший код.
+        if ((result as { kind?: unknown } | null)?.kind === "DemoQuota") {
+          window.dispatchEvent(new CustomEvent(DEMO_QUOTA_EVENT, { detail: result }));
+        }
+        throw result;
+      }
       if (command === "list") lastList = result as Note[];
       return result as T;
     }

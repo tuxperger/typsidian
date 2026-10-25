@@ -250,6 +250,9 @@ pub enum SyncError {
     /// занял бы ещё поток и делил бы с первым отмену.
     #[error("обмен уже идёт")]
     ExchangeRunning,
+    /// Удалённый репозиторий в этой оболочке не подключается (демо-сервер, 039).
+    #[error("удалённый репозиторий недоступен")]
+    RemoteUnavailable,
     #[error("есть неразрешённые конфликты получения")]
     PullConflictsPending,
     #[error("истории нет")]
@@ -317,6 +320,13 @@ pub struct ShellCapabilities {
     /// числе чужие vault. Такие адреса удалённого репозитория отклоняются.
     #[serde(default)]
     pub server: bool,
+    /// Можно подключать удалённый репозиторий (фича 039: на демо-сервере нельзя).
+    #[serde(default = "remote_default")]
+    pub remote: bool,
+}
+
+fn remote_default() -> bool {
+    true
 }
 
 impl ShellCapabilities {
@@ -329,6 +339,7 @@ impl ShellCapabilities {
                 syncthing_status: false,
                 secure_secrets: false,
                 server: false,
+                remote: true,
             }
         } else {
             Self {
@@ -337,6 +348,7 @@ impl ShellCapabilities {
                 syncthing_status: true,
                 secure_secrets: true,
                 server: false,
+                remote: true,
             }
         }
     }
@@ -350,6 +362,7 @@ impl ShellCapabilities {
             syncthing_status: false,
             secure_secrets: true,
             server: true,
+            remote: true,
         }
     }
 }

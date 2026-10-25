@@ -269,13 +269,40 @@ impl Speller {
 /// отбрасывается, а поток дорабатывает сам (research.md §3).
 pub struct ThreadExecutor;
 
+/// Сколько потоков сборки живёт одновременно на процесс — включая те, что
+/// дорабатывают после предела времени. Без предела на сервере (демо, фича 039)
+/// каждый новый тяжёлый документ раз в 10 секунд занимал бы ещё одно ядро до
+/// конца своей сборки.
+pub const MAX_COMPILE_THREADS: usize = 8;
+
+static COMPILE_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Отпускает место потока сборки, когда поток закончил — сам или паникой.
+struct CompileSlot;
+
+impl Drop for CompileSlot {
+    fn drop(&mut self) {
+        COMPILE_THREADS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl preview::CompileExecutor for ThreadExecutor {
     async fn run(
         &self,
         job: preview::CompileJob,
     ) -> Result<preview::CompileOutput, preview::ExecutorError> {
+        use std::sync::atomic::Ordering;
         let limit = std::time::Duration::from_secs(u64::from(preview::BUILD_TIME_LIMIT_SECS));
-        let work = tokio::task::spawn_blocking(move || job.run_inline());
+        // Мест нет — сборка не начинается, а ответ тот же, что у долгой сборки.
+        if COMPILE_THREADS.fetch_add(1, Ordering::SeqCst) >= MAX_COMPILE_THREADS {
+            COMPILE_THREADS.fetch_sub(1, Ordering::SeqCst);
+            return Err(preview::ExecutorError::TimedOut);
+        }
+        let slot = CompileSlot;
+        let work = tokio::task::spawn_blocking(move || {
+            let _slot = slot;
+            job.run_inline()
+        });
         match tokio::time::timeout(limit, work).await {
             Ok(Ok(output)) => Ok(output),
             // Паника компилятора — не превышение предела: пусть будет видна.

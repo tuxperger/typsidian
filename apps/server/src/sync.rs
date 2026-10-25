@@ -61,7 +61,11 @@ impl SyncHomes {
             DevicePlace::In(dir.join("device")),
             Some(dir.join("mirrors")),
             secrets.clone(),
-            ShellCapabilities::server(),
+            // Гостю демо-сервера удалённый репозиторий не подключается (039).
+            ShellCapabilities {
+                remote: !state.config.demo_mode,
+                ..ShellCapabilities::server()
+            },
         ));
         map.insert(
             account_id.to_owned(),
@@ -71,6 +75,11 @@ impl SyncHomes {
             },
         );
         Ok((home, secrets))
+    }
+
+    /// Забывает окружение удалённого аккаунта (гость демо-сервера, 039).
+    pub async fn forget_account(&self, account_id: &str) {
+        self.0.lock().await.remove(account_id);
     }
 
     /// Удаляет секреты и зеркало vault (удаление vault).

@@ -35,6 +35,12 @@ enum Command {
         /// Собранная статикой web-версия.
         #[arg(long = "static")]
         static_dir: Option<PathBuf>,
+        /// Демо-сервер: только гости с временным vault, без входа в профиль.
+        #[arg(long)]
+        demo: bool,
+        /// Своя папка-образец демо-vault (иначе встроенная).
+        #[arg(long)]
+        demo_vault: Option<PathBuf>,
     },
     /// Аккаунты.
     User {
@@ -205,6 +211,16 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     let store = Store::open(&config.database()).await?;
     let listen = config.listen;
     let state = AppState::new(config, store);
+    // Гости, чей срок истёк, пока сервер стоял (US2 AS3), — в любом режиме.
+    typsidian_server::demo::sweep(&state).await;
+    if state.config.demo_mode {
+        typsidian_server::demo::check(&state)?;
+        tracing::info!(
+            "демо-сервер: гости на {} мин, объём {} МБ",
+            state.config.demo.ttl_minutes,
+            state.config.demo.quota_mb
+        );
+    }
     spawn_housekeeping(state.clone());
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!("слушаю {listen}");
@@ -232,7 +248,18 @@ async fn main() -> anyhow::Result<()> {
         config.data = data;
     }
     match cli.command {
-        Command::Serve { listen, static_dir } => {
+        Command::Serve {
+            listen,
+            static_dir,
+            demo,
+            demo_vault,
+        } => {
+            if demo {
+                config.demo_mode = true;
+            }
+            if let Some(dir) = demo_vault {
+                config.demo.vault = Some(dir);
+            }
             if let Some(listen) = listen {
                 config.listen = listen;
             }

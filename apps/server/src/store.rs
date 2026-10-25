@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_account ON sessions(account_id);
+CREATE TABLE IF NOT EXISTS demo_starts (
+    ip_key TEXT NOT NULL,
+    at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS demo_starts_key ON demo_starts(ip_key, at);
 CREATE TABLE IF NOT EXISTS vault_sync_ids (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -56,6 +61,8 @@ pub struct Account {
     pub password_hash: Option<String>,
     pub blocked: bool,
     pub created_at: i64,
+    /// Гость демо-сервера (фича 039): когда удалить, секунды Unix.
+    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -117,6 +124,7 @@ fn account(row: &sqlx::sqlite::SqliteRow) -> Account {
         password_hash: row.get("password_hash"),
         blocked: row.get::<i64, _>("blocked") != 0,
         created_at: row.get("created_at"),
+        expires_at: row.get("expires_at"),
     }
 }
 
@@ -166,6 +174,17 @@ impl Store {
             .connect_with(options)
             .await?;
         sqlx::raw_sql(SCHEMA).execute(&pool).await?;
+        // Столбцы гостя (фича 039) в базе, заведённой до них.
+        for column in ["expires_at INTEGER"] {
+            let added = sqlx::query(&format!("ALTER TABLE accounts ADD COLUMN {column}"))
+                .execute(&pool)
+                .await;
+            if let Err(error) = added {
+                if !error.to_string().contains("duplicate column") {
+                    return Err(error.into());
+                }
+            }
+        }
         Ok(Store { pool })
     }
 
@@ -409,6 +428,102 @@ impl Store {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // ── Гости демо-сервера (фича 039, research.md §2) ──────────────────────
+
+    /// Заводит гостя без пароля со сроком `ttl_secs`. Адрес гостя не хранится:
+    /// предел по адресу ведёт отдельная таблица `demo_starts` (ключ с секретом).
+    pub async fn add_guest(&self, ttl_secs: i64) -> anyhow::Result<Account> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let login = format!("guest-{}", &random_token()[..12]);
+        let created = now();
+        sqlx::query(
+            "INSERT INTO accounts (id, login, display_name, password_hash, blocked, created_at, expires_at)
+             VALUES (?, ?, ?, NULL, 0, ?, ?)",
+        )
+        .bind(&id)
+        .bind(&login)
+        .bind("Гость демо")
+        .bind(created)
+        .bind(created + ttl_secs)
+        .execute(&self.pool)
+        .await?;
+        self.account_by_id(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("гость пропал сразу после записи"))
+    }
+
+    /// Сколько стартов демо было с этого адреса начиная с `since` и самый ранний
+    /// из них — чтобы назвать, когда можно снова. Старты лежат отдельно от
+    /// гостей: уборка просроченного гостя предел не сбрасывает.
+    pub async fn starts_from(
+        &self,
+        ip_key: &str,
+        since: i64,
+    ) -> anyhow::Result<(i64, Option<i64>)> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS n, MIN(at) AS first FROM demo_starts WHERE ip_key = ? AND at >= ?",
+        )
+        .bind(ip_key)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((row.get("n"), row.get("first")))
+    }
+
+    pub async fn record_start(&self, ip_key: &str, at: i64) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO demo_starts (ip_key, at) VALUES (?, ?)")
+            .bind(ip_key)
+            .bind(at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Забывает старты раньше `before`.
+    pub async fn prune_starts(&self, before: i64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM demo_starts WHERE at < ?")
+            .bind(before)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Сколько гостей живо к `at`.
+    pub async fn live_guests(&self, at: i64) -> anyhow::Result<i64> {
+        Ok(
+            sqlx::query("SELECT COUNT(*) AS n FROM accounts WHERE expires_at > ?")
+                .bind(at)
+                .fetch_one(&self.pool)
+                .await?
+                .get("n"),
+        )
+    }
+
+    /// Есть ли аккаунт с таким id — уборка папок без хозяина.
+    pub async fn account_exists(&self, id: &str) -> anyhow::Result<bool> {
+        Ok(self.account_by_id(id).await?.is_some())
+    }
+
+    /// Переносит срок гостя — проверка истечения без ожидания часа.
+    pub async fn set_guest_expiry(&self, id: &str, at: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE accounts SET expires_at = ? WHERE id = ? AND expires_at IS NOT NULL")
+            .bind(at)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Гости, срок которых истёк к `at`.
+    pub async fn expired_guests(&self, at: i64) -> anyhow::Result<Vec<String>> {
+        let rows =
+            sqlx::query("SELECT id FROM accounts WHERE expires_at IS NOT NULL AND expires_at <= ?")
+                .bind(at)
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows.iter().map(|row| row.get("id")).collect())
     }
 
     // ── Id синхронизации vault (фича 038, research.md §4) ─────────────────

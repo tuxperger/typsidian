@@ -26,6 +26,18 @@ pub enum ApiError {
     },
     /// Пользователь провайдера входа не сопоставлен аккаунту (US3 AS3).
     UnknownAccount,
+    /// Срок гостя демо-сервера истёк (фича 039).
+    DemoExpired,
+    /// С этого адреса заведено предельное число гостей за час.
+    TooManyDemos {
+        retry_after_s: u64,
+    },
+    /// Демо-сервер принял предельное число гостей.
+    DemoFull,
+    /// Запись превысила бы демо-объём vault.
+    DemoQuota {
+        quota_mb: u32,
+    },
     Internal(anyhow::Error),
 }
 
@@ -66,6 +78,17 @@ impl IntoResponse for ApiError {
             ApiError::UnknownAccount => {
                 (StatusCode::FORBIDDEN, json!({ "kind": "UnknownAccount" }))
             }
+            ApiError::DemoExpired => (StatusCode::UNAUTHORIZED, json!({ "kind": "DemoExpired" })),
+            ApiError::TooManyDemos { retry_after_s } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                json!({ "kind": "TooManyDemos", "retry_after_s": retry_after_s }),
+            ),
+            // Не 503: клиент считает 502–504 обрывом связи с сервером.
+            ApiError::DemoFull => (StatusCode::TOO_MANY_REQUESTS, json!({ "kind": "DemoFull" })),
+            ApiError::DemoQuota { quota_mb } => (
+                StatusCode::BAD_REQUEST,
+                json!({ "kind": "DemoQuota", "quota_mb": quota_mb }),
+            ),
             ApiError::Internal(error) => {
                 tracing::error!("внутренняя ошибка: {error:#}");
                 (

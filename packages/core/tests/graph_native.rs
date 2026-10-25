@@ -65,6 +65,11 @@ fn image_calls_are_read_with_the_typst_parser() {
     cases::image_calls_are_read_with_the_typst_parser();
 }
 
+#[test]
+fn board_json_has_no_links() {
+    cases::board_json_has_no_links();
+}
+
 #[tokio::test]
 async fn attachments_are_shown_only_on_request() {
     cases::attachments_are_shown_only_on_request().await;

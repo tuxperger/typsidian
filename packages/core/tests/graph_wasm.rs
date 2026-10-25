@@ -61,6 +61,11 @@ fn image_calls_are_read_with_the_typst_parser() {
 }
 
 #[wasm_bindgen_test]
+fn board_json_has_no_links() {
+    cases::board_json_has_no_links();
+}
+
+#[wasm_bindgen_test]
 async fn attachments_are_shown_only_on_request() {
     cases::attachments_are_shown_only_on_request().await;
 }

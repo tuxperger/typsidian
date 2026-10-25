@@ -109,6 +109,7 @@ impl Fixture {
                 syncthing_status: true,
                 secure_secrets: true,
                 server: false,
+                remote: true,
             },
         }
     }
@@ -1143,6 +1144,47 @@ pub async fn the_server_rejects_addresses_of_the_server_itself() {
         f.session.pull(&mut f.vault, &f.secrets, &ctx, false).await,
         Err(SyncError::UnsupportedScheme { .. })
     ));
+}
+
+/// Оболочка без удалённого репозитория (демо-сервер, фича 039): подключение и
+/// обмен с уже подключённым отклоняются, история работает.
+pub async fn a_shell_without_remote_refuses_connect_and_exchange() {
+    let remote = FakeGitEngine::new_remote();
+    let mut f = fixture(&[("a.typ", "= A\n")], Some(remote));
+    f.enable().await;
+    let desktop = f.ctx();
+    f.session
+        .connect_remote(
+            &mut f.vault,
+            &f.secrets,
+            &desktop,
+            REMOTE,
+            Credentials::default(),
+        )
+        .await
+        .unwrap();
+    let mut ctx = f.ctx();
+    ctx.capabilities.remote = false;
+    assert_eq!(
+        f.session
+            .connect_remote(
+                &mut f.vault,
+                &f.secrets,
+                &ctx,
+                REMOTE,
+                Credentials::default()
+            )
+            .await
+            .unwrap_err(),
+        SyncError::RemoteUnavailable
+    );
+    assert_eq!(
+        f.session
+            .push(&f.vault, &f.secrets, &ctx, false)
+            .await
+            .unwrap_err(),
+        SyncError::RemoteUnavailable
+    );
 }
 
 pub async fn settings_survive_in_vault_json_next_to_other_keys() {

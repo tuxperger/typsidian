@@ -291,6 +291,17 @@ pub async fn a_relocation_re_resolves_embeds<C: IndexCache>(mut cache: C) {
 
 // ── Вложения и теги (T020) ──────────────────────────────────────────────────
 
+/// Доска — не Typst: массив точек стрелки `[[0,0],[120,0]]` в её JSON не ссылка
+/// (найдено на демо-vault фичи 039), а `[[…]]` заметки — ссылка.
+pub fn board_json_has_no_links() {
+    let board = r#"{"type":"excalidraw","elements":[{"type":"arrow","points":[[0,0],[120,0]]}]}"#;
+    assert!(typsidian_core::graph::links_in(Path::new("схема.excalidraw"), board).is_empty());
+    assert_eq!(
+        typsidian_core::graph::links_in(Path::new("a.typ"), "[[b]]"),
+        vec![PathBuf::from("b.typ")]
+    );
+}
+
 /// Разбор `#image("…")`: путь от папки заметки или от корня, вложенные вызовы,
 /// дубли схлопываются, не литерал и чужие функции пропускаются.
 pub fn image_calls_are_read_with_the_typst_parser() {

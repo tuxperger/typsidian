@@ -92,6 +92,9 @@ pub async fn invoke(
         return Err(ApiError::Forbidden);
     }
     let open = open(&state, &authed, &name).await?;
+    // Гость демо-сервера: записи по одной и не сверх демо-объёма (039).
+    let _demo_write =
+        crate::demo::write_guard(&state, &authed, &open, &command, body.len()).await?;
     let reply = if command == REINDEX_COMMAND {
         let origin = client_of(&headers);
         let sender = open.events.clone();
@@ -149,7 +152,9 @@ pub async fn invoke(
                 reason: "NotJson",
             })?
         };
-        if !state.config.template_sources {
+        // На демо-сервере свои адреса шаблонов закрыты всегда: гость анонимен
+        // (ревью безопасности 039, С4).
+        if !state.config.template_sources || state.config.demo_mode {
             strip_template_sources(&mut arguments);
         }
         if command == SYNC_CONNECT_COMMAND
@@ -191,6 +196,9 @@ pub async fn invoke(
         }
         reply
     };
+    if state.config.demo_mode && command == "delete" && reply.is_ok() {
+        crate::demo::after_delete(&state, &authed.account.id).await;
+    }
     open.touch();
     Ok(match reply {
         Ok(value) => Json(value).into_response(),
@@ -247,9 +255,11 @@ struct SessionCheck {
 impl SessionCheck {
     async fn alive(&self) -> bool {
         let idle = self.state.config.session_idle_secs();
+        // Срок гостя демо-сервера — тоже конец потока (ревью безопасности 039).
         matches!(
             self.state.store.session_by_token(&self.token, idle).await,
-            Ok(Some(_))
+            Ok(Some((_, account)))
+                if account.expires_at.is_none_or(|at| at > crate::store::now())
         )
     }
 }

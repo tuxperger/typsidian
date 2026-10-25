@@ -715,11 +715,17 @@ function RemoteSection({
       <h2 className="ts-eyebrow">{t("sync.remote.title")}</h2>
       {remote === undefined ? (
         <>
-          <p className="ts-dialog__hint">{t("sync.remote.none")}</p>
+          {/* Оболочка без удалённого (демо-сервер, фича 039): кнопка видна, но
+              выключена, и причина названа. */}
+          <p className="ts-dialog__hint">
+            {overview.capabilities.remote === false
+              ? t("sync.remote.unavailable")
+              : t("sync.remote.none")}
+          </p>
           <button
             type="button"
             className="ts-btn"
-            disabled={!hasHistory || busy}
+            disabled={!hasHistory || busy || overview.capabilities.remote === false}
             title={hasHistory ? undefined : t("sync.remote.needsHistory")}
             onClick={onConnect}
           >

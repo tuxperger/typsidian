@@ -16,6 +16,7 @@ use axum::Router;
 pub mod allowed;
 pub mod auth;
 pub mod config;
+pub mod demo;
 pub mod error;
 pub mod events;
 pub mod invoke;
@@ -41,6 +42,12 @@ pub struct AppState {
     /// Одновременных обменов с удалёнными на весь сервер (038): каждый занимает
     /// блокирующий поток, а пул потоков общий для всех аккаунтов.
     pub exchanges: tokio::sync::Semaphore,
+    /// Старты гостей по одному: проверка предела по адресу и запись гостя
+    /// (фича 039).
+    pub demo_starts: tokio::sync::Mutex<()>,
+    /// Секрет ключей адресов демо-сервера; читается из папки данных при
+    /// первом старте гостя.
+    pub demo_secret: std::sync::OnceLock<String>,
 }
 
 pub type Shared = Arc<AppState>;
@@ -60,6 +67,8 @@ impl AppState {
             oidc: oidc::OidcState::default(),
             sync: sync::SyncHomes::default(),
             exchanges: tokio::sync::Semaphore::new(MAX_EXCHANGES),
+            demo_starts: tokio::sync::Mutex::new(()),
+            demo_secret: std::sync::OnceLock::new(),
         })
     }
 }
@@ -80,34 +89,76 @@ pub fn private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// Самый большой файл, который можно вставить вложением.
 const MAX_BODY: usize = 256 * 1024 * 1024;
 
+async fn closed() -> error::ApiError {
+    error::ApiError::Forbidden
+}
+
+async fn absent() -> error::ApiError {
+    error::ApiError::NotFound
+}
+
 pub fn router(state: Shared) -> Router {
+    // На демо-сервере тело не больше квоты гостя: тело читается в память целиком
+    // до проверки квоты, а отправить его может любой (ревью безопасности 039).
+    let body_limit = if state.config.demo_mode {
+        (state.config.demo.quota_bytes() as usize)
+            .saturating_add(1024 * 1024)
+            .min(MAX_BODY)
+    } else {
+        MAX_BODY
+    };
     let protected = Router::new()
         .route("/api/me", get(auth::me))
         .route("/api/logout", post(auth::logout))
-        .route("/api/logout-all", post(auth::logout_all))
-        .route("/api/password", post(auth::change_password))
-        .route("/api/sessions", get(auth::sessions))
-        .route("/api/sessions/{id}", delete(auth::end_session))
-        .route("/api/vaults", get(vaults::list).post(vaults::create))
-        .route(
-            "/api/vaults/{name}",
-            get(vaults::summary)
-                .patch(vaults::rename)
-                .delete(vaults::delete),
-        )
         .route(
             "/api/vaults/{name}/invoke/{command}",
-            post(invoke::invoke).layer(DefaultBodyLimit::max(MAX_BODY)),
+            post(invoke::invoke).layer(DefaultBodyLimit::max(body_limit)),
         )
         .route("/api/vaults/{name}/events", get(invoke::events))
-        .route("/api/vaults/{name}/file/{*path}", get(invoke::file))
-        .route_layer(from_fn_with_state(state.clone(), auth::require_session));
+        .route("/api/vaults/{name}/file/{*path}", get(invoke::file));
+    // Демо-сервер (фича 039): только гости — ни профиля, ни операций над vault,
+    // ни входа паролем и через провайдера (research.md §3).
+    let protected = if state.config.demo_mode {
+        protected
+            .route("/api/demo/usage", get(demo::usage))
+            .route("/api/logout-all", post(closed))
+            .route("/api/password", post(closed))
+            .route("/api/sessions", get(closed))
+            .route("/api/sessions/{id}", delete(closed))
+            .route("/api/vaults", get(vaults::list).post(closed))
+            .route(
+                "/api/vaults/{name}",
+                get(vaults::summary).patch(closed).delete(closed),
+            )
+    } else {
+        protected
+            .route("/api/logout-all", post(auth::logout_all))
+            .route("/api/password", post(auth::change_password))
+            .route("/api/sessions", get(auth::sessions))
+            .route("/api/sessions/{id}", delete(auth::end_session))
+            .route("/api/vaults", get(vaults::list).post(vaults::create))
+            .route(
+                "/api/vaults/{name}",
+                get(vaults::summary)
+                    .patch(vaults::rename)
+                    .delete(vaults::delete),
+            )
+    }
+    .route_layer(from_fn_with_state(state.clone(), auth::require_session));
 
-    let public = Router::new()
-        .route("/api/info", get(auth::info))
-        .route("/api/login", post(auth::login))
-        .route("/api/oidc/start", get(oidc::start))
-        .route("/api/oidc/callback", get(oidc::callback));
+    let public = Router::new().route("/api/info", get(auth::info));
+    let public = if state.config.demo_mode {
+        public
+            .route("/api/demo/start", post(demo::start))
+            .route("/api/login", post(absent))
+            .route("/api/oidc/start", get(absent))
+            .route("/api/oidc/callback", get(absent))
+    } else {
+        public
+            .route("/api/login", post(auth::login))
+            .route("/api/oidc/start", get(oidc::start))
+            .route("/api/oidc/callback", get(oidc::callback))
+    };
 
     let mut app = Router::new().merge(public).merge(protected);
     app = match &state.config.static_dir {
@@ -155,6 +206,7 @@ pub fn spawn_housekeeping(state: Shared) {
         loop {
             tick.tick().await;
             state.vaults.sweep().await;
+            demo::sweep(&state).await;
             if let Err(error) = state
                 .store
                 .purge_sessions(state.config.session_idle_secs())

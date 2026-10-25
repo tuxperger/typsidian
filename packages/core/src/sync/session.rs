@@ -2099,6 +2099,9 @@ pub async fn clone_vault<E: GitEngine, S: SecretStore>(
 }
 
 fn parse_remote(url: &str, ctx: &SyncContext) -> Result<remote_url::RemoteUrl, SyncError> {
+    if !ctx.capabilities.remote {
+        return Err(SyncError::RemoteUnavailable);
+    }
     let parsed = remote_url::normalize(url).map_err(|problem| match problem {
         remote_url::UrlProblem::Unsupported(scheme) => SyncError::UnsupportedScheme { scheme },
         _ => SyncError::InvalidRemoteUrl,
