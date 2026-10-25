@@ -44,6 +44,10 @@ pub struct Config {
     /// Разрешить свои адреса шаблонов из настроек vault (запросы сервера по адресам
     /// пользователей). По умолчанию — только реестр Typst.
     pub template_sources: bool,
+    /// Разрешить удалённые репозитории синхронизации по внутренним адресам
+    /// (loopback, частные сети, `localhost`) — фича 038. По умолчанию нет: иначе
+    /// пользователь направлял бы запросы сервера в его же сеть.
+    pub sync_private_remotes: bool,
     pub oidc: Option<OidcConfig>,
 }
 
@@ -58,6 +62,7 @@ impl Default for Config {
             name: "Typsidian".to_owned(),
             trust_proxy: false,
             template_sources: false,
+            sync_private_remotes: false,
             oidc: None,
         }
     }
@@ -109,6 +114,11 @@ impl Config {
 
     pub fn trash_dir(&self) -> PathBuf {
         self.data.join("trash")
+    }
+
+    /// Синхронизация аккаунтов: настройки устройства, секреты, зеркала (038).
+    pub fn sync_dir(&self) -> PathBuf {
+        self.data.join("sync")
     }
 
     /// `Secure`-cookie без HTTPS работает только на loopback (research.md §3): без

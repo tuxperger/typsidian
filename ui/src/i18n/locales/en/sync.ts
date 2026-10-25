@@ -53,6 +53,8 @@ export const sync = {
     "The browser blocked the request: this server does not allow requests from web pages.",
   "sync.error.unsupportedScheme": (p: { scheme: string }) =>
     `Addresses of the “${p.scheme}” kind are not available in this app build.`,
+  "sync.error.internalRemote":
+    "The address leads into the server’s internal network — the server does not use such repositories unless the administrator allows them.",
   "sync.error.invalidRemoteUrl": "This does not look like a repository address.",
   "sync.error.remoteChanged": (p: { url: string }) =>
     `The remote address  has not been confirmed on this device: it came with the vault settings. Check it and connect — until then nothing is sent there.`,
@@ -61,6 +63,7 @@ export const sync = {
     `History is kept by the device “${p.device}”. Snapshots from here need a confirmation.`,
   "sync.error.keeperDisputed":
     "Two devices claim to be the history keeper. Choose the keeper before taking snapshots.",
+  "sync.error.exchangeRunning": "An exchange with the remote repository is already running — wait for it to finish.",
   "sync.error.inProgressOperation":
     "An operation started outside the app (merge, rebase…) is unfinished in the history. Finish or abort it with git first.",
   "sync.error.pullConflictsPending":
@@ -252,10 +255,13 @@ export const sync = {
   "sync.remote.url": "Repository address",
   "sync.remote.urlHintSsh": "https://… with a token, or an ssh address — the keys of your system are used.",
   "sync.remote.urlHintNoSsh": "https://… with a token. Access by ssh keys is not available in this app build.",
+  "sync.remote.urlHintServer":
+    "https://… with a token. Only external HTTPS addresses work on the server: ssh, folders and addresses of the server’s internal network are not used.",
   "sync.remote.user": "User name",
   "sync.remote.userHint": "Usually not needed: for well-known hosts the app substitutes it itself.",
   "sync.remote.token": "Access token",
   "sync.remote.tokenHintSecure": "Stored in the system’s secret storage, never in the vault.",
+  "sync.remote.tokenHintServer": "Stored on the server for your account, never in the vault or the browser.",
   "sync.remote.tokenHintBrowser":
     "Stored in this browser’s storage, never in the vault. The browser has no protected storage: anyone with access to this profile can read the token.",
   "sync.remote.proxy": "Intermediary address",
@@ -294,6 +300,8 @@ export const sync = {
   "sync.syncthing.link.unauthorized": "Syncthing rejected the API key.",
   "sync.syncthing.link.unavailableInShell":
     "Syncthing’s state cannot be read in this app build: its interface does not answer requests from web pages.",
+  "sync.syncthing.link.unavailableOnServer":
+    "The vault is on a server: Syncthing is not supported here. History and the remote repository work.",
   "sync.syncthing.link.folderNotShared": "Syncthing answers, but it does not know this folder.",
   "sync.syncthing.link.certificateChanged":
     "The certificate at this address is not the one seen at the first connection. The API key is not sent there. If you reinstalled Syncthing, stop reading the state and connect again.",

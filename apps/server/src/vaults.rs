@@ -62,7 +62,8 @@ pub async fn open_vault(state: &Shared, account_id: &str, name: &str) -> ApiResu
         .join("notes")
         .join(account_id)
         .join(name);
-    state.vaults.get(account_id, name, &dir, trash).await
+    let home = state.sync.home(state, account_id).await?;
+    state.vaults.get(account_id, name, &dir, trash, home).await
 }
 
 // ── Открытые vault ──────────────────────────────────────────────────────────
@@ -104,13 +105,15 @@ const IDLE_CLOSE: Duration = Duration::from_secs(10 * 60);
 const MAX_OPEN: usize = 256;
 
 impl OpenVaults {
-    /// Открытый vault; `trash` — куда класть удалённые заметки.
+    /// Открытый vault; `trash` — куда класть удалённые заметки, `sync` —
+    /// окружение синхронизации аккаунта (фича 038).
     pub async fn get(
         &self,
         account_id: &str,
         name: &str,
         dir: &Path,
         trash: PathBuf,
+        sync: Arc<typsidian_host::SyncHome>,
     ) -> ApiResult<Arc<OpenVault>> {
         let key = (account_id.to_owned(), name.to_owned());
         let cell = {
@@ -130,7 +133,10 @@ impl OpenVaults {
                     .map_err(|error| anyhow::anyhow!("открытие vault: {error:?}"))?;
                 backend.set_trash_dir(trash);
                 let ready = backend.events_ready();
-                let host = Host::default();
+                let host = Host {
+                    sync_home: sync,
+                    ..Host::default()
+                };
                 *host.vault.0.lock().await = Some(backend);
                 let (events, _) = broadcast::channel(256);
                 let (alive, closed) = watch::channel(());
@@ -150,8 +156,28 @@ impl OpenVaults {
 
     /// Закрывает vault (перед переименованием и удалением папки).
     pub async fn close(&self, account_id: &str, name: &str) {
+        self.take(account_id, name).await;
+    }
+
+    /// Закрывает vault и отдаёт его, если он был открыт: запросы, которые уже
+    /// держат его, ещё могут идти.
+    async fn take(&self, account_id: &str, name: &str) -> Option<Arc<OpenVault>> {
         let key = (account_id.to_owned(), name.to_owned());
-        self.0.lock().await.remove(&key);
+        let cell = self.0.lock().await.remove(&key)?;
+        cell.get().cloned()
+    }
+
+    /// Закрывает vault и его сессию синхронизации. Сессию забирают под её
+    /// замком: команда, которая уже идёт (подключение удалённого с записью
+    /// токена), доработает до конца, а следующая увидит «нет сессии» и ничего
+    /// под id удалённого vault не запишет (038, ревью безопасности).
+    pub async fn close_with_sync(&self, account_id: &str, name: &str) {
+        if let Some(open) = self.take(account_id, name).await {
+            // Идущий обмен отменяется, а не дожидается своего предела.
+            typsidian_host::commands::sync_cancel(&open.host.sync_cancel);
+            let _exchange = open.host.sync_state.1.enter_wait().await;
+            *open.host.sync_state.0.lock().await = None;
+        }
     }
 
     /// Закрывает все vault аккаунта.
@@ -351,6 +377,9 @@ pub async fn create(
         },
         _ => error.into(),
     })?;
+    // Строка id прежнего vault с этим именем (удалённого мимо сервера) не должна
+    // отдать новому его токен и зеркало (038, ревью безопасности).
+    forget_sync(&state, &authed.account.id, &request.name).await?;
     tracing::info!(login = %authed.account.login, "vault создан");
     Ok(Json(view(request.name, &dir)))
 }
@@ -373,8 +402,27 @@ pub async fn rename(
         _ => error.into(),
     })?;
     state.vaults.close(&authed.account.id, &name).await;
+    // Id синхронизации идёт за vault: его секреты и зеркало остаются при нём.
+    // Переносится до папки — иначе сбой базы оторвал бы id от уже
+    // переименованного vault.
+    let moved = async {
+        forget_sync(&state, &authed.account.id, &request.name).await?;
+        state
+            .store
+            .rename_vault_sync_id(&authed.account.id, &name, &request.name)
+            .await
+    }
+    .await;
+    if let Err(error) = moved {
+        let _ = std::fs::remove_dir(&to);
+        return Err(error.into());
+    }
     if let Err(error) = std::fs::rename(&from, &to) {
         let _ = std::fs::remove_dir(&to);
+        let _ = state
+            .store
+            .rename_vault_sync_id(&authed.account.id, &request.name, &name)
+            .await;
         return Err(error.into());
     }
     tracing::info!(login = %authed.account.login, "vault переименован");
@@ -417,7 +465,10 @@ pub async fn delete(
     UrlPath(name): UrlPath<String>,
 ) -> ApiResult<Json<()>> {
     let from = vault_dir(&state, &authed.account.id, &name)?;
-    state.vaults.close(&authed.account.id, &name).await;
+    state
+        .vaults
+        .close_with_sync(&authed.account.id, &name)
+        .await;
     let trash = state.config.trash_dir();
     crate::private_dir(&trash)?;
     // Случайный хвост: два удаления за секунду не встретятся в одном имени.
@@ -429,8 +480,19 @@ pub async fn delete(
         &crate::store::random_token()[..8]
     ));
     std::fs::rename(&from, &target)?;
+    // Секреты синхронизации vault в корзину не идут (038 FR-002): удаляются
+    // сразу вместе с зеркалом и id.
+    forget_sync(&state, &authed.account.id, &name).await?;
     tracing::info!(login = %authed.account.login, "vault удалён в корзину");
     Ok(Json(()))
+}
+
+/// Забывает id синхронизации vault с этим именем, его секреты и зеркало.
+async fn forget_sync(state: &Shared, account_id: &str, name: &str) -> anyhow::Result<()> {
+    if let Some(sync_id) = state.store.forget_vault_sync_id(account_id, name).await? {
+        state.sync.forget_vault(state, account_id, &sync_id).await;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

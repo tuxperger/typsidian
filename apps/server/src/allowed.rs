@@ -183,8 +183,48 @@ pub const ALLOWED: &[&str] = &[
     "render_element",
     "plan_element_edit",
     "template_event",
+    // Синхронизация (фича 038): история и удалённый репозиторий по HTTPS. Без
+    // Syncthing и клонирования в папку устройства — их и нет в `typsidian-host`.
+    "sync_capabilities",
+    "sync_overview",
+    "sync_poll_events",
+    "sync_progress",
+    "sync_note_change",
+    "sync_cancel",
+    "sync_ignore_reports",
+    "sync_apply_ignore",
+    "sync_decline_stignore",
+    "sync_ignore_open",
+    "sync_ignore_check",
+    "sync_ignore_restore",
+    "sync_ignore_save",
+    "sync_enable_history",
+    "sync_changes",
+    "sync_snapshot",
+    "sync_history",
+    "sync_diff",
+    "sync_snapshot_changes",
+    "sync_file_at",
+    "sync_restore",
+    "sync_connect_remote",
+    "sync_disconnect_remote",
+    "sync_push",
+    "sync_pull",
+    "sync_restore_history",
+    "sync_abort_pull",
+    "sync_conflicts",
+    "sync_resolve",
+    "sync_set_keeper",
+    "sync_clear_keeper",
+    "sync_update_settings",
+    "sync_refresh_mirror",
+    "sync_tick",
+    "sync_device_values",
+    "sync_set_author",
     // Разбираются отдельно (`invoke.rs`): тело — байты; ход — событием SSE.
     "attachments_batch_store",
+    // Id vault назначает сервер (`invoke.rs`), а не клиент.
+    "sync_open",
     "vault_reindex_properties",
 ];
 
@@ -202,7 +242,12 @@ mod tests {
         for name in ALLOWED {
             assert!(
                 COMMANDS.contains(name)
-                    || ["attachments_batch_store", "vault_reindex_properties"].contains(name),
+                    || [
+                        "attachments_batch_store",
+                        "vault_reindex_properties",
+                        "sync_open"
+                    ]
+                    .contains(name),
                 "{name}"
             );
         }
@@ -217,7 +262,10 @@ mod tests {
             "import_open_source",
             "import_survey",
             "device_settings",
-            "sync_open",
+            "apply_device_settings",
+            "sync_syncthing_connect",
+            "sync_syncthing_discover",
+            "sync_clone_vault",
         ] {
             assert!(!allowed(name), "{name}");
         }

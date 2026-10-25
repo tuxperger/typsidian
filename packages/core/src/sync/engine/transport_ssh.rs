@@ -210,6 +210,13 @@ impl SmartSubtransport for SshSubtransport {
         url: &str,
         action: Service,
     ) -> Result<Box<dyn SmartSubtransportStream>, git2::Error> {
+        // На сервере ssh шёл бы ключами и агентом администратора (фича 038).
+        if super::server_policy::on_server() {
+            record_failure(EngineError::UnsupportedScheme {
+                scheme: "ssh".to_string(),
+            });
+            return Err(git2::Error::from_str("ssh на сервере недоступен"));
+        }
         let target = parse_target(url).ok_or_else(|| {
             record_failure(EngineError::Io {
                 message: "адрес ssh не разобран".to_string(),

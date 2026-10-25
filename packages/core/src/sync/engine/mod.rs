@@ -26,6 +26,8 @@ pub mod fake;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod server_policy;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod transport_http;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod transport_ssh;

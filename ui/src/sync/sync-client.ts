@@ -171,6 +171,8 @@ export interface RemoteCapabilities {
   ssh: boolean;
   directRemote: boolean;
   secureSecrets: boolean;
+  /** Ядро работает на сервере (фича 038). */
+  server: boolean;
 }
 
 /** Та же выборка из `ShellCapabilities` ядра. */
@@ -179,6 +181,7 @@ export function remoteCapabilities(capabilities: ShellCapabilities): RemoteCapab
     ssh: capabilities.ssh,
     directRemote: capabilities.direct_remote,
     secureSecrets: capabilities.secure_secrets,
+    server: capabilities.server ?? false,
   };
 }
 
@@ -204,6 +207,7 @@ const SYNC_ERROR_KINDS: ReadonlySet<string> = new Set<SyncError["kind"]>([
   "KeeperElsewhere",
   "KeeperDisputed",
   "InProgressOperation",
+  "ExchangeRunning",
   "PullConflictsPending",
   "NoHistory",
   "HistoryExists",

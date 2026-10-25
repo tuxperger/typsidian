@@ -1837,3 +1837,459 @@ pub fn plan_element_edit(
 pub fn template_event(event: VaultEvent) -> Option<templates::TemplateEvent> {
     templates::library_event(&event)
 }
+
+// ── Синхронизация (фича 011; общая с сервером с фичи 038) ───────────────────
+//
+// Открытие сессии (`sync_open`), Syncthing и клонирование в папку устройства —
+// в оболочке (`packages/shell/src/sync.rs`): серверу они не нужны.
+
+/// Ход идущей массовой операции — без блокировки сессии (011 T075, принцип X).
+pub fn sync_progress(progress: &SyncProgressSlot) -> Option<typsidian_core::sync::SyncProgress> {
+    progress.0.lock().ok().and_then(|slot| {
+        slot.as_ref()
+            .and_then(typsidian_core::sync::ProgressSink::current)
+    })
+}
+
+pub fn sync_capabilities(home: &SyncHome) -> ShellCapabilities {
+    home.capabilities()
+}
+
+pub async fn sync_overview(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<SyncOverview> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .overview(backend, &ctx)
+        .await))
+}
+
+pub async fn sync_poll_events(sync_state: &SyncState) -> SyncAnswer<Vec<SyncEvent>> {
+    let mut guard = sync_state.0.lock().await;
+    Ok(guard
+        .as_mut()
+        .map(|open| open.session.poll_events())
+        .unwrap_or_default())
+}
+
+pub async fn sync_note_change(sync_state: &SyncState) -> SyncAnswer<()> {
+    if let Some(open) = sync_state.0.lock().await.as_mut() {
+        open.session.note_change(sync::now());
+    }
+    Ok(())
+}
+
+/// Отмена текущей сетевой или массовой операции (принцип X). Не ждёт
+/// блокировки сессии: токен общий у сессии и движка.
+pub fn sync_cancel(cancel: &SyncCancel) {
+    if let Ok(slot) = cancel.0.lock() {
+        if let Some(token) = slot.as_ref() {
+            token.cancel();
+        }
+    }
+}
+
+pub async fn sync_ignore_reports(
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<Vec<IgnoreReport>> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .ignore_reports(backend)
+        .await))
+}
+
+pub async fn sync_apply_ignore(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    file: IgnoreFile,
+) -> SyncAnswer<()> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| {
+        session.apply_ignore(backend, &ctx, file).await?;
+        Ok(())
+    })
+}
+
+pub async fn sync_decline_stignore(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<()> {
+    with_sync!(home, vault, sync_state, |_backend, session, ctx| {
+        session.decline_stignore(&ctx);
+        Ok(())
+    })
+}
+
+// Редактор правил исключения (фича 012).
+
+pub async fn sync_ignore_open(
+    vault: &Vault,
+    sync_state: &SyncState,
+    file: IgnoreFile,
+) -> SyncAnswer<IgnoreDocument> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .ignore_open(backend, file)
+        .await))
+}
+
+/// Чистая проверка текста: ни vault, ни сессия не нужны, поэтому набор в
+/// редакторе не ждёт идущего обмена.
+pub fn sync_ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
+    sync_ignore::check(file, &text)
+}
+
+pub fn sync_ignore_restore(file: IgnoreFile, text: String) -> String {
+    sync_ignore::restore_block(file, &text)
+}
+
+pub async fn sync_ignore_save(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    request: IgnoreSaveRequest,
+) -> SyncAnswer<IgnoreSaveOutcome> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .ignore_save(backend, &ctx, request)
+        .await?))
+}
+
+pub async fn sync_enable_history(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    message: String,
+) -> SyncAnswer<Snapshot> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .enable_history(backend, &ctx, &message)
+        .await?))
+}
+
+pub async fn sync_changes(vault: &Vault, sync_state: &SyncState) -> SyncAnswer<Vec<Change>> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .changes(backend)
+        .await?))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_snapshot(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    paths: Option<Vec<String>>,
+    message: String,
+    auto_prefix: String,
+    flushed: bool,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<Snapshot> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .snapshot(
+            backend,
+            &ctx,
+            paths,
+            &message,
+            &auto_prefix,
+            flushed,
+            confirm_not_keeper
+        )
+        .await?))
+}
+
+pub async fn sync_history(
+    vault: &Vault,
+    sync_state: &SyncState,
+    path: Option<String>,
+    cursor: Option<String>,
+    limit: u32,
+) -> SyncAnswer<HistoryPage> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .history(backend, path.as_deref(), cursor.as_deref(), limit)
+        .await?))
+}
+
+pub async fn sync_diff(
+    vault: &Vault,
+    sync_state: &SyncState,
+    path: String,
+    from: Revision,
+    to: Revision,
+) -> SyncAnswer<FileDiff> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .diff(backend, &path, &from, &to)
+        .await?))
+}
+
+pub async fn sync_snapshot_changes(
+    vault: &Vault,
+    sync_state: &SyncState,
+    snapshot: String,
+) -> SyncAnswer<Vec<Change>> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .snapshot_changes(backend, &snapshot)
+        .await?))
+}
+
+pub async fn sync_file_at(
+    vault: &Vault,
+    sync_state: &SyncState,
+    path: String,
+    revision: Revision,
+) -> SyncAnswer<Content> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .file_at(backend, &path, &revision)
+        .await?))
+}
+
+pub async fn sync_restore(
+    vault: &Vault,
+    sync_state: &SyncState,
+    path: String,
+    snapshot: String,
+) -> SyncAnswer<Content> {
+    sync_locked!(vault, sync_state, |backend, session| Ok(session
+        .restore(backend, &path, &snapshot)
+        .await?))
+}
+
+pub async fn sync_connect_remote(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    url: String,
+    credentials: Credentials,
+) -> SyncAnswer<RemoteStatus> {
+    let _exchange = sync_state.1.enter()?;
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .connect_remote(backend, home.secrets(), &ctx, &url, credentials)
+        .await?))
+}
+
+pub async fn sync_disconnect_remote(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<()> {
+    sync_locked!(vault, sync_state, |backend, session| Ok(session
+        .disconnect_remote(backend, home.secrets())
+        .await?))
+}
+
+pub async fn sync_push(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<RemoteStatus> {
+    let _exchange = sync_state.1.enter()?;
+    let ctx = sync::sync_context(home, sync_state).await?;
+    let (plan, engine) = sync_locked!(vault, sync_state, |backend, session| (
+        session
+            .begin_push(backend, home.secrets(), &ctx, confirm_not_keeper)
+            .await?,
+        session.engine().clone()
+    ));
+    let sent = plan.push(&engine).await;
+    let result = sync_locked!(vault, sync_state, |backend, session| session
+        .complete_push(backend, &ctx, &plan, sent)
+        .await);
+    sync::persist_device_update(home, sync_state).await;
+    Ok(result?)
+}
+
+pub async fn sync_pull(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<PullOutcome> {
+    let _exchange = sync_state.1.enter()?;
+    let ctx = sync::sync_context(home, sync_state).await?;
+    let (plan, engine) = sync_locked!(vault, sync_state, |backend, session| (
+        session
+            .begin_pull(backend, home.secrets(), &ctx, confirm_not_keeper)
+            .await?,
+        session.engine().clone()
+    ));
+    let fetched = plan.exchange.fetch(&engine).await;
+    let result = sync_locked!(vault, sync_state, |backend, session| session
+        .complete_pull(backend, &ctx, plan, fetched)
+        .await);
+    sync::persist_device_update(home, sync_state).await;
+    Ok(result?)
+}
+
+pub async fn sync_restore_history(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<PullOutcome> {
+    let _exchange = sync_state.1.enter()?;
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .restore_history(backend, home.secrets(), &ctx, confirm_not_keeper)
+        .await?))
+}
+
+pub async fn sync_abort_pull(vault: &Vault, sync_state: &SyncState) -> SyncAnswer<()> {
+    sync_locked!(vault, sync_state, |backend, session| Ok(session
+        .abort_pull(backend)
+        .await?))
+}
+
+pub async fn sync_conflicts(vault: &Vault, sync_state: &SyncState) -> SyncAnswer<Vec<Conflict>> {
+    sync_read!(vault, sync_state, |backend, session| Ok(session
+        .conflicts(backend)
+        .await))
+}
+
+pub async fn sync_resolve(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    id: String,
+    resolution: Resolution,
+) -> SyncAnswer<()> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .resolve(backend, &ctx, &id, resolution)
+        .await?))
+}
+
+pub async fn sync_set_keeper(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<Keeper> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .set_keeper(backend, &ctx)
+        .await?))
+}
+
+pub async fn sync_clear_keeper(vault: &Vault, sync_state: &SyncState) -> SyncAnswer<()> {
+    sync_locked!(vault, sync_state, |backend, session| Ok(session
+        .clear_keeper(backend)
+        .await?))
+}
+
+pub async fn sync_update_settings(
+    vault: &Vault,
+    sync_state: &SyncState,
+    patch: VaultSyncSettingsPatch,
+) -> SyncAnswer<VaultSyncSettings> {
+    sync_locked!(vault, sync_state, |backend, session| Ok(session
+        .update_settings(backend, &patch)
+        .await?))
+}
+
+pub async fn sync_refresh_mirror(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+) -> SyncAnswer<()> {
+    let _exchange = sync_state.1.enter()?;
+    let ctx = sync::sync_context(home, sync_state).await?;
+    let (plan, mirror) = sync_locked!(vault, sync_state, |backend, session| (
+        session.begin_mirror(backend, home.secrets(), &ctx).await?,
+        session.mirror_engine().cloned()
+    ));
+    let fetched = match &mirror {
+        Some(mirror) => plan.mirror(mirror).await,
+        None => Err(SyncError::NoHistory),
+    };
+    let result = sync_locked!(vault, sync_state, |_backend, session| session
+        .complete_mirror(&ctx, fetched));
+    sync::persist_device_update(home, sync_state).await;
+    Ok(result?)
+}
+
+/// Такт автоматики (011 FR-019, FR-031): спрашивает ядро, пора ли снимать и
+/// обмениваться. Таймер — у окна; состояние Syncthing держит наблюдатель
+/// оболочки, такт его не опрашивает.
+pub async fn sync_tick(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    auto_prefix: String,
+) -> SyncAnswer<TickOutcome> {
+    // Идёт обмен по команде — такт ждёт следующего раза.
+    let Ok(_exchange) = sync_state.1.enter() else {
+        return Ok(TickOutcome::idle(sync::now()));
+    };
+    let ctx = sync::sync_context(home, sync_state).await?;
+    let secrets = home.secrets();
+    // Такт по шагам (011 T071): сеть автополучения и автоотправки — без блокировок.
+    let mut outcome = TickOutcome::idle(ctx.now);
+    let pull = sync_locked!(vault, sync_state, |backend, session| {
+        if session.tick_pull_due(backend, &ctx).await {
+            match session.begin_pull(backend, secrets, &ctx, false).await {
+                Ok(plan) => Some((plan, session.engine().clone())),
+                Err(error) => {
+                    session.tick_pulled(&mut outcome, Err(error));
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    });
+    let fetched = match &pull {
+        Some((plan, engine)) => Some(plan.exchange.fetch(engine).await),
+        None => None,
+    };
+    let push = sync_locked!(vault, sync_state, |backend, session| {
+        if let (Some((plan, _)), Some(fetched)) = (pull, fetched) {
+            let result = session.complete_pull(backend, &ctx, plan, fetched).await;
+            session.tick_pulled(&mut outcome, result);
+        }
+        if session
+            .tick_local(backend, &ctx, &auto_prefix, &mut outcome)
+            .await
+        {
+            match session.begin_push(backend, secrets, &ctx, false).await {
+                Ok(plan) => Some((plan, session.engine().clone())),
+                Err(error) => {
+                    session.tick_pushed(&mut outcome, Err(error));
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    });
+    let sent = match &push {
+        Some((plan, engine)) => Some(plan.push(engine).await),
+        None => None,
+    };
+    sync_locked!(vault, sync_state, |backend, session| {
+        if let (Some((plan, _)), Some(sent)) = (push, sent) {
+            let result = session.complete_push(backend, &ctx, &plan, sent).await;
+            session.tick_pushed(&mut outcome, result);
+        }
+        session.tick_finish(backend, &ctx, &mut outcome).await;
+    });
+    sync::persist_device_update(home, sync_state).await;
+    Ok(outcome)
+}
+
+/// Значения устройства открытого vault: автор снимков (038 research §5).
+pub async fn sync_device_values(
+    home: &SyncHome,
+    sync_state: &SyncState,
+) -> SyncAnswer<DeviceVaultSync> {
+    sync::device_values(home, sync_state).await
+}
+
+/// Автор снимков этого vault на этом устройстве; `None` — сбросить.
+pub async fn sync_set_author(
+    home: &SyncHome,
+    sync_state: &SyncState,
+    author: Option<Author>,
+) -> SyncAnswer<()> {
+    if author.as_ref().is_some_and(|author| !author.is_valid()) {
+        return Err(SyncError::Io {
+            message: "автор без имени или почты".to_string(),
+        }
+        .into());
+    }
+    sync::change_device_values(home, sync_state, |values| values.author = author).await
+}

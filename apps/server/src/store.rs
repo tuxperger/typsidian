@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_account ON sessions(account_id);
+CREATE TABLE IF NOT EXISTS vault_sync_ids (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    id TEXT NOT NULL UNIQUE,
+    PRIMARY KEY (account_id, name)
+);
 "#;
 
 #[derive(Debug, Clone, Serialize)]
@@ -404,11 +410,100 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    // ── Id синхронизации vault (фича 038, research.md §4) ─────────────────
+    //
+    // Ключ секретов и зеркала vault. Его назначает сервер, а не клиент, и
+    // переименование vault его сохраняет.
+
+    /// Id синхронизации vault; первое обращение его создаёт.
+    pub async fn vault_sync_id(&self, account_id: &str, name: &str) -> anyhow::Result<String> {
+        sqlx::query("INSERT OR IGNORE INTO vault_sync_ids (account_id, name, id) VALUES (?, ?, ?)")
+            .bind(account_id)
+            .bind(name)
+            .bind(&random_token()[..32])
+            .execute(&self.pool)
+            .await?;
+        Ok(
+            sqlx::query("SELECT id FROM vault_sync_ids WHERE account_id = ? AND name = ?")
+                .bind(account_id)
+                .bind(name)
+                .fetch_one(&self.pool)
+                .await?
+                .get("id"),
+        )
+    }
+
+    /// Переносит id синхронизации на новое имя vault.
+    pub async fn rename_vault_sync_id(
+        &self,
+        account_id: &str,
+        from: &str,
+        to: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query("UPDATE vault_sync_ids SET name = ? WHERE account_id = ? AND name = ?")
+            .bind(to)
+            .bind(account_id)
+            .bind(from)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Забывает id синхронизации удалённого vault; возвращает его, если был.
+    pub async fn forget_vault_sync_id(
+        &self,
+        account_id: &str,
+        name: &str,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(
+            sqlx::query(
+                "DELETE FROM vault_sync_ids WHERE account_id = ? AND name = ? RETURNING id",
+            )
+            .bind(account_id)
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|row| row.get("id")),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn vault_sync_ids_are_stable_and_per_account() {
+        let store = Store::memory().await.unwrap();
+        let anna = store.add_account("anna", "Анна", None).await.unwrap();
+        let boris = store.add_account("boris", "Борис", None).await.unwrap();
+        let first = store.vault_sync_id(&anna.id, "Заметки").await.unwrap();
+        assert_eq!(first.len(), 32);
+        assert_eq!(
+            store.vault_sync_id(&anna.id, "Заметки").await.unwrap(),
+            first
+        );
+        assert_ne!(
+            store.vault_sync_id(&boris.id, "Заметки").await.unwrap(),
+            first
+        );
+        store
+            .rename_vault_sync_id(&anna.id, "Заметки", "Архив")
+            .await
+            .unwrap();
+        assert_eq!(store.vault_sync_id(&anna.id, "Архив").await.unwrap(), first);
+        assert_eq!(
+            store.forget_vault_sync_id(&anna.id, "Архив").await.unwrap(),
+            Some(first.clone())
+        );
+        assert_ne!(store.vault_sync_id(&anna.id, "Архив").await.unwrap(), first);
+        store.delete_account(&anna.id).await.unwrap();
+        assert_eq!(
+            store.forget_vault_sync_id(&anna.id, "Архив").await.unwrap(),
+            None
+        );
+    }
 
     #[tokio::test]
     async fn accounts_and_sessions() {

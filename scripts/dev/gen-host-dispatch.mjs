@@ -29,6 +29,10 @@ const STATES = new Map(
     "HighlightSessions",
     "PropertiesReindex",
     "ImportSource",
+    "SyncHome",
+    "SyncState",
+    "SyncCancel",
+    "SyncProgressSlot",
   ].map((s) => [s, s.replace(/[A-Z]/g, (c, k) => (k ? "_" : "") + c.toLowerCase())]),
 );
 

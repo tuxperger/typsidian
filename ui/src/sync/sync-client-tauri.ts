@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "../tauri-invoke.js";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+import { invoke as tauriInvoke } from "../tauri-invoke.js";
 import type {
   Change,
   Conflict,
@@ -24,6 +24,7 @@ import type {
   VaultSyncSettings,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultOpenResult } from "../vault-tree/useVault.js";
+import type { ShellTransport } from "../vault-client-tauri.js";
 import { changeOf } from "../settings/useSettings.js";
 import {
   CloneFailure,
@@ -40,18 +41,32 @@ import {
 //
 // Значения устройства (автор, посредник) лежат в настройках устройства (004),
 // поэтому читаются и пишутся теми же командами, что и панель настроек.
+//
+// С фичи 038 тот же клиент работает поверх HTTP с сервером (`openServerSync`):
+// команды те же, но настроек устройства сервер не отдаёт — значения синхронизации
+// vault идут командами `sync_device_values` и `sync_set_author`.
+
+const tauriTransport: ShellTransport = { invoke: tauriInvoke, listen: tauriListen };
 
 /**
  * Открывает сессию синхронизации для только что открытого vault и отдаёт её
  * клиента. `vaultId` — идентификатор записи в хранилище устройства.
  */
 export async function openTauriSync(vaultId: string): Promise<SyncClient> {
-  await invoke<void>("sync_open", { vaultId });
-  return tauriSyncClient(vaultId);
+  await tauriInvoke<void>("sync_open", { vaultId });
+  return tauriSyncClient(vaultId, tauriTransport, false);
 }
 
-function tauriSyncClient(vaultId: string): SyncClient {
+/** Сессия синхронизации vault на сервере: id vault назначает сервер. */
+export async function openServerSync(transport: ShellTransport): Promise<SyncClient> {
+  await transport.invoke<void>("sync_open", { vaultId: "" });
+  return tauriSyncClient("", transport, true);
+}
+
+function tauriSyncClient(vaultId: string, transport: ShellTransport, server: boolean): SyncClient {
+  const { invoke, listen } = transport;
   const deviceSync = async (): Promise<DeviceVaultSync> => {
+    if (server) return invoke<DeviceVaultSync>("sync_device_values");
     const snapshot = await invoke<{ settings: Settings }>("device_settings");
     const entry = (snapshot.settings.vault_sync ?? []).find((item) => item.vault === vaultId);
     return entry?.value ?? {};
@@ -139,9 +154,14 @@ function tauriSyncClient(vaultId: string): SyncClient {
 
     deviceSync,
     setAuthor: (author) =>
-      writeDeviceSync((current) => ({ ...current, author: author ?? undefined })),
+      server
+        ? invoke<void>("sync_set_author", { author })
+        : writeDeviceSync((current) => ({ ...current, author: author ?? undefined })),
+    // Сервер обменивается с удалённым напрямую: посредник ему не нужен.
     setCorsProxy: (url) =>
-      writeDeviceSync((current) => ({ ...current, cors_proxy: url ?? undefined })),
+      server
+        ? Promise.resolve()
+        : writeDeviceSync((current) => ({ ...current, cors_proxy: url ?? undefined })),
   };
 }
 
@@ -157,6 +177,7 @@ export function tauriVaultCloner(
   pickFolder: () => Promise<string | null>,
   open: (path: string) => Promise<VaultOpenResult>,
 ): VaultCloner {
+  const { invoke } = tauriTransport;
   return {
     capabilities: async () =>
       remoteCapabilities(await invoke<ShellCapabilities>("sync_capabilities")),

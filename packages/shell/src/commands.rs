@@ -1410,3 +1410,329 @@ pub fn plan_element_edit(
 pub fn template_event(event: VaultEvent) -> Option<templates::TemplateEvent> {
     typsidian_host::commands::template_event(event)
 }
+
+#[tauri::command]
+pub fn sync_progress(
+    progress: State<'_, SyncProgressSlot>,
+) -> Option<typsidian_core::sync::SyncProgress> {
+    typsidian_host::commands::sync_progress(&progress)
+}
+
+#[tauri::command]
+pub fn sync_capabilities(home: State<'_, SyncHome>) -> ShellCapabilities {
+    typsidian_host::commands::sync_capabilities(&home)
+}
+
+#[tauri::command]
+pub async fn sync_overview(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<SyncOverview> {
+    typsidian_host::commands::sync_overview(&home, &vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_poll_events(sync_state: State<'_, SyncState>) -> SyncAnswer<Vec<SyncEvent>> {
+    typsidian_host::commands::sync_poll_events(&sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_note_change(sync_state: State<'_, SyncState>) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_note_change(&sync_state).await
+}
+
+#[tauri::command]
+pub fn sync_cancel(cancel: State<'_, SyncCancel>) {
+    typsidian_host::commands::sync_cancel(&cancel)
+}
+
+#[tauri::command]
+pub async fn sync_ignore_reports(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<Vec<IgnoreReport>> {
+    typsidian_host::commands::sync_ignore_reports(&vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_apply_ignore(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    file: IgnoreFile,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_apply_ignore(&home, &vault, &sync_state, file).await
+}
+
+#[tauri::command]
+pub async fn sync_decline_stignore(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_decline_stignore(&home, &vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_ignore_open(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    file: IgnoreFile,
+) -> SyncAnswer<IgnoreDocument> {
+    typsidian_host::commands::sync_ignore_open(&vault, &sync_state, file).await
+}
+
+#[tauri::command]
+pub fn sync_ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
+    typsidian_host::commands::sync_ignore_check(file, text)
+}
+
+#[tauri::command]
+pub fn sync_ignore_restore(file: IgnoreFile, text: String) -> String {
+    typsidian_host::commands::sync_ignore_restore(file, text)
+}
+
+#[tauri::command]
+pub async fn sync_ignore_save(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    request: IgnoreSaveRequest,
+) -> SyncAnswer<IgnoreSaveOutcome> {
+    typsidian_host::commands::sync_ignore_save(&home, &vault, &sync_state, request).await
+}
+
+#[tauri::command]
+pub async fn sync_enable_history(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    message: String,
+) -> SyncAnswer<Snapshot> {
+    typsidian_host::commands::sync_enable_history(&home, &vault, &sync_state, message).await
+}
+
+#[tauri::command]
+pub async fn sync_changes(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<Vec<Change>> {
+    typsidian_host::commands::sync_changes(&vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_snapshot(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    paths: Option<Vec<String>>,
+    message: String,
+    auto_prefix: String,
+    flushed: bool,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<Snapshot> {
+    typsidian_host::commands::sync_snapshot(
+        &home,
+        &vault,
+        &sync_state,
+        paths,
+        message,
+        auto_prefix,
+        flushed,
+        confirm_not_keeper,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_history(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    path: Option<String>,
+    cursor: Option<String>,
+    limit: u32,
+) -> SyncAnswer<HistoryPage> {
+    typsidian_host::commands::sync_history(&vault, &sync_state, path, cursor, limit).await
+}
+
+#[tauri::command]
+pub async fn sync_diff(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    path: String,
+    from: Revision,
+    to: Revision,
+) -> SyncAnswer<FileDiff> {
+    typsidian_host::commands::sync_diff(&vault, &sync_state, path, from, to).await
+}
+
+#[tauri::command]
+pub async fn sync_snapshot_changes(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    snapshot: String,
+) -> SyncAnswer<Vec<Change>> {
+    typsidian_host::commands::sync_snapshot_changes(&vault, &sync_state, snapshot).await
+}
+
+#[tauri::command]
+pub async fn sync_file_at(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    path: String,
+    revision: Revision,
+) -> SyncAnswer<Content> {
+    typsidian_host::commands::sync_file_at(&vault, &sync_state, path, revision).await
+}
+
+#[tauri::command]
+pub async fn sync_restore(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    path: String,
+    snapshot: String,
+) -> SyncAnswer<Content> {
+    typsidian_host::commands::sync_restore(&vault, &sync_state, path, snapshot).await
+}
+
+#[tauri::command]
+pub async fn sync_connect_remote(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    url: String,
+    credentials: Credentials,
+) -> SyncAnswer<RemoteStatus> {
+    typsidian_host::commands::sync_connect_remote(&home, &vault, &sync_state, url, credentials)
+        .await
+}
+
+#[tauri::command]
+pub async fn sync_disconnect_remote(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_disconnect_remote(&home, &vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_push(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<RemoteStatus> {
+    typsidian_host::commands::sync_push(&home, &vault, &sync_state, confirm_not_keeper).await
+}
+
+#[tauri::command]
+pub async fn sync_pull(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<PullOutcome> {
+    typsidian_host::commands::sync_pull(&home, &vault, &sync_state, confirm_not_keeper).await
+}
+
+#[tauri::command]
+pub async fn sync_restore_history(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    confirm_not_keeper: bool,
+) -> SyncAnswer<PullOutcome> {
+    typsidian_host::commands::sync_restore_history(&home, &vault, &sync_state, confirm_not_keeper)
+        .await
+}
+
+#[tauri::command]
+pub async fn sync_abort_pull(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_abort_pull(&vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_conflicts(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<Vec<Conflict>> {
+    typsidian_host::commands::sync_conflicts(&vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_resolve(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    id: String,
+    resolution: Resolution,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_resolve(&home, &vault, &sync_state, id, resolution).await
+}
+
+#[tauri::command]
+pub async fn sync_set_keeper(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<Keeper> {
+    typsidian_host::commands::sync_set_keeper(&home, &vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_clear_keeper(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_clear_keeper(&vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_update_settings(
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    patch: VaultSyncSettingsPatch,
+) -> SyncAnswer<VaultSyncSettings> {
+    typsidian_host::commands::sync_update_settings(&vault, &sync_state, patch).await
+}
+
+#[tauri::command]
+pub async fn sync_refresh_mirror(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_refresh_mirror(&home, &vault, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_tick(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    auto_prefix: String,
+) -> SyncAnswer<TickOutcome> {
+    typsidian_host::commands::sync_tick(&home, &vault, &sync_state, auto_prefix).await
+}
+
+#[tauri::command]
+pub async fn sync_device_values(
+    home: State<'_, SyncHome>,
+    sync_state: State<'_, SyncState>,
+) -> SyncAnswer<DeviceVaultSync> {
+    typsidian_host::commands::sync_device_values(&home, &sync_state).await
+}
+
+#[tauri::command]
+pub async fn sync_set_author(
+    home: State<'_, SyncHome>,
+    sync_state: State<'_, SyncState>,
+    author: Option<Author>,
+) -> SyncAnswer<()> {
+    typsidian_host::commands::sync_set_author(&home, &sync_state, author).await
+}

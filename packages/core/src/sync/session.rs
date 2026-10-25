@@ -2107,6 +2107,16 @@ fn parse_remote(url: &str, ctx: &SyncContext) -> Result<remote_url::RemoteUrl, S
         remote_url::Scheme::Ssh if !ctx.capabilities.ssh => Err(SyncError::UnsupportedScheme {
             scheme: "ssh".to_string(),
         }),
+        // На сервере каталог и `http://localhost` — сам сервер (фича 038).
+        remote_url::Scheme::File | remote_url::Scheme::HttpLoopback if ctx.capabilities.server => {
+            Err(SyncError::UnsupportedScheme {
+                scheme: match parsed.scheme {
+                    remote_url::Scheme::File => "file",
+                    _ => "http",
+                }
+                .to_string(),
+            })
+        }
         remote_url::Scheme::File if !ctx.capabilities.direct_remote => {
             Err(SyncError::UnsupportedScheme {
                 scheme: "file".to_string(),
@@ -2360,39 +2370,10 @@ pub fn safe_path(path: &str) -> Option<String> {
             _ => return None,
         }
     }
-    if parts.is_empty() || parts.iter().any(|part| names_git_dir(part)) {
+    if parts.is_empty() || parts.iter().any(|part| crate::vault::names_git_dir(part)) {
         return None;
     }
     Some(parts.join("/"))
-}
-
-/// Называет ли компонент пути каталог истории — прямо или так, как его
-/// прочтёт файловая система: NTFS отбрасывает хвостовые точки и пробелы,
-/// знает короткое имя `GIT~1` и потоки `имя:поток`; HFS+ и APFS игнорируют
-/// невидимые знаки внутри имени. Запись в такой путь — это запись в
-/// `.git/config`, то есть исполнение чужой команды обычным git.
-fn names_git_dir(part: &str) -> bool {
-    // Поток NTFS (`.git::$INDEX_ALLOCATION`) — тот же каталог; двоеточие в
-    // обычном имени заметки на остальных системах законно, поэтому смотрим
-    // только на имя до него.
-    let visible: String = part
-        .split(':')
-        .next()
-        .unwrap_or(part)
-        .chars()
-        .filter(|c| {
-            !matches!(*c,
-                '\u{200C}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{206A}'..='\u{206F}'
-                | '\u{FEFF}')
-        })
-        .collect();
-    let name = visible.trim_end_matches(['.', ' ']).to_ascii_lowercase();
-    name == ".git"
-        || name
-            .strip_prefix("git~")
-            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn to_slash(path: &Path) -> String {

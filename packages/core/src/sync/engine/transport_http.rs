@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream};
 
-use super::{Auth, CancelToken, EngineError};
+use super::{server_policy, Auth, CancelToken, EngineError};
 use crate::sync::settings::remote_url;
 
 /// Всё, что транспорту нужно знать об операции.
@@ -161,7 +161,12 @@ fn host_of(url: &str) -> Option<String> {
 }
 
 fn client(idle_limit: Duration) -> std::io::Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
+    let mut builder = reqwest::blocking::Client::builder();
+    if server_policy::on_server() {
+        // Внутренние адреса отбрасываются после разрешения имени (фича 038).
+        builder = builder.dns_resolver(std::sync::Arc::new(server_policy::ServerResolver));
+    }
+    builder
         // Перенаправление — только на тот же хост и не с https на http: иначе
         // заголовок с токеном или сам пакет ушли бы открытым каналом (T068).
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
@@ -198,7 +203,22 @@ impl HttpStream {
         }
         let host = host_of(&self.url);
         let scheme_ok = self.url.starts_with("https://")
-            || host.as_deref().is_some_and(remote_url::is_loopback);
+            || (!server_policy::on_server()
+                && host.as_deref().is_some_and(remote_url::is_loopback));
+        // Адрес числом клиент не разрешает — его проверяем здесь (фича 038), в
+        // том виде, в каком его прочтёт клиент (`2130706433`, `0x7f.1` — тоже IPv4).
+        let literal = reqwest::Url::parse(&self.url).ok().and_then(|url| {
+            // Число клиент записывает каноническим IPv4, IPv6 — в скобках.
+            url.host_str()
+                .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
+                .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+        });
+        if literal.is_some_and(server_policy::refuses_ip) {
+            record_failure(EngineError::UnsupportedScheme {
+                scheme: "internal".to_string(),
+            });
+            return Err(std::io::Error::other("адрес во внутренней сети сервера"));
+        }
         if !scheme_ok {
             record_failure(EngineError::UnsupportedScheme {
                 scheme: "http".to_string(),

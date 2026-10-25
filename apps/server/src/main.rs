@@ -147,6 +147,12 @@ async fn user(config: &Config, command: UserCommand) -> anyhow::Result<()> {
         UserCommand::Delete { login, with_vaults } => {
             let found = account(&store, &login).await?;
             store.delete_account(&found.id).await?;
+            // Секреты и настройки синхронизации удаляются всегда, даже если vault
+            // остаются (038 FR-002): без аккаунта они ничьи.
+            let sync_dir = config.sync_dir().join(&found.id);
+            if sync_dir.exists() {
+                std::fs::remove_dir_all(&sync_dir)?;
+            }
             let dir = config.users_dir().join(&found.id);
             if with_vaults && dir.exists() {
                 std::fs::remove_dir_all(&dir)?;

@@ -201,6 +201,42 @@ pub const COMMANDS: &[&str] = &[
     "render_element",
     "plan_element_edit",
     "template_event",
+    "sync_progress",
+    "sync_capabilities",
+    "sync_overview",
+    "sync_poll_events",
+    "sync_note_change",
+    "sync_cancel",
+    "sync_ignore_reports",
+    "sync_apply_ignore",
+    "sync_decline_stignore",
+    "sync_ignore_open",
+    "sync_ignore_check",
+    "sync_ignore_restore",
+    "sync_ignore_save",
+    "sync_enable_history",
+    "sync_changes",
+    "sync_snapshot",
+    "sync_history",
+    "sync_diff",
+    "sync_snapshot_changes",
+    "sync_file_at",
+    "sync_restore",
+    "sync_connect_remote",
+    "sync_disconnect_remote",
+    "sync_push",
+    "sync_pull",
+    "sync_restore_history",
+    "sync_abort_pull",
+    "sync_conflicts",
+    "sync_resolve",
+    "sync_set_keeper",
+    "sync_clear_keeper",
+    "sync_update_settings",
+    "sync_refresh_mirror",
+    "sync_tick",
+    "sync_device_values",
+    "sync_set_author",
 ];
 
 fn args<A: DeserializeOwned>(value: Value) -> Result<A, Value> {
@@ -2358,6 +2394,425 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
             }
             match args::<A>(arguments) {
                 Ok(a) => value(commands::template_event(a.event)),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_progress" => {
+            let _ = arguments;
+            value(commands::sync_progress(&host.sync_progress_slot))
+        }
+        "sync_capabilities" => {
+            let _ = arguments;
+            value(commands::sync_capabilities(&host.sync_home))
+        }
+        "sync_overview" => {
+            let _ = arguments;
+            answer(commands::sync_overview(&host.sync_home, &host.vault, &host.sync_state).await)
+        }
+        "sync_poll_events" => {
+            let _ = arguments;
+            answer(commands::sync_poll_events(&host.sync_state).await)
+        }
+        "sync_note_change" => {
+            let _ = arguments;
+            answer(commands::sync_note_change(&host.sync_state).await)
+        }
+        "sync_cancel" => {
+            let _ = arguments;
+            {
+                commands::sync_cancel(&host.sync_cancel);
+                value(())
+            }
+        }
+        "sync_ignore_reports" => {
+            let _ = arguments;
+            answer(commands::sync_ignore_reports(&host.vault, &host.sync_state).await)
+        }
+        "sync_apply_ignore" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                file: IgnoreFile,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_apply_ignore(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.file,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_decline_stignore" => {
+            let _ = arguments;
+            answer(
+                commands::sync_decline_stignore(&host.sync_home, &host.vault, &host.sync_state)
+                    .await,
+            )
+        }
+        "sync_ignore_open" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                file: IgnoreFile,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => {
+                    answer(commands::sync_ignore_open(&host.vault, &host.sync_state, a.file).await)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "sync_ignore_check" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                file: IgnoreFile,
+                text: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::sync_ignore_check(a.file, a.text)),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_ignore_restore" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                file: IgnoreFile,
+                text: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::sync_ignore_restore(a.file, a.text)),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_ignore_save" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                request: IgnoreSaveRequest,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_ignore_save(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.request,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_enable_history" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                message: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_enable_history(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.message,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_changes" => {
+            let _ = arguments;
+            answer(commands::sync_changes(&host.vault, &host.sync_state).await)
+        }
+        "sync_snapshot" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                paths: Option<Vec<String>>,
+                message: String,
+                auto_prefix: String,
+                flushed: bool,
+                confirm_not_keeper: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_snapshot(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.paths,
+                        a.message,
+                        a.auto_prefix,
+                        a.flushed,
+                        a.confirm_not_keeper,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_history" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: Option<String>,
+                cursor: Option<String>,
+                limit: u32,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_history(
+                        &host.vault,
+                        &host.sync_state,
+                        a.path,
+                        a.cursor,
+                        a.limit,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_diff" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                from: Revision,
+                to: Revision,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_diff(&host.vault, &host.sync_state, a.path, a.from, a.to).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_snapshot_changes" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                snapshot: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_snapshot_changes(&host.vault, &host.sync_state, a.snapshot)
+                        .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_file_at" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                revision: Revision,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_file_at(&host.vault, &host.sync_state, a.path, a.revision).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_restore" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                snapshot: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_restore(&host.vault, &host.sync_state, a.path, a.snapshot).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_connect_remote" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                url: String,
+                credentials: Credentials,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_connect_remote(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.url,
+                        a.credentials,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_disconnect_remote" => {
+            let _ = arguments;
+            answer(
+                commands::sync_disconnect_remote(&host.sync_home, &host.vault, &host.sync_state)
+                    .await,
+            )
+        }
+        "sync_push" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                confirm_not_keeper: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_push(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.confirm_not_keeper,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_pull" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                confirm_not_keeper: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_pull(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.confirm_not_keeper,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_restore_history" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                confirm_not_keeper: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_restore_history(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.confirm_not_keeper,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_abort_pull" => {
+            let _ = arguments;
+            answer(commands::sync_abort_pull(&host.vault, &host.sync_state).await)
+        }
+        "sync_conflicts" => {
+            let _ = arguments;
+            answer(commands::sync_conflicts(&host.vault, &host.sync_state).await)
+        }
+        "sync_resolve" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                id: String,
+                resolution: Resolution,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_resolve(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.id,
+                        a.resolution,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_set_keeper" => {
+            let _ = arguments;
+            answer(commands::sync_set_keeper(&host.sync_home, &host.vault, &host.sync_state).await)
+        }
+        "sync_clear_keeper" => {
+            let _ = arguments;
+            answer(commands::sync_clear_keeper(&host.vault, &host.sync_state).await)
+        }
+        "sync_update_settings" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                patch: VaultSyncSettingsPatch,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_update_settings(&host.vault, &host.sync_state, a.patch).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_refresh_mirror" => {
+            let _ = arguments;
+            answer(
+                commands::sync_refresh_mirror(&host.sync_home, &host.vault, &host.sync_state).await,
+            )
+        }
+        "sync_tick" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                auto_prefix: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_tick(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.auto_prefix,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_device_values" => {
+            let _ = arguments;
+            answer(commands::sync_device_values(&host.sync_home, &host.sync_state).await)
+        }
+        "sync_set_author" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                author: Option<Author>,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_set_author(&host.sync_home, &host.sync_state, a.author).await,
+                ),
                 Err(error) => Err(error),
             }
         }

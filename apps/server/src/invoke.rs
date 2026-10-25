@@ -29,6 +29,19 @@ pub const CLIENT_HEADER: &str = "x-typsidian-client";
 const RAW_COMMAND: &str = "attachments_batch_store";
 /// Пересчёт свойств отдаёт ход событием — вкладке, которая его начала.
 const REINDEX_COMMAND: &str = "vault_reindex_properties";
+/// Открытие сессии синхронизации: id vault назначает сервер (038 research.md §4).
+const SYNC_OPEN_COMMAND: &str = "sync_open";
+/// Подключение удалённого репозитория: адрес проверяется до ядра (038 research.md §3).
+const SYNC_CONNECT_COMMAND: &str = "sync_connect_remote";
+/// Команды, которые ходят в сеть к удалённому репозиторию.
+const EXCHANGE_COMMANDS: &[&str] = &[
+    "sync_connect_remote",
+    "sync_push",
+    "sync_pull",
+    "sync_restore_history",
+    "sync_refresh_mirror",
+    "sync_tick",
+];
 
 async fn open(state: &Shared, authed: &Authed, name: &str) -> ApiResult<std::sync::Arc<OpenVault>> {
     crate::vaults::open_vault(state, &authed.account.id, name).await
@@ -97,6 +110,24 @@ pub async fn invoke(
             Ok(value) => Ok(serde_json::to_value(value).unwrap_or(Value::Null)),
             Err(error) => Err(serde_json::to_value(error).unwrap_or(Value::Null)),
         }
+    } else if command == SYNC_OPEN_COMMAND {
+        // `vaultId` клиента не используется: иначе он выбирал бы, чьи секреты и
+        // зеркало открыть.
+        let sync_id = state.store.vault_sync_id(&authed.account.id, &name).await?;
+        let host = &open.host;
+        let result = typsidian_host::sync::open_session(
+            &host.vault,
+            &host.sync_home,
+            &host.sync_state,
+            &host.sync_cancel,
+            &host.sync_progress_slot,
+            sync_id,
+        )
+        .await;
+        match result {
+            Ok(()) => Ok(Value::Null),
+            Err(error) => Err(serde_json::to_value(error).unwrap_or(Value::Null)),
+        }
     } else if command == RAW_COMMAND {
         let result = typsidian_host::store_attachment_body(&open.host.vault, &body).await;
         match result {
@@ -121,6 +152,36 @@ pub async fn invoke(
         if !state.config.template_sources {
             strip_template_sources(&mut arguments);
         }
+        if command == SYNC_CONNECT_COMMAND
+            && !state.config.sync_private_remotes
+            && crate::sync::internal_remote(
+                arguments.get("url").and_then(Value::as_str).unwrap_or(""),
+            )
+        {
+            tracing::warn!(login = %authed.account.login, "отказ: удалённый репозиторий по внутреннему адресу");
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "kind": "UnsupportedScheme", "scheme": "internal" })),
+            )
+                .into_response());
+        }
+        // Обмены всех аккаунтов делят пул блокирующих потоков: их число на
+        // сервер ограничено (038, ревью безопасности).
+        let _exchange = if EXCHANGE_COMMANDS.contains(&command.as_str()) {
+            match state.exchanges.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    tracing::warn!("отказ: предел одновременных обменов сервера");
+                    return Ok((
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "kind": "ExchangeRunning" })),
+                    )
+                        .into_response());
+                }
+            }
+        } else {
+            None
+        };
         let echo = crate::events::echo(&command, &arguments);
         let reply = typsidian_host::dispatch::dispatch(&open.host, &command, arguments)
             .await
@@ -133,8 +194,45 @@ pub async fn invoke(
     open.touch();
     Ok(match reply {
         Ok(value) => Json(value).into_response(),
-        Err(value) => (StatusCode::BAD_REQUEST, Json(value)).into_response(),
+        Err(value) => (
+            StatusCode::BAD_REQUEST,
+            Json(without_server_paths(&state, value)),
+        )
+            .into_response(),
     })
+}
+
+/// Сообщения libgit2 и файловой системы называют абсолютные пути: каталог данных
+/// сервера и id аккаунта клиенту знать незачем (038, ревью безопасности).
+fn without_server_paths(state: &Shared, value: Value) -> Value {
+    let mut roots = vec![state.config.data.to_string_lossy().into_owned()];
+    if let Ok(real) = std::fs::canonicalize(&state.config.data) {
+        roots.push(real.to_string_lossy().into_owned());
+    }
+    roots.retain(|root| root.len() > 1);
+    roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
+    let text = value.to_string();
+    if !roots.iter().any(|root| text.contains(root.as_str())) {
+        return value;
+    }
+    scrub(value, &roots)
+}
+
+fn scrub(value: Value, roots: &[String]) -> Value {
+    match value {
+        Value::String(text) => Value::String(
+            roots
+                .iter()
+                .fold(text, |text, root| text.replace(root.as_str(), "…")),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(|v| scrub(v, roots)).collect()),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, field)| (key, scrub(field, roots)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Как часто поток событий перепроверяет сессию.

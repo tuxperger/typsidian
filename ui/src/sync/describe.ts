@@ -32,7 +32,9 @@ export function describeSyncError(t: Translate, error: SyncError): string {
     case "CorsBlocked":
       return t("sync.error.corsBlocked");
     case "UnsupportedScheme":
-      return t("sync.error.unsupportedScheme", { scheme: error.scheme });
+      return error.scheme === "internal"
+        ? t("sync.error.internalRemote")
+        : t("sync.error.unsupportedScheme", { scheme: error.scheme });
     case "InvalidRemoteUrl":
       return t("sync.error.invalidRemoteUrl");
     case "RemoteChanged":
@@ -45,6 +47,8 @@ export function describeSyncError(t: Translate, error: SyncError): string {
       return t("sync.error.keeperDisputed");
     case "InProgressOperation":
       return t("sync.error.inProgressOperation");
+    case "ExchangeRunning":
+      return t("sync.error.exchangeRunning");
     case "PullConflictsPending":
       return t("sync.error.pullConflictsPending");
     case "NoHistory":
@@ -139,7 +143,8 @@ export function describeFolderState(t: Translate, state: FolderState): string {
   }
 }
 
-export function describeLink(t: Translate, link: LinkState): string {
+/** `server` — ядро работает на сервере (038): там Syncthing не поддерживается вовсе. */
+export function describeLink(t: Translate, link: LinkState, server = false): string {
   switch (link) {
     case "NotConfigured":
       return t("sync.syncthing.link.notConfigured");
@@ -148,7 +153,9 @@ export function describeLink(t: Translate, link: LinkState): string {
     case "Unauthorized":
       return t("sync.syncthing.link.unauthorized");
     case "UnavailableInShell":
-      return t("sync.syncthing.link.unavailableInShell");
+      return server
+        ? t("sync.syncthing.link.unavailableOnServer")
+        : t("sync.syncthing.link.unavailableInShell");
     case "FolderNotShared":
       return t("sync.syncthing.link.folderNotShared");
     case "CertificateChanged":

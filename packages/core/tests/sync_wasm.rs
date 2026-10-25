@@ -161,6 +161,11 @@ async fn shells_reject_what_they_cannot_do() {
 }
 
 #[wasm_bindgen_test]
+async fn the_server_rejects_addresses_of_the_server_itself() {
+    cases::the_server_rejects_addresses_of_the_server_itself().await;
+}
+
+#[wasm_bindgen_test]
 async fn settings_survive_in_vault_json_next_to_other_keys() {
     cases::settings_survive_in_vault_json_next_to_other_keys().await;
 }

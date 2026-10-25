@@ -87,8 +87,28 @@ impl VaultSyncSettings {
             .remote_url
             .and_then(|url| remote_url::normalize(&url).ok())
             .map(|parsed| parsed.url);
+        // Ветка идёт в refspec обмена: `*` сделал бы из него шаблон, `:` — второй
+        // refspec (038, ревью безопасности). Негодное имя — ветка по умолчанию.
+        self.branch = self.branch.filter(|branch| valid_branch(branch));
         self
     }
+}
+
+/// Годится ли имя ветки (правила `git check-ref-format` для одной ветки).
+pub fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && !name.starts_with(['-', '/', '.'])
+        && !name.ends_with(['/', '.'])
+        && !name.ends_with(".lock")
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.contains("//")
+        && !name.chars().any(|c| {
+            c.is_control()
+                || c.is_whitespace()
+                || matches!(c, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+        })
 }
 
 /// Частичное изменение настроек из панели (FR-019, FR-031).
@@ -440,6 +460,26 @@ pub mod remote_url {
 mod tests {
     use super::remote_url::{normalize, Scheme};
     use super::*;
+
+    #[test]
+    fn branch_names_that_would_bend_the_refspec_are_dropped() {
+        for good in ["main", "master", "feature/заметки", "v1.2"] {
+            assert!(valid_branch(good), "{good}");
+        }
+        for bad in [
+            "",
+            "*",
+            "main:other",
+            "a..b",
+            "-x",
+            "x.lock",
+            "a b",
+            "x/",
+            "@{u}",
+        ] {
+            assert!(!valid_branch(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn credentials_are_stripped_from_https() {

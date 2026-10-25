@@ -5,6 +5,8 @@ import { ContextMenuProvider } from "../menu/ContextMenu.js";
 import type { BoardWriteProfile } from "../wasm-core/typsidian_core.js";
 import { tauriPreviewClient, tauriVaultClient } from "../vault-client-tauri.js";
 import type { LastVault, VaultOpenResult } from "../vault-tree/useVault.js";
+import type { SyncClient } from "../sync/sync-client.js";
+import { openServerSync } from "../sync/sync-client-tauri.js";
 import { AccountSection } from "./AccountSection.js";
 import { ConnectionBanner, useConnectionState } from "./ConnectionBanner.js";
 import { createServerConnection, type ServerConnection } from "./connection.js";
@@ -36,6 +38,14 @@ export async function openServerVault(
   } catch {
     return { ok: false, error: { kind: "FolderNotFound" } };
   }
+  // История и удалённый репозиторий vault ведёт сервер (фича 038). Без сессии
+  // синхронизации vault всё равно открывается — панель просто недоступна.
+  let sync: SyncClient | undefined;
+  try {
+    sync = await openServerSync(transport);
+  } catch {
+    sync = undefined;
+  }
   return {
     ok: true,
     client: {
@@ -43,6 +53,7 @@ export async function openServerVault(
       fileUrl: (path) => vaultFileUrl(vault, path),
     },
     preview: tauriPreviewClient(transport),
+    ...(sync === undefined ? {} : { sync }),
   };
 }
 

@@ -98,7 +98,11 @@ export function RemoteDialog({
             onChange={(event) => setUrl(event.target.value)}
           />
           <span className="ts-field__hint">
-            {capabilities.ssh ? t("sync.remote.urlHintSsh") : t("sync.remote.urlHintNoSsh")}
+            {capabilities.server
+              ? t("sync.remote.urlHintServer")
+              : capabilities.ssh
+                ? t("sync.remote.urlHintSsh")
+                : t("sync.remote.urlHintNoSsh")}
           </span>
         </label>
 
@@ -125,9 +129,11 @@ export function RemoteDialog({
             onChange={(event) => setToken(event.target.value)}
           />
           <span className="ts-field__hint">
-            {capabilities.secureSecrets
-              ? t("sync.remote.tokenHintSecure")
-              : t("sync.remote.tokenHintBrowser")}
+            {capabilities.server
+              ? t("sync.remote.tokenHintServer")
+              : capabilities.secureSecrets
+                ? t("sync.remote.tokenHintSecure")
+                : t("sync.remote.tokenHintBrowser")}
           </span>
         </label>
 

@@ -22,8 +22,46 @@ use std::path::{Path, PathBuf};
 /// vault-backend-trait, конституция XI): `root.join("/etc/passwd")` заменил бы
 /// корень целиком, а `..` вывел бы из него — к файлам машины или, на сервере
 /// (фича 037), к vault другого аккаунта. Пути приходят от клиента как есть.
+///
+/// Каталог истории `.git` — тоже граница (фича 038): запись в `.git/config`
+/// подменяет адрес обмена (`insteadOf`), а файл `.git` со ссылкой `gitdir:`
+/// открывает чужой репозиторий. Историю ведёт движок синхронизации, не
+/// команды файлов.
 pub fn is_inside(path: &Path) -> bool {
-    sections::normalize(path).is_some()
+    sections::normalize(path).is_some_and(|normalized| {
+        !normalized
+            .components()
+            .any(|part| names_git_dir(&part.as_os_str().to_string_lossy()))
+    })
+}
+
+/// Называет ли компонент пути каталог истории — прямо или так, как его
+/// прочтёт файловая система: NTFS отбрасывает хвостовые точки и пробелы,
+/// знает короткое имя `GIT~1` и потоки `имя:поток`; HFS+ и APFS игнорируют
+/// невидимые знаки внутри имени. Запись в такой путь — это запись в
+/// `.git/config`, то есть исполнение чужой команды обычным git.
+pub fn names_git_dir(part: &str) -> bool {
+    // Поток NTFS (`.git::$INDEX_ALLOCATION`) — тот же каталог; двоеточие в
+    // обычном имени заметки на остальных системах законно, поэтому смотрим
+    // только на имя до него.
+    let visible: String = part
+        .split(':')
+        .next()
+        .unwrap_or(part)
+        .chars()
+        .filter(|c| {
+            !matches!(*c,
+                '\u{200C}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{206A}'..='\u{206F}'
+                | '\u{FEFF}')
+        })
+        .collect();
+    let name = visible.trim_end_matches(['.', ' ']).to_ascii_lowercase();
+    name == ".git"
+        || name
+            .strip_prefix("git~")
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Расширение текстовой заметки.
@@ -415,5 +453,17 @@ mod inside_tests {
         assert!(!is_inside(Path::new("../a.typ")));
         assert!(!is_inside(Path::new("a/../../b")));
         assert!(!is_inside(Path::new("/etc/passwd")));
+        // Каталог истории — не vault (фича 038).
+        for git in [
+            ".git",
+            ".git/config",
+            "папка/.git/hooks/x",
+            ".GIT./config",
+            "git~1/config",
+        ] {
+            assert!(!is_inside(Path::new(git)), "{git}");
+        }
+        assert!(is_inside(Path::new(".gitignore")));
+        assert!(is_inside(Path::new(".github/x.typ")));
     }
 }

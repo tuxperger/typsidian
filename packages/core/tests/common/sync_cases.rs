@@ -108,6 +108,7 @@ impl Fixture {
                 direct_remote: true,
                 syncthing_status: true,
                 secure_secrets: true,
+                server: false,
             },
         }
     }
@@ -1095,6 +1096,53 @@ pub async fn shells_reject_what_they_cannot_do() {
         )
         .await
         .is_err());
+}
+
+/// На сервере (фича 038) адреса «этого устройства» — файлы и службы сервера:
+/// они отклоняются и при подключении, и при обмене с уже подключённым.
+pub async fn the_server_rejects_addresses_of_the_server_itself() {
+    let remote = FakeGitEngine::new_remote();
+    let mut f = fixture(&[("a.typ", "= A\n")], Some(remote));
+    f.enable().await;
+    let mut ctx = f.ctx();
+    ctx.capabilities = ShellCapabilities::server();
+    for url in [
+        "file:///srv/typsidian/users/other/notes",
+        "/srv/typsidian/users/other/notes",
+        "http://localhost:3000/me/notes.git",
+        "http://127.0.0.1/me/notes.git",
+        "git@github.com:me/notes.git",
+    ] {
+        assert!(
+            matches!(
+                f.session
+                    .connect_remote(&mut f.vault, &f.secrets, &ctx, url, Credentials::default())
+                    .await,
+                Err(SyncError::UnsupportedScheme { .. })
+            ),
+            "{url}"
+        );
+    }
+    // Подключённый на устройстве адрес localhost на сервере не используется.
+    let desktop = f.ctx();
+    let _ = f
+        .session
+        .connect_remote(
+            &mut f.vault,
+            &f.secrets,
+            &desktop,
+            "http://localhost:3000/me/notes.git",
+            Credentials::default(),
+        )
+        .await;
+    assert!(matches!(
+        f.session.push(&f.vault, &f.secrets, &ctx, false).await,
+        Err(SyncError::UnsupportedScheme { .. })
+    ));
+    assert!(matches!(
+        f.session.pull(&mut f.vault, &f.secrets, &ctx, false).await,
+        Err(SyncError::UnsupportedScheme { .. })
+    ));
 }
 
 pub async fn settings_survive_in_vault_json_next_to_other_keys() {

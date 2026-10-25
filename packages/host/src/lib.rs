@@ -54,6 +54,19 @@ pub mod prelude {
     pub use typsidian_core::spellcheck;
     pub use typsidian_core::stamp::FileStamp;
     pub use typsidian_core::structure;
+    pub use typsidian_core::sync::ignore::{
+        self as sync_ignore, IgnoreCheck, IgnoreDocument, IgnoreFile, IgnoreReport,
+        IgnoreSaveOutcome, IgnoreSaveRequest,
+    };
+    pub use typsidian_core::sync::session::{
+        Conflict, Credentials, PullOutcome, Resolution, TickOutcome,
+    };
+    pub use typsidian_core::sync::settings::VaultSyncSettingsPatch;
+    pub use typsidian_core::sync::{
+        Author, Change, Content, DeviceVaultSync, FileDiff, HistoryPage, Keeper, RemoteStatus,
+        Revision, ShellCapabilities, Snapshot, SyncError, SyncEvent, SyncOverview,
+        VaultSyncSettings,
+    };
     pub use typsidian_core::tasks;
     pub use typsidian_core::templates::{
         self, NameCheck, PreviewState, ReadTemplateError, SaveTemplateError, TemplateLibraryView,
@@ -92,6 +105,11 @@ pub struct Host {
     pub highlight_sessions: HighlightSessions,
     pub properties_reindex: PropertiesReindex,
     pub import_source: ImportSource,
+    /// Окружение синхронизации: на сервере — одно на аккаунт (фича 038).
+    pub sync_home: Arc<SyncHome>,
+    pub sync_state: SyncState,
+    pub sync_cancel: SyncCancel,
+    pub sync_progress_slot: SyncProgressSlot,
 }
 
 /// Право этой сборки писать доски (фича 002, FR-033, FR-034).
@@ -420,6 +438,9 @@ mod attachments_body_tests {
 
 pub mod commands;
 pub mod dispatch;
+pub mod sync;
+
+pub use sync::{SyncAnswer, SyncCancel, SyncFailure, SyncHome, SyncProgressSlot, SyncState};
 
 pub use commands::*;
 

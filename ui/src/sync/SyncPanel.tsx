@@ -844,7 +844,7 @@ function SyncthingSection({
     <section className="ts-sync__section" aria-label={t("sync.syncthing.title")}>
       <h2 className="ts-eyebrow">{t("sync.syncthing.title")}</h2>
       <p>{folder.detected ? t("sync.syncthing.detected") : t("sync.syncthing.notDetected")}</p>
-      <p className="ts-dialog__hint">{describeLink(t, folder.link)}</p>
+      <p className="ts-dialog__hint">{describeLink(t, folder.link, overview.capabilities.server ?? false)}</p>
 
       {folder.link === "Connected" && (
         <>
@@ -881,7 +881,7 @@ function SyncthingSection({
           type="button"
           className="ts-btn"
           disabled={!available || busy}
-          title={available ? undefined : t("sync.syncthing.link.unavailableInShell")}
+          title={available ? undefined : describeLink(t, "UnavailableInShell", overview.capabilities.server ?? false)}
           onClick={() => void discover()}
         >
           {t("sync.syncthing.find")}
@@ -890,7 +890,7 @@ function SyncthingSection({
           type="button"
           className="ts-btn"
           disabled={!available || busy}
-          title={available ? undefined : t("sync.syncthing.link.unavailableInShell")}
+          title={available ? undefined : describeLink(t, "UnavailableInShell", overview.capabilities.server ?? false)}
           aria-expanded={manual}
           onClick={() => setManual((value) => !value)}
         >

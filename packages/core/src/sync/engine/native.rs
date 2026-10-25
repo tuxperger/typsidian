@@ -222,9 +222,39 @@ fn classify(error: &git2::Error) -> EngineError {
 fn callbacks<'a>(cancel: CancelToken) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
     let transfer_cancel = cancel.clone();
-    callbacks.transfer_progress(move |_| !transfer_cancel.is_cancelled());
+    // На сервере получение ограничено объёмом и временем (фича 038): диск и
+    // потоки общие для всех аккаунтов.
+    let limited = super::server_policy::on_server();
+    let started = std::time::Instant::now();
+    callbacks.transfer_progress(move |progress| {
+        if transfer_cancel.is_cancelled() {
+            return false;
+        }
+        !limited
+            || (progress.received_bytes() <= super::server_policy::SERVER_FETCH_LIMIT_BYTES
+                && started.elapsed() <= super::server_policy::SERVER_EXCHANGE_LIMIT)
+    });
     callbacks.push_transfer_progress(move |_, _, _| {});
     callbacks
+}
+
+/// Безымянный удалённый ровно с этим адресом. libgit2 применяет к адресу
+/// `url.*.insteadOf` из конфигурации git, и проверенный адрес тихо стал бы другим —
+/// каталогом, `localhost` или ssh (фича 038). Переписанный адрес — отказ.
+fn exact_remote<'r>(repo: &'r Repository, url: &str) -> Result<git2::Remote<'r>, git2::Error> {
+    let remote = repo.remote_anonymous(url)?;
+    let same = remote.url().ok() == Some(url)
+        && remote
+            .pushurl()
+            .ok()
+            .flatten()
+            .is_none_or(|push| push == url);
+    if !same {
+        return Err(git2::Error::from_str(
+            "адрес обмена переписан настройками git (url.*.insteadOf)",
+        ));
+    }
+    Ok(remote)
 }
 
 impl GitEngine for NativeGitEngine {
@@ -515,7 +545,7 @@ impl GitEngine for NativeGitEngine {
                 format!("refs/remotes/origin/{branch}")
             };
             let refspec = format!("+refs/heads/{branch}:{tracking}");
-            let mut remote = repo.remote_anonymous(&url)?;
+            let mut remote = exact_remote(&repo, &url)?;
             let mut options = FetchOptions::new();
             options.remote_callbacks(callbacks(token));
             remote.fetch(&[refspec.as_str()], Some(&mut options), None)?;
@@ -554,7 +584,7 @@ impl GitEngine for NativeGitEngine {
                 .head()?
                 .target()
                 .ok_or_else(|| git2::Error::from_str("в истории нет снимков"))?;
-            let mut remote = repo.remote_anonymous(&url)?;
+            let mut remote = exact_remote(&repo, &url)?;
             let mut callbacks = callbacks(token);
             let sink = rejected_inner.clone();
             callbacks.push_update_reference(move |_, status| {
@@ -666,6 +696,10 @@ impl GitEngine for NativeGitEngine {
     }
 
     async fn global_author(&self) -> Option<Author> {
+        // Автор администратора сервера не становится автором снимков пользователей.
+        if super::server_policy::on_server() {
+            return None;
+        }
         let config = git2::Config::open_default().ok()?;
         Some(Author {
             name: config.get_string("user.name").ok()?,

@@ -21,10 +21,14 @@ pub mod events;
 pub mod invoke;
 pub mod oidc;
 pub mod store;
+pub mod sync;
 pub mod vaults;
 
 use config::Config;
 use store::Store;
+
+/// Сколько обменов с удалёнными репозиториями идут одновременно на весь сервер.
+pub const MAX_EXCHANGES: usize = 32;
 
 /// Состояние сервера, общее для всех запросов.
 pub struct AppState {
@@ -33,18 +37,29 @@ pub struct AppState {
     pub limiter: auth::Limiter,
     pub vaults: vaults::OpenVaults,
     pub oidc: oidc::OidcState,
+    pub sync: sync::SyncHomes,
+    /// Одновременных обменов с удалёнными на весь сервер (038): каждый занимает
+    /// блокирующий поток, а пул потоков общий для всех аккаунтов.
+    pub exchanges: tokio::sync::Semaphore,
 }
 
 pub type Shared = Arc<AppState>;
 
 impl AppState {
     pub fn new(config: Config, store: Store) -> Shared {
+        // Обмены с удалёнными — только по внешнему HTTPS, без ssh и конфигурации git
+        // администратора (038, ревью безопасности).
+        typsidian_core::sync::engine::server_policy::restrict_to_server(
+            config.sync_private_remotes,
+        );
         Arc::new(AppState {
             config,
             store,
             limiter: auth::Limiter::default(),
             vaults: vaults::OpenVaults::default(),
             oidc: oidc::OidcState::default(),
+            sync: sync::SyncHomes::default(),
+            exchanges: tokio::sync::Semaphore::new(MAX_EXCHANGES),
         })
     }
 }

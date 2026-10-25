@@ -246,6 +246,10 @@ pub enum SyncError {
     KeeperDisputed,
     #[error("в истории не завершена операция")]
     InProgressOperation,
+    /// Обмен с удалённым этого vault уже идёт (фича 038): второй параллельный
+    /// занял бы ещё поток и делил бы с первым отмену.
+    #[error("обмен уже идёт")]
+    ExchangeRunning,
     #[error("есть неразрешённые конфликты получения")]
     PullConflictsPending,
     #[error("истории нет")]
@@ -308,6 +312,11 @@ pub struct ShellCapabilities {
     pub syncthing_status: bool,
     /// Секреты лежат в защищённом хранилище ОС, а не в хранилище браузера.
     pub secure_secrets: bool,
+    /// Ядро работает на сервере (фича 038): «это устройство» — сервер, и адреса
+    /// на нём (каталог, `http://localhost`) — файлы и службы сервера, в том
+    /// числе чужие vault. Такие адреса удалённого репозитория отклоняются.
+    #[serde(default)]
+    pub server: bool,
 }
 
 impl ShellCapabilities {
@@ -319,6 +328,7 @@ impl ShellCapabilities {
                 direct_remote: false,
                 syncthing_status: false,
                 secure_secrets: false,
+                server: false,
             }
         } else {
             Self {
@@ -326,7 +336,20 @@ impl ShellCapabilities {
                 direct_remote: true,
                 syncthing_status: true,
                 secure_secrets: true,
+                server: false,
             }
+        }
+    }
+
+    /// Возможности сервера (фича 038): обмен напрямую и только по HTTPS, без ssh
+    /// и Syncthing; секреты — в файле аккаунта на сервере.
+    pub fn server() -> Self {
+        Self {
+            ssh: false,
+            direct_remote: true,
+            syncthing_status: false,
+            secure_secrets: true,
+            server: true,
         }
     }
 }

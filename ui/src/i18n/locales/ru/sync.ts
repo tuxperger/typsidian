@@ -53,6 +53,8 @@ export const sync: Translation<typeof en> = {
     "Браузер не пустил запрос: этот сервер не разрешает обращения со страниц.",
   "sync.error.unsupportedScheme": (p) =>
     `Адреса вида «${p.scheme}» в этой сборке приложения недоступны.`,
+  "sync.error.internalRemote":
+    "Адрес ведёт во внутреннюю сеть сервера — такие репозитории сервер не использует, пока их не разрешит администратор.",
   "sync.error.invalidRemoteUrl": "Это не похоже на адрес репозитория.",
   "sync.error.remoteChanged": (p) =>
     `Адрес удалённого репозитория  на этом устройстве не подтверждён: он пришёл вместе с настройками vault. Проверьте его и подключите — до этого туда ничего не отправляется.`,
@@ -61,6 +63,7 @@ export const sync: Translation<typeof en> = {
     `Историю ведёт устройство «${p.device}». Снимок отсюда требует подтверждения.`,
   "sync.error.keeperDisputed":
     "Два устройства считают себя хранителем истории. Выберите хранителя, прежде чем делать снимки.",
+  "sync.error.exchangeRunning": "Обмен с удалённым репозиторием уже идёт — дождитесь его окончания.",
   "sync.error.inProgressOperation":
     "В истории не завершена операция, начатая вне приложения (слияние, перенос…). Сначала завершите или отмените её средствами git.",
   "sync.error.pullConflictsPending":
@@ -250,10 +253,13 @@ export const sync: Translation<typeof en> = {
   "sync.remote.url": "Адрес репозитория",
   "sync.remote.urlHintSsh": "https://… с токеном или ssh-адрес — используются ключи вашей системы.",
   "sync.remote.urlHintNoSsh": "https://… с токеном. Доступ по ssh-ключам в этой сборке приложения недоступен.",
+  "sync.remote.urlHintServer":
+    "https://… с токеном. На сервере доступны только внешние адреса HTTPS: ssh, папки и адреса внутренней сети сервера не используются.",
   "sync.remote.user": "Имя пользователя",
   "sync.remote.userHint": "Обычно не нужно: для известных хостингов приложение подставит его само.",
   "sync.remote.token": "Токен доступа",
   "sync.remote.tokenHintSecure": "Хранится в хранилище секретов системы, в vault не попадает.",
+  "sync.remote.tokenHintServer": "Хранится на сервере для вашего аккаунта, в vault и браузер не попадает.",
   "sync.remote.tokenHintBrowser":
     "Хранится в хранилище этого браузера, в vault не попадает. Защищённого хранилища у браузера нет: токен прочтёт любой, у кого есть доступ к этому профилю.",
   "sync.remote.proxy": "Адрес посредника",
@@ -290,6 +296,8 @@ export const sync: Translation<typeof en> = {
   "sync.syncthing.link.unauthorized": "Syncthing отклонил ключ API.",
   "sync.syncthing.link.unavailableInShell":
     "В этой сборке приложения состояние Syncthing не читается: его интерфейс не отвечает на обращения со страниц.",
+  "sync.syncthing.link.unavailableOnServer":
+    "Vault на сервере: Syncthing здесь не поддерживается. История и удалённый репозиторий работают.",
   "sync.syncthing.link.folderNotShared": "Syncthing отвечает, но этой папки в нём нет.",
   "sync.syncthing.link.certificateChanged":
     "Сертификат по этому адресу не тот, что был при первом подключении. Ключ API туда не отправляется. Если вы переустанавливали Syncthing, отключите чтение состояния и подключите заново.",
