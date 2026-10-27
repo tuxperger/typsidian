@@ -1494,6 +1494,11 @@ pub fn sync_ignore_restore(file: IgnoreFile, text: String) -> String {
 }
 
 #[tauri::command]
+pub fn sync_merge_annotate(request: AnnotateRequest) -> Annotated {
+    typsidian_host::commands::sync_merge_annotate(request)
+}
+
+#[tauri::command]
 pub async fn sync_ignore_save(
     home: State<'_, SyncHome>,
     vault: State<'_, Vault>,
@@ -1673,6 +1678,17 @@ pub async fn sync_resolve(
     resolution: Resolution,
 ) -> SyncAnswer<()> {
     typsidian_host::commands::sync_resolve(&home, &vault, &sync_state, id, resolution).await
+}
+
+#[tauri::command]
+pub async fn sync_resolve_many(
+    home: State<'_, SyncHome>,
+    vault: State<'_, Vault>,
+    sync_state: State<'_, SyncState>,
+    ids: Vec<String>,
+    how: BulkResolution,
+) -> SyncAnswer<BulkReport> {
+    typsidian_host::commands::sync_resolve_many(&home, &vault, &sync_state, ids, how).await
 }
 
 #[tauri::command]

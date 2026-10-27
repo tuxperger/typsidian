@@ -201,6 +201,11 @@ pub async fn invoke(
     }
     open.touch();
     Ok(match reply {
+        // Отчёт пачки решений несёт отказы отдельных файлов в успешном ответе
+        // (040, ревью безопасности) — их пути чистятся так же, как у отказа.
+        Ok(value) if command == "sync_resolve_many" => {
+            Json(without_server_paths(&state, value)).into_response()
+        }
         Ok(value) => Json(value).into_response(),
         Err(value) => (
             StatusCode::BAD_REQUEST,

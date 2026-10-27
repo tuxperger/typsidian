@@ -678,6 +678,7 @@ pub mod import_cases;
 pub mod install_cases;
 pub mod language_cases;
 pub mod links_cases;
+pub mod merge_view_cases;
 pub mod message_cases;
 pub mod note_panel_cases;
 pub mod package_cases;

@@ -213,6 +213,7 @@ pub const COMMANDS: &[&str] = &[
     "sync_ignore_open",
     "sync_ignore_check",
     "sync_ignore_restore",
+    "sync_merge_annotate",
     "sync_ignore_save",
     "sync_enable_history",
     "sync_changes",
@@ -230,6 +231,7 @@ pub const COMMANDS: &[&str] = &[
     "sync_abort_pull",
     "sync_conflicts",
     "sync_resolve",
+    "sync_resolve_many",
     "sync_set_keeper",
     "sync_clear_keeper",
     "sync_update_settings",
@@ -2491,6 +2493,17 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 Err(error) => Err(error),
             }
         }
+        "sync_merge_annotate" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                request: AnnotateRequest,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::sync_merge_annotate(a.request)),
+                Err(error) => Err(error),
+            }
+        }
         "sync_ignore_save" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -2747,6 +2760,27 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                         &host.sync_state,
                         a.id,
                         a.resolution,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "sync_resolve_many" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                ids: Vec<String>,
+                how: BulkResolution,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::sync_resolve_many(
+                        &host.sync_home,
+                        &host.vault,
+                        &host.sync_state,
+                        a.ids,
+                        a.how,
                     )
                     .await,
                 ),

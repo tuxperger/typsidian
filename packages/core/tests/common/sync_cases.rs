@@ -809,6 +809,179 @@ pub async fn a_copy_can_be_taken_or_kept_as_a_separate_file() {
     assert_eq!(f.text("n.typ").as_deref(), Some("снова их\n"));
 }
 
+// ── 040: пачка решений ─────────────────────────────────────────────────────
+
+const COPY_M: &str = "m.sync-conflict-20261003-120000-ABCDEFG.typ";
+
+pub async fn bulk_accept_clean_resolves_only_clean_copies() {
+    let mut f = fixture(&[("n.typ", BASE), ("m.typ", BASE)], None);
+    f.enable().await;
+    f.put("n.typ", &BASE.replace("Первый абзац.", "Первый — здесь."))
+        .await;
+    f.put(COPY, &BASE.replace("Третий абзац.", "Третий — там."))
+        .await;
+    f.put("m.typ", &BASE.replace("Второй абзац.", "Второй — A."))
+        .await;
+    f.put(COPY_M, &BASE.replace("Второй абзац.", "Второй — B."))
+        .await;
+    let ids: Vec<String> = f
+        .session
+        .conflicts(&f.vault)
+        .await
+        .into_iter()
+        .map(|conflict| conflict.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+
+    let ctx = f.ctx();
+    let report = f
+        .session
+        .resolve_many(
+            &mut f.vault,
+            &ctx,
+            &ids,
+            session::BulkResolution::AcceptClean,
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.resolved, vec![format!("st:{COPY}")]);
+    assert_eq!(report.skipped, vec![format!("st:{COPY_M}")]);
+    assert!(report.failed.is_empty() && !report.cancelled);
+    let merged = f.text("n.typ").unwrap();
+    assert!(merged.contains("здесь") && merged.contains("там"));
+    assert!(f.text(COPY).is_none());
+    assert!(f.text(COPY_M).is_some(), "спорная копия остаётся");
+}
+
+pub async fn bulk_take_theirs_replaces_files_and_removes_copies() {
+    let mut f = fixture(
+        &[
+            ("n.typ", "наше\n"),
+            (COPY, "их\n"),
+            ("m.typ", "м\n"),
+            (COPY_M, "мм\n"),
+        ],
+        None,
+    );
+    let ctx = f.ctx();
+    let ids = vec![format!("st:{COPY}"), format!("st:{COPY_M}")];
+    let report = f
+        .session
+        .resolve_many(
+            &mut f.vault,
+            &ctx,
+            &ids,
+            session::BulkResolution::TakeTheirs,
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.resolved, ids);
+    assert_eq!(f.text("n.typ").as_deref(), Some("их\n"));
+    assert_eq!(f.text("m.typ").as_deref(), Some("мм\n"));
+    assert!(f.text(COPY).is_none() && f.text(COPY_M).is_none());
+}
+
+pub async fn bulk_failure_of_one_does_not_stop_the_rest() {
+    let mut f = fixture(&[("n.typ", "наше\n"), (COPY, "их\n")], None);
+    let ctx = f.ctx();
+    let ids = vec![
+        "st:нет.sync-conflict-20261003-120000-ABCDEFG.typ".to_string(),
+        format!("st:{COPY}"),
+    ];
+    let report = f
+        .session
+        .resolve_many(&mut f.vault, &ctx, &ids, session::BulkResolution::KeepOurs)
+        .await
+        .unwrap();
+    assert_eq!(report.resolved, vec![format!("st:{COPY}")]);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(report.failed[0].id, ids[0]);
+    assert_eq!(report.failed[0].error, SyncError::ConflictNotFound);
+    assert_eq!(f.text("n.typ").as_deref(), Some("наше\n"));
+    assert!(f.text(COPY).is_none());
+}
+
+pub async fn bulk_resolving_the_last_pull_conflict_completes_the_pull() {
+    let remote = FakeGitEngine::new_remote();
+    let mut a = fixture(&[("n.typ", BASE), ("m.typ", BASE)], Some(remote.clone()));
+    a.enable().await;
+    a.connect().await;
+    a.push().await.unwrap();
+    let mut b = clone_of(&remote).await;
+    for path in ["n.typ", "m.typ"] {
+        a.put(path, &BASE.replace("Второй абзац.", "Второй — A."))
+            .await;
+        b.put(path, &BASE.replace("Второй абзац.", "Второй — B."))
+            .await;
+    }
+    a.snap("A").await;
+    a.push().await.unwrap();
+    b.snap("B").await;
+    assert_eq!(b.pull().await.unwrap().conflicts, 2);
+
+    let ids: Vec<String> = b
+        .session
+        .conflicts(&b.vault)
+        .await
+        .into_iter()
+        .map(|conflict| conflict.id)
+        .collect();
+    let ctx = b.ctx();
+    let report = b
+        .session
+        .resolve_many(&mut b.vault, &ctx, &ids, session::BulkResolution::KeepOurs)
+        .await
+        .unwrap();
+    assert_eq!(report.resolved.len(), 2);
+    assert!(b.session.conflicts(&b.vault).await.is_empty());
+    assert!(b.text("n.typ").unwrap().contains("Второй — B."));
+    b.push().await.unwrap();
+    a.pull().await.unwrap();
+    assert!(a.text("m.typ").unwrap().contains("Второй — B."));
+}
+
+pub async fn bulk_counts_repeats_once_and_refuses_huge_batches() {
+    let mut f = fixture(&[("n.typ", "наше\n"), (COPY, "их\n")], None);
+    let ctx = f.ctx();
+    let id = format!("st:{COPY}");
+    let report = f
+        .session
+        .resolve_many(
+            &mut f.vault,
+            &ctx,
+            &[id.clone(), id.clone()],
+            session::BulkResolution::KeepOurs,
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.resolved, vec![id]);
+    assert!(report.failed.is_empty());
+
+    let huge: Vec<String> = (0..10_001).map(|n| format!("st:{n}")).collect();
+    assert!(matches!(
+        f.session
+            .resolve_many(&mut f.vault, &ctx, &huge, session::BulkResolution::KeepOurs)
+            .await,
+        Err(SyncError::Io { .. })
+    ));
+}
+
+pub async fn conflicts_carry_line_marks() {
+    let mut f = fixture(&[("n.typ", BASE)], None);
+    f.enable().await;
+    f.put("n.typ", &BASE.replace("Первый абзац.", "Первый — здесь."))
+        .await;
+    f.put(COPY, &BASE.replace("Третий абзац.", "Третий — там."))
+        .await;
+    let conflicts = f.session.conflicts(&f.vault).await;
+    let view = conflicts[0].view.as_ref().expect("обе версии — текст");
+    use typsidian_core::sync::merge::LineOrigin::{Ours, Same, Theirs};
+    assert_eq!(view.ours[2], Ours);
+    assert_eq!(view.theirs[6], Theirs);
+    assert_eq!(view.ours[6], Same);
+    assert!(view.segments.is_some(), "общая версия — последний снимок");
+}
+
 pub async fn conflict_copies_never_become_notes() {
     use typsidian_core::vault::{classify, FileKind};
     assert_eq!(classify(Path::new(COPY)), FileKind::Other);

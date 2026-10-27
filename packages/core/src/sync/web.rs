@@ -334,6 +334,21 @@ impl WebSyncSession {
             .map_err(js_error)
     }
 
+    /// Пачка решений (фича 040).
+    #[wasm_bindgen(js_name = resolveMany)]
+    pub async fn resolve_many(
+        &mut self,
+        backend: &mut WebBackend,
+        ctx: SyncContext,
+        ids: Vec<String>,
+        how: session::BulkResolution,
+    ) -> Result<session::BulkReport, JsValue> {
+        self.inner
+            .resolve_many(backend, &ctx, &ids, how)
+            .await
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = setKeeper)]
     pub async fn set_keeper(
         &mut self,
@@ -455,6 +470,13 @@ pub fn sync_context(settings: crate::settings::Settings, vault: String, now: f64
 #[wasm_bindgen(js_name = ignoreCheck)]
 pub fn ignore_check(file: IgnoreFile, text: String) -> IgnoreCheck {
     ignore::check(file, &text)
+}
+
+/// Результат слияния с пометками строк (фича 040, research §3). Свободная
+/// функция: чистая, зовётся при смене выбора и по мере правки.
+#[wasm_bindgen(js_name = mergeAnnotate)]
+pub fn merge_annotate(request: super::merge::AnnotateRequest) -> super::merge::Annotated {
+    request.run()
 }
 
 /// Текст редактора с возвращённым блоком приложения (фича 012, FR-011).

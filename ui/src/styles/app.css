@@ -6509,22 +6509,6 @@ input.ts-sources__url:focus {
   min-width: 0;
 }
 
-.ts-sync-merge__column pre,
-.ts-sync-merge__pair pre {
-  margin: 0;
-  padding: var(--space-2);
-  max-height: 220px;
-  overflow: auto;
-  border: var(--border-width) solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--steel-950);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--steel-200);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .ts-sync-merge__hunks {
   display: flex;
   flex-direction: column;
@@ -6548,10 +6532,477 @@ input.ts-sources__url:focus {
   align-self: stretch;
 }
 
-.ts-sync-merge__result {
-  min-height: 200px;
-  resize: vertical;
-  white-space: pre;
+/* ── Подсветка сторон слияния (фича 040) ─────────────────────────────────
+ *
+ * Временный макет фичи (plan.md → Макет), research §6. Своя сторона — синяя,
+ * их — янтарная: пара различима при дейтеранопии и протанопии, а оранжевый
+ * остаётся за «выбрано». Середины — смесь 600 и 100 одного семейства, как у
+ * подсветки 024. Диалог тёмный в любой теме, поэтому роли в `[data-theme]` не
+ * переопределяются. Цвет не единственный признак: у строки есть знак стороны
+ * (`mergeMarks.ts`), у окна — легенда (FR-005). */
+.ts-sync-merge,
+.ts-sync-conflicts,
+.ts-sync-bulk-report {
+  --ts-merge-ours: color-mix(in srgb, var(--blue-600) 55%, var(--blue-100));
+  --ts-merge-ours-bg: color-mix(in srgb, var(--blue-600) 24%, transparent);
+  --ts-merge-theirs: color-mix(in srgb, var(--amber-600) 75%, var(--amber-100));
+  --ts-merge-theirs-bg: color-mix(in srgb, var(--amber-600) 18%, transparent);
+  --ts-merge-manual: var(--orange-400);
+  --ts-merge-manual-bg: color-mix(in srgb, var(--orange-500) 14%, transparent);
+}
+
+.ts-btn--sm {
+  height: 24px;
+  padding: 0 var(--space-2);
+  font-size: 11px;
+}
+
+.ts-merge-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--steel-400);
+}
+
+.ts-merge-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ts-merge-chip {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+}
+
+.ts-merge-chip.ts-merge-line--same {
+  border: var(--border-width) solid var(--steel-700);
+}
+
+.ts-merge-column__head,
+.ts-merge-result__head,
+.ts-merge-hunk__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-merge-column__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-500);
+}
+
+.ts-merge-code {
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-1) 0;
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--steel-200);
+}
+
+/* Строка: номер, знак стороны, текст. Тот же класс получает строка поля
+ * результата — там номер и знак рисует `::before` по `data-mark`. */
+.ts-merge-code .ts-merge-line {
+  display: grid;
+  grid-template-columns: auto 14px minmax(0, 1fr);
+  padding-right: var(--space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ts-merge-half .ts-merge-code .ts-merge-line {
+  grid-template-columns: 14px minmax(0, 1fr);
+  padding-left: var(--space-1);
+}
+
+.ts-merge-line__no {
+  min-width: 3ch;
+  padding: 0 var(--space-1);
+  text-align: right;
+  color: var(--steel-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-merge-line__mark {
+  text-align: center;
+  font-weight: var(--weight-semibold);
+}
+
+.ts-merge-line--ours {
+  background: var(--ts-merge-ours-bg);
+  box-shadow: inset 2px 0 0 var(--ts-merge-ours);
+  color: var(--ts-merge-ours);
+}
+
+.ts-merge-line--theirs {
+  background: var(--ts-merge-theirs-bg);
+  box-shadow: inset 2px 0 0 var(--ts-merge-theirs);
+  color: var(--ts-merge-theirs);
+}
+
+.ts-merge-line--both {
+  background: linear-gradient(90deg, var(--ts-merge-ours-bg), var(--ts-merge-theirs-bg));
+  box-shadow: inset 2px 0 0 var(--steel-300);
+  color: var(--steel-200);
+}
+
+.ts-merge-line--manual {
+  background: var(--ts-merge-manual-bg);
+  box-shadow: inset 2px 0 0 var(--ts-merge-manual);
+  color: var(--ts-merge-manual);
+}
+
+/* Цвет у строки — для знака и чипа; текст строки остаётся обычным. */
+.ts-merge-line .ts-merge-line__text,
+.ts-merge-result .cm-line {
+  color: var(--steel-200);
+}
+
+.ts-merge-disputed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ts-merge-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-950);
+}
+
+.ts-merge-bulk__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-300);
+}
+
+.ts-merge-bulk__note,
+.ts-merge-hunk__override {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--orange-400);
+}
+
+.ts-merge-bulk__note {
+  color: var(--steel-500);
+}
+
+.ts-merge-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-sync-merge__hunks .ts-merge-hunk {
+  align-items: stretch;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.ts-sync-merge__hunks .ts-merge-hunk[aria-current="true"] {
+  border-color: var(--orange-600);
+}
+
+.ts-merge-half {
+  position: relative;
+  min-width: 0;
+}
+
+.ts-merge-half .ts-merge-code {
+  max-height: 180px;
+}
+
+.ts-merge-half[data-picked="false"] .ts-merge-code {
+  opacity: 0.55;
+}
+
+.ts-merge-half[data-picked="true"] .ts-merge-code {
+  border-color: var(--orange-500);
+}
+
+.ts-merge-half__tag {
+  position: absolute;
+  top: -8px;
+  right: var(--space-2);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--orange-500);
+  color: var(--steel-950);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+}
+
+.ts-merge-half__empty {
+  margin: 0;
+  padding: var(--space-2);
+  border: var(--border-width) dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--steel-500);
+}
+
+/* Подтверждение — строкой в окне, без второго диалога (research §8). */
+.ts-merge-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid color-mix(in srgb, var(--amber-600) 55%, var(--steel-700));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--amber-600) 10%, var(--steel-900));
+  color: var(--steel-200);
+}
+
+.ts-merge-confirm p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+.ts-merge-confirm strong {
+  color: var(--amber-100);
+  font-weight: var(--weight-semibold);
+}
+
+/* Поле результата: CodeMirror, у строки — фон стороны и знак слева. */
+.ts-merge-result {
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--steel-950);
+}
+
+.ts-merge-result[data-readonly] {
+  opacity: 0.7;
+}
+
+.ts-merge-result .cm-editor {
+  max-height: 340px;
+  min-height: 160px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ts-merge-result .cm-editor.cm-focused {
+  outline: none;
+}
+
+.ts-merge-result .cm-scroller {
+  font-family: inherit;
+  line-height: 1.7;
+}
+
+.ts-merge-result .cm-content {
+  padding: var(--space-1) 0;
+  caret-color: var(--orange-400);
+}
+
+.ts-merge-result .cm-line.ts-merge-line {
+  position: relative;
+  padding: 0 var(--space-2) 0 22px;
+}
+
+.ts-merge-result .cm-line.ts-merge-line::before {
+  content: attr(data-mark);
+  position: absolute;
+  left: 0;
+  width: 18px;
+  text-align: center;
+  font-weight: var(--weight-semibold);
+}
+
+.ts-merge-line--ours.cm-line::before {
+  color: var(--ts-merge-ours);
+}
+
+.ts-merge-line--theirs.cm-line::before {
+  color: var(--ts-merge-theirs);
+}
+
+.ts-merge-line--manual.cm-line::before {
+  color: var(--ts-merge-manual);
+}
+
+/* Вкладки версий — только на узкой ширине (research §7, макет 3). */
+.ts-merge-tabs {
+  display: none;
+  border-bottom: var(--border-width) solid var(--border-default);
+}
+
+.ts-merge-tabs__item {
+  flex: 1 1 0;
+  height: 30px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--steel-400);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ts-merge-tabs__item[aria-selected="true"] {
+  color: var(--steel-100);
+  border-bottom-color: var(--orange-500);
+}
+
+@media (max-width: 860px) {
+  .ts-merge-tabs {
+    display: flex;
+  }
+
+  .ts-sync-merge__columns[data-columns] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ts-sync-merge__columns[data-tab="ours"] > :not([data-column="ours"]),
+  .ts-sync-merge__columns[data-tab="base"] > :not([data-column="base"]),
+  .ts-sync-merge__columns[data-tab="theirs"] > :not([data-column="theirs"]) {
+    display: none;
+  }
+
+  .ts-sync-merge__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Список конфликтов с отметками (фича 040, макет 2a–2c) ───────────── */
+
+.ts-sync-conflicts__all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--steel-400);
+}
+
+.ts-sync-conflicts__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.ts-sync-conflicts__row > input {
+  flex: 0 0 auto;
+  margin: 7px 0 0 var(--space-1);
+  accent-color: var(--orange-500);
+}
+
+.ts-sync-conflicts__row[data-checked] {
+  background: color-mix(in srgb, var(--orange-500) 8%, transparent);
+}
+
+.ts-sync-conflicts .ts-sync-list__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.ts-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ts-sync-badge[data-tone="clean"] {
+  background: color-mix(in srgb, var(--green-600) 25%, transparent);
+  color: var(--green-100);
+}
+
+.ts-sync-badge[data-tone="hunks"] {
+  background: var(--steel-800);
+  color: var(--steel-300);
+}
+
+.ts-sync-badge[data-tone="plain"] {
+  border: var(--border-width) solid var(--steel-700);
+  color: var(--steel-500);
+}
+
+.ts-sync-badge[data-tone="failed"] {
+  background: color-mix(in srgb, var(--red-600) 25%, transparent);
+  color: var(--red-100);
+}
+
+.ts-sync-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--steel-950);
+}
+
+.ts-sync-bulk__count {
+  margin-right: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-300);
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-sync-bulk-report {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid color-mix(in srgb, var(--red-600) 50%, var(--steel-700));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red-600) 8%, var(--steel-900));
+}
+
+.ts-sync-bulk-report p {
+  margin: 0;
+  color: var(--steel-200);
+}
+
+.ts-sync-bulk-report ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: 11px;
+  color: var(--steel-300);
+}
+
+.ts-sync-bulk-report code {
+  font-family: var(--font-mono);
+  color: var(--steel-100);
 }
 
 .ts-sync-history__body {

@@ -1956,6 +1956,11 @@ pub fn sync_ignore_restore(file: IgnoreFile, text: String) -> String {
     sync_ignore::restore_block(file, &text)
 }
 
+/// Сборка результата слияния с пометками строк (фича 040) — чистая функция.
+pub fn sync_merge_annotate(request: AnnotateRequest) -> Annotated {
+    request.run()
+}
+
 pub async fn sync_ignore_save(
     home: &SyncHome,
     vault: &Vault,
@@ -2164,6 +2169,19 @@ pub async fn sync_resolve(
 ) -> SyncAnswer<()> {
     with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
         .resolve(backend, &ctx, &id, resolution)
+        .await?))
+}
+
+/// Пачка решений по конфликтам (фича 040).
+pub async fn sync_resolve_many(
+    home: &SyncHome,
+    vault: &Vault,
+    sync_state: &SyncState,
+    ids: Vec<String>,
+    how: BulkResolution,
+) -> SyncAnswer<BulkReport> {
+    with_sync!(home, vault, sync_state, |backend, session, ctx| Ok(session
+        .resolve_many(backend, &ctx, &ids, how)
         .await?))
 }
 

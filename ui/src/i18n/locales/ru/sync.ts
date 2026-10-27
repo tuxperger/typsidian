@@ -277,6 +277,7 @@ export const sync: Translation<typeof en> = {
   "sync.progress.pull": "получение",
   "sync.progress.push": "отправка",
   "sync.progress.clone": "загрузка",
+  "sync.progress.resolve": "решение конфликтов",
   "sync.remote.notCounted": "с сервером ещё не сверялись",
   "sync.remote.counts": (p) => `↑${p.ahead} к отправке · ↓${p.behind} к получению`,
   "sync.remote.neverExchanged": "обмена ещё не было",
@@ -350,7 +351,6 @@ export const sync: Translation<typeof en> = {
   "sync.merge.takeBoth": "обе",
   "sync.merge.emptySide": "(пусто)",
   "sync.merge.result": "Результат",
-  "sync.merge.manualHint": "Исправлено вручную: повторный выбор стороны пересоберёт результат.",
   "sync.merge.wholeOnly": "Построчно эти версии не совместить — выберите одну целиком.",
   "sync.merge.keepBothPath": "Имя для второй версии",
   "sync.merge.copySuffix": " (копия)",
@@ -360,6 +360,65 @@ export const sync: Translation<typeof en> = {
   "sync.merge.saveMerged": "Сохранить результат",
   "sync.merge.abortPull": "Отменить получение",
   "sync.merge.abortPullHint": "Все файлы вернутся к состоянию до получения.",
+
+  "sync.merge.legend": "Обозначения",
+  "sync.merge.legendOurs": "ваши изменения",
+  "sync.merge.legendTheirs": "их изменения",
+  "sync.merge.legendBoth": "обе стороны",
+  "sync.merge.legendManual": "изменено вручную",
+  "sync.merge.legendSame": "без изменений",
+  "sync.merge.changedLines": (p) =>
+    ruN(p.count, "# изменённая строка", "# изменённые строки", "# изменённых строк"),
+  "sync.merge.inResult": "в результате",
+  "sync.merge.fragment": (p) => `Участок ${p.index}`,
+  "sync.merge.overridden": "выбрано иначе, чем «везде»",
+  "sync.merge.allGroup": "Выбрать во всех участках",
+  "sync.merge.allOurs": "везде своё",
+  "sync.merge.allTheirs": "везде их",
+  "sync.merge.allBoth": "везде обе",
+  "sync.merge.overriddenCount": (p) =>
+    ruN(p.count, "# участок выбран иначе", "# участка выбраны иначе", "# участков выбраны иначе"),
+  "sync.merge.position": (p) => `участок ${p.index} из ${p.total}`,
+  "sync.merge.previous": "Предыдущий участок",
+  "sync.merge.next": "Следующий участок",
+  "sync.merge.resultHint": "можно править прямо здесь; правленые строки помечаются ✎",
+  "sync.merge.manualCount": (p) =>
+    `изменено вручную: ${ruN(p.count, "# строка", "# строки", "# строк")}`,
+  "sync.merge.replaceTitle": "Заменить ручную правку?",
+  "sync.merge.replaceText": (p) =>
+    `В результате ${ruN(p.count, "изменена # строка", "изменены # строки", "изменены # строк")}. Выбор во всех участках соберёт результат заново, и эти правки пропадут.`,
+  "sync.merge.keepEdit": "Оставить правку",
+  "sync.merge.replace": "Заменить",
+
+  "sync.conflicts.selectAll": "выбрать все",
+  "sync.conflicts.select": (p) => `Отметить ${p.path}`,
+  "sync.conflicts.open": "открыть",
+  "sync.conflicts.disputed": (p) => ruN(p.count, "# спорный", "# спорных", "# спорных"),
+  "sync.conflicts.binary": "двоичный",
+  "sync.conflicts.missing": "нет одной из версий",
+  "sync.conflicts.selected": (p) => `отмечено ${p.count} из ${p.total}`,
+  "sync.conflicts.keepOurs": "Оставить свои",
+  "sync.conflicts.takeTheirs": "Взять их",
+  "sync.conflicts.cleanCount": (p) => `без спорных участков: ${p.count}`,
+  "sync.conflicts.acceptClean": "Принять совмещённые",
+  "sync.conflicts.confirmKeepOurs": (p) =>
+    `Оставить свои версии для ${ruN(p.count, "# файла", "# файлов", "# файлов")}?`,
+  "sync.conflicts.confirmKeepOursText": "Их версии этих файлов будут отброшены.",
+  "sync.conflicts.confirmTakeTheirs": (p) =>
+    `Взять их версии для ${ruN(p.count, "# файла", "# файлов", "# файлов")}?`,
+  "sync.conflicts.confirmTakeTheirsText":
+    "Ваши версии этих файлов будут заменены. Двоичные файлы заменяются целиком.",
+  "sync.conflicts.confirmAcceptClean": (p) =>
+    `Сохранить совмещённый текст для ${ruN(p.count, "# файла", "# файлов", "# файлов")}?`,
+  "sync.conflicts.confirmAcceptCleanText": "Файлы со спорными участками останутся в списке.",
+  "sync.conflicts.confirmAction": (p) => `${p.action} · ${p.count}`,
+  "sync.conflicts.reportTitle": (p) => `Решено ${p.done} из ${p.total}.`,
+  "sync.conflicts.reportFailed": (p) =>
+    `${ruN(p.count, "# файл остался", "# файла остались", "# файлов остались")} в списке:`,
+  "sync.conflicts.reportSkipped": (p) =>
+    `${ruN(p.count, "# файл не тронут", "# файла не тронуты", "# файлов не тронуты")}.`,
+  "sync.conflicts.reportCancelled": "Прервано: остальные файлы не тронуты.",
+  "sync.conflicts.failed": "не решён",
 
   "sync.keeper.title": "Хранитель истории",
   "sync.keeper.unassigned": "Хранитель не назначен.",

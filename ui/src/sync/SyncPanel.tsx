@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  BulkReport,
+  BulkResolution,
   Change,
   Conflict,
   FileDiff,
@@ -12,13 +14,14 @@ import type {
   SyncOverview,
 } from "../wasm-core/typsidian_core.js";
 import { DiffView } from "../editor/DiffView.js";
-import { useI18n, type I18n } from "../i18n/index.js";
+import { useI18n, type I18n, type Translate } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import {
   describeChange,
   describeFolderState,
   describeInProgress,
   describeLink,
+  describeProgress,
   describeSyncError,
 } from "./describe.js";
 import { EnableHistoryWizard } from "./EnableHistoryWizard.js";
@@ -994,6 +997,24 @@ function SyncthingSection({
 
 // ── Конфликты ──────────────────────────────────────────────────────────────
 
+/** Что про конфликт видно сразу, бейджем в строке (фича 040, макет 2a). */
+function conflictBadge(
+  t: Translate,
+  conflict: Conflict,
+): { text: string; tone: "clean" | "hunks" | "plain" } | null {
+  if (conflict.ours.kind === "Binary" || conflict.theirs.kind === "Binary") {
+    return { text: t("sync.conflicts.binary"), tone: "plain" };
+  }
+  if (conflict.ours.kind === "Missing" || conflict.theirs.kind === "Missing") {
+    return { text: t("sync.conflicts.missing"), tone: "plain" };
+  }
+  const merge = conflict.auto_merge;
+  if (merge === undefined || merge === null) return null;
+  if (merge.kind === "Clean") return { text: t("sync.conflicts.autoClean"), tone: "clean" };
+  const count = merge.hunks.filter((hunk) => hunk.kind === "Conflict").length;
+  return { text: t("sync.conflicts.disputed", { count }), tone: "hunks" };
+}
+
 function ConflictsSection({
   sync,
   overview,
@@ -1007,14 +1028,28 @@ function ConflictsSection({
 }): React.JSX.Element {
   const { t } = useI18n();
   const { client, revision } = sync;
+  const busy = sync.activity !== null;
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  // Пачка, ждущая подтверждения (FR-012).
+  const [confirm, setConfirm] = useState<{ how: BulkResolution; ids: string[] } | null>(null);
+  const [report, setReport] = useState<{ report: BulkReport; paths: Map<string, string> } | null>(
+    null,
+  );
+  const [reload, setReload] = useState(0);
+  // Идёт пачка: ход и «Прервать» — здесь же (принцип X).
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const next = await client.conflicts();
-        if (!cancelled) setConflicts(next);
+        if (cancelled) return;
+        setConflicts(next);
+        // Исчезнувшие записи отметку теряют, новые не отмечаются сами.
+        const present = new Set(next.map((conflict) => conflict.id));
+        setSelected((old) => new Set([...old].filter((id) => present.has(id))));
       } catch {
         if (!cancelled) setConflicts([]);
       }
@@ -1022,7 +1057,79 @@ function ConflictsSection({
     return () => {
       cancelled = true;
     };
-  }, [client, revision]);
+  }, [client, revision, reload]);
+
+  const cleanIds = conflicts
+    .filter((conflict) => conflict.auto_merge?.kind === "Clean")
+    .map((conflict) => conflict.id);
+  const allSelected = conflicts.length > 0 && selected.size === conflicts.length;
+
+  const toggle = (id: string): void => {
+    setSelected((old) => {
+      const next = new Set(old);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const run = async (how: BulkResolution, ids: string[]): Promise<void> => {
+    setConfirm(null);
+    const paths = new Map(conflicts.map((conflict) => [conflict.id, conflict.path]));
+    setBulkRunning(true);
+    const outcome = await sync.run("resolve", () => client.resolveMany(ids, how));
+    setBulkRunning(false);
+    if (outcome !== undefined) {
+      const resolved = new Set(outcome.resolved);
+      setSelected((old) => new Set([...old].filter((id) => !resolved.has(id))));
+      setReport({ report: outcome, paths });
+    }
+    setReload((value) => value + 1);
+  };
+
+  const actionLabel = (how: BulkResolution): string => {
+    switch (how.kind) {
+      case "KeepOurs":
+        return t("sync.conflicts.keepOurs");
+      case "TakeTheirs":
+        return t("sync.conflicts.takeTheirs");
+      case "AcceptClean":
+        return t("sync.conflicts.acceptClean");
+      default: {
+        const exhaustive: never = how;
+        return exhaustive;
+      }
+    }
+  };
+  const confirmText = (how: BulkResolution, count: number): [string, string] => {
+    switch (how.kind) {
+      case "KeepOurs":
+        return [
+          t("sync.conflicts.confirmKeepOurs", { count }),
+          t("sync.conflicts.confirmKeepOursText"),
+        ];
+      case "TakeTheirs":
+        return [
+          t("sync.conflicts.confirmTakeTheirs", { count }),
+          t("sync.conflicts.confirmTakeTheirsText"),
+        ];
+      case "AcceptClean":
+        return [
+          t("sync.conflicts.confirmAcceptClean", { count }),
+          t("sync.conflicts.confirmAcceptCleanText"),
+        ];
+      default: {
+        const exhaustive: never = how;
+        return exhaustive;
+      }
+    }
+  };
+
+  const shownReport =
+    report !== null &&
+    (report.report.failed.length > 0 || report.report.skipped.length > 0 || report.report.cancelled)
+      ? report
+      : null;
 
   return (
     <section className="ts-sync__section" aria-label={t("sync.conflicts.title")} ref={sectionRef}>
@@ -1030,28 +1137,196 @@ function ConflictsSection({
         {t("sync.conflicts.title")}
         {overview.conflicts > 0 && ` · ${overview.conflicts}`}
       </h2>
+
+      {shownReport !== null && (
+        <div className="ts-sync-bulk-report" role="status">
+          <p>
+            {t("sync.conflicts.reportTitle", {
+              done: shownReport.report.resolved.length,
+              total:
+                shownReport.report.resolved.length +
+                shownReport.report.failed.length +
+                shownReport.report.skipped.length,
+            })}{" "}
+            {shownReport.report.cancelled && t("sync.conflicts.reportCancelled")}
+            {!shownReport.report.cancelled &&
+              shownReport.report.skipped.length > 0 &&
+              t("sync.conflicts.reportSkipped", { count: shownReport.report.skipped.length })}
+          </p>
+          {shownReport.report.failed.length > 0 && (
+            <>
+              <p>{t("sync.conflicts.reportFailed", { count: shownReport.report.failed.length })}</p>
+              <ul>
+                {shownReport.report.failed.map((failure) => (
+                  <li key={failure.id}>
+                    <code>{failure.path || shownReport.paths.get(failure.id) || failure.id}</code>
+                    {" — "}
+                    {describeSyncError(t, failure.error)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <button
+            type="button"
+            className="ts-btn ts-btn--ghost ts-btn--sm"
+            onClick={() => setReport(null)}
+          >
+            {t("common.close")}
+          </button>
+        </div>
+      )}
+
       {conflicts.length === 0 ? (
         <p className="ts-dialog__hint">{t("sync.conflicts.none")}</p>
       ) : (
-        <ul className="ts-sync-list">
-          {conflicts.map((conflict) => (
-            <li key={conflict.id}>
+        <>
+          <label className="ts-sync-conflicts__all">
+            <input
+              type="checkbox"
+              id="ts-sync-conflicts-all"
+              checked={allSelected}
+              ref={(node) => {
+                if (node !== null) node.indeterminate = selected.size > 0 && !allSelected;
+              }}
+              disabled={busy}
+              onChange={() =>
+                setSelected(
+                  allSelected ? new Set() : new Set(conflicts.map((conflict) => conflict.id)),
+                )
+              }
+            />
+            {t("sync.conflicts.selectAll")}
+          </label>
+          <ul className="ts-sync-list ts-sync-conflicts">
+            {conflicts.map((conflict) => {
+              const badge = conflictBadge(t, conflict);
+              const failed =
+                report?.report.failed.some((failure) => failure.id === conflict.id) ?? false;
+              const checked = selected.has(conflict.id);
+              return (
+                <li
+                  key={conflict.id}
+                  className="ts-sync-conflicts__row"
+                  data-checked={checked ? "true" : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={busy}
+                    aria-label={t("sync.conflicts.select", { path: conflict.path })}
+                    onChange={() => toggle(conflict.id)}
+                  />
+                  <button
+                    type="button"
+                    className="ts-sync-list__row"
+                    disabled={busy}
+                    onClick={() => onMerge(conflict)}
+                  >
+                    <span className="ts-sync-list__title">{conflict.path}</span>
+                    <span className="ts-sync-list__meta">
+                      {conflict.source.kind === "Pull"
+                        ? t("sync.conflicts.fromPull")
+                        : t("sync.conflicts.fromSyncthing", { device: conflict.source.device })}
+                      {badge !== null && (
+                        <span className="ts-sync-badge" data-tone={badge.tone}>
+                          {badge.text}
+                        </span>
+                      )}
+                      {failed && (
+                        <span className="ts-sync-badge" data-tone="failed">
+                          {t("sync.conflicts.failed")}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {bulkRunning ? (
+            <div className="ts-sync-bulk" role="status">
+              <span className="ts-sync-bulk__count">
+                {sync.progress !== null
+                  ? describeProgress(t, sync.progress)
+                  : t("sync.progress.resolve")}
+              </span>
+              <button type="button" className="ts-btn ts-btn--sm" onClick={sync.cancel}>
+                {t("sync.cancelOperation")}
+              </button>
+            </div>
+          ) : confirm !== null ? (
+            <div className="ts-merge-confirm" role="alertdialog">
+              <p>
+                <strong>{confirmText(confirm.how, confirm.ids.length)[0]}</strong>{" "}
+                {confirmText(confirm.how, confirm.ids.length)[1]}
+              </p>
               <button
                 type="button"
-                className="ts-sync-list__row"
-                onClick={() => onMerge(conflict)}
+                className="ts-btn ts-btn--sm"
+                onClick={() => setConfirm(null)}
               >
-                <span className="ts-sync-list__title">{conflict.path}</span>
-                <span className="ts-sync-list__meta">
-                  {conflict.source.kind === "Pull"
-                    ? t("sync.conflicts.fromPull")
-                    : t("sync.conflicts.fromSyncthing", { device: conflict.source.device })}
-                  {conflict.auto_merge?.kind === "Clean" && ` · ${t("sync.conflicts.autoClean")}`}
-                </span>
+                {t("common.cancel")}
               </button>
-            </li>
-          ))}
-        </ul>
+              <button
+                type="button"
+                className="ts-btn ts-btn--accent ts-btn--sm"
+                disabled={busy}
+                onClick={() => void run(confirm.how, confirm.ids)}
+              >
+                {t("sync.conflicts.confirmAction", {
+                  action: actionLabel(confirm.how),
+                  count: confirm.ids.length,
+                })}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="ts-sync-bulk" role="toolbar" aria-label={t("sync.conflicts.title")}>
+                <span className="ts-sync-bulk__count">
+                  {t("sync.conflicts.selected", {
+                    count: selected.size,
+                    total: conflicts.length,
+                  })}
+                </span>
+                {(["KeepOurs", "TakeTheirs"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="ts-btn ts-btn--sm"
+                    disabled={busy || selected.size === 0}
+                    onClick={() =>
+                      setConfirm({
+                        how: { kind },
+                        ids: conflicts
+                          .map((conflict) => conflict.id)
+                          .filter((id) => selected.has(id)),
+                      })
+                    }
+                  >
+                    {actionLabel({ kind })}
+                  </button>
+                ))}
+              </div>
+              {cleanIds.length > 0 && (
+                <div className="ts-sync-bulk">
+                  <span className="ts-sync-bulk__count">
+                    {t("sync.conflicts.cleanCount", { count: cleanIds.length })}
+                  </span>
+                  <button
+                    type="button"
+                    className="ts-btn ts-btn--accent ts-btn--sm"
+                    disabled={busy}
+                    onClick={() => setConfirm({ how: { kind: "AcceptClean" }, ids: cleanIds })}
+                  >
+                    {t("sync.conflicts.acceptClean")}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
     </section>
   );

@@ -1,6 +1,8 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { invoke as tauriInvoke } from "../tauri-invoke.js";
 import type {
+  Annotated,
+  BulkReport,
   Change,
   Conflict,
   Content,
@@ -139,6 +141,8 @@ function tauriSyncClient(vaultId: string, transport: ShellTransport, server: boo
     abortPull: () => invoke<void>("sync_abort_pull"),
     conflicts: () => invoke<Conflict[]>("sync_conflicts"),
     resolve: (id, resolution) => invoke<void>("sync_resolve", { id, resolution }),
+    resolveMany: (ids, how) => invoke<BulkReport>("sync_resolve_many", { ids, how }),
+    mergeAnnotate: (request) => invoke<Annotated>("sync_merge_annotate", { request }),
 
     setKeeper: () => invoke<Keeper>("sync_set_keeper"),
     clearKeeper: () => invoke<void>("sync_clear_keeper"),

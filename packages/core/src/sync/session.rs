@@ -46,6 +46,8 @@ const HISTORY_SCAN_LIMIT: u32 = 2_000;
 const LOG_CHUNK: u32 = 100;
 /// Сколько изменённых заметок перечисляется в автоматическом сообщении.
 const AUTO_MESSAGE_NAMES: usize = 5;
+/// Сколько конфликтов решается одной пачкой (040, ревью безопасности).
+const BULK_LIMIT: usize = 10_000;
 
 /// Конфликт для показа (data-model «Conflict»).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +64,9 @@ pub struct Conflict {
     /// Общая версия из истории (FR-016, FR-034); `None` — истории у файла нет.
     pub base: Option<Content>,
     pub auto_merge: Option<MergeResult>,
+    /// Пометки строк и участки с происхождением (фича 040); `None` — одна из
+    /// версий не текст.
+    pub view: Option<merge::MergeView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +99,42 @@ pub enum Resolution {
     KeepBothAsFile {
         new_path: String,
     },
+}
+
+/// Решение для пачки конфликтов (фича 040, FR-011). «Обе» и «отдельным
+/// файлом» в пачку не входят (FR-014).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(tag = "kind")]
+pub enum BulkResolution {
+    KeepOurs,
+    TakeTheirs,
+    /// Только конфликты, совместившиеся без спорных участков; остальные — в
+    /// `skipped`.
+    AcceptClean,
+}
+
+/// Итог пачки: каждый id запроса — ровно в одном списке.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct BulkReport {
+    pub resolved: Vec<String>,
+    /// Не тронуты: нечистые при `AcceptClean` или оставшиеся после отмены.
+    pub skipped: Vec<String>,
+    pub failed: Vec<BulkFailure>,
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct BulkFailure {
+    pub id: String,
+    /// Файл, о котором спор; для неизвестного id — пусто.
+    pub path: String,
+    pub error: SyncError,
 }
 
 /// Итог получения (FR-016).
@@ -1541,6 +1582,12 @@ impl<E: GitEngine> SyncSession<E> {
     // ── Конфликты (US3, US4, US5) ──────────────────────────────────────────
 
     pub async fn conflicts<B: VaultBackend>(&self, backend: &B) -> Vec<Conflict> {
+        self.conflict_list(backend, true).await
+    }
+
+    /// Список конфликтов; без `with_view` — без пометок строк: пачке решений
+    /// они не нужны, а построчное сравнение не бесплатно (040, ревью).
+    async fn conflict_list<B: VaultBackend>(&self, backend: &B, with_view: bool) -> Vec<Conflict> {
         let mut list = Vec::new();
         if let Some(pull) = &self.pull {
             for (path, conflict) in &pull.conflicts {
@@ -1553,6 +1600,7 @@ impl<E: GitEngine> SyncSession<E> {
                     conflict.ours.clone(),
                     conflict.theirs.clone(),
                     Some(conflict.base.clone()),
+                    with_view,
                 ));
             }
         }
@@ -1591,6 +1639,7 @@ impl<E: GitEngine> SyncSession<E> {
                 ours,
                 theirs,
                 base,
+                with_view,
             ));
         }
         list
@@ -1647,6 +1696,95 @@ impl<E: GitEngine> SyncSession<E> {
         });
         self.events.push(SyncEvent::OverviewChanged);
         Ok(())
+    }
+
+    /// Пачка решений (фича 040, FR-013, research §4): каждый конфликт решается
+    /// тем же `resolve`, что одиночный; сбой одного не прерывает остальные.
+    /// Отмена проверяется между файлами (принцип X) — файл решается целиком.
+    pub async fn resolve_many<B: VaultBackend>(
+        &mut self,
+        backend: &mut B,
+        ctx: &SyncContext,
+        ids: &[String],
+        how: BulkResolution,
+    ) -> Result<BulkReport, SyncError> {
+        // Повторы — один раз; длина пачки ограничена (040, ревью безопасности):
+        // список id приходит от клиента сервера.
+        let mut seen = BTreeSet::new();
+        let ids: Vec<&String> = ids.iter().filter(|id| seen.insert(id.as_str())).collect();
+        if ids.len() > BULK_LIMIT {
+            return Err(SyncError::Io {
+                message: format!("в одной пачке больше {BULK_LIMIT} конфликтов"),
+            });
+        }
+        let cancel = self.fresh_cancel();
+        let known: BTreeMap<String, Conflict> = self
+            .conflict_list(backend, false)
+            .await
+            .into_iter()
+            .map(|conflict| (conflict.id.clone(), conflict))
+            .collect();
+        let total = ids.len() as u32;
+        let mut report = BulkReport::default();
+        for (index, &id) in ids.iter().enumerate() {
+            if cancel.is_cancelled() {
+                report.cancelled = true;
+                report
+                    .skipped
+                    .extend(ids[index..].iter().map(|&id| id.clone()));
+                break;
+            }
+            self.progress(Operation::Resolve, index as u32, total);
+            let Some(conflict) = known.get(id) else {
+                report.failed.push(BulkFailure {
+                    id: id.clone(),
+                    path: String::new(),
+                    error: SyncError::ConflictNotFound,
+                });
+                continue;
+            };
+            let resolution = match how {
+                BulkResolution::KeepOurs => Resolution::KeepOurs,
+                BulkResolution::TakeTheirs => Resolution::TakeTheirs,
+                BulkResolution::AcceptClean => match &conflict.auto_merge {
+                    // Syncthing мог доставить новую версию, пока шла пачка:
+                    // совмещённое из прежних версий её бы молча затёрло.
+                    Some(MergeResult::Clean { text })
+                        if self.unchanged_since_listed(backend, conflict).await =>
+                    {
+                        Resolution::Merged { text: text.clone() }
+                    }
+                    _ => {
+                        report.skipped.push(id.clone());
+                        continue;
+                    }
+                },
+            };
+            match self.resolve(backend, ctx, id, resolution).await {
+                Ok(()) => report.resolved.push(id.clone()),
+                Err(error) => report.failed.push(BulkFailure {
+                    id: id.clone(),
+                    path: conflict.path.clone(),
+                    error,
+                }),
+            }
+        }
+        self.progress(Operation::Resolve, total, total);
+        Ok(report)
+    }
+
+    /// Файлы конфликтной копии те же, что были, когда строился список.
+    /// Конфликты получения целиком под управлением приложения — для них да.
+    async fn unchanged_since_listed<B: VaultBackend>(
+        &self,
+        backend: &B,
+        conflict: &Conflict,
+    ) -> bool {
+        let ConflictSource::Syncthing { copy_path, .. } = &conflict.source else {
+            return true;
+        };
+        Content::from_bytes(read_bytes(backend, &conflict.path).await) == conflict.ours
+            && Content::from_bytes(read_bytes(backend, copy_path).await) == conflict.theirs
     }
 
     async fn resolve_pull<B: VaultBackend>(
@@ -2179,6 +2317,7 @@ fn build_conflict(
     ours: Option<Vec<u8>>,
     theirs: Option<Vec<u8>>,
     base: Option<Option<Vec<u8>>>,
+    with_view: bool,
 ) -> Conflict {
     let ours_content = Content::from_bytes(ours);
     let theirs_content = Content::from_bytes(theirs);
@@ -2195,6 +2334,17 @@ fn build_conflict(
         (Some(ours), Some(theirs), Some(base)) => Some(merge::merge3(base, ours, theirs)),
         _ => None,
     };
+    let view = match (ours_content.text(), theirs_content.text()) {
+        (Some(ours), Some(theirs)) if with_view => {
+            let base = base_content.as_ref().and_then(|base| match base {
+                Content::Text { text } => Some(text.as_str()),
+                Content::Missing => Some(""),
+                Content::Binary { .. } => None,
+            });
+            merge::merge_view(base, ours, theirs)
+        }
+        _ => None,
+    };
     Conflict {
         id,
         source,
@@ -2203,6 +2353,7 @@ fn build_conflict(
         theirs: theirs_content,
         base: base_content,
         auto_merge,
+        view,
     }
 }
 

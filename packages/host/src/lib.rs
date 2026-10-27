@@ -58,8 +58,9 @@ pub mod prelude {
         self as sync_ignore, IgnoreCheck, IgnoreDocument, IgnoreFile, IgnoreReport,
         IgnoreSaveOutcome, IgnoreSaveRequest,
     };
+    pub use typsidian_core::sync::merge::{AnnotateRequest, Annotated};
     pub use typsidian_core::sync::session::{
-        Conflict, Credentials, PullOutcome, Resolution, TickOutcome,
+        BulkReport, BulkResolution, Conflict, Credentials, PullOutcome, Resolution, TickOutcome,
     };
     pub use typsidian_core::sync::settings::VaultSyncSettingsPatch;
     pub use typsidian_core::sync::{

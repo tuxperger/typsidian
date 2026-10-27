@@ -5,6 +5,7 @@ import {
   ensureDeviceChange,
   ignoreCheck,
   ignoreRestore,
+  mergeAnnotate,
   syncContext,
   type DeviceVaultSync,
   type SyncContext,
@@ -211,6 +212,8 @@ export async function webSyncClient(
     conflicts: () => plain(() => session.conflicts(backend)),
     resolve: (id, resolution) =>
       withContext((ctx) => session.resolve(backend, ctx, id, resolution)),
+    resolveMany: (ids, how) => withContext((ctx) => session.resolveMany(backend, ctx, ids, how)),
+    mergeAnnotate: async (request) => mergeAnnotate(request),
 
     setKeeper: () => withContext((ctx) => session.setKeeper(backend, ctx)),
     clearKeeper: () => plain(() => session.clearKeeper(backend)),

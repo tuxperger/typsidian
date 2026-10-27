@@ -254,3 +254,33 @@ async fn a_note_saved_during_the_network_step_is_merged() {
 async fn progress_is_readable_while_the_operation_runs() {
     cases::progress_is_readable_while_the_operation_runs().await;
 }
+
+#[wasm_bindgen_test]
+async fn bulk_accept_clean_resolves_only_clean_copies() {
+    cases::bulk_accept_clean_resolves_only_clean_copies().await;
+}
+
+#[wasm_bindgen_test]
+async fn bulk_take_theirs_replaces_files_and_removes_copies() {
+    cases::bulk_take_theirs_replaces_files_and_removes_copies().await;
+}
+
+#[wasm_bindgen_test]
+async fn bulk_failure_of_one_does_not_stop_the_rest() {
+    cases::bulk_failure_of_one_does_not_stop_the_rest().await;
+}
+
+#[wasm_bindgen_test]
+async fn bulk_resolving_the_last_pull_conflict_completes_the_pull() {
+    cases::bulk_resolving_the_last_pull_conflict_completes_the_pull().await;
+}
+
+#[wasm_bindgen_test]
+async fn conflicts_carry_line_marks() {
+    cases::conflicts_carry_line_marks().await;
+}
+
+#[wasm_bindgen_test]
+async fn bulk_counts_repeats_once_and_refuses_huge_batches() {
+    cases::bulk_counts_repeats_once_and_refuses_huge_batches().await;
+}

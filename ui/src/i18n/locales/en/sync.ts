@@ -280,6 +280,7 @@ export const sync = {
   "sync.progress.pull": "receiving",
   "sync.progress.push": "sending",
   "sync.progress.clone": "downloading",
+  "sync.progress.resolve": "resolving conflicts",
   "sync.remote.notCounted": "not compared with the server yet",
   "sync.remote.counts": (p: { ahead: number; behind: number }) =>
     `↑${p.ahead} to push · ↓${p.behind} to pull`,
@@ -355,7 +356,6 @@ export const sync = {
   "sync.merge.takeBoth": "both",
   "sync.merge.emptySide": "(nothing)",
   "sync.merge.result": "Result",
-  "sync.merge.manualHint": "Edited by hand: choosing a side again will rebuild the result.",
   "sync.merge.wholeOnly": "These versions cannot be merged line by line — choose one of them entirely.",
   "sync.merge.keepBothPath": "Name for the second version",
   "sync.merge.copySuffix": " (copy)",
@@ -365,6 +365,70 @@ export const sync = {
   "sync.merge.saveMerged": "Save the result",
   "sync.merge.abortPull": "Cancel the pull",
   "sync.merge.abortPullHint": "All files return to how they were before the pull.",
+
+  "sync.merge.legend": "Legend",
+  "sync.merge.legendOurs": "your changes",
+  "sync.merge.legendTheirs": "their changes",
+  "sync.merge.legendBoth": "both sides",
+  "sync.merge.legendManual": "edited by hand",
+  "sync.merge.legendSame": "unchanged",
+  "sync.merge.changedLines": (p: { count: number }) =>
+    enN(p.count, "# changed line", "# changed lines"),
+  "sync.merge.inResult": "in the result",
+  "sync.merge.fragment": (p: { index: number }) => `Fragment ${p.index}`,
+  "sync.merge.overridden": "chosen differently from “everywhere”",
+  "sync.merge.allGroup": "Choose in every fragment",
+  "sync.merge.allOurs": "yours everywhere",
+  "sync.merge.allTheirs": "theirs everywhere",
+  "sync.merge.allBoth": "both everywhere",
+  "sync.merge.overriddenCount": (p: { count: number }) =>
+    enN(p.count, "# fragment chosen differently", "# fragments chosen differently"),
+  "sync.merge.position": (p: { index: number; total: number }) =>
+    `fragment ${p.index} of ${p.total}`,
+  "sync.merge.previous": "Previous fragment",
+  "sync.merge.next": "Next fragment",
+  "sync.merge.resultHint": "edit right here; edited lines are marked ✎",
+  "sync.merge.manualCount": (p: { count: number }) =>
+    `edited by hand: ${enN(p.count, "# line", "# lines")}`,
+  "sync.merge.replaceTitle": "Replace the manual edit?",
+  "sync.merge.replaceText": (p: { count: number }) =>
+    `${enN(p.count, "# line", "# lines")} of the result were edited. Choosing a side for every fragment rebuilds the result, and these edits are lost.`,
+  "sync.merge.keepEdit": "Keep the edit",
+  "sync.merge.replace": "Replace",
+
+  "sync.conflicts.selectAll": "select all",
+  "sync.conflicts.select": (p: { path: string }) => `Select ${p.path}`,
+  "sync.conflicts.open": "open",
+  "sync.conflicts.disputed": (p: { count: number }) => enN(p.count, "# disputed", "# disputed"),
+  "sync.conflicts.binary": "binary",
+  "sync.conflicts.missing": "one version is missing",
+  "sync.conflicts.selected": (p: { count: number; total: number }) =>
+    `${p.count} of ${p.total} selected`,
+  "sync.conflicts.keepOurs": "Keep yours",
+  "sync.conflicts.takeTheirs": "Take theirs",
+  "sync.conflicts.cleanCount": (p: { count: number }) =>
+    `without disputed fragments: ${p.count}`,
+  "sync.conflicts.acceptClean": "Accept merged",
+  "sync.conflicts.confirmKeepOurs": (p: { count: number }) =>
+    `Keep your versions of ${enN(p.count, "# file", "# files")}?`,
+  "sync.conflicts.confirmKeepOursText": "Their versions of these files will be discarded.",
+  "sync.conflicts.confirmTakeTheirs": (p: { count: number }) =>
+    `Take their versions of ${enN(p.count, "# file", "# files")}?`,
+  "sync.conflicts.confirmTakeTheirsText":
+    "Your versions of these files will be replaced. Binary files are replaced entirely.",
+  "sync.conflicts.confirmAcceptClean": (p: { count: number }) =>
+    `Save the merged text for ${enN(p.count, "# file", "# files")}?`,
+  "sync.conflicts.confirmAcceptCleanText": "Files with disputed fragments stay in the list.",
+  "sync.conflicts.confirmAction": (p: { action: string; count: number }) =>
+    `${p.action} · ${p.count}`,
+  "sync.conflicts.reportTitle": (p: { done: number; total: number }) =>
+    `Resolved ${p.done} of ${p.total}.`,
+  "sync.conflicts.reportFailed": (p: { count: number }) =>
+    `${enN(p.count, "# file stays", "# files stay")} in the list:`,
+  "sync.conflicts.reportSkipped": (p: { count: number }) =>
+    `${enN(p.count, "# file was", "# files were")} not touched.`,
+  "sync.conflicts.reportCancelled": "Stopped: the remaining files were not touched.",
+  "sync.conflicts.failed": "not resolved",
 
   "sync.keeper.title": "History keeper",
   "sync.keeper.unassigned": "No keeper is assigned.",

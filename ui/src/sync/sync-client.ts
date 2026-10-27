@@ -1,5 +1,9 @@
 import type {
+  AnnotateRequest,
+  Annotated,
   Author,
+  BulkReport,
+  BulkResolution,
   Change,
   Conflict,
   Content,
@@ -122,6 +126,10 @@ export interface SyncClient {
   abortPull(): Promise<void>;
   conflicts(): Promise<Conflict[]>;
   resolve(id: string, resolution: Resolution): Promise<void>;
+  /** Пачка решений (фича 040): ход — `progress()` с операцией `Resolve`, отмена — `cancel()`. */
+  resolveMany(ids: string[], how: BulkResolution): Promise<BulkReport>;
+  /** Результат слияния с пометками строк (фича 040) — чистая функция ядра. */
+  mergeAnnotate(request: AnnotateRequest): Promise<Annotated>;
 
   setKeeper(): Promise<Keeper>;
   clearKeeper(): Promise<void>;

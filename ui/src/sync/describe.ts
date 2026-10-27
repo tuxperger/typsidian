@@ -273,6 +273,8 @@ export function describeProgress(t: Translate, progress: SyncProgress): string {
         return t("sync.progress.push");
       case "Clone":
         return t("sync.progress.clone");
+      case "Resolve":
+        return t("sync.progress.resolve");
     }
   })();
   return t("sync.progress", { operation, done: progress.done, total: progress.total });
