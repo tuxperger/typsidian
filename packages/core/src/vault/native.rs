@@ -239,6 +239,18 @@ enum RawChange {
     /// Изменился файл-кандидат в источники (фича 017): какой — решает сверка
     /// отпечатков в библиотеке, поэтому без пути.
     SourceFiles,
+    /// События могли потеряться — нужна полная сверка с диском (FR-016,
+    /// FR-018). Бывает в трёх случаях:
+    ///
+    /// - появилась папка. inotify вешает наблюдение на новую папку только
+    ///   после события о ней, и то, что успели положить внутрь до этого,
+    ///   событий не порождает; папка, перенесённая в vault целиком, не
+    ///   порождает их для содержимого вовсе. Syncthing, принося папку с
+    ///   другого устройства, создаёт её и сразу кладёт файлы — они не
+    ///   появлялись в дереве до переоткрытия vault;
+    /// - ОС переполнила очередь событий (`need_rescan`);
+    /// - сбой самого наблюдателя.
+    Rescan,
 }
 
 /// Классифицирует один `DebouncedEvent` в ноль или более [`RawChange`],
@@ -270,6 +282,9 @@ fn dispatch_debounced_event(ev: &DebouncedEvent, tx: &UnboundedSender<RawChange>
             .any(|path| crate::sources::discover::is_source_candidate(path))
     {
         let _ = tx.send(RawChange::SourceFiles);
+    }
+    if ev.event.need_rescan() || appeared_folder(ev) {
+        let _ = tx.send(RawChange::Rescan);
     }
     match &ev.event.kind {
         notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
@@ -325,6 +340,21 @@ fn dispatch_debounced_event(ev: &DebouncedEvent, tx: &UnboundedSender<RawChange>
         }
         _ => {}
     }
+}
+
+/// Появилась ли в vault папка — созданием или переименованием в неё (см.
+/// [`RawChange::Rescan`]). Вид объекта берётся с диска, а не из события:
+/// inotify не всегда помечает папку (`CreateKind::Any`), а для переименования
+/// вида нет вовсе. Папка, исчезнувшая к моменту проверки, — не повод для
+/// сверки: её содержимого уже нет.
+fn appeared_folder(ev: &DebouncedEvent) -> bool {
+    let target = match &ev.event.kind {
+        notify::EventKind::Create(_) => ev.event.paths.first(),
+        notify::EventKind::Modify(ModifyKind::Name(RenameMode::To)) => ev.event.paths.first(),
+        notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => ev.event.paths.get(1),
+        _ => None,
+    };
+    target.is_some_and(|path| path.is_dir())
 }
 
 /// Период опроса доступности vault (T056, FR-020, FR-036) — не привязан ни
@@ -843,9 +873,16 @@ impl NativeBackend {
             Duration::from_millis(400),
             None,
             move |result: DebounceEventResult| {
-                if let Ok(debounced_events) = result {
-                    for ev in &debounced_events {
-                        dispatch_debounced_event(ev, &raw_tx);
+                match result {
+                    Ok(debounced_events) => {
+                        for ev in &debounced_events {
+                            dispatch_debounced_event(ev, &raw_tx);
+                        }
+                    }
+                    // Сбой бэкенда мог унести события — сверка с диском
+                    // возвращает то, что они должны были принести.
+                    Err(_) => {
+                        let _ = raw_tx.send(RawChange::Rescan);
                     }
                 }
                 // `Err(errors)` — сбои самого watcher-бэкенда (например,
@@ -893,6 +930,7 @@ impl NativeBackend {
         let conflicts = self.conflicts.clone();
         let events = self.events.clone();
         let events_ready = self.events_ready.clone();
+        let shared = self.shared();
         tokio::spawn(async move {
             while let Some(first) = raw_rx.recv().await {
                 // Забираем всё, что уже скопилось в канале, одной пачкой —
@@ -917,7 +955,7 @@ impl NativeBackend {
                     .filter_map(|c| match c {
                         RawChange::Created(p) | RawChange::Updated(p) => Some(p.clone()),
                         RawChange::Renamed(_, to) => Some(to.clone()),
-                        RawChange::Deleted(_) | RawChange::SourceFiles => None,
+                        RawChange::Deleted(_) | RawChange::SourceFiles | RawChange::Rescan => None,
                     })
                     .collect();
                 let stamped: HashMap<PathBuf, Option<(Note, Derived)>> =
@@ -940,6 +978,7 @@ impl NativeBackend {
                 // входящих на них ссылок (FR-030, T087).
                 let mut link_targets_touched: Vec<PathBuf> = Vec::new();
                 let mut sources_changed = false;
+                let mut rescan = false;
                 for change in batch {
                     match change {
                         RawChange::Created(abs) | RawChange::Updated(abs) => {
@@ -1017,6 +1056,7 @@ impl NativeBackend {
                             }
                         }
                         RawChange::SourceFiles => sources_changed = true,
+                        RawChange::Rescan => rescan = true,
                         RawChange::Renamed(from_abs, to_abs) => {
                             let (Some(from_rel), Some(to_rel)) = (
                                 from_abs.strip_prefix(&root).ok().map(Path::to_path_buf),
@@ -1070,6 +1110,12 @@ impl NativeBackend {
                     batch.extend(links_invalidated(affected_by_links));
                     events.lock().unwrap().extend(batch);
                     events_ready.notify_one();
+                }
+                // Одна сверка на пачку, сколько бы папок в ней ни появилось, —
+                // после разбора самой пачки и без её замков: сверка берёт их
+                // сама и сравнивает диск уже с обновлённым индексом.
+                if rescan {
+                    reconcile(shared.clone()).await;
                 }
             }
         })
@@ -1196,131 +1242,164 @@ impl NativeBackend {
     /// как обычных `VaultEvent` через тот же канал, что и `watch()` — UI не
     /// обязан знать, что событие пришло из сверки, а не из FS-watcher.
     fn spawn_reconciliation(&self) {
-        let root = self.root_path.clone();
-        let index = self.index.clone();
-        let cache = self.cache.clone();
-        let conflicts = self.conflicts.clone();
-        let events = self.events.clone();
-        let events_ready = self.events_ready.clone();
-        tokio::spawn(async move {
-            let root_for_walk = root.clone();
-            let fresh = tokio::task::spawn_blocking(move || {
-                let root = root_for_walk;
-                // Если root уже недоступен на момент самой сверки (гонка
-                // между `open()` и потерей доступа сразу после него,
-                // либо просто задержка фонового планирования) — не
-                // трактуем «ничего не нашли» как «всё удалено» (FR-020):
-                // об истинной потере доступа сообщит отдельно
-                // `spawn_access_watch`, а эта сверка просто пропускает
-                // текущий проход, не трогая индекс.
-                if std::fs::read_dir(&root).is_err() {
-                    None
-                } else {
-                    // Предел FR-038 применён при открытии; здесь vault уже
-                    // открыт, и сверка не может «закрыть» его задним числом —
-                    // поэтому обход без ограничения.
-                    walk(&root, usize::MAX).ok()
-                }
-            })
-            .await
-            .unwrap_or(None);
-            let Some(fresh) = fresh else {
-                return;
-            };
-            let mut idx = index.lock().await;
-            let known_paths: std::collections::HashSet<_> =
-                idx.all().into_iter().map(|n| n.path).collect();
-            let fresh_paths: std::collections::HashSet<_> =
-                fresh.iter().map(|(n, _)| n.path.clone()).collect();
-            let mut link_targets_touched: Vec<PathBuf> = Vec::new();
+        tokio::spawn(reconcile(self.shared()));
+    }
 
-            let mut cache_guard = cache.lock().await;
-            // Собираем события в локальный Vec и берём std::sync::Mutex только
-            // в самом конце, одним разом — иначе MutexGuard пришлось бы
-            // удерживать через `.await` (cache.upsert_note), а std::sync::Mutex
-            // не Send через точки await.
-            let mut pending = Vec::new();
-            for (note, links) in &fresh {
-                // Обход шёл без замка индекса: файл, удалённый приложением
-                // после обхода, вернулся бы в индекс устаревшей записью
-                // (001 FR-030). `delete` убирает файл до замка, поэтому
-                // проверка под замком закрывает гонку.
-                if !root.join(&note.path).exists() {
-                    continue;
+    /// Общее состояние для фоновых задач: сверка нужна и при открытии, и из
+    /// обработчика событий наблюдателя.
+    fn shared(&self) -> Shared {
+        Shared {
+            root: self.root_path.clone(),
+            index: self.index.clone(),
+            cache: self.cache.clone(),
+            conflicts: self.conflicts.clone(),
+            events: self.events.clone(),
+            events_ready: self.events_ready.clone(),
+        }
+    }
+}
+
+/// То, с чем работает сверка, — без самого `NativeBackend`: она живёт в
+/// фоновой задаче и переживает вызов, который её запустил.
+#[derive(Clone)]
+struct Shared {
+    root: PathBuf,
+    index: Arc<AsyncMutex<Index>>,
+    cache: Arc<AsyncMutex<Option<SqliteCache>>>,
+    conflicts: Arc<StdMutex<ConflictRegistry>>,
+    events: Arc<StdMutex<VecDeque<VaultEvent>>>,
+    events_ready: Arc<tokio::sync::Notify>,
+}
+
+/// Сверка индекса с диском (FR-018): полный обход, диффинг против индекса,
+/// публикация расхождений как обычных `VaultEvent` через тот же канал, что и
+/// наблюдатель. Запускается при открытии и когда события могли потеряться
+/// ([`RawChange::Rescan`]).
+async fn reconcile(shared: Shared) {
+    let Shared {
+        root,
+        index,
+        cache,
+        conflicts,
+        events,
+        events_ready,
+    } = shared;
+    let root_for_walk = root.clone();
+    let fresh = tokio::task::spawn_blocking(move || {
+        let root = root_for_walk;
+        // Если root уже недоступен на момент самой сверки (гонка
+        // между `open()` и потерей доступа сразу после него,
+        // либо просто задержка фонового планирования) — не
+        // трактуем «ничего не нашли» как «всё удалено» (FR-020):
+        // об истинной потере доступа сообщит отдельно
+        // `spawn_access_watch`, а эта сверка просто пропускает
+        // текущий проход, не трогая индекс.
+        if std::fs::read_dir(&root).is_err() {
+            None
+        } else {
+            // Предел FR-038 применён при открытии; здесь vault уже
+            // открыт, и сверка не может «закрыть» его задним числом —
+            // поэтому обход без ограничения.
+            walk(&root, usize::MAX).ok()
+        }
+    })
+    .await
+    .unwrap_or(None);
+    let Some(fresh) = fresh else {
+        return;
+    };
+    let mut idx = index.lock().await;
+    let known_paths: std::collections::HashSet<_> = idx.all().into_iter().map(|n| n.path).collect();
+    let fresh_paths: std::collections::HashSet<_> =
+        fresh.iter().map(|(n, _)| n.path.clone()).collect();
+    let mut link_targets_touched: Vec<PathBuf> = Vec::new();
+
+    let mut cache_guard = cache.lock().await;
+    // Собираем события в локальный Vec и берём std::sync::Mutex только
+    // в самом конце, одним разом — иначе MutexGuard пришлось бы
+    // удерживать через `.await` (cache.upsert_note), а std::sync::Mutex
+    // не Send через точки await.
+    let mut pending = Vec::new();
+    for (note, links) in &fresh {
+        // Обход шёл без замка индекса: файл, удалённый приложением
+        // после обхода, вернулся бы в индекс устаревшей записью
+        // (001 FR-030). `delete` убирает файл до замка, поэтому
+        // проверка под замком закрывает гонку.
+        if !root.join(&note.path).exists() {
+            continue;
+        }
+        let changed = match idx.get(&note.path) {
+            Some(existing) => existing.stamp != note.stamp,
+            None => true,
+        };
+        if changed {
+            let known_stamp = idx.get(&note.path).map(|n| n.stamp.clone());
+            let is_new = !known_paths.contains(&note.path);
+            // Тот же разбор, что и в `spawn_change_processor`: сверка —
+            // равноправный источник внешних изменений, и расхождение,
+            // накопившееся пока приложение было закрыто, не имеет права
+            // молча затереть открытый буфер (FR-018 + FR-021).
+            let conflicted = match &known_stamp {
+                Some(known) => {
+                    conflicts
+                        .lock()
+                        .unwrap()
+                        .observe_disk_change(&note.path, known, &note.stamp)
                 }
-                let changed = match idx.get(&note.path) {
-                    Some(existing) => existing.stamp != note.stamp,
-                    None => true,
-                };
-                if changed {
-                    let known_stamp = idx.get(&note.path).map(|n| n.stamp.clone());
-                    let is_new = !known_paths.contains(&note.path);
-                    // Тот же разбор, что и в `spawn_change_processor`: сверка —
-                    // равноправный источник внешних изменений, и расхождение,
-                    // накопившееся пока приложение было закрыто, не имеет права
-                    // молча затереть открытый буфер (FR-018 + FR-021).
-                    let conflicted = match &known_stamp {
-                        Some(known) => conflicts.lock().unwrap().observe_disk_change(
-                            &note.path,
-                            known,
-                            &note.stamp,
-                        ),
-                        None => false,
-                    };
-                    upsert_preserving_unsaved_edits(&mut idx, note.clone());
-                    if let Some(c) = cache_guard.as_mut() {
-                        c.upsert_note(note).await;
-                        record_derived(c, &note.path, links).await;
-                    }
-                    if is_new {
-                        link_targets_touched.push(note.path.clone());
-                    }
-                    pending.push(if conflicted {
-                        VaultEvent::ConflictDetected {
-                            note_path: note.path.clone(),
-                            disk_snapshot: note.stamp.clone(),
-                        }
-                    } else if is_new {
-                        VaultEvent::NoteCreated {
-                            path: note.path.clone(),
-                        }
-                    } else {
-                        VaultEvent::NoteUpdated {
-                            path: note.path.clone(),
-                        }
-                    });
-                }
+                None => false,
+            };
+            upsert_preserving_unsaved_edits(&mut idx, note.clone());
+            if let Some(c) = cache_guard.as_mut() {
+                c.upsert_note(note).await;
+                record_derived(c, &note.path, links).await;
             }
-            for stale_path in known_paths.difference(&fresh_paths) {
-                let had_edits = conflicts.lock().unwrap().observe_disk_deletion(stale_path);
-                idx.remove(stale_path);
-                if let Some(c) = cache_guard.as_mut() {
-                    c.remove_note(stale_path).await;
-                }
-                link_targets_touched.push(stale_path.clone());
-                pending.push(if had_edits {
-                    VaultEvent::NoteDeletedWithUnsavedEdits {
-                        note_path: stale_path.clone(),
-                    }
-                } else {
-                    VaultEvent::NoteDeleted {
-                        path: stale_path.clone(),
-                    }
-                });
+            if is_new {
+                link_targets_touched.push(note.path.clone());
             }
-            let mut affected_by_links: Vec<PathBuf> = Vec::new();
-            if let Some(c) = cache_guard.as_ref() {
-                for target in &link_targets_touched {
-                    affected_by_links.extend(c.backlinks(target).await);
+            pending.push(if conflicted {
+                VaultEvent::ConflictDetected {
+                    note_path: note.path.clone(),
+                    disk_snapshot: note.stamp.clone(),
                 }
+            } else if is_new {
+                VaultEvent::NoteCreated {
+                    path: note.path.clone(),
+                }
+            } else {
+                VaultEvent::NoteUpdated {
+                    path: note.path.clone(),
+                }
+            });
+        }
+    }
+    for stale_path in known_paths.difference(&fresh_paths) {
+        let had_edits = conflicts.lock().unwrap().observe_disk_deletion(stale_path);
+        idx.remove(stale_path);
+        if let Some(c) = cache_guard.as_mut() {
+            c.remove_note(stale_path).await;
+        }
+        link_targets_touched.push(stale_path.clone());
+        pending.push(if had_edits {
+            VaultEvent::NoteDeletedWithUnsavedEdits {
+                note_path: stale_path.clone(),
             }
-            if !pending.is_empty() {
-                let mut batch = wrap_bulk_if_needed(pending);
-                batch.extend(links_invalidated(affected_by_links));
-                events.lock().unwrap().extend(batch);
-                events_ready.notify_one();
+        } else {
+            VaultEvent::NoteDeleted {
+                path: stale_path.clone(),
             }
         });
+    }
+    let mut affected_by_links: Vec<PathBuf> = Vec::new();
+    if let Some(c) = cache_guard.as_ref() {
+        for target in &link_targets_touched {
+            affected_by_links.extend(c.backlinks(target).await);
+        }
+    }
+    if !pending.is_empty() {
+        let mut batch = wrap_bulk_if_needed(pending);
+        batch.extend(links_invalidated(affected_by_links));
+        events.lock().unwrap().extend(batch);
+        events_ready.notify_one();
     }
 }
 

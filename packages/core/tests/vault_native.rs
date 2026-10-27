@@ -475,6 +475,61 @@ async fn watch_emits_created_updated_renamed_deleted_for_external_changes() {
 }
 
 #[tokio::test]
+async fn folder_moved_in_whole_brings_its_notes_into_the_index() {
+    // FR-016: папка с заметками, перенесённая в vault одним переименованием,
+    // даёт ОС-событие только о самой папке — о её содержимом событий нет.
+    // Заметки внутри обязаны появиться без переоткрытия vault.
+    let vault = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    write_note(vault.path(), "старт.typ", "уже была");
+    let mut backend = NativeBackend::open(vault.path()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    backend.poll_events();
+
+    write_note(outside.path(), "Доклады/2026/Семинар.typ", "= Семинар");
+    write_note(outside.path(), "Доклады/План.typ", "= План");
+    fs::rename(outside.path().join("Доклады"), vault.path().join("Доклады")).unwrap();
+
+    let events = drain_events_for(&mut backend, Duration::from_secs(5)).await;
+    for expected in ["Доклады/2026/Семинар.typ", "Доклады/План.typ"] {
+        assert!(
+            events.iter().any(
+                |e| matches!(e, VaultEvent::NoteCreated { path } if path == Path::new(expected))
+            ),
+            "ожидался NoteCreated для {expected}: {events:?}"
+        );
+    }
+    let paths: Vec<PathBuf> = backend.list().await.into_iter().map(|n| n.path).collect();
+    assert!(paths.contains(&PathBuf::from("Доклады/2026/Семинар.typ")));
+    assert!(paths.contains(&PathBuf::from("Доклады/План.typ")));
+}
+
+#[tokio::test]
+async fn syncthing_style_note_in_new_nested_folders_appears() {
+    // FR-016: так Syncthing приносит папку с другого устройства — создаёт
+    // цепочку папок и сразу пишет заметку через временный файл. Файл, успевший
+    // появиться до того, как на новую папку повесили наблюдение, не даёт
+    // событий — его находит сверка с диском.
+    let dir = TempDir::new().unwrap();
+    let mut backend = NativeBackend::open(dir.path()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    backend.poll_events();
+
+    let folder = dir.path().join("x/y/z");
+    fs::create_dir_all(&folder).unwrap();
+    let tmp = folder.join(".syncthing.заметка.typ.tmp");
+    fs::write(&tmp, "= С другого устройства").unwrap();
+    fs::rename(&tmp, folder.join("заметка.typ")).unwrap();
+
+    drain_events_for(&mut backend, Duration::from_secs(5)).await;
+    let paths: Vec<PathBuf> = backend.list().await.into_iter().map(|n| n.path).collect();
+    assert!(
+        paths.contains(&PathBuf::from("x/y/z/заметка.typ")),
+        "заметка из новых папок не попала в индекс: {paths:?}"
+    );
+}
+
+#[tokio::test]
 async fn debounce_collapses_atomic_write_via_tmp_and_rename_into_one_event() {
     // T046, Edge Case: внешняя программа пишет через временный файл, затем
     // переименовывает его в целевое имя — не должно давать наблюдаемую
