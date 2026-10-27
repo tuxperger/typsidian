@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -55,6 +56,9 @@ export { PREVIEW_DEBOUNCE_MS } from "./useCompiledDocument.js";
  */
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5, 3];
 const ZOOM_DEFAULT = ZOOM_STEPS.indexOf(1);
+
+/** Сколько ширина колонки должна простоять, чтобы листы разложились под неё. */
+const SETTLE_MS = 150;
 
 /** Что показывает индикатор сборки в шапке (handoff § Header bar). */
 export interface CompileStatus {
@@ -162,6 +166,12 @@ export function PreviewPane({
   // абсолютные. Одно измерение на обоих и есть то, что держит их вместе.
   const stackRef = useRef<HTMLDivElement | null>(null);
   const [pageWidth, setPageWidth] = useState<number | null>(null);
+  // Обёртка листов: на время изменения ширины она обрезает лишнее (`measurePage`).
+  const pagesRef = useRef<HTMLDivElement | null>(null);
+  const settleRef = useRef<number | null>(null);
+  // Ширина, под которую листы разложены сейчас, — та же `pageWidth`, но
+  // доступная колбэку наблюдателя без перезапуска.
+  const laidOutRef = useRef<number | null>(null);
   // Колбэк в ref: новая ссылка на него не должна перезапускать сборку.
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -274,18 +284,50 @@ export function PreviewPane({
 
   // Дробная часть отбрасывается: измерения приходят субпиксельными, и без
   // округления состояние менялось бы на сотых долях пикселя. Ширина листа на
-  // раскладку не влияет (лист шире колонки просто выезжает за неё, а полоса
-  // прокрутки зарезервирована постоянно), поэтому обратной связи «шире лист →
-  // уже колонка → уже лист» здесь нет, а при неизменной ширине состояние не
-  // двигается вовсе — и цикла отрисовок отсюда не берётся.
+  // раскладку колонки не влияет (лист шире колонки просто выезжает за неё, а
+  // полоса прокрутки зарезервирована постоянно), поэтому обратной связи «шире
+  // лист → уже колонка → уже лист» здесь нет.
+  //
+  // Пока ширина меняется (тянут край окна или границу колонок), листы не
+  // раскладываются заново: каждая новая ширина — это заново растрированная
+  // картинка страницы и пересчитанный текстовый слой, и в WebKitGTK оболочки
+  // рабочего стола кадр выходил в сотни миллисекунд (005 FR-007). Листы
+  // остаются прежней ширины, а настоящая принимается, когда изменения затихли
+  // на `SETTLE_MS`. Масштаб `transform` на это время пробовали — замер в
+  // WebKitGTK: 61 мс на кадр против 26 мс без него, уменьшенные листы
+  // растрируются под масштаб, и в окно их попадает больше. Первое измерение
+  // принимается сразу: подстраивать ещё нечего.
   const measurePage = useCallback(() => {
     const node = stackRef.current;
     if (node === null) return;
-    setPageWidth((previous) => {
-      const next = Math.floor(node.clientWidth);
-      return next > 0 && next !== previous ? next : previous;
-    });
+    const next = Math.floor(node.clientWidth);
+    if (next <= 0) return;
+    const laidOut = laidOutRef.current;
+    if (laidOut === null) {
+      setPageWidth(next);
+      return;
+    }
+    pagesRef.current?.toggleAttribute("data-resizing", next !== laidOut);
+    if (settleRef.current !== null) window.clearTimeout(settleRef.current);
+    settleRef.current = window.setTimeout(() => {
+      settleRef.current = null;
+      setPageWidth(next);
+    }, SETTLE_MS);
   }, []);
+
+  // Принятая ширина разложена — обрезка снимается в том же кадре: при
+  // масштабе больше 100 % лист шире колонки законно и прокручивается вбок.
+  useLayoutEffect(() => {
+    laidOutRef.current = pageWidth;
+    pagesRef.current?.removeAttribute("data-resizing");
+  }, [pageWidth]);
+
+  useEffect(
+    () => () => {
+      if (settleRef.current !== null) window.clearTimeout(settleRef.current);
+    },
+    [],
+  );
 
   // Слежение за шириной колонки. Один `ResizeObserver` на всё: он сообщает о
   // любом изменении размера — и о том, что сделал React (границу колонок
@@ -493,7 +535,11 @@ export function PreviewPane({
             )}
 
             {state.shown ? (
-              state.shown.pages.map((page) => <PreviewPage key={page.index} page={page} />)
+              <div className="ts-preview__pages" ref={pagesRef}>
+                {state.shown.pages.map((page) => (
+                  <PreviewPage key={page.index} page={page} />
+                ))}
+              </div>
             ) : errors.length === 0 && state.failure === null ? (
               // Пустая панель без объяснения запрещена (FR-014, SC-004).
               <div className="ts-placeholder">
