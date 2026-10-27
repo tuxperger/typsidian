@@ -315,6 +315,47 @@ body {
   padding-left: 20px;
 }
 
+/* Строка подписи дерева: «Vault» слева, кнопки свёртки разом справа (фича
+ * 042, макет «Кнопки над деревом»). Кнопки 22px — высота строки подписи, чтобы
+ * она не выросла от их появления. */
+.ts-tree__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ts-tree__head .ts-tree__eyebrow {
+  flex: 1;
+}
+
+.ts-tree__head-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-500);
+  cursor: pointer;
+}
+
+.ts-tree__head-btn:hover:not(:disabled) {
+  background: var(--steel-800);
+  color: var(--steel-200);
+}
+
+.ts-tree__head-btn:focus-visible {
+  outline: var(--border-width) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ts-tree__head-btn:disabled {
+  color: var(--steel-700);
+  cursor: default;
+}
+
 .ts-tree__eyebrow {
   display: block;
   padding: var(--space-2) var(--space-1) var(--space-1);

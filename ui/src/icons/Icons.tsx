@@ -21,6 +21,7 @@ export type IconName =
   | "x"
   | "chevron"
   | "updown"
+  | "foldin"
   | "image"
   | "terminal"
   | "plus"
@@ -192,6 +193,27 @@ export function IconSprite(): React.JSX.Element {
         <symbol id="i-chevron" viewBox="0 0 24 24">
           <polyline
             points="9 18 15 12 9 6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </symbol>
+
+        {/* Шевроны внутрь — «Свернуть все папки» (фича 042); пара к `updown`,
+            которым рисуется «Развернуть все папки». */}
+        <symbol id="i-foldin" viewBox="0 0 24 24">
+          <polyline
+            points="7 4 12 9 17 4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <polyline
+            points="7 20 12 15 17 20"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"

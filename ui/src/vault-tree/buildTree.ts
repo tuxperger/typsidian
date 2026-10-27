@@ -45,3 +45,20 @@ export function buildTree(notes: Note[]): TreeNode[] {
 
   return root.children;
 }
+
+/**
+ * Пути всех папок среди `nodes` и под ними, на всех уровнях (фича 042): для
+ * «Свернуть все папки» — по всему дереву, для «Свернуть вложенные» — по папке.
+ */
+export function folderPaths(nodes: readonly TreeNode[]): string[] {
+  const paths: string[] = [];
+  const walk = (list: readonly TreeNode[]): void => {
+    for (const node of list) {
+      if (node.kind !== "folder") continue;
+      paths.push(node.path);
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return paths;
+}

@@ -11,7 +11,7 @@ import type {
 import type { VaultClient } from "../vault-client.js";
 import { currentI18n, useI18n, type Translate } from "../i18n/index.js";
 import { fillFromTemplate } from "../templates/NewNoteFromTemplate.js";
-import { buildTree, type TreeFolder, type TreeNode } from "./buildTree.js";
+import { buildTree, folderPaths, type TreeFolder, type TreeNode } from "./buildTree.js";
 import type { VaultOperationError } from "./ErrorBanner.js";
 import { isBoard } from "./fileKind.js";
 import { Icon } from "../icons/Icons.js";
@@ -517,6 +517,27 @@ export function useVaultTreeActions({
     });
   }, []);
 
+  // Свёртка разом (фича 042). Пути папок приходят от дерева показа — оно их
+  // уже построило (`folderPaths`), и хранить второй перечень здесь незачем.
+  // Свернуть — добавить пути в множество, развернуть — убрать: обычное
+  // раскрытие одной папки по-прежнему убирает только её путь, и вложенные
+  // остаются свёрнутыми (FR-004). Файлов это не трогает (FR-006).
+  const setFoldersCollapsed = useCallback((paths: readonly string[], collapse: boolean) => {
+    setState((prev) => {
+      const collapsed = new Set(prev.collapsed);
+      for (const path of paths) {
+        if (collapse) collapsed.add(path);
+        else collapsed.delete(path);
+      }
+      return { ...prev, collapsed, menu: null };
+    });
+  }, []);
+
+  /** «Развернуть все папки»: свёрнутых не остаётся вовсе. */
+  const expandAll = useCallback(() => {
+    setState((prev) => ({ ...prev, collapsed: new Set<string>(), menu: null }));
+  }, []);
+
   const expand = useCallback((folder: string) => {
     setState((prev) => {
       if (!prev.collapsed.has(folder)) return prev;
@@ -543,6 +564,8 @@ export function useVaultTreeActions({
     state,
     toggleExpanded,
     expand,
+    setFoldersCollapsed,
+    expandAll,
     remapExpanded,
     openMenu,
     closeMenu,
@@ -814,6 +837,7 @@ function FolderRow({
   const { t } = useI18n();
   const { onMoveTo, onBookmark } = useContext(TreeExtrasContext);
   const moveEntry = { path: folder.path, name: folder.name };
+  const hasSubfolders = folder.children.some((child) => child.kind === "folder");
 
   return (
     <li
@@ -837,6 +861,21 @@ function FolderRow({
             run: () => actions.beginCreate(folder.path, "board"),
           },
           { kind: "separator" },
+          // Ветка целиком (фича 042, FR-003): только у папки с подпапками —
+          // без них обычного шеврона достаточно (FR-005).
+          ...(hasSubfolders
+            ? [
+                {
+                  label: t("tree.menu.expandBranch"),
+                  run: () => actions.setFoldersCollapsed(folderPaths([folder]), false),
+                },
+                {
+                  label: t("tree.menu.collapseBranch"),
+                  run: () => actions.setFoldersCollapsed(folderPaths([folder]), true),
+                },
+                { kind: "separator" as const },
+              ]
+            : []),
           ...(actions.onToggleSection
             ? [
                 {
@@ -910,6 +949,28 @@ function FolderRow({
               {t("tree.menu.createNote")}
             </button>
           </li>
+          {hasSubfolders && (
+            <>
+              <li role="none">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => actions.setFoldersCollapsed(folderPaths([folder]), false)}
+                >
+                  {t("tree.menu.expandBranch")}
+                </button>
+              </li>
+              <li role="none">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => actions.setFoldersCollapsed(folderPaths([folder]), true)}
+                >
+                  {t("tree.menu.collapseBranch")}
+                </button>
+              </li>
+            </>
+          )}
           {actions.onToggleSection && (
             <li role="none">
               <button
@@ -1008,6 +1069,7 @@ export function VaultTreeActions({
 }: VaultTreeActionsProps): React.JSX.Element {
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
+  const allFolders = useMemo(() => folderPaths(tree), [tree]);
   const isCreatingAtRoot = actions.state.creatingInFolder === "";
   const isBusy = actions.state.pendingPath !== null;
   const extras = useMemo(
@@ -1028,13 +1090,34 @@ export function VaultTreeActions({
       {notes.length === 0 && !isCreatingAtRoot ? (
         <p role="status">{t("tree.emptyNotesOrBoards")}</p>
       ) : (
+        <>
+        {/* Заголовок группы из шаблона § Sidebar и кнопки свёртки разом (фича
+            042). Стоит над деревом, а не внутри `role="tree"`: кнопки — не
+            узлы дерева, и в обходе дерева с клавиатуры им не место. */}
+        <div className="ts-tree__head">
+          <span className="ts-tree__eyebrow">{t("tree.eyebrow")}</span>
+          <button
+            type="button"
+            className="ts-tree__head-btn"
+            onClick={() => actions.setFoldersCollapsed(allFolders, true)}
+            disabled={allFolders.length === 0}
+            aria-label={t("tree.collapseAll")}
+            title={t("tree.collapseAll")}
+          >
+            <Icon name="foldin" size={14} />
+          </button>
+          <button
+            type="button"
+            className="ts-tree__head-btn"
+            onClick={actions.expandAll}
+            disabled={allFolders.length === 0}
+            aria-label={t("tree.expandAll")}
+            title={t("tree.expandAll")}
+          >
+            <Icon name="updown" size={14} />
+          </button>
+        </div>
         <ul role="tree" aria-label={t("tree.label")} className="ts-tree__root">
-          {/* Заголовок группы из шаблона § Sidebar. `presentation`, потому что
-              для дерева это подпись, а не узел: своим `treeitem` он добавил бы
-              в обход с клавиатуры строку, которую нельзя открыть. */}
-          <li className="ts-tree__eyebrow" role="presentation">
-            Vault
-          </li>
           {isCreatingAtRoot && (
             <li role="treeitem">
               <InlineTextInput
@@ -1051,6 +1134,7 @@ export function VaultTreeActions({
             <TreeNodeRow key={nodeKey(node)} node={node} actions={actions} onOpenNote={onOpenNote} />
           ))}
         </ul>
+        </>
       )}
     </div>
     </TreeExtrasContext.Provider>
