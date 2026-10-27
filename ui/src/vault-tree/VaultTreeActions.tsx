@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { confirmAction } from "../confirm.js";
 import type {
   BookmarkTarget,
   CreateError,
@@ -97,10 +98,10 @@ function makeDefaultConfirmDelete(client: VaultClient) {
   return async (note: Note): Promise<boolean> => {
     const affected = await client.backlinks(note.path);
     if (affected.length === 0) {
-      return window.confirm(currentI18n().t("tree.confirm.delete", { name: note.name }));
+      return confirmAction(currentI18n().t("tree.confirm.delete", { name: note.name }));
     }
     const list = affected.map((n) => `  • ${n.path}`).join("\n");
-    return window.confirm(currentI18n().t("tree.confirm.deleteLinked", { name: note.name, list }));
+    return confirmAction(currentI18n().t("tree.confirm.deleteLinked", { name: note.name, list }));
   };
 }
 
@@ -115,7 +116,7 @@ function makeDefaultConfirmRename(client: VaultClient) {
     const affected = await client.backlinks(note.path);
     if (affected.length === 0) return true;
     const list = affected.map((n) => `  • ${n.path}`).join("\n");
-    return window.confirm(
+    return confirmAction(
       currentI18n().t("tree.confirm.renameLinked", { from: note.path, to: nextPath, list }),
     );
   };
