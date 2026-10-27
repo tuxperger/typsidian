@@ -38,7 +38,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use typst::syntax::package::PackageSpec;
 
-use super::resolve::{package_root, PACKAGE_MANIFEST};
+use super::resolve::{download_root, installed_root, PACKAGE_MANIFEST};
 use crate::vault::backend::{VaultBackend, WriteError};
 
 /// Пространство имён, которое обслуживает общий реестр шаблонов.
@@ -436,7 +436,8 @@ pub async fn install<B: VaultBackend>(
     spec: &PackageSpec,
     files: &[(String, Vec<u8>)],
 ) -> Result<String, InstallError> {
-    let root = package_root(spec);
+    // Скачанное — в папку скачанного: она не синхронизируется (фича 041).
+    let root = download_root(spec);
     let digest = fingerprint(files);
 
     // Манифест откладывается на конец — см. доктрину выше.
@@ -491,7 +492,7 @@ struct InstallRecord {
 }
 
 async fn read_record<B: VaultBackend>(backend: &B, spec: &PackageSpec) -> Option<InstallRecord> {
-    let path = package_root(spec).join(FINGERPRINT_FILE);
+    let path = installed_root(backend, spec).await?.join(FINGERPRINT_FILE);
     let text = backend.read(&path).await.ok()?;
     let mut lines = text.lines();
     let digest = lines.next()?.trim().to_string();
@@ -526,7 +527,9 @@ pub async fn verify_installed<B: VaultBackend>(
         return FingerprintCheck::Unknown;
     }
 
-    let root = package_root(spec);
+    let Some(root) = installed_root(backend, spec).await else {
+        return FingerprintCheck::Unknown;
+    };
     let mut files: Vec<(String, Vec<u8>)> = Vec::with_capacity(record.files.len());
     for name in &record.files {
         match backend.read_bytes(&root.join(name)).await {
@@ -558,30 +561,40 @@ pub async fn verify_installed<B: VaultBackend>(
 /// запись перед выдачей проверяется наличием манифеста: шаблон, удалённый
 /// руками, из перечня исчезает, а не висит призраком.
 pub async fn installed_templates<B: VaultBackend>(backend: &B) -> Vec<InstalledTemplate> {
-    let Ok(text) = backend.read(&registry_path()).await else {
-        return Vec::new();
-    };
-    let Ok(entries) = serde_json::from_str::<Vec<InstalledTemplate>>(&text) else {
-        return Vec::new();
-    };
+    // Перечень скачанного и перечень прежних версий (до фичи 041 он лежал рядом
+    // с ручными шаблонами); запись о той же версии берётся из нового.
+    let mut entries: Vec<InstalledTemplate> = Vec::new();
+    for path in [registry_path(), legacy_registry_path()] {
+        let Ok(text) = backend.read(&path).await else {
+            continue;
+        };
+        for entry in serde_json::from_str::<Vec<InstalledTemplate>>(&text).unwrap_or_default() {
+            if !entries.iter().any(|known| known.spec == entry.spec) {
+                entries.push(entry);
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.spec.cmp(&b.spec));
 
     let mut alive = Vec::with_capacity(entries.len());
     for entry in entries {
         let Some(spec) = parse_spec(&entry.spec) else {
             continue;
         };
-        if backend
-            .read(&package_root(&spec).join(PACKAGE_MANIFEST))
-            .await
-            .is_ok()
-        {
+        if installed_root(backend, &spec).await.is_some() {
             alive.push(entry);
         }
     }
     alive
 }
 
+/// Перечень скачанного — в папке скачанного: он принадлежит устройству.
 fn registry_path() -> PathBuf {
+    crate::vault::service_dir::downloads_dir().join(REGISTRY_FILE)
+}
+
+/// Где перечень лежал до фичи 041. Только читается.
+fn legacy_registry_path() -> PathBuf {
     crate::vault::service_dir::packages_dir().join(REGISTRY_FILE)
 }
 

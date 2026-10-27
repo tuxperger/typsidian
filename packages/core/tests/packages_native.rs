@@ -44,3 +44,13 @@ async fn a_missing_file_inside_an_installed_template_is_a_different_reason() {
 async fn a_document_without_imports_is_unaffected() {
     cases::a_document_without_imports_is_unaffected().await;
 }
+
+#[test]
+fn downloads_have_their_own_folder() {
+    cases::downloads_have_their_own_folder();
+}
+
+#[tokio::test]
+async fn a_downloaded_template_is_read_and_a_hand_placed_one_wins() {
+    cases::a_downloaded_template_is_read_and_a_hand_placed_one_wins().await;
+}

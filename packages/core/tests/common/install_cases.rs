@@ -18,7 +18,7 @@ use typsidian_core::preview::packages::{
     source_url, unpack, verify_installed, ArchiveProblem, FingerprintCheck, InstallError,
     InstalledTemplate, TemplateSource, FINGERPRINT_FILE,
 };
-use typsidian_core::preview::resolve::{package_root, PACKAGE_MANIFEST};
+use typsidian_core::preview::resolve::{download_root, package_root, PACKAGE_MANIFEST};
 use typst::syntax::package::{PackageSpec, PackageVersion};
 
 use super::MemoryVault;
@@ -171,7 +171,7 @@ pub async fn install_writes_the_manifest_last() {
     let digest = install(&mut vault, &codly, &files)
         .await
         .expect("установка");
-    let root = package_root(&codly);
+    let root = download_root(&codly);
 
     assert!(vault.read(&root.join("lib.typ")).await.is_ok());
     assert!(vault.read(&root.join(PACKAGE_MANIFEST)).await.is_ok());
@@ -206,7 +206,7 @@ pub async fn a_template_with_binary_files_installs() {
         .await
         .expect("шаблон с картинкой обязан установиться");
 
-    let root = package_root(&codly);
+    let root = download_root(&codly);
     assert_eq!(
         vault
             .read_bytes(&root.join("src/typst-small.png"))
@@ -233,7 +233,7 @@ pub async fn a_read_only_vault_refuses_installation() {
     );
     assert!(
         vault
-            .read(&package_root(&codly).join(PACKAGE_MANIFEST))
+            .read(&download_root(&codly).join(PACKAGE_MANIFEST))
             .await
             .is_err(),
         "ни одного файла не создано"
@@ -397,7 +397,7 @@ pub async fn tampering_is_noticed_without_reinstalling() {
     );
 
     // Правка файла руками — ровно то, что фича обязана заметить.
-    let root = package_root(&codly);
+    let root = download_root(&codly);
     vault
         .write_bytes(&root.join("lib.typ"), b"#let codly() = panic()")
         .await
@@ -477,7 +477,7 @@ pub async fn the_registry_lists_installed_templates() {
     assert_eq!(listed[0].fingerprint, digest);
 
     // Шаблон удалили руками: истина на диске, а не в реестре.
-    vault.remove(&package_root(&codly).join(PACKAGE_MANIFEST));
+    vault.remove(&download_root(&codly).join(PACKAGE_MANIFEST));
     assert!(
         installed_templates(&vault).await.is_empty(),
         "удалённый руками шаблон из перечня исчез"
@@ -775,7 +775,7 @@ pub async fn a_local_namespace_is_only_reported_missing() {
 pub async fn compiling_reports_a_tampered_template_without_reinstalling() {
     let mut vault = MemoryVault::new();
     install_demo(&mut vault).await;
-    let lib = package_root(&spec("demo", (1, 0, 0))).join("lib.typ");
+    let lib = download_root(&spec("demo", (1, 0, 0))).join("lib.typ");
     let edited = "#let привет = [Изменено]\n";
     vault
         .write_bytes(&lib, edited.as_bytes())

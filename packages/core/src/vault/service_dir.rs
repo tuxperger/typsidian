@@ -32,8 +32,14 @@ pub const VAULT_SETTINGS_FILE_NAME: &str = "vault.json";
 /// (`vault::cache::MemoryCache`), файла там никогда не было.
 pub const CACHE_FILE_NAME: &str = "cache.sqlite";
 
-/// Папка локальных внешних шаблонов Typst.
+/// Папка внешних шаблонов Typst, положенных пользователем. Едет с
+/// синхронизацией: скачать их неоткуда.
 pub const PACKAGES_DIR_NAME: &str = "packages";
+
+/// Папка шаблонов, скачанных приложением из сети (фича 041): та же раскладка,
+/// что у [`PACKAGES_DIR_NAME`]. Принадлежит устройству и не синхронизируется —
+/// каждое устройство скачивает шаблон само.
+pub const DOWNLOADS_DIR_NAME: &str = "downloads";
 
 /// Временные файлы атомарной записи (фича 009, research.md §4). Только
 /// native: в вебе атомарность даёт сам `FileSystemWritableFileStream`.
@@ -54,6 +60,11 @@ pub const DICTIONARY_FILE_NAME: &str = "dictionary.txt";
 /// Индекс задач (фича 033, research.md §2): задачи заметок с их отпечатками.
 /// Принадлежит устройству, поэтому входит в производные пути.
 pub const TASKS_FILE_NAME: &str = "tasks.json";
+
+/// Журналы пакетного импорта (фича 021): по ним прерванный импорт продолжается
+/// из папки-источника, которая есть только на этом устройстве. Принадлежат
+/// устройству, поэтому входят в производные пути.
+pub const IMPORTS_DIR_NAME: &str = "imports";
 
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
@@ -98,6 +109,11 @@ pub fn packages_dir() -> PathBuf {
     service_dir().join(PACKAGES_DIR_NAME)
 }
 
+/// Папка скачанных шаблонов относительно корня vault (фича 041).
+pub fn downloads_dir() -> PathBuf {
+    service_dir().join(DOWNLOADS_DIR_NAME)
+}
+
 /// Файл кэша прежней версии относительно корня vault.
 pub fn legacy_cache_path() -> PathBuf {
     PathBuf::from(LEGACY_CACHE_FILE_NAME)
@@ -105,18 +121,36 @@ pub fn legacy_cache_path() -> PathBuf {
 
 /// Производные пути служебного места — то, что восстановимо и принадлежит
 /// устройству (фича 011, research §5, §6): кэш индекса вместе с файлами журнала
-/// SQLite и временные файлы атомарной записи.
+/// SQLite, временные файлы атомарной записи, снимки заметок, индекс задач,
+/// журналы импорта и скачиваемые шаблоны.
 ///
 /// Строки в форме правил исключения, относительно корня vault, через `/`: их
 /// читают правила истории и Syncthing, а не файловая система. Настройки vault и
 /// локальные шаблоны сюда не входят намеренно — они общие для устройств и
-/// обязаны доставляться вместе с заметками.
+/// обязаны доставляться вместе с заметками; шаблоны — только положенные
+/// вручную в пространства имён, которые скачать неоткуда.
 pub fn derived_paths() -> Vec<String> {
     vec![
         format!("{SERVICE_DIR_NAME}/{CACHE_FILE_NAME}*"),
         format!("{SERVICE_DIR_NAME}/{TMP_DIR_NAME}"),
         format!("{SERVICE_DIR_NAME}/{SNAPSHOTS_DIR_NAME}"),
         format!("{SERVICE_DIR_NAME}/{TASKS_FILE_NAME}"),
+        format!("{SERVICE_DIR_NAME}/{IMPORTS_DIR_NAME}"),
+        // Скачиваемые шаблоны (фича 041): всё скачанное, пространство имён
+        // реестра Typst — его можно скачать, даже если положено руками, — и
+        // перечень скачанного прежних версий.
+        format!("{SERVICE_DIR_NAME}/{DOWNLOADS_DIR_NAME}"),
+        format!(
+            "{SERVICE_DIR_NAME}/{PACKAGES_DIR_NAME}/{}",
+            crate::preview::packages::REGISTRY_NAMESPACE
+        ),
+        format!(
+            "{SERVICE_DIR_NAME}/{PACKAGES_DIR_NAME}/{}",
+            crate::preview::packages::REGISTRY_FILE
+        ),
+        // Кэш прежних версий лежал в корне vault (см. LEGACY_CACHE_FILE_NAME):
+        // устройство со старой версией ещё может его создавать.
+        format!("{LEGACY_CACHE_FILE_NAME}*"),
     ]
 }
 
@@ -146,7 +180,12 @@ mod tests {
                 ".typsidian/cache.sqlite*",
                 ".typsidian/tmp",
                 ".typsidian/snapshots",
-                ".typsidian/tasks.json"
+                ".typsidian/tasks.json",
+                ".typsidian/imports",
+                ".typsidian/downloads",
+                ".typsidian/packages/preview",
+                ".typsidian/packages/installed.json",
+                ".typsidian-cache.sqlite*"
             ]
         );
         assert!(!derived

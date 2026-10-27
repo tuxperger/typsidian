@@ -80,7 +80,36 @@ pub fn package_root(spec: &PackageSpec) -> PathBuf {
         .join(version)
 }
 
-/// Путь конкретного файла внутри шаблона.
+/// Куда приложение кладёт скачанный шаблон (фича 041): та же раскладка, что у
+/// [`package_root`], но в папке скачанного — она не синхронизируется, каждое
+/// устройство скачивает шаблон само.
+pub fn download_root(spec: &PackageSpec) -> PathBuf {
+    let version = format!(
+        "{}.{}.{}",
+        spec.version.major, spec.version.minor, spec.version.patch
+    );
+    crate::vault::service_dir::downloads_dir()
+        .join(spec.namespace.as_str())
+        .join(spec.name.as_str())
+        .join(version)
+}
+
+/// Где установлен шаблон: сначала положенный вручную (и скачанный версиями до
+/// фичи 041), затем скачанный. `None` — нигде нет манифеста (041 §FR-004, §FR-005).
+pub async fn installed_root<B: VaultBackend>(backend: &B, spec: &PackageSpec) -> Option<PathBuf> {
+    for root in [package_root(spec), download_root(spec)] {
+        if backend
+            .read_bytes(&root.join(PACKAGE_MANIFEST))
+            .await
+            .is_ok()
+        {
+            return Some(root);
+        }
+    }
+    None
+}
+
+/// Путь конкретного файла внутри шаблона, положенного вручную.
 pub fn package_path(spec: &PackageSpec, vpath: &VirtualPath) -> PathBuf {
     package_root(spec).join(vpath.get_without_slash())
 }
@@ -111,17 +140,15 @@ pub async fn read_dependency<B: VaultBackend>(
         // тем же `VaultBackend`, у которого сетевого пути не существует
         // (FR-039, принцип VII).
         VirtualRoot::Package(spec) => {
-            let file = package_path(&spec, id.vpath());
             // Отличаем «шаблона нет» от «в шаблоне нет такого файла»: первое
             // чинится установкой шаблона, второе — правкой заметки, и общее
             // «не удалось собрать» запрещено (FR-037).
-            let manifest = package_root(&spec).join(PACKAGE_MANIFEST);
-            if backend.read_bytes(&manifest).await.is_err() {
+            let Some(root) = installed_root(backend, &spec).await else {
                 return Err(ResolveError::PackageMissing {
                     spec: spec.to_string(),
                 });
-            }
-            file
+            };
+            root.join(id.vpath().get_without_slash())
         }
     };
 

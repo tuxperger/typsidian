@@ -100,7 +100,9 @@ fn slash(path: &Path) -> String {
 }
 
 fn journal_path(id: &str) -> PathBuf {
-    service_dir().join("imports").join(format!("{id}.json"))
+    service_dir()
+        .join(crate::vault::service_dir::IMPORTS_DIR_NAME)
+        .join(format!("{id}.json"))
 }
 
 /// Общая подготовка обзора и запуска.

@@ -56,6 +56,7 @@ impl IgnoreFile {
             IgnoreFile::StIgnore => {
                 let mut rules = vec!["/.git".to_string()];
                 rules.extend(derived_rules());
+                rules.extend(os_rules(self));
                 rules
             }
             // Кэши, служебные файлы Syncthing и его конфликтные копии (FR-003).
@@ -74,9 +75,22 @@ impl IgnoreFile {
                     ]
                     .map(str::to_string),
                 );
+                rules.extend(os_rules(self));
                 rules
             }
         }
+    }
+}
+
+/// Служебные файлы операционных систем: Finder, Проводник. Они не принадлежат
+/// пользователю и на каждом устройстве свои (011 §FR-003). Без привязки к корню —
+/// появляются в любой папке. В `.stignore` с `(?d)`: Syncthing вправе удалить
+/// такой файл, если иначе не может удалить папку, удалённую на другом устройстве.
+fn os_rules(file: IgnoreFile) -> Vec<String> {
+    let names = [".DS_Store", "Thumbs.db", "desktop.ini"];
+    match file {
+        IgnoreFile::StIgnore => names.iter().map(|name| format!("(?d){name}")).collect(),
+        IgnoreFile::GitIgnore => names.iter().map(|name| name.to_string()).collect(),
     }
 }
 
@@ -503,6 +517,36 @@ mod tests {
         let report = report(IgnoreFile::StIgnore, None);
         assert_eq!(report.missing, IgnoreFile::StIgnore.required_rules());
         assert_eq!(report.user_lines, 0);
+    }
+
+    #[test]
+    fn device_state_and_os_files_are_required_in_both_files() {
+        let st = IgnoreFile::StIgnore.required_rules();
+        for rule in [
+            "/.typsidian/imports",
+            "/.typsidian-cache.sqlite*",
+            "(?d).DS_Store",
+            "(?d)Thumbs.db",
+        ] {
+            assert!(st.contains(&rule.to_string()), "{rule} в .stignore");
+        }
+        let git = IgnoreFile::GitIgnore.required_rules();
+        for rule in [
+            "/.typsidian/imports",
+            "/.typsidian-cache.sqlite*",
+            ".DS_Store",
+            "desktop.ini",
+        ] {
+            assert!(git.contains(&rule.to_string()), "{rule} в .gitignore");
+        }
+        // Блок прежней версии без этих правил — неполный: приложение предложит
+        // дописать их (FR-027), не трогая строк пользователя.
+        let old = "// typsidian:begin\n/.git\n/.typsidian/cache.sqlite*\n// typsidian:end\n*.tmp\n";
+        let report = report(IgnoreFile::StIgnore, Some(old));
+        assert!(report.missing.contains(&"/.typsidian/imports".to_string()));
+        let fixed = apply(IgnoreFile::StIgnore, Some(old));
+        assert!(fixed.contains("(?d)desktop.ini") && fixed.contains("*.tmp"));
+        assert!(super::report(IgnoreFile::StIgnore, Some(&fixed)).is_complete());
     }
 
     #[test]

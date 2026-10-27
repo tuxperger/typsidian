@@ -7,7 +7,9 @@
 #![allow(dead_code)]
 
 use typsidian_core::messages::AppMessage;
-use typsidian_core::preview::resolve::{package_path, package_root, read_dependency, ResolveError};
+use typsidian_core::preview::resolve::{
+    download_root, installed_root, package_path, package_root, read_dependency, ResolveError,
+};
 use typst::syntax::package::{PackageSpec, PackageVersion};
 use typst::syntax::{FileId, RootedPath, VirtualPath, VirtualRoot};
 
@@ -140,4 +142,41 @@ pub async fn a_document_without_imports_is_unaffected() {
     )
     .intern();
     assert!(read_dependency(&vault, id).await.is_ok());
+}
+
+// ── Фича 041: скачанное отдельно от положенного вручную ──────────────────────
+
+/// Скачанный шаблон лежит в папке скачанного — она не синхронизируется.
+pub fn downloads_have_their_own_folder() {
+    let codly = spec("preview", "codly", (1, 3, 0));
+    assert_eq!(
+        download_root(&codly).to_string_lossy().replace('\\', "/"),
+        ".typsidian/downloads/preview/codly/1.3.0"
+    );
+}
+
+/// FR-004: сборка находит скачанный шаблон, а при наличии обоих берёт ручной.
+pub async fn a_downloaded_template_is_read_and_a_hand_placed_one_wins() {
+    let codly = spec("preview", "codly", (1, 3, 0));
+    let downloaded = download_root(&codly).to_string_lossy().into_owned();
+    let vault = MemoryVault::new()
+        .with_file(&format!("{downloaded}/typst.toml"), b"[package]".to_vec())
+        .with_file(&format!("{downloaded}/lib.typ"), b"// downloaded".to_vec());
+    let bytes = read_dependency(&vault, file_id(&codly, "lib.typ"))
+        .await
+        .expect("скачанный шаблон читается");
+    assert_eq!(bytes.as_slice(), b"// downloaded");
+
+    let manual = package_root(&codly).to_string_lossy().into_owned();
+    let vault = vault
+        .with_file(&format!("{manual}/typst.toml"), b"[package]".to_vec())
+        .with_file(&format!("{manual}/lib.typ"), b"// by hand".to_vec());
+    let bytes = read_dependency(&vault, file_id(&codly, "lib.typ"))
+        .await
+        .expect("ручной шаблон читается");
+    assert_eq!(bytes.as_slice(), b"// by hand", "ручной важнее скачанного");
+    assert_eq!(
+        installed_root(&vault, &codly).await,
+        Some(package_root(&codly))
+    );
 }
