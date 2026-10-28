@@ -26,4 +26,10 @@ export const preview: Translation<typeof en> = {
   "preview.installing": "Загружается…",
   "preview.install": "Загрузить шаблон",
   "preview.page": (p) => `Страница ${p.number}`,
+  // Полоса над листом (фича 043).
+  "preview.pageShort": (p) => `стр. ${p.number} из ${p.total}`,
+  "preview.status.built": "собрано",
+  "preview.status.building": "собирается",
+  "preview.status.failed": "ошибка сборки",
+  "preview.zoom.fit": "по ширине",
 };

@@ -98,6 +98,8 @@ export function MobileWorkspace(): React.JSX.Element {
         // То же предложение продолжить с последним vault, что на рабочем столе
         // и на web, и из того же хранилища настроек устройства (FR-007).
         lastVault={lastTauriVault}
+        // Меню vault в шапке и недавние на стартовом экране (фича 043).
+        openKnownVault={openTauriVaultById}
         cloneVault={cloner}
         // Состояние колонки заметки (фича 013) хранится в настройках устройства.
         device={device}

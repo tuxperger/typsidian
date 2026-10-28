@@ -69,6 +69,7 @@ import type {
   Source,
 } from "../wasm-core/typsidian_core.js";
 import { useI18n, type Phrase, type Translate } from "../i18n/index.js";
+import { Icon } from "../icons/Icons.js";
 
 /** Порт пачки вложений из рабочей области (фича 016). */
 /** Источники vault для редактора заметки (фича 017). */
@@ -221,6 +222,11 @@ export interface NoteEditorProps {
    */
   linksSummary?: string;
   /**
+   * История открытой заметки (фича 043, FR-007): «История» в строке состояния.
+   * Не передан — история выключена, и входа нет.
+   */
+  onHistory?: ((path: string) => void) | undefined;
+  /**
    * Сводка вкладок для статус-бара («6 вкладок», «группа 1 из 2 · 4 вкладки»).
    * Передаётся редактору активной группы: статус-бар в коде у каждого редактора
    * свой, а в макете один на окно (research.md §14).
@@ -275,6 +281,7 @@ export function NoteEditor({
   selectRequest = null,
   onLibraryStatus,
   linksSummary,
+  onHistory,
   tabsSummary,
   attachments,
   attachmentStatus,
@@ -1315,6 +1322,17 @@ export function NoteEditor({
 
         <span>{countWords(t, content)}</span>
         <span className="ts-tag ts-statusbar__minor">typst</span>{/* i18n-ignore: имя языка разметки */}
+        {onHistory !== undefined && (
+          <button
+            type="button"
+            className="ts-statusbar__action"
+            title={t("editor.historyHint")}
+            onClick={() => onHistory(document.path)}
+          >
+            <Icon name="history" size={11} />
+            {t("editor.history")}
+          </button>
+        )}
       </div>
     </section>
   );

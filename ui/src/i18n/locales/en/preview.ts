@@ -25,4 +25,10 @@ export const preview = {
   "preview.installing": "Downloading…",
   "preview.install": "Download template",
   "preview.page": (p: { number: number }) => `Page ${p.number}`,
+  // Полоса над листом (фича 043).
+  "preview.pageShort": (p: { number: number; total: number }) => `p. ${p.number} of ${p.total}`,
+  "preview.status.built": "built",
+  "preview.status.building": "building",
+  "preview.status.failed": "build failed",
+  "preview.zoom.fit": "fit width",
 } as const satisfies Entries;

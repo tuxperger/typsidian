@@ -93,4 +93,7 @@ export const editor: Translation<typeof en> = {
 
   "editor.diff.localTitle": "Ваша версия",
   "editor.diff.externalTitle": "Версия на диске",
+  // «История» в строке состояния (фича 043).
+  "editor.history": "История",
+  "editor.historyHint": "История этой заметки",
 };

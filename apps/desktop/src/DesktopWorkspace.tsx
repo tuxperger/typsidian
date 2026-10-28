@@ -57,6 +57,8 @@ export function DesktopWorkspace(): React.JSX.Element {
         // Путь к нему хранит `settings.json` в каталоге конфигурации ОС — то же
         // хранилище, что и на Android, и те же команды оболочки.
         lastVault={lastTauriVault}
+        // Меню vault в шапке и недавние на стартовом экране (фича 043).
+        openKnownVault={openTauriVaultById}
         cloneVault={cloner}
         // Состояние колонки заметки (фича 013) хранится в настройках устройства.
         device={device}

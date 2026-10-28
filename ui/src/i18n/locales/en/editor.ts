@@ -93,4 +93,7 @@ export const editor = {
 
   "editor.diff.localTitle": "Your version",
   "editor.diff.externalTitle": "Version on disk",
+  // «История» в строке состояния (фича 043).
+  "editor.history": "History",
+  "editor.historyHint": "History of this note",
 } as const satisfies Entries;

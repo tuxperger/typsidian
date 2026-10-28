@@ -15,8 +15,9 @@
 
 :root {
   /* Размеры конструкции из handoff § Spacing / radii. */
-  --ts-header-h: 44px;
-  --ts-sidebar-w: 248px;
+  /* Шапка и дерево — по Typsidian.pdf (фича 043): 40px и 220px. */
+  --ts-header-h: 40px;
+  --ts-sidebar-w: 220px;
   --ts-notepanel-w: 248px;
   --ts-bar-h: 26px;
 
@@ -1498,8 +1499,8 @@ input.ts-sources__url:focus {
    * лист, лист становился бы ниже, полоса исчезала — и ширина колебалась бы
    * между двумя значениями на каждом пересчёте. */
   scrollbar-gutter: stable;
-  /* Асимметрия из макета: слева место под вертикальную линейку. */
-  padding: var(--space-5) var(--space-6) var(--space-10) 34px;
+  /* Линеек больше нет (фича 043, Typsidian.pdf) — поля симметричны. */
+  padding: var(--space-5) var(--space-6) var(--space-10);
   display: flex;
   flex-direction: column;
 
@@ -11910,4 +11911,581 @@ button.ts-props__chipbtn,
   border-left: 2px solid var(--red-600);
   color: var(--steel-200);
   font-size: 12px;
+}
+
+/* ── Оболочка по Typsidian.pdf (фича 043) ─────────────────────────────────
+ * Шапка из шести вещей, низ дерева со значками, статус сборки над листом,
+ * стартовый экран с недавними vault и экраны телефона. Только токены
+ * «Спецформы»; размеры конструкции — переменными выше. */
+
+.ts-header__group--lead {
+  flex: 1 1 auto;
+}
+
+.ts-header__group--lead .ts-crumb {
+  min-width: 0;
+}
+
+.ts-crumb__file {
+  color: var(--steel-200);
+}
+
+.ts-vault-switch {
+  /* Имя vault не сжимается — в узком окне первым уступает путь заметки. */
+  flex: 0 0 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--space-2) 0 10px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+  color: var(--steel-200);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.ts-vault-switch:hover:not(:disabled) {
+  border-color: var(--steel-500);
+  color: var(--steel-100);
+}
+
+.ts-vault-switch:focus-visible,
+.ts-cmdfield:focus-visible,
+.ts-segmented__item:focus-visible,
+.ts-sidebar__icon:focus-visible,
+.ts-start__open:focus-visible,
+.ts-start__link:focus-visible,
+.ts-statusbar__action:focus-visible {
+  outline: var(--border-width) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ts-vault-switch__name {
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ts-vault-switch > svg:first-child {
+  color: var(--steel-400);
+}
+
+.ts-cmdfield {
+  flex: 0 1 220px;
+  min-width: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-500);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.ts-cmdfield:hover {
+  border-color: var(--steel-500);
+  color: var(--steel-300);
+}
+
+.ts-cmdfield__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ts-kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--steel-400);
+  white-space: nowrap;
+}
+
+.ts-segmented {
+  flex: none;
+  display: inline-flex;
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ts-segmented__item {
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--steel-400);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ts-segmented__item + .ts-segmented__item {
+  border-left: var(--border-width) solid var(--steel-800);
+}
+
+.ts-segmented__item:hover:not(:disabled) {
+  color: var(--steel-200);
+}
+
+.ts-segmented__item[aria-pressed="true"] {
+  background: var(--steel-800);
+  color: var(--steel-100);
+}
+
+.ts-segmented__item:disabled {
+  color: var(--steel-600);
+  cursor: default;
+}
+
+.ts-header__primary {
+  font-family: var(--font-sans);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Статус синхронизации в шапке — точка и слово, без рамки (Typsidian.pdf). */
+.ts-header .ts-sync-pill {
+  border-color: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--steel-400);
+}
+
+.ts-header .ts-sync-pill:hover,
+.ts-header .ts-sync-pill[aria-pressed="true"] {
+  border-color: var(--steel-700);
+}
+
+/* Вид «Документ»: текст скрыт, но смонтирован — курсор и несохранённый текст
+ * переживают переключение (фича 043, FR-002). */
+.ts-body[data-view="document"] > .ts-groups {
+  display: none;
+}
+
+/* Низ дерева. */
+.ts-sidebar__footer {
+  flex: 0 0 auto;
+  height: auto;
+  gap: 2px;
+  padding: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.ts-create--up .ts-create__menu {
+  top: auto;
+  right: auto;
+  left: 0;
+  bottom: calc(100% + var(--space-1));
+}
+
+.ts-create__plus--labeled {
+  width: auto;
+  height: 28px;
+  gap: 6px;
+  padding: 0 var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--steel-200);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.ts-create__plus--labeled > svg {
+  color: var(--orange-500);
+}
+
+.ts-sidebar__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--steel-500);
+  cursor: pointer;
+}
+
+.ts-sidebar__icon:hover {
+  background: var(--steel-800);
+  color: var(--steel-200);
+}
+
+.ts-sidebar__quick {
+  flex: 1 1 auto;
+  justify-content: center;
+  height: 40px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+}
+
+/* Статус сборки над листом: точка и слово. */
+.ts-build-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--steel-400);
+}
+
+.ts-build-status__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ts-build-status__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--success);
+}
+
+.ts-build-status[data-state="building"] .ts-build-status__dot {
+  background: var(--hivis-500);
+}
+
+.ts-build-status[data-state="failed"] .ts-build-status__dot {
+  background: var(--danger);
+}
+
+.ts-build-status[data-state="failed"] {
+  color: color-mix(in srgb, var(--danger), var(--steel-100) 35%);
+}
+
+/* «История» в строке состояния. */
+.ts-statusbar__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--steel-500);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-statusbar__action:hover {
+  color: var(--steel-200);
+}
+
+/* Стартовый экран (экран 2 Typsidian.pdf). */
+.ts-app--start {
+  justify-content: center;
+  overflow: auto;
+}
+
+.ts-start {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 506px);
+  gap: 60px;
+  align-items: start;
+  justify-content: center;
+  padding: var(--space-10) var(--space-6);
+}
+
+.ts-start__intro {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.ts-start__mark {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-tight);
+  color: var(--steel-100);
+}
+
+.ts-start__lead {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--steel-200);
+}
+
+.ts-start__about {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--steel-400);
+}
+
+.ts-start__actions {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.ts-start__action {
+  height: 36px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.ts-start__error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--orange-400);
+}
+
+.ts-start__link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--steel-400);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.ts-start__link:hover {
+  color: var(--steel-200);
+}
+
+.ts-start__recent {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+.ts-start__recent h2 {
+  margin: 0;
+}
+
+.ts-start__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--border-width) solid var(--steel-800);
+  border-radius: var(--radius-sm);
+  background: var(--steel-900);
+}
+
+.ts-start__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-right: var(--space-3);
+}
+
+.ts-start__item > .ts-btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ts-start__item + .ts-start__item {
+  border-top: var(--border-width) solid var(--steel-800);
+}
+
+.ts-start__item[data-last] {
+  box-shadow: inset 2px 0 0 var(--orange-500);
+}
+
+.ts-start__item[data-last] .ts-start__open > svg {
+  color: var(--orange-500);
+}
+
+.ts-start__open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 14px;
+  border: 0;
+  background: none;
+  color: var(--steel-400);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-start__open:hover:not(:disabled) .ts-start__name {
+  color: var(--white);
+}
+
+.ts-start__open:disabled {
+  cursor: default;
+}
+
+.ts-start__names {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ts-start__name {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-100);
+}
+
+.ts-start__location {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-start__problem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--hivis-400);
+}
+
+.ts-start__problem::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--hivis-500);
+}
+
+@media (max-width: 760px) {
+  .ts-start {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+  }
+}
+
+/* Телефон (экраны 3–4 Typsidian.pdf). */
+@media (max-width: 560px) {
+  .ts-header .ts-wordmark,
+  .ts-header .ts-crumb,
+  .ts-cmdfield__label,
+  .ts-cmdfield .ts-kbd {
+    display: none;
+  }
+
+  .ts-cmdfield {
+    flex: none;
+    justify-content: center;
+    width: 32px;
+  }
+
+  .ts-vault-switch__name {
+    max-width: none;
+  }
+
+  .ts-vault-switch {
+    border-color: transparent;
+    background: transparent;
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    color: var(--steel-100);
+  }
+
+  .ts-app[data-phone-screen="note"] > .ts-header {
+    display: none;
+  }
+
+  /* Над листом на телефоне — только страница и статус (экран 4). */
+  /* Строка страницы и статуса — внизу, под пальцем (экран 4). */
+  .ts-app[data-phone-screen] .ts-pane--preview > .ts-pane__toolbar {
+    order: 2;
+    border-top: var(--border-width) solid var(--border-default);
+    border-bottom: 0;
+  }
+
+  .ts-app[data-phone-screen] .ts-pane--preview .ts-pane__toolbar > .ts-eyebrow,
+  .ts-app[data-phone-screen] .ts-pane--preview .ts-zoom {
+    display: none;
+  }
+
+  .ts-phone-note {
+    flex: none;
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: var(--border-width) solid var(--border-default);
+  }
+
+  .ts-phone-note__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .ts-phone-note__names {
+    display: grid;
+    min-width: 0;
+  }
+
+  .ts-phone-note__title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    color: var(--steel-100);
+  }
+
+  .ts-phone-note__path {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--steel-500);
+  }
+
+  .ts-segmented--wide {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ts-segmented--wide .ts-segmented__item {
+    height: 36px;
+  }
+
+  .ts-sidebar__footer {
+    padding: var(--space-3);
+    gap: var(--space-2);
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom, 0px));
+  }
+
+  .ts-sidebar__icon {
+    width: 40px;
+    height: 40px;
+    border: var(--border-width) solid var(--steel-700);
+  }
 }

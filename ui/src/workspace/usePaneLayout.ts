@@ -18,8 +18,8 @@ import { useEffect, useRef, useState } from "react";
  * обращения обёрнуты, и отказ хранилища просто оставляет значения по умолчанию.
  */
 
-/** Ширина боковой панели из макета — она же значение по умолчанию. */
-export const SIDEBAR_DEFAULT_WIDTH = 248;
+/** Ширина боковой панели из макета (Typsidian.pdf, фича 043) — она же значение по умолчанию. */
+export const SIDEBAR_DEFAULT_WIDTH = 220;
 /** Уже этого дерево перестаёт читаться: имена файлов уходят в многоточие. */
 export const SIDEBAR_MIN_WIDTH = 168;
 export const SIDEBAR_MAX_WIDTH = 560;
@@ -39,6 +39,18 @@ const PERSIST_DEBOUNCE_MS = 250;
 
 const STORAGE_KEY = "typsidian.panes";
 
+/**
+ * Вид рабочей области (фича 043, FR-002): только текст, текст и лист рядом,
+ * только лист. Свойство окна, как ширина колонок (research.md, Decision 3).
+ */
+export type PaneView = "text" | "side" | "document";
+
+const VIEWS: readonly PaneView[] = ["text", "side", "document"];
+
+function isPaneView(value: unknown): value is PaneView {
+  return typeof value === "string" && (VIEWS as readonly string[]).includes(value);
+}
+
 export interface PaneLayout {
   /** Ширина боковой панели в пикселях. */
   sidebarWidth: number;
@@ -52,6 +64,8 @@ export interface PaneLayout {
    * шириной 0», из которой некуда вернуться.
    */
   sidebarHidden: boolean;
+  /** Какие колонки показаны: текст, лист или обе. */
+  view: PaneView;
 }
 
 export interface PaneLayoutHandle extends PaneLayout {
@@ -72,12 +86,14 @@ export interface PaneLayoutHandle extends PaneLayout {
   dragSplit: (clientX: number) => void;
   stepSplit: (direction: -1 | 1) => void;
   resetSplit: () => void;
+  setView: (view: PaneView) => void;
 }
 
 const DEFAULTS: PaneLayout = {
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   editorShare: SPLIT_DEFAULT,
   sidebarHidden: false,
+  view: "side",
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -95,7 +111,7 @@ function readStored(): PaneLayout {
     if (raw === null) return DEFAULTS;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return DEFAULTS;
-    const { sidebarWidth, editorShare, sidebarHidden } = parsed as Partial<PaneLayout>;
+    const { sidebarWidth, editorShare, sidebarHidden, view } = parsed as Partial<PaneLayout>;
     return {
       sidebarWidth:
         typeof sidebarWidth === "number" && Number.isFinite(sidebarWidth)
@@ -107,6 +123,7 @@ function readStored(): PaneLayout {
           : DEFAULTS.editorShare,
       sidebarHidden:
         typeof sidebarHidden === "boolean" ? sidebarHidden : DEFAULTS.sidebarHidden,
+      view: isPaneView(view) ? view : DEFAULTS.view,
     };
   } catch {
     // Хранилища нет или оно закрыто (приватное окно, запрет на данные сайта) —
@@ -131,7 +148,8 @@ export function usePaneLayout(): PaneLayoutHandle {
     setLayout((current) =>
       current.sidebarWidth === DEFAULTS.sidebarWidth &&
       current.editorShare === DEFAULTS.editorShare &&
-      current.sidebarHidden === DEFAULTS.sidebarHidden
+      current.sidebarHidden === DEFAULTS.sidebarHidden &&
+      current.view === DEFAULTS.view
         ? readStored()
         : current,
     );
@@ -212,6 +230,10 @@ export function usePaneLayout(): PaneLayoutHandle {
     setLayout((prev) => ({ ...prev, editorShare: SPLIT_DEFAULT }));
   };
 
+  const setView = (view: PaneView): void => {
+    setLayout((prev) => (prev.view === view ? prev : { ...prev, view }));
+  };
+
   // Размеры уезжают переменными, а не пропами колонок: ширину боковой панели
   // `.ts-sidebar` уже читает из `--ts-sidebar-w`, и вторая дорога к тому же
   // размеру развела бы макет с приложением. Приведение нужно потому, что
@@ -233,5 +255,6 @@ export function usePaneLayout(): PaneLayoutHandle {
     dragSplit,
     stepSplit,
     resetSplit,
+    setView,
   };
 }

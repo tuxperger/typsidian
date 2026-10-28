@@ -23,7 +23,7 @@ export interface OpenVaultProps {
  * Текст на каждый вариант отказа (FR-008) — без общего «что-то пошло не так».
  * `null` для отмены диалога: пользователь передумал, это не сбой (Assumptions).
  */
-function describeOpenVaultError(t: Translate, error: OpenVaultError): string | null {
+export function describeOpenVaultError(t: Translate, error: OpenVaultError): string | null {
   switch (error.kind) {
     case "PickerCancelled":
       return null;

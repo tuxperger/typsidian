@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Icon } from "../icons/Icons.js";
+import { Icon, type IconName } from "../icons/Icons.js";
 import { useI18n } from "../i18n/index.js";
 import type { VaultClient } from "../vault-client.js";
 import type { BookmarkTarget, Note, PathChange, Template } from "../wasm-core/typsidian_core.js";
@@ -38,6 +38,15 @@ export interface SidebarProps {
   onCreated: (path: string) => void;
   onError: (error: VaultOperationError) => void;
   onOpenGraph: () => void;
+  /** Значки внизу дерева (фича 043, FR-004): не переданы — значка нет. */
+  onToggleOutline?: (() => void) | undefined;
+  onToggleSources?: (() => void) | undefined;
+  onOpenSettings?: (() => void) | undefined;
+  /**
+   * Телефон (фича 043, US3): внизу дерева «Быстрая заметка» вместо меню
+   * создания — так на экране 3 Typsidian.pdf.
+   */
+  onQuickNote?: (() => void) | undefined;
   /** Битых ссылок в vault (фича 028); ноль не показывается. */
   brokenLinks?: number;
   /** Открыть экран «Состояние ссылок». */
@@ -92,12 +101,15 @@ export function Sidebar({
   client,
   notes,
   openPath,
-  folderCount,
   onOpenNote,
   onNotesChanged,
   onCreated,
   onError,
   onOpenGraph,
+  onToggleOutline,
+  onToggleSources,
+  onOpenSettings,
+  onQuickNote,
   brokenLinks = 0,
   onOpenLinkHealth,
   templates = [],
@@ -225,7 +237,8 @@ export function Sidebar({
 
   return (
     <aside className="ts-sidebar">
-      {/* Шапка панели: поиск занимает всю ширину, «+» — квадрат 32px справа. */}
+      {/* Шапка панели — поиск во всю ширину; создание переехало вниз, к
+          остальным действиям панели (фича 043, Typsidian.pdf). */}
       <div className="ts-sidebar__search">
         <div className="ts-searchfield">
           <Icon name="search" size={13} />
@@ -237,16 +250,6 @@ export function Sidebar({
             onChange={(event) => setFilter(event.target.value)}
           />
         </div>
-        <CreateFileMenu
-          folderName=""
-          disabled={actions.state.pendingPath !== null}
-          templates={templates}
-          {...(onOpenTemplates ? { onOpenTemplates } : {})}
-          onCreate={(kind: CreateKind, template?: Template | null) =>
-            actions.beginCreate("", kind, template ?? null)
-          }
-          shortcuts={shortcuts}
-        />
       </div>
 
       {bookmarksPanel}
@@ -320,10 +323,10 @@ export function Sidebar({
         onCancel={() => move.answerConfirm(false)}
       />
 
+      {/* Низ дерева (фича 043, FR-004; Typsidian.pdf): создание и значки
+          экранов, ушедших из шапки. Ход переноса большой папки встаёт на место
+          создания, пока идёт (макет «Большая папка едет»). */}
       <div className="ts-sidebar__footer">
-        {/* Ход переноса большой папки — вместо счётчика, пока он идёт (макет
-            «Большая папка едет»). На рабочем столе перенос атомарен и сюда не
-            попадает. */}
         {move.progress !== null ? (
           <span className="ts-tree-progress" role="status">
             {t("tree.move.progress", move.progress)}
@@ -332,11 +335,23 @@ export function Sidebar({
               {t("tree.move.cancel")}
             </button>
           </span>
+        ) : onQuickNote !== undefined ? (
+          <button type="button" className="ts-btn ts-btn--accent ts-sidebar__quick" onClick={onQuickNote}>
+            <Icon name="plus" size={14} />
+            {t("workspace.phone.quickNote")}
+          </button>
         ) : (
-        <span>
-          {t("common.notesCount", { count: notes.length })} ·{" "}
-          {t("tree.foldersCount", { count: folderCount })}
-        </span>
+          <CreateFileMenu
+            folderName=""
+            disabled={actions.state.pendingPath !== null}
+            templates={templates}
+            {...(onOpenTemplates ? { onOpenTemplates } : {})}
+            onCreate={(kind: CreateKind, template?: Template | null) =>
+              actions.beginCreate("", kind, template ?? null)
+            }
+            shortcuts={shortcuts}
+            label={t("tree.footer.newNote")}
+          />
         )}
         <span className="ts-spacer" />
         {/* Счётчик битых ссылок (фича 028, макет L3): ноль не показывается. */}
@@ -350,16 +365,34 @@ export function Sidebar({
             {t("linkHealth.footer", { count: brokenLinks })}
           </button>
         )}
-        <button
-          type="button"
-          className="ts-btn ts-btn--ghost"
-          title={t("tree.graph.title")}
-          aria-label={t("tree.graph.open")}
-          onClick={onOpenGraph}
-        >
-          <Icon name="network" />
-        </button>
+        <FooterIcon icon="network" label={t("tree.graph.open")} onClick={onOpenGraph} />
+        {onToggleOutline !== undefined && (
+          <FooterIcon icon="list" label={t("tree.footer.outline")} onClick={onToggleOutline} />
+        )}
+        {onToggleSources !== undefined && (
+          <FooterIcon icon="quote" label={t("tree.footer.sources")} onClick={onToggleSources} />
+        )}
+        {onOpenSettings !== undefined && (
+          <FooterIcon icon="sliders" label={t("tree.footer.settings")} onClick={onOpenSettings} />
+        )}
       </div>
     </aside>
+  );
+}
+
+/** Значок внизу дерева: подсказка совпадает с доступным именем (FR-004). */
+function FooterIcon({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: IconName;
+  label: string;
+  onClick: () => void;
+}): React.JSX.Element {
+  return (
+    <button type="button" className="ts-sidebar__icon" title={label} aria-label={label} onClick={onClick}>
+      <Icon name={icon} size={14} />
+    </button>
   );
 }

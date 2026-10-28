@@ -72,6 +72,11 @@ export interface CreateFileMenuProps {
    * приложение, и меню обязано показывать те же клавиши, что и работают.
    */
   shortcuts: ShortcutsState;
+  /**
+   * Подпись рядом с «+» и раскрытие меню вверх — кнопка внизу дерева (фича 043,
+   * «+ Заметка» в Typsidian.pdf). Без подписи — прежний квадрат.
+   */
+  label?: string;
 }
 
 export function CreateFileMenu({
@@ -81,6 +86,7 @@ export function CreateFileMenu({
   onOpenTemplates,
   onCreate,
   shortcuts,
+  label,
 }: CreateFileMenuProps): React.JSX.Element {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -128,10 +134,10 @@ export function CreateFileMenu({
   }, [isOpen]);
 
   return (
-    <div className="ts-create" ref={rootRef}>
+    <div className={label === undefined ? "ts-create" : "ts-create ts-create--up"} ref={rootRef}>
       <button
         type="button"
-        className="ts-create__plus"
+        className={label === undefined ? "ts-create__plus" : "ts-create__plus ts-create__plus--labeled"}
         title={hintWith(t("tree.create.button"), shortcuts.displayOf("new-file"))}
         aria-label={t("tree.create.button")}
         aria-haspopup="menu"
@@ -144,6 +150,7 @@ export function CreateFileMenu({
         }}
       >
         <Icon name="plus" size={15} />
+        {label}
       </button>
 
       {isOpen && (

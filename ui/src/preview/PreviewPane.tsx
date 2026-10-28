@@ -18,13 +18,12 @@ import type {
   VaultOverrides,
 } from "../wasm-core/typsidian_core.js";
 import type { PreviewClient } from "../preview-client.js";
-import { Icon } from "../icons/Icons.js";
 import { PreviewPage } from "./PreviewPage.js";
 import { useCompiledDocument, type PreviewState } from "./useCompiledDocument.js";
 import { useScrollAnchor } from "./useScrollAnchor.js";
 import { describeInstallError } from "./describeInstallError.js";
 import { diagnosticText } from "../i18n/messages.js";
-import { useI18n, type Phrase } from "../i18n/index.js";
+import { useI18n, type MessageKey, type Phrase } from "../i18n/index.js";
 import { copyText, useContextMenu } from "../menu/ContextMenu.js";
 
 // Принцип I: панель ничего не решает про документ. «Собрался или нет»,
@@ -95,13 +94,6 @@ export interface PreviewPaneProps {
    */
   vaultOverrides?: VaultOverrides | null;
   /**
-   * Экспорт открытой заметки в PDF (фича 009, FR-005). `undefined` — кнопки
-   * нет: экспорт недоступен этому клиенту или открыта не заметка.
-   */
-  onExport?: (() => void) | undefined;
-  /** Экспорт идёт — кнопка недоступна, пока не пришёл итог. */
-  exporting?: boolean;
-  /**
    * Переход к месту замечания в редакторе (FR-015). Открыть связанный файл и
    * поставить курсор умеет рабочая область — панель только просит.
    */
@@ -147,8 +139,6 @@ export function PreviewPane({
   onStatus,
   rebuildToken = 0,
   vaultOverrides = null,
-  onExport,
-  exporting = false,
   onReveal,
   canReveal,
   onDependencies,
@@ -355,6 +345,43 @@ export function PreviewPane({
     [state.diagnostics],
   );
 
+  // Статус сборки для полосы над листом (фича 043): ошибка — и при отказе
+  // сборки, и при ошибках документа; иначе — идёт ли сборка.
+  const buildState: BuildState = state.isBuilding
+    ? "building"
+    : errors.length > 0 || state.failure !== null
+      ? "failed"
+      : "built";
+
+  const pageCount = state.shown?.pages.length ?? 0;
+  const [visiblePage, setVisiblePage] = useState(1);
+  // Видимая страница — та, что пересекает верхнюю треть колонки. Считается по
+  // прокрутке через кадр анимации: событие приходит чаще, чем меняется ответ.
+  useEffect(() => {
+    const node = previewRef.current;
+    if (node === null) return undefined;
+    let frame = 0;
+    const measure = (): void => {
+      frame = 0;
+      const line = node.getBoundingClientRect().top + node.clientHeight / 3;
+      const pages = node.querySelectorAll<HTMLElement>(".ts-preview__page");
+      let index = 0;
+      pages.forEach((page, at) => {
+        if (page.getBoundingClientRect().top <= line) index = at;
+      });
+      setVisiblePage(Math.min(index + 1, Math.max(pages.length, 1)));
+    };
+    const onScroll = (): void => {
+      if (frame === 0) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    node.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [pageCount]);
+
   const zoom = ZOOM_STEPS[zoomIndex] ?? 1;
   const percent = Math.round(zoom * 100);
 
@@ -362,11 +389,20 @@ export function PreviewPane({
     <section className="ts-pane ts-pane--preview" aria-label={t("preview.label")}>
       <div className="ts-pane__toolbar">
         <span className="ts-eyebrow">{t("preview.label")}</span>
-        <span className="ts-pane__meta ts-pane__meta--sep">·</span>
-        <span className="ts-pane__meta" title={t("preview.pageSize")}>{t("preview.pageSize")}</span>
+        {/* Видимая страница (фича 043, FR-006): та, что пересекает верхнюю
+            треть колонки, — её и читают. */}
+        {pageCount > 0 && (
+          <span className="ts-pane__meta">
+            {t("preview.pageShort", { number: visiblePage, total: pageCount })}
+          </span>
+        )}
         <span className="ts-spacer" />
-        {/* В узкой колонке метка сжимается многоточием — полный текст в подсказке. */}
-        {state.isBuilding && <span className="ts-tag" title={t("preview.building")}>{t("preview.building")}</span>}
+        {/* Статус сборки — точкой и словом (фича 043): состояние формой, не
+            только цветом. В узкой колонке слово сжимается многоточием. */}
+        <span className="ts-build-status" data-state={buildState} title={t(BUILD_LABEL[buildState])}>
+          <span className="ts-build-status__dot" aria-hidden="true" />
+          <span className="ts-build-status__label">{t(BUILD_LABEL[buildState])}</span>
+        </span>
         {state.isStale && !state.isBuilding && (
           <span className="ts-tag" title={t("preview.stale")}>{t("preview.stale")}</span>
         )}
@@ -391,7 +427,7 @@ export function PreviewPane({
             aria-label={t("preview.zoom.value", { percent })}
             title={t("preview.zoom.reset")}
           >
-            {percent}&nbsp;%
+            {zoomIndex === ZOOM_DEFAULT ? t("preview.zoom.fit") : <>{percent}&nbsp;%</>}
           </button>
           <button
             type="button"
@@ -405,18 +441,6 @@ export function PreviewPane({
           </button>
         </div>
 
-        {onExport !== undefined && (
-          <button
-            type="button"
-            className="ts-btn"
-            onClick={onExport}
-            disabled={exporting || notePath === null}
-            title={t("workspace.exportPdf")}
-          >
-            <Icon name="download" size={11} />
-            {exporting ? "PDF…" : "PDF"}
-          </button>
-        )}
       </div>
 
       {/* Масштаб уходит в CSS переменной: ширину листа и деления линеек считает
@@ -480,29 +504,7 @@ export function PreviewPane({
           } as CSSProperties
         }
       >
-        {/* Линейки в сантиметрах — мотив макета (handoff § Ruler motif):
-            признак того, что перед пользователем постраничный документ, а не
-            бесконечная лента.
-
-            Горизонтальная повторяет ширину листа (CSS `.ts-ruler-h`), поэтому
-            деления стоят в долях от 21 см A4: 5 см — это 23.8 % ширины, а не
-            «на глаз». Вертикальная своей высоты не имеет, её деления считаются
-            от той же ширины листа тем же множителем масштаба. */}
-        <div className="ts-ruler-h" aria-hidden="true">
-          <span style={{ left: "0" }}>0</span>
-          <span style={{ left: "23.8%" }}>5</span>
-          <span style={{ left: "47.6%" }}>10</span>
-          <span style={{ left: "71.4%" }}>15</span>
-          <span style={{ left: "95.2%" }}>20</span>
-        </div>
-
         <div className="ts-preview__rows">
-          <div className="ts-ruler-v" aria-hidden="true">
-            <span style={{ top: "0" }}>0</span>
-            <span style={{ top: "var(--ts-ruler-10cm)" }}>10</span>
-            <span style={{ top: "calc(var(--ts-ruler-10cm) * 2)" }}>20</span>
-          </div>
-
           <div className="ts-preview__stack" ref={stackRef}>
             {/* Ошибки — на месте предпросмотра, а не строчкой внизу: собранного
                 вида всё равно нет или он устарел, и главное на панели сейчас
@@ -667,3 +669,12 @@ function DiagnosticItem({
 function placeText(place: DiagnosticLocation): string {
   return `${place.path}:${place.line}:${place.column}`;
 }
+
+type BuildState = "built" | "building" | "failed";
+
+/** Подписи статуса сборки над листом (фича 043, FR-006). */
+const BUILD_LABEL = {
+  built: "preview.status.built",
+  building: "preview.status.building",
+  failed: "preview.status.failed",
+} as const satisfies Record<BuildState, MessageKey>;

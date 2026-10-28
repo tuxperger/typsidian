@@ -36,6 +36,7 @@ export type SharedEditorProps = Pick<
   | "attachments"
   | "sources"
   | "completion"
+  | "onHistory"
 >;
 
 export interface EditorGroupProps {

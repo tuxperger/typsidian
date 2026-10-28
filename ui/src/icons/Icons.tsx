@@ -22,6 +22,8 @@ export type IconName =
   | "chevron"
   | "updown"
   | "foldin"
+  | "sliders"
+  | "history"
   | "image"
   | "terminal"
   | "plus"
@@ -220,6 +222,21 @@ export function IconSprite(): React.JSX.Element {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        </symbol>
+
+        {/* Настройки и история (фича 043, Typsidian.pdf): ползунки внизу дерева,
+            часы у «Истории» в строке состояния. */}
+        <symbol id="i-sliders" viewBox="0 0 24 24">
+          <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <line x1="4" y1="16" x2="20" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="9" cy="8" r="2.5" fill="var(--steel-950)" stroke="currentColor" strokeWidth="2" />
+          <circle cx="15" cy="16" r="2.5" fill="var(--steel-950)" stroke="currentColor" strokeWidth="2" />
+        </symbol>
+
+        <symbol id="i-history" viewBox="0 0 24 24">
+          <path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <polyline points="3.5 3.5 3.5 7.5 7.5 7.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points="12 7.5 12 12 15 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </symbol>
 
         <symbol id="i-updown" viewBox="0 0 24 24">

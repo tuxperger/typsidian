@@ -16,13 +16,16 @@ import {
   ErrorBanner,
   type VaultOperationError,
 } from "../vault-tree/ErrorBanner.js";
-import { OpenVault } from "../vault-tree/OpenVault.js";
 import {
   useVault,
   type LastVault,
   type LastVaultLookup,
   type VaultOpener,
+  type VaultOpenResult,
 } from "../vault-tree/useVault.js";
+import { VaultSwitcher } from "./VaultSwitcher.js";
+import { ViewSwitch } from "./ViewSwitch.js";
+import { WelcomeScreen } from "./WelcomeScreen.js";
 import type { VaultClient } from "../vault-client.js";
 import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
@@ -80,6 +83,7 @@ import {
   SPLIT_MAX,
   SPLIT_MIN,
   usePaneLayout,
+  type PaneView,
 } from "./usePaneLayout.js";
 import { hintWith, NOTHING_OVERRIDDEN, useShortcuts } from "./useShortcuts.js";
 import { EditorGroups } from "./tabs/EditorGroups.js";
@@ -132,11 +136,9 @@ import { plainEditors } from "../note-panel/links/plainEditors.js";
 import { useNoteLinks, type LinksChanges } from "../note-panel/links/useNoteLinks.js";
 import type { PreviewState } from "../preview/useCompiledDocument.js";
 import type { ShowHost } from "../slides/show-channel.js";
-import { ShowMenu } from "../slides/ShowMenu.js";
 import { useShowSession, type PreviewSnapshot } from "../slides/useShowSession.js";
 import type { CaptureSource } from "../capture/capture-source.js";
 import { CaptureSheet } from "../capture/CaptureSheet.js";
-import { DailyNav } from "../capture/DailyNav.js";
 import { useCapture } from "../capture/useCapture.js";
 import { useDailyNote } from "../capture/useDailyNote.js";
 import { useSources } from "../sources/useSources.js";
@@ -153,12 +155,6 @@ const NO_OPEN_TEXTS: readonly OpenText[] = [];
 
 /** Колонка, которую показывает телефон (010 T057). */
 type PhonePane = "tree" | "editor" | "preview";
-
-const PHONE_PANE_LABEL = {
-  tree: "workspace.phone.tree",
-  editor: "workspace.phone.editor",
-  preview: "workspace.phone.preview",
-} as const satisfies Record<PhonePane, MessageKey>;
 
 /** Указанных пользователем файлов источников нет (фича 017). */
 const NO_SOURCE_FILES: readonly string[] = [];
@@ -183,6 +179,12 @@ export interface WorkspaceProps {
    * отказ: оболочка без хранилища устройства и не обязана ничего помнить.
    */
   lastVault?: LastVaultLookup;
+  /**
+   * Открыть известный vault по записи хранилища устройства (фича 043): меню
+   * vault в шапке и недавние на стартовом экране. Не передан — записи
+   * показываются без перехода (contracts/shell-props.md).
+   */
+  openKnownVault?: (id: string) => Promise<VaultOpenResult>;
   /**
    * Панель настроек (фича 004). Приходит извне, а не импортируется здесь,
    * потому что её хранилище платформенное: панель везде одна — `SettingsPanel`,
@@ -320,6 +322,7 @@ const NO_IMAGE_SOURCES: ImageSources = { camera: false, gallery: false };
 function WorkspaceView({
   openVaultFolder,
   lastVault,
+  openKnownVault,
   settings,
   preview = null,
   cloneVault,
@@ -782,6 +785,11 @@ function WorkspaceView({
   }, [activePath]);
   const shownPhonePane: PhonePane =
     phonePane === "preview" && !showPreview ? "editor" : phonePane;
+  // Вид «Текст / Рядом / Документ» (фича 043, FR-002). У доски одна колонка —
+  // вид не применяется (US1 AS6). На телефоне свои экраны (US3).
+  const viewLocked = isBoardOpen;
+  const workspaceView = viewLocked ? "side" : panes.view;
+  const previewShown = showPreview && (phone || workspaceView !== "text");
   const activeNote = useMemo(
     () => (activePath === null ? null : (state.notes.find((entry) => entry.path === activePath) ?? null)),
     [activePath, state.notes],
@@ -2110,6 +2118,20 @@ function WorkspaceView({
         meta: shortcuts.displayOf("toggle-graph"),
         run: toggleView,
       },
+      // Кнопки, ушедшие из шапки (фича 043, FR-005): дерево и вид.
+      {
+        id: "toggle-tree",
+        ...titled("workspace.toggleTree"),
+        icon: "layout",
+        run: panes.toggleSidebar,
+      },
+      ...(["text", "side", "document"] as const).map((mode) => ({
+        id: `view-${mode}`,
+        title: t("workspace.view.command", { view: t(VIEW_LABEL[mode]) }),
+        titleEn: tEn("workspace.view.command", { view: tEn(VIEW_LABEL[mode]) }),
+        icon: "layout" as const,
+        run: () => panes.setView(mode),
+      })),
       {
         id: "search",
         ...titled("workspace.search"),
@@ -2640,24 +2662,58 @@ function WorkspaceView({
     />
   );
 
+  // Лист настроек — и над рабочей областью, и над стартовым экраном
+  // («Настройки приложения», фича 043).
+  const settingsSheet = showSettings && (
+        <div className="ts-overlay">
+          <div className="ts-sheet">
+            <div className="ts-sheet__head">
+              <span className="ts-eyebrow">{t("workspace.settings")}</span>
+              <span className="ts-spacer" />
+              <button
+                type="button"
+                className="ts-btn"
+                onClick={() => setShowSettings(false)}
+              >
+                {t("common.close")}
+              </button>
+            </div>
+            {/* Без внутренних отступов: панель настроек сама задаёт раскладку
+                в два столбца (меню слева, содержимое справа), и обёртка со
+                своим padding сдвинула бы границу между ними. */}
+            <div className="ts-sheet__body ts-sheet__body--flush">
+              {settings?.(
+                state.client ?? null,
+                (opener) => void reopenVault(opener),
+                state.preview ?? preview ?? null,
+                { sync, onCloneVault: openClone },
+              )}
+            </div>
+          </div>
+        </div>
+      );
+
   if (!state.client) {
     return (
       <>
-        <main className="ts-welcome">
-          <h1 className="ts-welcome__mark">
-            <span className="ts-wordmark__slash">/</span>typsidian
-          </h1>
-          <p>{t("workspace.welcome")}</p>
-          <OpenVault
+        <main className="ts-app ts-app--start">
+          <IconSprite />
+          <WelcomeScreen
             isLoading={state.isLoading}
             error={state.error}
-            onOpen={openVault}
-            last={offered}
-            {...(offered ? { onOpenLast: () => void openVaultWith(offered.open) } : {})}
+            device={device}
+            onOpenFolder={() => void openVault()}
+            onOpenKnown={
+              openKnownVault === undefined
+                ? undefined
+                : (id) => void openVaultWith(() => openKnownVault(id))
+            }
             onClone={openClone ?? undefined}
+            onSettings={settings === undefined ? undefined : () => setShowSettings(true)}
+            extra={welcomeExtra}
           />
           {cloneDialog}
-          {welcomeExtra}
+          {settingsSheet}
         </main>
         {/* Лист захвата без vault (макет D3) стоит рядом с экраном приветствия, а не
             внутри: стили приветствия окрасили бы его текст. */}
@@ -2678,7 +2734,14 @@ function WorkspaceView({
 
   return (
     <BookmarkActionsContext.Provider value={bookmarkActions}>
-    <main className="ts-app">
+    <main
+      className="ts-app"
+      // Экран телефона (фича 043, US3): у экрана заметки своя шапка — «Назад»
+      // и название, общая шапка скрыта (экран 4 Typsidian.pdf).
+      {...(phone && view === "workspace"
+        ? { "data-phone-screen": shownPhonePane === "tree" ? "tree" : "note" }
+        : {})}
+    >
       {/* Определения иконок монтируются один раз на всё приложение; всё
           остальное ссылается на них через `<use>`. */}
       <IconSprite />
@@ -2736,30 +2799,28 @@ function WorkspaceView({
           ]);
         }}
       >
-        <div className="ts-header__group">
-          {/* Дерево файлов убирается целиком — тексту и предпросмотру остаётся
-              всё окно. Кнопка в шапке, а не в самой панели: скрытой панели на
-              экране нет, и вернуть её было бы нечем. */}
-          <button
-            type="button"
-            className="ts-btn ts-btn--icon"
-            aria-pressed={!panes.sidebarHidden}
-            title={panes.sidebarHidden ? t("workspace.showTree") : t("workspace.hideTree")}
-            aria-label={
-              panes.sidebarHidden ? t("workspace.showTree") : t("workspace.hideTree")
-            }
-            onClick={panes.toggleSidebar}
-          >
-            <Icon name="layout" size={14} />
-          </button>
+        {/* Шапка по Typsidian.pdf (фича 043, FR-001): знак, vault, путь, поле
+            палитры, вид, синхронизация и одно главное действие. Остальные
+            действия — внизу дерева и в палитре команд (FR-005). */}
+        <div className="ts-header__group ts-header__group--lead">
           <span className="ts-wordmark">
             <span className="ts-wordmark__slash">/</span>typsidian
           </span>
-          <span className="ts-divider" />
-          <Breadcrumb rootName={state.client.rootName} path={activePath} />
+          <VaultSwitcher
+            rootName={state.client.rootName}
+            device={device}
+            onOpenKnown={
+              openKnownVault === undefined
+                ? undefined
+                : (id) => void reopenVault(() => openKnownVault(id))
+            }
+            onOpenFolder={() => void openVault()}
+            onManage={settings === undefined ? undefined : () => setShowSettings(true)}
+          />
+          <Breadcrumb path={activePath} />
           {/* Телефон (макет 1c): «Назад», «Вперёд» и название открытой заметки —
               вместо полосы вкладок. Шапка уже скрывает крошки. */}
-          {layout !== null && layout.presentation === "List" && view === "workspace" && (
+          {layout !== null && layout.presentation === "List" && view === "workspace" && shownPhonePane !== "tree" && (
             <PhoneNav
               layout={layout}
               onBack={tabCommands.back}
@@ -2770,38 +2831,28 @@ function WorkspaceView({
           )}
         </div>
         <div className="ts-header__group">
-          {/* Статус сборки — только на рабочей области: в графе собирать
-              нечего, и макет его там не показывает. */}
-          {view === "workspace" && (
-            <div className="ts-compile">
-              {compile.isBuilding ? (
-                <>
-                  <div className="ts-hazard" role="progressbar" aria-label={t("workspace.compile.building")}>
-                    <div className="ts-hazard__fill" />
-                  </div>
-                  <span className="ts-compile__label">{t("workspace.compile.compiling")}</span>
-                </>
-              ) : (
-                <>
-                  <span className="ts-compile__dot" aria-hidden="true" />
-                  <span className="ts-compile__label">
-                    {compile.lastMs === null
-                      ? t("workspace.compile.ready")
-                      : t("workspace.compile.readyIn", { ms: compile.lastMs })}
-                  </span>
-                </>
-              )}
-              <button
-                type="button"
-                className="ts-btn ts-btn--icon"
-                title={t("workspace.rebuild")}
-                aria-label={t("workspace.rebuildPreview")}
-                disabled={compile.isBuilding}
-                onClick={() => setRebuildToken((token) => token + 1)}
-              >
-                <Icon name="refresh" />
-              </button>
-            </div>
+          {/* Поле палитры показывает действующее сочетание: после
+              переназначения подпись обязана следовать за клавишами. */}
+          <button
+            type="button"
+            className="ts-cmdfield"
+            aria-label={t("workspace.openPalette")}
+            onClick={() => setPaletteOpen(true)}
+          >
+            <Icon name="search" size={13} />
+            <span className="ts-cmdfield__label">{t("workspace.commandField")}</span>
+            {shortcuts.displayOf("command-palette") !== "" && (
+              <kbd className="ts-kbd">{shortcuts.displayOf("command-palette")}</kbd>
+            )}
+          </button>
+
+          {view === "workspace" && !phone && (
+            <ViewSwitch
+              value={workspaceView}
+              onChange={panes.setView}
+              disabled={viewLocked}
+              disabledHint={t("workspace.view.boardHint")}
+            />
           )}
 
           {/* Ход пакета экспорта виден и при закрытом Центре (009 FR-025). */}
@@ -2854,10 +2905,8 @@ function WorkspaceView({
             />
           )}
 
-          <span className="ts-divider" />
-
           {/* Телефон: счётчик открытых заметок раскрывает их список (макет 1c). */}
-          {layout !== null && layout.presentation === "List" && view === "workspace" && (
+          {layout !== null && layout.presentation === "List" && view === "workspace" && shownPhonePane !== "tree" && (
             <button
               type="button"
               className="ts-btn ts-open-notes__count"
@@ -2871,105 +2920,17 @@ function WorkspaceView({
             </button>
           )}
 
-          {/* «Сегодня» и ‹ › у ежедневной заметки (022, макет D4). */}
-          {view === "workspace" && (
-            <DailyNav daily={daily} todayShortcut={shortcuts.displayOf("today")} />
-          )}
-
-          {/* Показ слайдов (019, макет A1): только у открытой заметки Typst. */}
-          {view === "workspace" && showHost !== undefined && openNotePath !== null && (
-            <ShowMenu
-              canPresent={showHost.supports.presenter}
-              shortcut={shortcuts.displayOf("start-show")}
-              active={showSession.active}
-              onStart={startShow}
-              onExport={() => setSlidesExportOpen(true)}
-            />
-          )}
-
-          {/* Оглавление (015, макет 1a): та же колонка в режиме «Структура». */}
-          {view === "workspace" && (
+          {/* Единственное главное действие шапки (Typsidian.pdf). */}
+          {view === "workspace" && !phone && (
             <button
               type="button"
-              className="ts-btn"
-              aria-pressed={outlineShown}
-              title={hintWith(t("outline.button"), shortcuts.displayOf("toggle-outline"))}
-              onClick={toggleOutline}
+              className="ts-btn ts-btn--accent ts-header__primary"
+              disabled={openNotePath === null || previewClient === null || exporter.busy}
+              title={shortcuts.displayOf("export-pdf") || undefined}
+              onClick={exportCurrent}
             >
-              {t("outline.button")}
-            </button>
-          )}
-
-          {/* Источники (017, макет 1a): та же колонка в режиме «Источники». */}
-          {view === "workspace" && (
-            <button
-              type="button"
-              className="ts-btn"
-              aria-pressed={notePanelOpen && notePanel.mode === "sources"}
-              title={hintWith(t("sources.command.toggle"), shortcuts.displayOf("toggle-sources"))}
-              onClick={toggleSources}
-            >
-              {t("sources.command.toggle")}
-            </button>
-          )}
-
-          {/* Колонка заметки (013): на узком окне кнопка подписана названием
-              активного режима и открывает шторку. */}
-          {view === "workspace" && (
-            <button
-              type="button"
-              className="ts-btn"
-              aria-pressed={notePanelOpen}
-              title={shortcuts.displayOf("toggle-note-panel") || undefined}
-              onClick={toggleNotePanel}
-            >
-              {narrow
-                ? t(noteModes.find((mode) => mode.id === notePanel.mode)?.title ?? "links.mode")
-                : t("notePanel.button")}
-            </button>
-          )}
-
-          <button
-            type="button"
-            className="ts-btn"
-            aria-pressed={view === "graph"}
-            title={t("tree.graph.title")}
-            onClick={toggleView}
-          >
-            {view === "workspace" ? (
-              <Icon name="network" size={14} />
-            ) : (
-              <Icon name="chevron" size={14} className="ts-icon--flip" />
-            )}
-            {view === "workspace" ? t("workspace.graph") : t("graph.back")}
-          </button>
-
-          {/* Кнопка показывает действующее сочетание, а не ⌘K из макета:
-              после переназначения подпись обязана следовать за клавишами.
-              Значок ⌘ остаётся, только пока сочетание его содержит. */}
-          <button
-            type="button"
-            className="ts-btn ts-btn--cmd"
-            title={t("palette.label")}
-            aria-label={t("workspace.openPalette")}
-            onClick={() => setPaletteOpen(true)}
-          >
-            {shortcuts.displayOf("command-palette") || (
-              <>
-                <Icon name="cmd" size={12} />
-                K
-              </>
-            )}
-          </button>
-
-          {settings !== undefined && (
-            <button
-              type="button"
-              className="ts-btn"
-              aria-pressed={showSettings}
-              onClick={() => setShowSettings((shown) => !shown)}
-            >
-              {showSettings ? t("workspace.closeSettings") : t("workspace.settings")}
+              <Icon name="download" size={13} />
+              {t("workspace.exportPdfShort")}
             </button>
           )}
         </div>
@@ -3065,11 +3026,51 @@ function WorkspaceView({
         />
       ) : (
       <>
+      {/* Экран заметки на телефоне (фича 043, US3; экран 4 Typsidian.pdf):
+          «Назад» к дереву, название и путь, «Текст / Документ». */}
+      {phone && shownPhonePane !== "tree" && (
+        <div className="ts-phone-note">
+          <div className="ts-phone-note__head">
+            <button
+              type="button"
+              className="ts-btn ts-btn--icon"
+              aria-label={t("workspace.phone.back")}
+              title={t("workspace.phone.back")}
+              onClick={() => setPhonePane("tree")}
+            >
+              <Icon name="chevron" size={14} className="ts-icon--flip" />
+            </button>
+            <span className="ts-phone-note__names">
+              <span className="ts-phone-note__title">{noteStem(activePath)}</span>
+              {activePath !== null && <span className="ts-phone-note__path">{activePath}</span>}
+            </span>
+          </div>
+          <div className="ts-segmented ts-segmented--wide" role="group" aria-label={t("workspace.view.label")}>
+            <button
+              type="button"
+              className="ts-segmented__item"
+              aria-pressed={shownPhonePane === "editor"}
+              onClick={() => setPhonePane("editor")}
+            >
+              {t("workspace.view.text")}
+            </button>
+            <button
+              type="button"
+              className="ts-segmented__item"
+              aria-pressed={shownPhonePane === "preview"}
+              disabled={!showPreview}
+              onClick={() => setPhonePane("preview")}
+            >
+              {t("workspace.view.document")}
+            </button>
+          </div>
+        </div>
+      )}
       <div
         className="ts-body"
         ref={panes.bodyRef}
         style={panes.style}
-        {...(phone ? { "data-phone-pane": shownPhonePane } : {})}
+        {...(phone ? { "data-phone-pane": shownPhonePane } : { "data-view": workspaceView })}
       >
         {/* Скрытое дерево не рендерится вовсе, а не сжимается до нуля: панель
             нулевой ширины оставляла бы в раскладке свою рамку и по-прежнему
@@ -3081,7 +3082,12 @@ function WorkspaceView({
               notes={state.notes}
               openPath={activePath}
               folderCount={folderCount}
-              onOpenNote={openEntry}
+              onOpenNote={(note) => {
+                // Телефон: заметка из дерева всегда ведёт к её экрану — и та,
+                // что уже открыта (фича 043, US3 AS1).
+                if (phone) setPhonePane("editor");
+                openEntry(note);
+              }}
               onNotesChanged={refresh}
               onPathsMoved={applyPathChanges}
               moveToRequest={moveToRequest}
@@ -3089,6 +3095,10 @@ function WorkspaceView({
               onCreated={(path) => void openPath(path)}
               onError={setOperationError}
               onOpenGraph={toggleView}
+              onToggleOutline={phone ? undefined : toggleOutline}
+              onToggleSources={phone ? undefined : toggleSources}
+              onQuickNote={phone ? openManualCapture : undefined}
+              onOpenSettings={settings === undefined ? undefined : () => setShowSettings(true)}
               brokenLinks={linkHealth.health?.broken_links ?? 0}
               onOpenLinkHealth={() => setHealthOpen(true)}
               templates={templates}
@@ -3172,6 +3182,9 @@ function WorkspaceView({
               attachments: noteAttachments,
               sources: noteSources,
               completion: noteCompletion,
+              ...(syncOverview?.history.kind === "Local" || syncOverview?.history.kind === "Mirror"
+                ? { onHistory: openFileHistory }
+                : {}),
             }}
             linksSummary={linksSummary ?? undefined}
             attachmentStatus={
@@ -3179,17 +3192,19 @@ function WorkspaceView({
                 ? undefined
                 : t("attachments.status.inserted", { name: attachments.lastInserted })
             }
-            solo={!showPreview}
+            solo={!previewShown}
           />
         ) : (
           <div className="ts-groups ts-groups--solo" aria-busy="true" />
         )}
 
-        {showPreview && (
+        {previewShown && (
           <>
             {/* Доля считается в процентах, а не в пикселях: ширина колонки
                 зависит от размера окна, а доля — нет, и озвучивать пиксели,
-                меняющиеся сами по себе, значило бы врать скринридеру. */}
+                меняющиеся сами по себе, значило бы врать скринридеру. В виде
+                «Документ» делить нечего — текст скрыт (фича 043). */}
+            {workspaceView !== "document" && (
             <PaneDivider
               label={t("workspace.editorPreviewSplit")}
               now={panes.editorShare * 100}
@@ -3199,6 +3214,7 @@ function WorkspaceView({
               onStep={panes.stepSplit}
               onReset={panes.resetSplit}
             />
+            )}
 
             {isBoardOpen ? (
               <section className="ts-pane ts-pane--preview" aria-label={t("preview.label")}>
@@ -3220,9 +3236,6 @@ function WorkspaceView({
                 // в сеть. Читаются здесь, а не в панели: панель предпросмотра
                 // vault-клиентом не владеет.
                 vaultOverrides={vaultSettings.overrides}
-                // Фича 009: кнопка «PDF» в тулбаре — только у открытой заметки.
-                onExport={openNotePath === null ? undefined : exportCurrent}
-                exporting={exporter.busy}
                 // Фича 005: переход к месту замечания и пересборка при правке
                 // связанного файла.
                 onReveal={revealPlace}
@@ -3237,22 +3250,6 @@ function WorkspaceView({
           </>
         )}
       </div>
-      {phone && (
-        <nav className="ts-phone-switch" aria-label={t("workspace.phone.switch")}>
-          {(["tree", "editor", "preview"] as const).map((pane) => (
-            <button
-              key={pane}
-              type="button"
-              className="ts-phone-switch__btn"
-              aria-pressed={shownPhonePane === pane}
-              disabled={pane === "preview" && !showPreview}
-              onClick={() => setPhonePane(pane)}
-            >
-              {t(PHONE_PANE_LABEL[pane])}
-            </button>
-          ))}
-        </nav>
-      )}
       </>
       )}
 
@@ -3496,34 +3493,7 @@ function WorkspaceView({
         />
       )}
 
-      {showSettings && (
-        <div className="ts-overlay">
-          <div className="ts-sheet">
-            <div className="ts-sheet__head">
-              <span className="ts-eyebrow">{t("workspace.settings")}</span>
-              <span className="ts-spacer" />
-              <button
-                type="button"
-                className="ts-btn"
-                onClick={() => setShowSettings(false)}
-              >
-                {t("common.close")}
-              </button>
-            </div>
-            {/* Без внутренних отступов: панель настроек сама задаёт раскладку
-                в два столбца (меню слева, содержимое справа), и обёртка со
-                своим padding сдвинула бы границу между ними. */}
-            <div className="ts-sheet__body ts-sheet__body--flush">
-              {settings?.(
-                state.client ?? null,
-                (opener) => void reopenVault(opener),
-                state.preview ?? preview ?? null,
-                { sync, onCloneVault: openClone },
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {settingsSheet}
 
       {/* Синхронизация (фича 011). Панель не модальна: она сбоку, и работа с
           заметкой под ней продолжается (FR-019). */}
@@ -3602,13 +3572,22 @@ function WorkspaceView({
  * правило о путях. Ничего не открыто — показывается только имя vault, чтобы
  * шапка не схлопывалась.
  */
-function Breadcrumb({
-  rootName,
-  path,
-}: {
-  rootName: string;
-  path: string | null;
-}): React.JSX.Element {
+/** Подписи вида для команд палитры — те же, что у переключателя в шапке. */
+const VIEW_LABEL = {
+  text: "workspace.view.text",
+  side: "workspace.view.side",
+  document: "workspace.view.document",
+} as const satisfies Record<PaneView, MessageKey>;
+
+/** Имя открытой заметки без расширения — заголовок экрана заметки на телефоне. */
+function noteStem(path: string | null): string {
+  if (path === null) return "";
+  const file = path.split("/").pop() ?? path;
+  const dot = file.lastIndexOf(".");
+  return dot > 0 ? file.slice(0, dot) : file;
+}
+
+function Breadcrumb({ path }: { path: string | null }): React.JSX.Element {
   const segments = path === null ? [] : path.split("/").filter((part) => part !== "");
   const file = segments.pop() ?? null;
   const dot = file === null ? -1 : file.lastIndexOf(".");
@@ -3616,18 +3595,16 @@ function Breadcrumb({
   const extension = file !== null && dot > 0 ? file.slice(dot) : null;
 
   return (
-    <span className="ts-crumb">
-      {rootName}
+    <span className="ts-crumb" title={path ?? undefined}>
       {segments.map((segment) => (
         <span key={segment}>
-          <span className="ts-crumb__sep"> / </span>
           {segment}
+          <span className="ts-crumb__sep"> / </span>
         </span>
       ))}
       {stem !== null && (
         <>
-          <span className="ts-crumb__sep"> / </span>
-          {stem}
+          <span className="ts-crumb__file">{stem}</span>
           {extension && <span className="ts-crumb__ext">{extension}</span>}
         </>
       )}
