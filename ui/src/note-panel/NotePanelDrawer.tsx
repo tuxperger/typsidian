@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import type { NotePanelModeSpec, PanelModeId } from "./modes.js";
+import { NotePanelTabs } from "./NotePanel.js";
 
 // Боковая шторка колонки заметки для узкого окна (фича 015, макет
 // «Typsidian Оглавление» 1b, research.md §11): та же колонка с теми же
@@ -88,29 +89,8 @@ export function NotePanelDrawer({
         onKeyDown={onKeyDown}
       >
         <div className="ts-notepanel__head">
-          {modes.length > 1 ? (
-            <div className="ts-notepanel__modes" role="group" aria-label={t("notePanel.modes")}>
-              {modes.map((mode) => (
-                <button
-                  key={mode.id}
-                  type="button"
-                  className={
-                    mode.id === spec.id
-                      ? "ts-notepanel__mode ts-eyebrow ts-notepanel__mode--on"
-                      : "ts-notepanel__mode ts-eyebrow"
-                  }
-                  aria-pressed={mode.id === spec.id}
-                  onClick={() => onSelect(mode.id)}
-                >
-                  {t(mode.title)}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <span className="ts-eyebrow ts-notepanel__mode--on">{t(spec.title)}</span>
-          )}
+          <NotePanelTabs modes={modes} active={spec.id} onSelect={onSelect} />
           <span className="ts-spacer" />
-          {spec.badge !== null && <span className="ts-notepanel__tag">{spec.badge}</span>}
           <button
             type="button"
             className="ts-notepanel__tag ts-notepanel-drawer__esc"

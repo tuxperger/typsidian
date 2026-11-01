@@ -87,7 +87,9 @@ export default async (page) => {
   await page.evaluate(write("часть.typ", PART));
   await page.evaluate(write("План работ.typ", "= План\n"));
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.click("text=Глава");
   await page.waitForElement(".ts-editor .cm-content", { timeout: 60000 });
   // Первая сборка — она даёт связанные файлы и свидетельство.

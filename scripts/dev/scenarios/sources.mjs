@@ -78,7 +78,9 @@ export default async (page) => {
   await page.evaluate(write("Вёрстка.typ", CITING));
   await page.evaluate(write("Черновик.typ", PLAIN));
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await openNote(page, "Вёрстка");
 
   // ── Отметка битой цитаты (FR-006) ──────────────────────────────────────

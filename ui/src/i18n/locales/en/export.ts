@@ -74,4 +74,22 @@ export const exporting = {
   "export.toast.openCenter": "Export center",
   "export.toast.download": "Download",
   "export.toast.close": "Close message",
+  // Окно экспорта заметки (фича 044, артборд Export.dc.html).
+  "export.dialog.title": "Export",
+  "export.dialog.close": "Close export",
+  "export.dialog.format": "Format",
+  "export.dialog.pdf": "PDF",
+  "export.dialog.html": "HTML",
+  "export.dialog.slides": "Slides",
+  "export.dialog.what": "What",
+  "export.dialog.whatValue": (p: { name: string; pages: number | null }) =>
+    p.pages === null ? p.name : `${p.name} — ${enN(p.pages, "# page", "# pages")}`,
+  "export.dialog.where": "Where",
+  "export.dialog.whereValue": (p: { folder: string }) => `${p.folder}/ in the vault`,
+  "export.dialog.change": "Change…",
+  "export.dialog.slidesNote": "Slide export options open in the next step.",
+  "export.dialog.cancel": "Cancel",
+  "export.dialog.savePdf": "Save PDF",
+  "export.dialog.saveHtml": "Save HTML",
+  "export.dialog.nextSlides": "Next…",
 } as const satisfies Entries;

@@ -48,7 +48,9 @@ export default async (page) => {
     await o.write("Яд.typ", "= Яд\\n");
   })()`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Проект Альфа");
 
   // Шаг 1 (US1): колонка по Ctrl+Shift+L, группы и числа как на макете 1a.
@@ -64,7 +66,7 @@ export default async (page) => {
   await page.shot(shots + "/1a-column.png");
 
   await page.click(".ts-links__row .ts-links__snip[aria-label*='Методология']");
-  await page.sleep(500);
+  await page.waitFor(`document.querySelector(".ts-crumb")?.textContent.includes("Методология")`, { label: "открылась Методология", timeout: 8000 }).catch(() => undefined);
   expect(page, (await page.text(".ts-crumb")).includes("Методология"), "клик открыл Методологию");
   await page.shot(shots + "/1a-after-reveal.png");
   await page.click("text=Проект Альфа");
@@ -112,7 +114,7 @@ export default async (page) => {
   // Последний vault может открыться сам; иначе — обычная кнопка.
   await page.waitFor("document.body.innerText.includes('Проект Альфа') || document.body.innerText.includes('Открыть vault')");
   if (!(await page.evaluate("document.body.innerText.includes('Проект Альфа')"))) {
-    await page.click("text=Открыть vault");
+    await page.click("text=Открыть папку…");
   }
   await page.waitForElement("text=Проект Альфа");
   await page.click("text=Проект Альфа");
@@ -128,11 +130,17 @@ export default async (page) => {
   await page.click("text=Проект Альфа");
 
   // Шаг 6 (1c): узкое окно — колонки нет, шторка по кнопке.
-  await page.click("text=Скрыть дерево файлов");
+  // Дерево скрывается командой палитры (кнопки в шапке нет с 043).
+  await page.click(".ts-cmdfield");
+  await page.type("Скрыть дерево");
+  await page.press("Enter");
   await page.viewport(360, 720);
   await page.sleep(600);
   expect(page, (await page.evaluate("document.querySelector('.ts-notepanel') === null")), "на узком окне колонки нет");
-  await page.click("text=Связи");
+  // Шторка — кнопкой «Панель» над текстом, затем вкладка «Ссылки» (044).
+  await page.evaluate(`[...document.querySelectorAll("button")].find((el) => el.textContent.trim() === "Панель" && el.getClientRects().length > 0)?.click()`);
+  await page.waitForElement(".ts-notepanel--sheet");
+  await page.evaluate(`[...document.querySelectorAll(".ts-notepanel--sheet .ts-notepanel__mode")].find((el) => el.textContent.startsWith("Ссылки"))?.click()`);
   await page.waitForElement(".ts-notepanel--sheet .ts-links__group");
   await page.sleep(500);
   await page.shot(shots + "/1c-sheet.png");

@@ -25,6 +25,7 @@ export const editor: Translation<typeof en> = {
   "editor.words": (p) => ruN(p.count, "# слово", "# слова", "# слов"),
   // Как в макете: обозначения позиции — те же, что в английском.
   "editor.caret": (p) => `Ln ${p.line}, Col ${p.column}`,
+  "editor.buildErrors": (p) => ruN(p.count, "# ошибка", "# ошибки", "# ошибок"),
   "editor.save.saving": "сохранение…",
   "editor.save.dirty": "не сохранено",
   "editor.save.held": "конфликт — сохранение приостановлено",

@@ -24,6 +24,7 @@ export const editor = {
   "editor.fontSize.increaseHint": "Increase font (Ctrl + wheel)",
   "editor.words": (p: { count: number }) => enN(p.count, "# word", "# words"),
   "editor.caret": (p: { line: number; column: number }) => `Ln ${p.line}, Col ${p.column}`,
+  "editor.buildErrors": (p: { count: number }) => enN(p.count, "# error", "# errors"),
   "editor.save.saving": "saving…",
   "editor.save.dirty": "not saved",
   "editor.save.held": "conflict — saving paused",

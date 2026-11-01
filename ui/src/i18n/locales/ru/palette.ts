@@ -9,8 +9,7 @@ export const palette: Translation<typeof en> = {
   "palette.groupNotes": "Заметки",
   "palette.groupCommands": "Команды",
   "palette.nothingFound": "ничего не найдено",
-  "palette.hintNavigate": "навигация",
-  "palette.hintOpen": "открыть",
-  "palette.hintClose": "esc закрыть",
-  "palette.changedNow": "изменено сейчас",
+  "palette.escKey": "Esc",
+  "palette.hintNavigate": "↑↓ выбрать",
+  "palette.hintOpen": "Enter открыть",
 };

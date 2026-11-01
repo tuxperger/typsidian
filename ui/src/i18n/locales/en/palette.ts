@@ -8,8 +8,7 @@ export const palette = {
   "palette.groupNotes": "Notes",
   "palette.groupCommands": "Commands",
   "palette.nothingFound": "nothing found",
-  "palette.hintNavigate": "navigate",
-  "palette.hintOpen": "open",
-  "palette.hintClose": "esc close",
-  "palette.changedNow": "changed just now",
+  "palette.escKey": "Esc",
+  "palette.hintNavigate": "↑↓ select",
+  "palette.hintOpen": "Enter open",
 } as const satisfies Entries;

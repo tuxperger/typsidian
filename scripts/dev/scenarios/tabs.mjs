@@ -125,7 +125,9 @@ export default async (page) => {
     for (let i = 1; i <= 50; i += 1) await o.write("Много/Лист " + String(i).padStart(2, "0") + ".typ", "= Лист " + i + "\\n");
   })()`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Введение");
   // Первый тик сверки с диском видит только что созданные тестом файлы; правка
   // до него дала бы ложный конфликт — это свойство стенда, а не вкладок.
@@ -539,7 +541,7 @@ export default async (page) => {
   expect(page, before.first.length + before.second.length === 5, "пять вкладок в двух группах: " + JSON.stringify(before));
   await page.sleep(1500); // запись набора — после паузы 400 мс
   const reopen = async () => {
-    await page.click("text=Открыть vault").catch(() => {});
+    await page.click("text=Открыть папку…").catch(() => {});
     await page.waitForElement("text=Введение", { timeout: 30000 });
   };
   await page.reload();

@@ -87,7 +87,7 @@ export default async (page) => {
   check(page, !(await page.evaluate(visible(".ts-ruler-h"))), "линеек нет");
   const footer = await page.evaluate(`[...document.querySelectorAll(".ts-sidebar__footer button")].map((el) => el.getAttribute("aria-label") || el.textContent.trim())`);
   page.log(`  низ дерева: ${footer.join(" | ")}`);
-  check(page, ["Открыть граф связей", "Оглавление", "Источники"].every((label) => footer.includes(label)), "низ дерева: граф, оглавление, источники");
+  check(page, ["Открыть граф связей", "Задачи", "Источники"].every((label) => footer.includes(label)), "низ дерева: граф, задачи, источники (044)");
   await shot(page, "workspace");
 
   // Вид «Текст» и «Документ».

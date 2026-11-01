@@ -17,7 +17,8 @@ export default async (page) => {
   await page.viewport(400, 820);
   await page.evaluate(write("Заметка.typ", "= Заголовок\nТекст заметки для проверки телефонной раскладки.\n"));
   await page.evaluate(write("Вторая.typ", "= Вторая\n"));
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.sleep(1500);
   await page.shot(process.env.SHOT_A);
   await page.click("text=Заметка");

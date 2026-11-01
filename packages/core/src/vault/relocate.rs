@@ -650,6 +650,7 @@ pub async fn move_section_marks<B: VaultBackend>(
 ) {
     if is_folder {
         let _ = move_sections(backend, from, new_path).await;
+        crate::ai::access::move_denied_folders(backend, from, new_path).await;
     }
     let _ = super::vault_settings::move_intentional_orphans(backend, from, new_path).await;
     let _ = crate::snapshots::move_snapshots(backend, from, new_path).await;

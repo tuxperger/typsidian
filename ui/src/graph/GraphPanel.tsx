@@ -51,16 +51,9 @@ export function GraphPanel({ state }: { state: GraphSettingsState }): React.JSX.
 
   return (
     <aside className="ts-graph__panel" aria-label={t("graph.panel.label")}>
+      {/* «Показывать» и «Обозначения» — первыми (фича 044, артборд 7). */}
       <section className="ts-graph__sec">
-        <h3>{t("graph.filter.title")}</h3>
-        <input
-          className="ts-graph__input"
-          type="text"
-          value={settings.filter}
-          aria-label={t("graph.filter.label")}
-          placeholder={t("graph.filter.placeholder")}
-          onChange={(event) => update({ filter: event.target.value })}
-        />
+        <h3>{t("graph.show.title")}</h3>
         <Toggle
           label={t("graph.show.orphans")}
           checked={settings.show_orphans}
@@ -75,6 +68,32 @@ export function GraphPanel({ state }: { state: GraphSettingsState }): React.JSX.
           label={t("graph.show.tags")}
           checked={settings.show_tags}
           onChange={(show_tags) => update({ show_tags })}
+        />
+      </section>
+
+      <section className="ts-graph__sec">
+        <h3>{t("graph.legend.title")}</h3>
+        <span className="ts-graph__legend ts-graph__legend--current">{t("graph.legend.current")}</span>
+        <span className="ts-graph__legend">{t("graph.legend.note")}</span>
+        {settings.show_tags && (
+          <span className="ts-graph__legend ts-graph__legend--tag">{t("graph.legend.tag")}</span>
+        )}
+        {settings.show_attachments && (
+          <span className="ts-graph__legend ts-graph__legend--attachment">
+            {t("graph.legend.attachment")}
+          </span>
+        )}
+      </section>
+
+      <section className="ts-graph__sec">
+        <h3>{t("graph.filter.title")}</h3>
+        <input
+          className="ts-graph__input"
+          type="text"
+          value={settings.filter}
+          aria-label={t("graph.filter.label")}
+          placeholder={t("graph.filter.placeholder")}
+          onChange={(event) => update({ filter: event.target.value })}
         />
       </section>
 

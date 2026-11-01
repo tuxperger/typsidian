@@ -5,6 +5,7 @@
 //! Помощник, который командой не является, живёт в `lib.rs`.
 
 use crate::*;
+use typsidian_core::sync::secrets::SecretStore;
 
 // ── Дерево и файлы ──────────────────────────────────────────────────────────
 
@@ -2322,4 +2323,168 @@ pub async fn sync_set_author(
         .into());
     }
     sync::change_device_values(home, sync_state, |values| values.author = author).await
+}
+
+// ── Обучение с ИИ (фича 050) ────────────────────────────────────────────────
+//
+// Блокировка vault снимается на время сети: медленная модель не должна останавливать
+// редактор (FR-017). `vault_id` и `allow_custom` на сервере подставляет сам сервер.
+
+pub async fn ai_settings_get(state: &Vault) -> Answer<ai::settings::AiSettings, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        ai::settings::load_settings(backend).await
+    ))
+}
+
+pub async fn ai_settings_set(
+    state: &Vault,
+    settings: ai::settings::AiSettings,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::settings::save_settings(
+        backend, &settings
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+pub async fn ai_key_state(
+    home: &SyncHome,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+) -> Answer<bool, ai::AiFailure> {
+    home.secrets()
+        .get(&vault_id, provider.secret_kind())
+        .await
+        .map(|key| key.is_some())
+        .map_err(|_| ai::AiFailure::SecretsUnavailable)
+}
+
+pub async fn ai_key_set(
+    home: &SyncHome,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+    key: String,
+) -> Answer<(), ai::AiFailure> {
+    home.secrets()
+        .set(&vault_id, provider.secret_kind(), &key)
+        .await
+        .map_err(|_| ai::AiFailure::SecretsUnavailable)
+}
+
+pub async fn ai_key_delete(
+    home: &SyncHome,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+) -> Answer<(), ai::AiFailure> {
+    home.secrets()
+        .delete(&vault_id, provider.secret_kind())
+        .await
+        .map_err(|_| ai::AiFailure::SecretsUnavailable)
+}
+
+pub async fn ai_models(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    request_id: String,
+    allow_custom: bool,
+) -> Answer<Vec<String>, Failure<ai::AiFailure>> {
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    let request = ai::client::prepare_models(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+    ai::cancel::cancellable(
+        &vault_id,
+        &request_id,
+        ai::client::send_models(
+            &ai::transport::DefaultTransport,
+            settings.provider,
+            request,
+            key.as_deref(),
+        ),
+    )
+    .await
+    .map_err(Failure::Core)
+}
+
+pub async fn ai_probe(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    request_id: String,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::client::ProbeResult, Failure<ai::AiFailure>> {
+    // Ключа нет или адрес не одобрен здесь — запроса не будет: журнал такой
+    // попытки не получает.
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    if settings.enabled {
+        ai::endpoint::base_url(&settings, allow_custom).map_err(Failure::Core)?;
+        ai::client::require_approved(home.secrets(), &vault_id, &settings)
+            .await
+            .map_err(Failure::Core)?;
+    }
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+    let prepared = with_vault!(state, |backend| ai::client::begin_probe(
+        backend,
+        &request_id,
+        now,
+        allow_custom
+    )
+    .await
+    .map_err(Failure::Core))?;
+    let outcome = ai::cancel::cancellable(
+        &vault_id,
+        &request_id,
+        ai::client::send_probe(&ai::transport::DefaultTransport, &prepared, key.as_deref()),
+    )
+    .await;
+    with_vault!(state, |backend| ai::client::finish_probe(
+        backend, &prepared, now, outcome
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+/// Одобряет свой адрес из настроек vault на этом устройстве (ревью безопасности
+/// 050, M1). `insecure_ok` — пользователь здесь подтвердил незашифрованное соединение.
+pub async fn ai_approve_endpoint(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    insecure_ok: bool,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    ai::client::approve_endpoint(home.secrets(), &vault_id, &settings, insecure_ok)
+        .await
+        .map_err(Failure::Core)
+}
+
+pub fn ai_cancel(vault_id: String, request_id: String) {
+    ai::cancel::cancel(&vault_id, &request_id);
+}
+
+pub async fn ai_journal(state: &Vault) -> Answer<Vec<ai::journal::JournalEntry>, Failure<()>> {
+    with_vault!(state, |backend| Ok(
+        ai::journal::journal_entries(backend).await
+    ))
+}
+
+pub async fn ai_journal_clear(state: &Vault) -> Answer<u32, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::journal::journal_clear(backend)
+        .await
+        .map_err(Failure::Core))
+}
+
+pub async fn ai_check_access(state: &Vault, path: String) -> Answer<bool, Failure<()>> {
+    with_vault!(state, |backend| {
+        let settings = ai::settings::load_settings(backend).await;
+        Ok(ai::access::check_access_in(backend, &path, &settings).await)
+    })
 }

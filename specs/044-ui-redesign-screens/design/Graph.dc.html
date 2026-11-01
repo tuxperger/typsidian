@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Граф</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14171a}
+a{color:#ff8a33}a:hover{color:#ffc7a3}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+input{font:inherit;color:inherit}
+input::placeholder{color:#9aa3ac}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #ff6a00;outline-offset:1px}
+</style>
+</helmet>
+<div style="position: relative; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #14171a; color: #c2c8ce; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+<header style="flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 40px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid #262b31; background: #14171a">
+<a href="Welcome.dc.html" aria-label="Typsidian, стартовый экран" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600; color: #eceff1; text-decoration: none; white-space: nowrap"><span style="color: #ff6a00">/</span>typsidian</a>
+<button type="button" aria-label="Сменить vault: диссертация-2026" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>диссертация-2026<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6l4 4 4-4"></path></svg></button>
+<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #9aa3ac; white-space: nowrap"><b style="color: #dde1e5; font-weight: 500">Граф</b></span>
+<a href="Palette.dc.html" style="margin-left: auto; width: 200px; height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; color: #9aa3ac; font-size: 12px; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>Команды и заметки<kbd style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac; border: 1px solid #353c44; border-radius: 2px; padding: 1px 5px">Ctrl K</kbd></a>
+<div role="group" aria-label="Вид" style="display: inline-flex; border: 1px solid #353c44; border-radius: 2px; overflow: hidden">
+<a href="TextPanel.dc.html" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; color: #9aa3ac; text-decoration: none">Текст</a>
+<a href="Main.dc.html" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; background: #262b31; color: #eceff1; text-decoration: none">Рядом</a>
+<button type="button" style="height: 24px; padding: 0 10px; font-size: 12px; color: #9aa3ac">Документ</button>
+</div>
+<a href="Sync.dc.html" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa3ac; text-decoration: none; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #6fbf8e; flex: none"></span>синхронизировано</a>
+<a href="Export.dc.html" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #ff6a00; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10"></path></svg>Экспорт PDF</a>
+</header>
+
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-wrap: wrap">
+
+<aside aria-label="Vault" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 8px 8px; box-sizing: border-box; background: #14171a; border-right: 1px solid #262b31">
+<label style="height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg><input type="search" aria-label="Поиск по vault" placeholder="Поиск по vault" style="flex: 1 1 auto; min-width: 0; height: 24px; padding: 0; background: transparent; border: 0; font-size: 12px; color: #eceff1"></label>
+<div style="display: flex; align-items: center; gap: 2px; padding: 8px 4px 2px">
+<span style="flex: 1 1 auto; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9aa3ac">Vault</span>
+<button type="button" aria-label="Свернуть все папки" title="Свернуть все папки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M5 3l3 3 3-3M5 13l3-3 3 3"></path></svg></button>
+<button type="button" aria-label="Развернуть все папки" title="Развернуть все папки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"></path></svg></button>
+</div>
+<nav aria-label="Дерево vault" style="display: flex; flex-direction: column; gap: 1px; font-size: 13px">
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Введение</button>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Методология</button>
+<button type="button" aria-expanded="true" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6l4 4 4-4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Результаты</button>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 24px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>рисунки</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 40px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">Обсуждение<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></button>
+<a href="Main.dc.html" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 40px; border-radius: 2px; white-space: nowrap; background: #262b31; color: #eceff1; box-shadow: inset 2px 0 0 #ff6a00; text-decoration: none">Результаты<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></a>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>шаблоны</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">План работы<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></button>
+<a href="Board.dc.html" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce; text-decoration: none">Схема установки<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.board</span></a>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">refs<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.yml</span></button>
+</nav>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 2px; padding-top: 8px; border-top: 1px solid #262b31">
+<button type="button" style="flex: 1 1 auto; display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px; color: #dde1e5; font-size: 12px"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #ff6a00; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 3v10M3 8h10"></path></svg>Заметка</button>
+<a href="Graph.dc.html" aria-current="page" aria-label="Граф" title="Граф" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; background: #262b31; color: #ff8a33"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="4" cy="8" r="1.8"></circle><circle cx="12" cy="4" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><path d="M5.6 7.2 10.4 4.8M5.6 8.8l4.8 2.4"></path></svg></a>
+<button type="button" aria-label="Задачи" title="Задачи" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><rect x="2.5" y="2.5" width="11" height="11"></rect><path d="m5 8 2 2 4-4"></path></svg></button>
+<button type="button" aria-label="Источники" title="Источники" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M3 3h6.5a2 2 0 0 1 2 2v8.5H5a2 2 0 0 1-2-2zM11.5 5H13v8.5"></path></svg></button>
+<a href="Settings.dc.html" aria-label="Настройки" title="Настройки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M3 5h10M3 11h10"></path><circle cx="6" cy="5" r="1.6" style="fill: #14171a"></circle><circle cx="10" cy="11" r="1.6" style="fill: #14171a"></circle></svg></a>
+</div>
+</aside>
+
+<main style="flex: 999 1 640px; min-width: 0; display: flex; flex-wrap: wrap">
+
+<section aria-label="Фильтры графа" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box; background: #14171a; border-right: 1px solid #262b31; font-size: 12px">
+<h2 style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: #dde1e5">Показывать</h2>
+<sc-for list="{{toggles}}" as="t" hint-placeholder-count="4">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; color: #c2c8ce"><span>{{t.label}}</span><button type="button" role="switch" aria-checked="{{t.checked}}" aria-label="{{t.label}}" onClick="{{t.flip}}" style="position: relative; flex: none; width: 28px; height: 16px; border-radius: 8px; background: {{t.track}}"><span aria-hidden="true" style="position: absolute; top: 2px; left: {{t.knobLeft}}; width: 12px; height: 12px; border-radius: 50%; background: {{t.knob}}"></span></button></div>
+</sc-for>
+<div aria-hidden="true" style="height: 1px; background: #262b31"></div>
+<h2 style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: #dde1e5">Обозначения</h2>
+<div style="display: flex; align-items: center; gap: 8px; color: #c2c8ce"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #ff6a00; flex: none"></span>открытая заметка</div>
+<div style="display: flex; align-items: center; gap: 8px; color: #c2c8ce"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #9aa3ac; flex: none"></span>заметка</div>
+<div style="display: flex; align-items: center; gap: 8px; color: #c2c8ce"><span aria-hidden="true" style="width: 9px; height: 9px; box-sizing: border-box; border: 2px solid #ffd400; border-radius: 50%; flex: none"></span>битая ссылка</div>
+</section>
+
+<figure aria-label="Граф vault: 16 заметок вокруг открытой «Результаты»" style="flex: 1000 1 420px; min-width: 0; min-height: 420px; margin: 0; position: relative; overflow: hidden; background: #1b1f24">
+<svg viewBox="0 0 560 652" preserveAspectRatio="none" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%"><path d="{{edgesD}}" style="fill: none; stroke: #353c44; stroke-width: 1; vector-effect: non-scaling-stroke"></path><path d="{{hotD}}" style="fill: none; stroke: rgba(255, 106, 0, 0.55); stroke-width: 1.5; vector-effect: non-scaling-stroke"></path></svg>
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="16">
+<div style="position: absolute; left: {{n.left}}; top: {{n.top}}; display: flex; align-items: center; gap: 6px; transform: translate({{n.shift}}, -50%); white-space: nowrap; font-size: 12px; color: {{n.labelColor}}"><span aria-hidden="true" style="flex: none; width: {{n.size}}; height: {{n.size}}; border-radius: 50%; background: {{n.fill}}; box-shadow: {{n.ring}}"></span><span>{{n.label}}</span></div>
+</sc-for>
+</figure>
+
+</main>
+</div>
+
+<footer style="height: 24px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 10px; box-sizing: border-box; border-top: 1px solid #262b31; background: #14171a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden">
+<span>42 заметки · 118 ссылок · 2 битые</span>
+<span style="margin-left: auto">64 слова</span>
+<span>typst</span>
+<button type="button" style="display: flex; align-items: center; gap: 5px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.4h2.4M8 5v3l2 1.5"></path></svg>История</button>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":750}}'>
+class Component extends DCLogic {
+  constructor(...args) {
+    super(...args);
+    this.state = { on: { notes: true, boards: true, attach: false, linked: false } };
+  }
+  renderVals() {
+    const W = 560;
+    const H = 652;
+    const names = ['Результаты', 'Методология', 'Введение', 'Обсуждение', 'План работы', 'Схема установки', 'Протокол №4', 'Литература', 'Термопары', 'Калибровка', 'Модель', 'Заключение', 'Нагреватель', 'Серия 7', 'Таблицы', 'Глоссарий'];
+    const pts = names.map((label, i) => {
+      const a = (i / names.length) * Math.PI * 2 + (i % 3) * 0.35;
+      const r = i === 0 ? 0 : 120 + ((i * 53) % 130);
+      return { label: label, x: W / 2 + Math.cos(a) * r, y: H / 2 + Math.sin(a) * r * 0.9 };
+    });
+    const edges = [[0, 1], [0, 3], [0, 4], [0, 5], [0, 6], [0, 13], [0, 14], [1, 6], [1, 8], [1, 9], [2, 4], [2, 7], [3, 10], [3, 11], [5, 12], [8, 9], [10, 7], [11, 3], [6, 15], [13, 9]];
+    const seg = (e) => 'M' + pts[e[0]].x.toFixed(1) + ' ' + pts[e[0]].y.toFixed(1) + 'L' + pts[e[1]].x.toFixed(1) + ' ' + pts[e[1]].y.toFixed(1);
+    const broken = [12, 15];
+    const nodes = pts.map((p, i) => {
+      const deg = edges.filter((e) => e[0] === i || e[1] === i).length;
+      const r = 4 + deg * 1.6;
+      return {
+        label: p.label,
+        left: (p.x / W * 100).toFixed(2) + '%',
+        top: (p.y / H * 100).toFixed(2) + '%',
+        shift: (-r).toFixed(1) + 'px',
+        size: (r * 2).toFixed(1) + 'px',
+        fill: i === 0 ? '#ff6a00' : '#9aa3ac',
+        ring: broken.indexOf(i) >= 0 ? '0 0 0 2px #1b1f24, 0 0 0 4px #ffd400' : 'none',
+        labelColor: i === 0 ? '#eceff1' : '#9aa3ac'
+      };
+    });
+    const labels = { notes: 'Заметки', boards: 'Доски', attach: 'Вложения', linked: 'Только связанные с открытой' };
+    const on = this.state.on;
+    const toggles = ['notes', 'boards', 'attach', 'linked'].map((k) => ({
+      label: labels[k],
+      checked: on[k] ? 'true' : 'false',
+      track: on[k] ? '#d94f00' : '#353c44',
+      knob: on[k] ? '#ffffff' : '#c2c8ce',
+      knobLeft: on[k] ? '14px' : '2px',
+      flip: () => this.setState({ on: Object.assign({}, this.state.on, { [k]: !this.state.on[k] }) })
+    }));
+    return {
+      nodes: nodes,
+      toggles: toggles,
+      edgesD: edges.map(seg).join(' '),
+      hotD: edges.filter((e) => e[0] === 0).map(seg).join(' ')
+    };
+  }
+}
+</script>
+</body>
+</html>

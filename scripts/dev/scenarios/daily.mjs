@@ -87,7 +87,8 @@ export default async (page) => {
   // Папки `дневник/` в начале нет: «Сегодня» в свежем vault обязано завести её само
   // (quickstart.md §2, 022 T021). Старая заметка для ‹ › кладётся позже, снаружи.
   await page.evaluate(`window.__opfs.write("входящие.typ", "= Входящие\\n")`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=входящие");
   await page.sleep(1500);
 

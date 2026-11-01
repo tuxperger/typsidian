@@ -438,3 +438,15 @@ async fn ordinary_sessions_do_not_work_on_a_demo_server() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+/// Гость анонимен: запросы к моделям от имени сервера ему закрыты (050 FR-019).
+#[tokio::test]
+async fn a_guest_has_no_ai_commands() {
+    let server = Server::demo().await;
+    let (_, _, anna) = server.start().await;
+    let anna = anna.unwrap();
+    for command in ["ai_settings_get", "ai_probe", "ai_key_set", "ai_cancel"] {
+        let (status, _) = server.invoke(&anna, command, json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{command}");
+    }
+}

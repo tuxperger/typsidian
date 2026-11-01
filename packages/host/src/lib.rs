@@ -469,6 +469,7 @@ pub mod dispatch;
 pub mod sync;
 
 pub use sync::{SyncAnswer, SyncCancel, SyncFailure, SyncHome, SyncProgressSlot, SyncState};
+pub use typsidian_core::ai;
 
 pub use commands::*;
 

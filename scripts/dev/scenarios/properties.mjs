@@ -54,7 +54,8 @@ export default async (page) => {
   await page.evaluate(`window.__opfs.write("проекты/вторая.typ", ${JSON.stringify(record("") + "= Вторая\nТекст.\n")})`);
   await page.evaluate(`window.__opfs.write("проекты/третья.typ", ${JSON.stringify(record("") + "= Третья\nТекст.\n")})`);
   await page.evaluate(`window.__opfs.write("сложная.typ", ${JSON.stringify('#let базовые = ("а",)\n#metadata((tags: базовые + ("срочно",), статус: "в работе")) <properties>\n= Сложная\n')})`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=первая");
   await page.sleep(2500);
 

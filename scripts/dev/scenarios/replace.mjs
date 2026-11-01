@@ -56,7 +56,8 @@ const checks = `[...document.querySelectorAll(".ts-replace__match input")]`;
 
 export default async (page) => {
   for (const [path, text] of Object.entries(FILES)) await page.evaluate(write(path, text));
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Введение");
   await page.sleep(2500);
 

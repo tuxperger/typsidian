@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "../icons/Icons.js";
-import { useI18n, type I18n } from "../i18n/index.js";
+import { useI18n } from "../i18n/index.js";
 import type { Note } from "../wasm-core/typsidian_core.js";
 import { useDismissOnEscape } from "./useDismissOnEscape.js";
 
-// Палитра команд ⌘K — экран 3 макета (handoff § Screens 3).
+// Палитра команд ⌘K — артборд 3 нового дизайна (фича 044, `specs/044-…/design/Palette.dc.html`).
 //
 // Что здесь есть и чего нет: фильтрация, навигация с клавиатуры и вызов
 // действия. Списка команд она не придумывает — он приходит сверху, из
@@ -36,8 +36,8 @@ export interface CommandPaletteProps {
 
 /** Строка списка после фильтрации — заметка или команда, но не то и другое. */
 type Row =
-  | { kind: "note"; key: string; title: string; meta: string; note: Note }
-  | { kind: "command"; key: string; title: string; meta: string; command: PaletteCommand };
+  | { kind: "note"; key: string; title: string; meta: string; match: number; note: Note }
+  | { kind: "command"; key: string; title: string; meta: string; match: number; command: PaletteCommand };
 
 export function CommandPalette({
   notes,
@@ -45,8 +45,7 @@ export function CommandPalette({
   onOpenNote,
   onClose,
 }: CommandPaletteProps): React.JSX.Element {
-  const i18n = useI18n();
-  const { t } = i18n;
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -61,10 +60,11 @@ export function CommandPalette({
         kind: "note" as const,
         key: `note:${note.path}`,
         title: note.name,
-        meta: describeChangedAt(i18n, note.stamp.mtime_millis),
+        meta: folderOf(note.path),
+        match: needle === "" ? -1 : note.name.toLowerCase().indexOf(needle),
         note,
       }));
-  }, [notes, query, i18n]);
+  }, [notes, query]);
 
   const commandRows = useMemo<Row[]>(() => {
     const needle = query.trim().toLowerCase();
@@ -79,6 +79,7 @@ export function CommandPalette({
         key: `command:${command.id}`,
         title: command.title,
         meta: command.meta ?? "",
+        match: needle === "" ? -1 : command.title.toLowerCase().indexOf(needle),
         command,
       }));
   }, [commands, query]);
@@ -154,6 +155,7 @@ export function CommandPalette({
               `aria-activedescendant`, а не фокус. */}
           <input
             autoFocus
+            className="ts-palette__input"
             type="text"
             role="combobox"
             aria-expanded="true"
@@ -167,13 +169,15 @@ export function CommandPalette({
               setActive(0);
             }}
           />
+          {/* Клавиша закрытия — и подсказка, и кнопка: на сенсорном экране
+              Esc нажать нечем. */}
           <button
             type="button"
-            className="ts-btn ts-btn--ghost"
+            className="ts-kbd ts-palette__esc"
             aria-label={t("palette.close")}
             onClick={onClose}
           >
-            <Icon name="x" size={12} />
+            {t("palette.escKey")}
           </button>
         </div>
 
@@ -187,6 +191,7 @@ export function CommandPalette({
             <PaletteRow
               key={row.key}
               row={row}
+              needleLength={query.trim().length}
               selected={rows[active]?.key === row.key}
               onRun={() => runRow(row)}
             />
@@ -201,6 +206,7 @@ export function CommandPalette({
             <PaletteRow
               key={row.key}
               row={row}
+              needleLength={query.trim().length}
               selected={rows[active]?.key === row.key}
               onRun={() => runRow(row)}
             />
@@ -214,18 +220,8 @@ export function CommandPalette({
         </ul>
 
         <div className="ts-palette__hints">
-          <span>
-            <Icon name="updown" size={11} />
-            {t("palette.hintNavigate")}
-          </span>
-          <span>
-            <Icon name="enter" size={11} />
-            {t("palette.hintOpen")}
-          </span>
-          <span>
-            <Icon name="x" size={11} />
-            {t("palette.hintClose")}
-          </span>
+          <span>{t("palette.hintNavigate")}</span>
+          <span>{t("palette.hintOpen")}</span>
         </div>
       </div>
     </div>
@@ -239,10 +235,13 @@ function rowId(row: Row): string {
 
 function PaletteRow({
   row,
+  needleLength,
   selected,
   onRun,
 }: {
   row: Row;
+  /** Длина запроса: совпадение выделяется от `row.match` на столько символов. */
+  needleLength: number;
   selected: boolean;
   onRun: () => void;
 }): React.JSX.Element {
@@ -258,36 +257,38 @@ function PaletteRow({
       }
       onClick={onRun}
     >
-      <Icon
-        name={row.kind === "command" ? row.command.icon : "file"}
-        className="ts-palette__icon"
-      />
-      <span className="ts-palette__title">{row.title}</span>
+      <span className="ts-palette__title">
+        <Highlighted text={row.title} at={row.match} length={needleLength} />
+      </span>
       {row.meta && <span className="ts-palette__meta">{row.meta}</span>}
     </li>
   );
 }
 
+/** Совпадение с запросом — цветом акцента, как у «Переместить в…». */
+function Highlighted({
+  text,
+  at,
+  length,
+}: {
+  text: string;
+  at: number;
+  length: number;
+}): React.JSX.Element {
+  if (at < 0 || length === 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className="ts-palette__match">{text.slice(at, at + length)}</mark>
+      {text.slice(at + length)}
+    </>
+  );
+}
+
 /**
- * Когда файл менялся, словами.
- *
- * Ноль означает «отметки времени нет»: web-бэкенд намеренно не использует
- * `lastModified` как часть идентичности заметки (`stamp_from_content` в
- * `packages/core/src/vault/web.rs`), и показывать вместо этого «55 лет назад»
- * было бы враньём. В таком случае мета просто пустая.
+ * Папка заметки — где она лежит (артборд 3); у заметки в корне vault — пусто.
  */
-function describeChangedAt(i18n: I18n, mtimeMillis: number): string {
-  if (!mtimeMillis) return "";
-  const elapsed = Date.now() - mtimeMillis;
-  if (elapsed < 0) return "";
-
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 1) return i18n.t("palette.changedNow");
-  if (minutes < 60) return i18n.formatRelative(-minutes, "minute");
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return i18n.formatRelative(-hours, "hour");
-
-  const days = Math.floor(hours / 24);
-  return i18n.formatRelative(-days, "day");
+function folderOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash <= 0 ? "" : `${path.slice(0, slash)}/`;
 }

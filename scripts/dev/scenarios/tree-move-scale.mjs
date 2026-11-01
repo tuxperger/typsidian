@@ -37,7 +37,9 @@ export default async (page) => {
     }
   })()`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   const source = "А-01/заметка.typ";
   await page.waitForElement(row(source), { timeout: 120000 });
   const rows = await page.evaluate(`document.querySelectorAll("[data-drag-path]").length`);

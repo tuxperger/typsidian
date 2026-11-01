@@ -69,7 +69,8 @@ export default async (page) => {
   await page.evaluate(OPFS + "true");
   await page.evaluate(`window.__opfs.write("Диссертация/Методика.typ", ${JSON.stringify(METHOD)})`);
   await page.evaluate(`window.__opfs.write("Диссертация/Введение.typ", ${JSON.stringify(INTRO)})`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Введение", { timeout: 30000 });
   await page.click("text=Введение");
   await page.waitFor(`document.querySelector('.cm-content')?.innerText.includes('Цель работы')`, { label: "заметка открыта" });

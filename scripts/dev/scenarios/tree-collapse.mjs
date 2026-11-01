@@ -62,7 +62,7 @@ export default async (page) => {
   if (process.env.NO_FOLDERS) {
     await page.evaluate(writeFiles([["Начните здесь.typ", "= Начните здесь\n"], ["Черновик.typ", "= Черновик\n"]]));
     await page.click("text=Продолжить");
-    await page.click("text=Открыть vault");
+    await page.click("text=Открыть папку…");
     await page.waitForElement(".ts-tree__head", { timeout: 60000 });
     const disabled = await page.evaluate(`[...document.querySelectorAll(".ts-tree__head button")].map((b) => b.disabled)`);
     check(page, disabled.length === 2 && disabled.every(Boolean), "без папок обе кнопки выключены");
@@ -70,7 +70,7 @@ export default async (page) => {
   }
   await page.evaluate(writeFiles(FILES));
   await page.click("text=Продолжить");
-  await page.click("text=Открыть vault");
+  await page.click("text=Открыть папку…");
   await page.waitFor(`${expanded("Исследование")} !== "нет"`, { label: "дерево", timeout: 60000 });
   await page.sleep(500);
 

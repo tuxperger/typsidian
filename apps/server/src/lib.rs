@@ -31,6 +31,10 @@ use store::Store;
 /// Сколько обменов с удалёнными репозиториями идут одновременно на весь сервер.
 pub const MAX_EXCHANGES: usize = 32;
 
+/// Сколько запросов к моделям идут одновременно на весь сервер (050, ревью
+/// безопасности L2): каждый живёт до 30 с и держит буфер ответа.
+pub const MAX_AI_REQUESTS: usize = 16;
+
 /// Состояние сервера, общее для всех запросов.
 pub struct AppState {
     pub config: Config,
@@ -42,6 +46,8 @@ pub struct AppState {
     /// Одновременных обменов с удалёнными на весь сервер (038): каждый занимает
     /// блокирующий поток, а пул потоков общий для всех аккаунтов.
     pub exchanges: tokio::sync::Semaphore,
+    /// Одновременных запросов к моделям на весь сервер (050).
+    pub ai_requests: tokio::sync::Semaphore,
     /// Старты гостей по одному: проверка предела по адресу и запись гостя
     /// (фича 039).
     pub demo_starts: tokio::sync::Mutex<()>,
@@ -67,6 +73,7 @@ impl AppState {
             oidc: oidc::OidcState::default(),
             sync: sync::SyncHomes::default(),
             exchanges: tokio::sync::Semaphore::new(MAX_EXCHANGES),
+            ai_requests: tokio::sync::Semaphore::new(MAX_AI_REQUESTS),
             demo_starts: tokio::sync::Mutex::new(()),
             demo_secret: std::sync::OnceLock::new(),
         })

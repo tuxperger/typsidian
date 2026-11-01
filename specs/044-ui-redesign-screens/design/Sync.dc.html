@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Синхронизация и конфликт</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14171a}
+a{color:#ff8a33}a:hover{color:#ffc7a3}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+input{font:inherit;color:inherit}
+input::placeholder{color:#9aa3ac}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #ff6a00;outline-offset:1px}
+</style>
+</helmet>
+<div style="position: relative; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #14171a; color: #c2c8ce; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+<header style="flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 40px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid #262b31; background: #14171a">
+<a href="Welcome.dc.html" aria-label="Typsidian, стартовый экран" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600; color: #eceff1; text-decoration: none; white-space: nowrap"><span style="color: #ff6a00">/</span>typsidian</a>
+<button type="button" aria-label="Сменить vault: диссертация-2026" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>диссертация-2026<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6l4 4 4-4"></path></svg></button>
+<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #9aa3ac; white-space: nowrap">Результаты / <b style="color: #dde1e5; font-weight: 500">Результаты.typ</b></span>
+<a href="Palette.dc.html" style="margin-left: auto; width: 200px; height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; color: #9aa3ac; font-size: 12px; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>Команды и заметки<kbd style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac; border: 1px solid #353c44; border-radius: 2px; padding: 1px 5px">Ctrl K</kbd></a>
+<div role="group" aria-label="Вид" style="display: inline-flex; border: 1px solid #353c44; border-radius: 2px; overflow: hidden">
+<a href="TextPanel.dc.html" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; color: #9aa3ac; text-decoration: none">Текст</a>
+<a href="Main.dc.html" aria-current="page" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; background: #262b31; color: #eceff1; text-decoration: none">Рядом</a>
+<button type="button" style="height: 24px; padding: 0 10px; font-size: 12px; color: #9aa3ac">Документ</button>
+</div>
+<a href="Sync.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #ffe14d; text-decoration: none; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #ffd400; flex: none"></span>2 конфликта</a>
+<a href="Export.dc.html" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #ff6a00; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10"></path></svg>Экспорт PDF</a>
+</header>
+
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-wrap: wrap">
+
+<aside aria-label="Vault" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 8px 8px; box-sizing: border-box; background: #14171a; border-right: 1px solid #262b31">
+<label style="height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg><input type="search" aria-label="Поиск по vault" placeholder="Поиск по vault" style="flex: 1 1 auto; min-width: 0; height: 24px; padding: 0; background: transparent; border: 0; font-size: 12px; color: #eceff1"></label>
+<div style="display: flex; align-items: center; gap: 2px; padding: 8px 4px 2px">
+<span style="flex: 1 1 auto; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9aa3ac">Vault</span>
+<button type="button" aria-label="Свернуть все папки" title="Свернуть все папки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M5 3l3 3 3-3M5 13l3-3 3 3"></path></svg></button>
+<button type="button" aria-label="Развернуть все папки" title="Развернуть все папки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"></path></svg></button>
+</div>
+<nav aria-label="Дерево vault" style="display: flex; flex-direction: column; gap: 1px; font-size: 13px">
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Введение</button>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Методология</button>
+<button type="button" aria-expanded="true" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6l4 4 4-4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Результаты</button>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 24px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>рисунки</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 40px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">Обсуждение<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></button>
+<a href="Main.dc.html" aria-current="page" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 40px; border-radius: 2px; white-space: nowrap; background: #262b31; color: #eceff1; box-shadow: inset 2px 0 0 #ff6a00; text-decoration: none">Результаты<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></a>
+<button type="button" aria-expanded="false" style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 2px; white-space: nowrap; color: #dde1e5"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #6b757f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M6 4l4 4-4 4"></path></svg><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #9aa3ac; stroke-width: 1.6; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>шаблоны</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">План работы<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.typ</span></button>
+<a href="Board.dc.html" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce; text-decoration: none">Схема установки<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.board</span></a>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 22px; border-radius: 2px; white-space: nowrap; color: #c2c8ce">refs<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac">.yml</span></button>
+</nav>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 2px; padding-top: 8px; border-top: 1px solid #262b31">
+<button type="button" style="flex: 1 1 auto; display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px; color: #dde1e5; font-size: 12px"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #ff6a00; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 3v10M3 8h10"></path></svg>Заметка</button>
+<a href="Graph.dc.html" aria-label="Граф" title="Граф" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="4" cy="8" r="1.8"></circle><circle cx="12" cy="4" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><path d="M5.6 7.2 10.4 4.8M5.6 8.8l4.8 2.4"></path></svg></a>
+<button type="button" aria-label="Задачи" title="Задачи" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><rect x="2.5" y="2.5" width="11" height="11"></rect><path d="m5 8 2 2 4-4"></path></svg></button>
+<button type="button" aria-label="Источники" title="Источники" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M3 3h6.5a2 2 0 0 1 2 2v8.5H5a2 2 0 0 1-2-2zM11.5 5H13v8.5"></path></svg></button>
+<a href="Settings.dc.html" aria-label="Настройки" title="Настройки" style="width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M3 5h10M3 11h10"></path><circle cx="6" cy="5" r="1.6" style="fill: #14171a"></circle><circle cx="10" cy="11" r="1.6" style="fill: #14171a"></circle></svg></a>
+</div>
+</aside>
+
+<main style="flex: 999 1 640px; min-width: 0; display: flex; flex-wrap: wrap">
+
+<section aria-label="Синхронизация" style="flex: 1 1 330px; min-width: 0; display: flex; flex-direction: column; background: #14171a; border-right: 1px solid #262b31">
+<div style="height: 32px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid #262b31; font-size: 11px; color: #9aa3ac; white-space: nowrap">
+<h2 style="margin: 0; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9aa3ac">Синхронизация</h2>
+<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #ffd400; flex: none"></span>нужно решение</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 12px; font-size: 12px">
+<div role="status" style="display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid #5c4d00; border-left: 3px solid #ffd400; border-radius: 2px; background: rgba(255, 212, 0, 0.06); color: #dde1e5">
+<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; margin-top: 2px; fill: none; stroke: #ffd400; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 2.5 14 13H2zM8 6.5v3M8 11.3v.2"></path></svg>
+<div><b>2 конфликта после получения</b><div style="margin-top: 2px; font-size: 11px; color: #9aa3ac">Правки с ноутбука и с этого устройства пересеклись. Остальное получено.</div></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 2px; background: #262b31; color: #dde1e5; cursor: pointer"><input type="checkbox" checked="" style="margin: 0; accent-color: #ff6a00">Результаты.typ<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">3 участка</span></label>
+<label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 2px; color: #c2c8ce; cursor: pointer"><input type="checkbox" checked="" style="margin: 0; accent-color: #ff6a00">План работы.typ<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">1 участок</span></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 11px; white-space: nowrap">Оставить свои</button>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 11px; white-space: nowrap">Взять их</button>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 11px; white-space: nowrap">Принять обе</button>
+</div>
+<div aria-hidden="true" style="height: 1px; background: #262b31"></div>
+<h3 style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: #dde1e5">История</h3>
+<div style="display: flex; flex-direction: column; gap: 2px; margin-top: -6px">
+<button type="button" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; box-sizing: border-box; border-radius: 2px; color: #c2c8ce"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"></path></svg>Снимок: глава 3, таблицы<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">10:42</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; box-sizing: border-box; border-radius: 2px; color: #c2c8ce"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"></path></svg>Получено с ноутбука<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">09:15</span></button>
+<button type="button" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; box-sizing: border-box; border-radius: 2px; color: #c2c8ce"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"></path></svg>Снимок: методология<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">вчера</span></button>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9aa3ac"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #6fbf8e; flex: none"></span>git.lab.ru/ivanova/диссертация · отправлено 10:43</div>
+</div>
+</section>
+
+<section aria-label="Слияние Результаты.typ" style="flex: 1000 1 420px; min-width: 0; display: flex; flex-direction: column">
+<div style="min-height: 32px; flex: none; display: flex; flex-wrap: wrap; align-items: stretch; border-bottom: 1px solid #262b31; background: #14171a">
+<span style="display: flex; align-items: center; padding: 0 12px; border-right: 1px solid #262b31; background: #1b1f24; box-shadow: inset 0 -2px 0 #ff6a00; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #eceff1; white-space: nowrap">Слияние — Результаты.typ</span>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 10px">
+<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; padding: 1px 6px; border: 1px solid #b34000; border-radius: 2px; color: #ff8a33">свои</span>
+<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; padding: 1px 6px; border: 1px solid #3d5872; border-radius: 2px; color: #8fb6dc">их</span>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 11px; white-space: nowrap">Везде своё</button>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 11px; white-space: nowrap">Везде их</button>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid #ff6a00; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 11px; font-weight: 600; white-space: nowrap">Сохранить результат</button>
+</div>
+</div>
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; background: #1b1f24; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; line-height: 22px">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid #262b31">
+<div style="padding: 6px 12px; border-right: 1px solid #262b31; color: #ff8a33">Это устройство · 10:40</div>
+<div style="padding: 6px 12px; color: #8fb6dc">Ноутбук · 09:12</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 1 1 auto">
+<div aria-label="Своя версия" style="padding: 8px 0; border-right: 1px solid #262b31; color: #c2c8ce">
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">9</span><span style="min-width: 0; white-space: pre-wrap">Нагрев шёл равномерно, без</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(255, 138, 51, 0.13); box-shadow: inset 2px 0 0 #ff6a00"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #ff8a33">10</span><span style="min-width: 0; white-space: pre-wrap">Максимум отклонения — *3.2%*</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(255, 138, 51, 0.13); box-shadow: inset 2px 0 0 #ff6a00"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #ff8a33">11</span><span style="min-width: 0; white-space: pre-wrap">при нагрузке 450 Вт.</span></div>
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">12</span><span></span></div>
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">13</span><span style="min-width: 0; white-space: pre-wrap">- калибровка датчиков</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(255, 138, 51, 0.13); box-shadow: inset 2px 0 0 #ff6a00"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #ff8a33">14</span><span style="min-width: 0; white-space: pre-wrap">- шаг измерений `dt = 0.5 s`</span></div>
+</div>
+<div aria-label="Их версия" style="padding: 8px 0; color: #c2c8ce">
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">9</span><span style="min-width: 0; white-space: pre-wrap">Нагрев шёл равномерно, без</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(143, 182, 220, 0.12); box-shadow: inset 2px 0 0 #8fb6dc"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #8fb6dc">10</span><span style="min-width: 0; white-space: pre-wrap">Максимум отклонения — *3.4%*</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(143, 182, 220, 0.12); box-shadow: inset 2px 0 0 #8fb6dc"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #8fb6dc">11</span><span style="min-width: 0; white-space: pre-wrap">при нагрузке 460 Вт.</span></div>
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">12</span><span></span></div>
+<div style="display: flex; padding-right: 16px"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #6b757f">13</span><span style="min-width: 0; white-space: pre-wrap">- калибровка датчиков</span></div>
+<div style="display: flex; padding-right: 16px; background: rgba(143, 182, 220, 0.12); box-shadow: inset 2px 0 0 #8fb6dc"><span style="width: 44px; flex: none; padding-right: 14px; box-sizing: border-box; text-align: right; color: #8fb6dc">14</span><span style="min-width: 0; white-space: pre-wrap">- шаг измерений `dt = 0.25 s`</span></div>
+</div>
+</div>
+</div>
+</section>
+
+</main>
+</div>
+
+<footer style="height: 24px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 10px; box-sizing: border-box; border-top: 1px solid #262b31; background: #14171a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden">
+<span style="padding: 2px 6px; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 10px; font-weight: 600">NORMAL</span>
+<span>строка 10, столбец 74</span>
+<span>UTF-8</span>
+<span style="margin-left: auto">64 слова</span>
+<span>typst</span>
+<button type="button" style="display: flex; align-items: center; gap: 5px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.4h2.4M8 5v3l2 1.5"></path></svg>История</button>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":750}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

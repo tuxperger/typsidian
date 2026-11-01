@@ -664,6 +664,7 @@ impl VaultBackend for MemoryVault {
 // сверялись с ОДНИМ набором ожиданий: в отличие от эталонного хэша досок, это
 // таблица из контракта, и две её копии разошлись бы при первой же правке
 // контракта, оставив один таргет проверенным по устаревшему правилу.
+pub mod ai_cases;
 pub mod attachment_cases;
 pub mod bookmarks_cases;
 pub mod capture_cases;

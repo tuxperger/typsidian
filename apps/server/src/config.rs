@@ -87,6 +87,11 @@ pub struct Config {
     /// (loopback, частные сети, `localhost`) — фича 038. По умолчанию нет: иначе
     /// пользователь направлял бы запросы сервера в его же сеть.
     pub sync_private_remotes: bool,
+    /// Разрешить свой адрес модели для обучения с ИИ (фича 050). По умолчанию нет:
+    /// иначе пользователь направлял бы запросы сервера в его же сеть.
+    /// Даже разрешённый свой адрес не ведёт во внутреннюю сеть сервера, пока не
+    /// включён `sync_private_remotes` (ревью безопасности 050, M2).
+    pub ai_custom_endpoint: bool,
     pub oidc: Option<OidcConfig>,
     /// Демо-режим (фича 039): только гости. Включается флагом `serve --demo`
     /// или `TYPSIDIAN_DEMO=1`, а не файлом — см. research.md §1.
@@ -108,6 +113,7 @@ impl Default for Config {
             trust_proxy: false,
             template_sources: false,
             sync_private_remotes: false,
+            ai_custom_endpoint: false,
             oidc: None,
             demo_mode: false,
             demo: DemoConfig::default(),

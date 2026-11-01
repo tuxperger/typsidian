@@ -112,6 +112,7 @@ export function MoveToDialog({
               ради выбора папки; фокус в поле — это и есть действие */}
           <input
             autoFocus
+            className="ts-palette__input"
             type="text"
             role="combobox"
             aria-expanded="true"

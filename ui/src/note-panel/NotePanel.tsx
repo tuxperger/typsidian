@@ -78,29 +78,7 @@ export function NotePanel({
         />
       )}
       <div className="ts-notepanel__head">
-        {modes.length > 1 ? (
-          <div ref={modesRef} className="ts-notepanel__modes" role="group" aria-label={t("notePanel.modes")}>
-            {modes.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                className={
-                  mode.id === spec.id
-                    ? "ts-notepanel__mode ts-eyebrow ts-notepanel__mode--on"
-                    : "ts-notepanel__mode ts-eyebrow"
-                }
-                aria-pressed={mode.id === spec.id}
-                onClick={() => onSelect(mode.id)}
-              >
-                {t(mode.title)}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="ts-eyebrow ts-notepanel__mode--on">{t(spec.title)}</span>
-        )}
-        <span className="ts-spacer" />
-        {spec.badge !== null && <span className="ts-notepanel__tag">{spec.badge}</span>}
+        <NotePanelTabs modes={modes} active={spec.id} onSelect={onSelect} stripRef={modesRef} />
       </div>
       <div className="ts-notepanel__body">{spec.render()}</div>
     </aside>
@@ -116,6 +94,43 @@ export function NotePanel({
       }}
     >
       {panel}
+    </div>
+  );
+}
+
+/**
+ * Вкладки режимов колонки (фича 044, артборд TextPanel.dc.html): название
+ * обычным регистром, счётчик режима — в той же вкладке («Ссылки · 3»). Общие
+ * для колонки, шторки и выдвижной панели.
+ */
+export function NotePanelTabs({
+  modes,
+  active,
+  onSelect,
+  stripRef,
+}: {
+  modes: readonly NotePanelModeSpec[];
+  active: PanelModeId;
+  onSelect: (mode: PanelModeId) => void;
+  stripRef?: React.Ref<HTMLDivElement>;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <div ref={stripRef} className="ts-notepanel__modes" role="group" aria-label={t("notePanel.modes")}>
+      {modes.map((mode) => (
+        <button
+          key={mode.id}
+          type="button"
+          className={
+            mode.id === active ? "ts-notepanel__mode ts-notepanel__mode--on" : "ts-notepanel__mode"
+          }
+          aria-pressed={mode.id === active}
+          onClick={() => onSelect(mode.id)}
+        >
+          {t(mode.title)}
+          {mode.badge !== null && <span className="ts-notepanel__count">{mode.badge}</span>}
+        </button>
+      ))}
     </div>
   );
 }

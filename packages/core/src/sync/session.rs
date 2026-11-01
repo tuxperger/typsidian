@@ -785,7 +785,15 @@ impl<E: GitEngine> SyncSession<E> {
     /// Изменения с последнего снимка (FR-004), с переименованиями.
     pub async fn changes<B: VaultBackend>(&self, backend: &B) -> Result<Vec<Change>, SyncError> {
         self.require_local().await?;
-        let raw = self.engine.status().await?;
+        // Производное устройства в историю не идёт, даже если правила
+        // исключения в vault старые (050, ревью безопасности M3).
+        let raw: Vec<_> = self
+            .engine
+            .status()
+            .await?
+            .into_iter()
+            .filter(|change| !crate::vault::service_dir::is_derived(&change.path))
+            .collect();
         Ok(pair_renames(raw, |old, new| async move {
             let before = self.engine.read_blob("HEAD", &old).await.ok().flatten();
             let after = backend.read_bytes(Path::new(&new)).await.ok();
@@ -831,6 +839,7 @@ impl<E: GitEngine> SyncSession<E> {
             Some(paths) => paths,
             None => changes.iter().map(|change| change.path.clone()).collect(),
         };
+        selected.retain(|path| !crate::vault::service_dir::is_derived(path));
         // У переименования в снимок обязаны попасть обе стороны, иначе старое
         // имя останется в истории висеть удалённым не тем снимком.
         for change in &changes {

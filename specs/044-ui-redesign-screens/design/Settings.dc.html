@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Настройки</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14171a}
+a{color:#ff8a33}a:hover{color:#ffc7a3}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+input{font:inherit;color:inherit}
+input::placeholder{color:#9aa3ac}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #ff6a00;outline-offset:1px}
+</style>
+</helmet>
+<div style="position: relative; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #14171a; color: #c2c8ce; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+<header style="flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 40px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid #262b31; background: #14171a">
+<a href="Welcome.dc.html" aria-label="Typsidian, стартовый экран" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600; color: #eceff1; text-decoration: none; white-space: nowrap"><span style="color: #ff6a00">/</span>typsidian</a>
+<button type="button" aria-label="Сменить vault: диссертация-2026" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>диссертация-2026<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6l4 4 4-4"></path></svg></button>
+<span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #9aa3ac; white-space: nowrap"><b style="color: #dde1e5; font-weight: 500">Настройки</b></span>
+<a href="Palette.dc.html" style="margin-left: auto; width: 200px; height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; color: #9aa3ac; font-size: 12px; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>Команды и заметки<kbd style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac; border: 1px solid #353c44; border-radius: 2px; padding: 1px 5px">Ctrl K</kbd></a>
+<div role="group" aria-label="Вид" style="display: inline-flex; border: 1px solid #353c44; border-radius: 2px; overflow: hidden">
+<a href="TextPanel.dc.html" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; color: #9aa3ac; text-decoration: none">Текст</a>
+<a href="Main.dc.html" style="height: 24px; padding: 0 10px; display: grid; place-items: center; font-size: 12px; background: #262b31; color: #eceff1; text-decoration: none">Рядом</a>
+<button type="button" style="height: 24px; padding: 0 10px; font-size: 12px; color: #9aa3ac">Документ</button>
+</div>
+<a href="Sync.dc.html" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa3ac; text-decoration: none; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #6fbf8e; flex: none"></span>синхронизировано</a>
+<a href="Export.dc.html" style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #ff6a00; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10"></path></svg>Экспорт PDF</a>
+</header>
+
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-wrap: wrap">
+
+<nav aria-label="Разделы настроек" style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 8px; box-sizing: border-box; background: #14171a; border-right: 1px solid #262b31; font-size: 13px">
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Общие</button>
+<button type="button" aria-current="page" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; background: #262b31; color: #eceff1; box-shadow: inset 2px 0 0 #ff6a00">Редактор</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Предпросмотр</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Клавиши</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Vault</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Синхронизация</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Орфография</button>
+<button type="button" style="height: 24px; display: flex; align-items: center; padding: 0 6px; border-radius: 2px; color: #c2c8ce">Дополнительно</button>
+</nav>
+
+<main style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; padding: 28px 40px; box-sizing: border-box; background: #14171a">
+<h1 style="margin: 0 0 18px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 18px; font-weight: 600; color: #eceff1">Редактор</h1>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<label for="set-font" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Размер шрифта</label>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="display: flex; align-items: center; gap: 6px"><input id="set-font" type="text" value="14 px" style="width: 90px; height: 28px; padding: 0 9px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #14171a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #dde1e5"></div>
+<div style="font-size: 11px; color: #9aa3ac">Только текст заметки. Интерфейс не меняется.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<span id="set-keys" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Режим клавиш</span>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div role="group" aria-labelledby="set-keys" style="align-self: flex-start; display: inline-flex; border: 1px solid #353c44; border-radius: 2px; overflow: hidden">
+<button type="button" aria-pressed="{{keysPlain.pressed}}" onClick="{{keysPlain.pick}}" style="height: 24px; padding: 0 10px; font-size: 12px; background: {{keysPlain.bg}}; color: {{keysPlain.fg}}">Обычный</button>
+<button type="button" aria-pressed="{{keysVim.pressed}}" onClick="{{keysVim.pick}}" style="height: 24px; padding: 0 10px; font-size: 12px; background: {{keysVim.bg}}; color: {{keysVim.fg}}">Vim</button>
+</div>
+<div style="font-size: 11px; color: #9aa3ac">Режим ввода виден в строке состояния.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<span id="set-wrap" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Перенос строк</span>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<button type="button" role="switch" aria-checked="{{wrap.checked}}" aria-labelledby="set-wrap" onClick="{{wrap.flip}}" style="position: relative; flex: none; width: 28px; height: 16px; border-radius: 8px; background: {{wrap.track}}"><span aria-hidden="true" style="position: absolute; top: 2px; left: {{wrap.knobLeft}}; width: 12px; height: 12px; border-radius: 50%; background: {{wrap.knob}}"></span></button>
+<div style="font-size: 11px; color: #9aa3ac">Длинные строки переносятся по ширине колонки.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<span id="set-hl" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Подсветка Typst</span>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<button type="button" role="switch" aria-checked="{{hl.checked}}" aria-labelledby="set-hl" onClick="{{hl.flip}}" style="position: relative; flex: none; width: 28px; height: 16px; border-radius: 8px; background: {{hl.track}}"><span aria-hidden="true" style="position: absolute; top: 2px; left: {{hl.knobLeft}}; width: 12px; height: 12px; border-radius: 50%; background: {{hl.knob}}"></span></button>
+<div style="font-size: 11px; color: #9aa3ac">Разметка, код и формулы разными цветами.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<span id="set-spell" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Проверка орфографии</span>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div role="group" aria-labelledby="set-spell" style="align-self: flex-start; display: inline-flex; border: 1px solid #353c44; border-radius: 2px; overflow: hidden">
+<button type="button" aria-pressed="{{spellOn.pressed}}" onClick="{{spellOn.pick}}" style="height: 24px; padding: 0 10px; font-size: 12px; background: {{spellOn.bg}}; color: {{spellOn.fg}}">ru + en</button>
+<button type="button" aria-pressed="{{spellOff.pressed}}" onClick="{{spellOff.pick}}" style="height: 24px; padding: 0 10px; font-size: 12px; background: {{spellOff.bg}}; color: {{spellOff.fg}}">Выкл.</button>
+</div>
+<div style="font-size: 11px; color: #9aa3ac">Словарь vault — в <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace">.typsidian/dictionary.txt</span>.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid #262b31; align-items: flex-start">
+<label for="set-save" style="flex: 0 0 200px; color: #dde1e5; font-size: 13px">Автосохранение</label>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+<input id="set-save" type="text" value="через 1 с" style="width: 90px; height: 28px; padding: 0 9px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #14171a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #dde1e5">
+<span style="margin-left: 2px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; padding: 1px 6px; border: 1px solid #b34000; border-radius: 2px; color: #ff8a33">изменено</span>
+<button type="button" style="display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 2px; color: #9aa3ac; font-size: 11px">Сбросить</button>
+</div>
+<div style="font-size: 11px; color: #9aa3ac">По умолчанию — сразу после паузы в наборе.</div>
+</div>
+</div>
+
+</main>
+</div>
+
+<footer style="height: 24px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 10px; box-sizing: border-box; border-top: 1px solid #262b31; background: #14171a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden">
+<span>Настройки сохраняются сразу</span>
+<span style="margin-left: auto">64 слова</span>
+<span>typst</span>
+<button type="button" style="display: flex; align-items: center; gap: 5px; color: #9aa3ac"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.4h2.4M8 5v3l2 1.5"></path></svg>История</button>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":750}}'>
+class Component extends DCLogic {
+  constructor(...args) {
+    super(...args);
+    this.state = { keys: 'vim', spell: 'ru', wrap: true, hl: true };
+  }
+  renderVals() {
+    const s = this.state;
+    const seg = (field, value) => ({
+      pressed: s[field] === value ? 'true' : 'false',
+      bg: s[field] === value ? '#262b31' : 'transparent',
+      fg: s[field] === value ? '#eceff1' : '#9aa3ac',
+      pick: () => this.setState({ [field]: value })
+    });
+    const sw = (field) => ({
+      checked: s[field] ? 'true' : 'false',
+      track: s[field] ? '#d94f00' : '#353c44',
+      knob: s[field] ? '#ffffff' : '#c2c8ce',
+      knobLeft: s[field] ? '14px' : '2px',
+      flip: () => this.setState({ [field]: !this.state[field] })
+    });
+    return {
+      keysPlain: seg('keys', 'plain'),
+      keysVim: seg('keys', 'vim'),
+      spellOn: seg('spell', 'ru'),
+      spellOff: seg('spell', 'off'),
+      wrap: sw('wrap'),
+      hl: sw('hl')
+    };
+  }
+}
+</script>
+</body>
+</html>

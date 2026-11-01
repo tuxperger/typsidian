@@ -32,6 +32,7 @@ import { sync } from "./en/sync.js";
 import { links } from "./en/links.js";
 import { slides } from "./en/slides.js";
 import { snapshots } from "./en/snapshots.js";
+import { ai } from "./en/ai.js";
 import { spellcheck } from "./en/spellcheck.js";
 import { embeds } from "./en/embeds.js";
 import { bookmarks } from "./en/bookmarks.js";
@@ -67,6 +68,7 @@ export const en = {
   ...links,
   ...slides,
   ...snapshots,
+  ...ai,
   ...spellcheck,
   ...embeds,
   ...bookmarks,

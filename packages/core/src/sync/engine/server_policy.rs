@@ -133,7 +133,7 @@ fn internal_v6(ip: Ipv6Addr) -> bool {
 /// Разрешение имён для HTTP-клиента на сервере: внутренние адреса отбрасываются
 /// после разрешения, на каждом соединении, — переразрешение имени (DNS
 /// rebinding) не уводит обмен во внутреннюю сеть.
-pub(super) struct ServerResolver;
+pub(crate) struct ServerResolver;
 
 impl reqwest::dns::Resolve for ServerResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {

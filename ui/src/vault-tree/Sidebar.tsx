@@ -38,8 +38,13 @@ export interface SidebarProps {
   onCreated: (path: string) => void;
   onError: (error: VaultOperationError) => void;
   onOpenGraph: () => void;
-  /** Значки внизу дерева (фича 043, FR-004): не переданы — значка нет. */
-  onToggleOutline?: (() => void) | undefined;
+  /**
+   * Значки внизу дерева (фича 043, FR-004; состав — фича 044, артборд 1):
+   * граф, задачи, источники, настройки. Не переданы — значка нет.
+   */
+  onOpenTasks?: (() => void) | undefined;
+  /** Открыт граф — его значок отмечен как текущий экран (044, артборд 7). */
+  graphOpen?: boolean;
   onToggleSources?: (() => void) | undefined;
   onOpenSettings?: (() => void) | undefined;
   /**
@@ -106,7 +111,8 @@ export function Sidebar({
   onCreated,
   onError,
   onOpenGraph,
-  onToggleOutline,
+  onOpenTasks,
+  graphOpen = false,
   onToggleSources,
   onOpenSettings,
   onQuickNote,
@@ -365,9 +371,14 @@ export function Sidebar({
             {t("linkHealth.footer", { count: brokenLinks })}
           </button>
         )}
-        <FooterIcon icon="network" label={t("tree.graph.open")} onClick={onOpenGraph} />
-        {onToggleOutline !== undefined && (
-          <FooterIcon icon="list" label={t("tree.footer.outline")} onClick={onToggleOutline} />
+        <FooterIcon
+          icon="network"
+          label={t("tree.graph.open")}
+          current={graphOpen}
+          onClick={onOpenGraph}
+        />
+        {onOpenTasks !== undefined && (
+          <FooterIcon icon="list" label={t("tree.footer.tasks")} onClick={onOpenTasks} />
         )}
         {onToggleSources !== undefined && (
           <FooterIcon icon="quote" label={t("tree.footer.sources")} onClick={onToggleSources} />
@@ -384,14 +395,23 @@ export function Sidebar({
 function FooterIcon({
   icon,
   label,
+  current = false,
   onClick,
 }: {
   icon: IconName;
   label: string;
+  current?: boolean;
   onClick: () => void;
 }): React.JSX.Element {
   return (
-    <button type="button" className="ts-sidebar__icon" title={label} aria-label={label} onClick={onClick}>
+    <button
+      type="button"
+      className="ts-sidebar__icon"
+      title={label}
+      aria-label={label}
+      aria-current={current ? "page" : undefined}
+      onClick={onClick}
+    >
       <Icon name={icon} size={14} />
     </button>
   );

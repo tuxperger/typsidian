@@ -63,6 +63,21 @@ import {
   snapshotRecoverNote,
   snapshotUsage,
   snapshotsClear,
+  aiApproveEndpoint,
+  aiBeginProbe,
+  aiCancel,
+  aiFinishProbe,
+  aiJournal,
+  aiJournalClear,
+  aiKeyDelete,
+  aiKeySet,
+  aiKeyState,
+  aiModels,
+  aiSendProbe,
+  aiSetSettings,
+  aiSettings,
+  type AiFailure,
+  type ProbeReply,
   linksMentionsAvailability,
   linksMentionsCancel,
   linksMentionsIn,
@@ -499,6 +514,33 @@ export function webVaultClient(
       addWord: (word) => call(() => speller.addWord(backend, word)),
       removeWord: (word) => call(() => speller.removeWord(backend, word)),
       suggest: async (word) => speller.suggest(word),
+    },
+
+    // ── Обучение с ИИ (фича 050) ──────────────────────────────────────
+    // Сеть идёт вне очереди: на время запроса `backend` не занят и редактор работает.
+    ai: {
+      settings: () => call(() => aiSettings(backend)),
+      setSettings: (settings) => call(() => aiSetSettings(backend, settings)),
+      keyState: (vaultId, provider) => aiKeyState(vaultId, provider),
+      setKey: (vaultId, provider, key) => aiKeySet(vaultId, provider, key),
+      deleteKey: (vaultId, provider) => aiKeyDelete(vaultId, provider),
+      models: async (vaultId, requestId) =>
+        aiModels(vaultId, requestId, await call(() => aiSettings(backend))),
+      probe: async (vaultId, requestId) => {
+        const prepared = await call(() => aiBeginProbe(backend, vaultId, requestId, Date.now()));
+        let reply: ProbeReply | undefined;
+        let failure: AiFailure | undefined;
+        try {
+          reply = await aiSendProbe(vaultId, prepared);
+        } catch (error) {
+          failure = error as AiFailure;
+        }
+        return call(() => aiFinishProbe(backend, prepared, Date.now(), reply, failure));
+      },
+      approveEndpoint: (vaultId, insecureOk) => call(() => aiApproveEndpoint(backend, vaultId, insecureOk)),
+      cancel: (vaultId, requestId) => aiCancel(vaultId, requestId),
+      journal: () => call(() => aiJournal(backend)),
+      clearJournal: () => call(() => aiJournalClear(backend)),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

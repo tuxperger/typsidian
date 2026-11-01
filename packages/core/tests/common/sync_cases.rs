@@ -2005,3 +2005,41 @@ pub async fn progress_is_readable_while_the_operation_runs() {
         .unwrap();
     assert_eq!(sink.current(), None);
 }
+
+/// Vault с правилами исключения прежней версии: журнала отправленного модели в
+/// них нет, а в историю он всё равно не идёт (050, ревью безопасности M3).
+pub async fn derived_files_stay_out_of_history_with_old_rules() {
+    let mut f = fixture(&[("a.typ", "= A\n")], None);
+    f.enable().await;
+    let old_rules: String = f
+        .text(".gitignore")
+        .unwrap()
+        .lines()
+        .filter(|line| !line.contains("ai-journal"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    f.put(".gitignore", &old_rules).await;
+    let ctx = f.ctx();
+    f.session
+        .snapshot(&f.vault, &ctx, None, "старые правила", "Снимок", true, false)
+        .await
+        .unwrap();
+    f.put(".typsidian/ai-journal.jsonl", "{\"text\":\"секрет\"}\n")
+        .await;
+    assert!(f.session.changes(&f.vault).await.unwrap().is_empty());
+    assert_eq!(
+        f.session
+            .snapshot(
+                &f.vault,
+                &ctx,
+                Some(vec![".typsidian/ai-journal.jsonl".into()]),
+                "",
+                "Снимок",
+                true,
+                false,
+            )
+            .await
+            .unwrap_err(),
+        SyncError::NothingToSnapshot
+    );
+}

@@ -5,7 +5,7 @@ import type { outline as en } from "../en/outline.js";
 // шторка узкого окна. Макет — `Typsidian Оглавление.dc.html`, экраны 1a–1c.
 export const outline: Translation<typeof en> = {
   // ── Режим и команда ────────────────────────────────────────────────
-  "outline.mode": "Структура",
+  "outline.mode": "Оглавление",
   "outline.button": "Оглавление",
   "outline.treeLabel": "Оглавление заметки",
   "outline.loading": "Читаю заголовки…",

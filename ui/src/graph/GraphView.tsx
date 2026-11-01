@@ -30,7 +30,11 @@ export interface GraphViewProps {
   depth: number;
   onDepthChange: (depth: number) => void;
   onOpenPath: (path: string) => void;
-  onBack: () => void;
+  /**
+   * «Назад» на полотне — только на телефоне: на рабочем столе граф стоит
+   * внутри рабочей области, и выход — вид в шапке или значок дерева (044).
+   */
+  onBack?: (() => void) | undefined;
 }
 
 /** Узлы, которые открываются щелчком: заметки и доски. */
@@ -91,6 +95,11 @@ export function GraphView({
   return (
     <section className="ts-graph" aria-label={t("graph.title")}>
       <div className="ts-graph__stage">
+        {/* Колонка «Показывать» / «Обозначения» — слева от полотна (фича 044,
+            артборд 7); на узком экране — шторка снизу, как прежде. */}
+        <div className="ts-graph__side" data-open={sheetOpen}>
+          <GraphPanel state={settingsState} />
+        </div>
         <div className="ts-graph__canvas">
           {graph !== null && empty === null && (
             <>
@@ -130,10 +139,12 @@ export function GraphView({
           )}
 
           <div className="ts-graph__top">
-            <button type="button" className="ts-btn" onClick={onBack}>
-              <Icon name="chevron" size={13} className="ts-icon--flip" />
-              {t("graph.back")}
-            </button>
+            {onBack !== undefined && (
+              <button type="button" className="ts-btn" onClick={onBack}>
+                <Icon name="chevron" size={13} className="ts-icon--flip" />
+                {t("graph.back")}
+              </button>
+            )}
             <div className="ts-graph__seg" role="group" aria-label={t("graph.mode.label")}>
               <button
                 type="button"
@@ -151,9 +162,6 @@ export function GraphView({
               </button>
             </div>
             {scope === "local" && <GraphDepth depth={depth} onChange={onDepthChange} />}
-            <span className="ts-graph__count" aria-live="polite" data-loading={loading}>
-              {countText}
-            </span>
           </div>
 
           {graph !== null && empty === null && (
@@ -190,9 +198,12 @@ export function GraphView({
             {sheetOpen ? t("graph.settings.close") : t("graph.settings.open")}
           </button>
         </div>
-        <div className="ts-graph__side" data-open={sheetOpen}>
-          <GraphPanel state={settingsState} />
-        </div>
+      </div>
+      {/* Сводка графа — в строке состояния под ним (артборд 7). */}
+      <div className="ts-statusbar ts-graph__status">
+        <span className="ts-graph__count" aria-live="polite" data-loading={loading}>
+          {countText}
+        </span>
       </div>
     </section>
   );

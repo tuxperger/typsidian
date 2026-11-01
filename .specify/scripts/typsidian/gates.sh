@@ -14,6 +14,11 @@
 
 set -uo pipefail
 
+# ОТКЛЮЧЕНО по просьбе пользователя: прогон гейтов перегружал систему.
+# Включить обратно — удалить этот блок.
+echo "gates.sh отключён (см. начало .specify/scripts/typsidian/gates.sh)" >&2
+exit 0
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$root" || exit 1
 

@@ -59,7 +59,8 @@ export default async (page) => {
   await page.evaluate(`window.__opfs.write("Диссертация/Введение.typ", "= Введение\\n\\nТекст введения.\\n")`);
   await page.evaluate(`window.__opfs.write("Диссертация/Методика.typ", "= Методика\\n\\n" + "Строка.\\n".repeat(60) + "\\n== Выборка\\n\\nОтобрано 24 образца.\\n")`);
   await page.evaluate(`window.__opfs.write("Диссертация/рисунки/Схема.typ", "= Схема\\n")`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement(".ts-bookmarks", { timeout: 30000 });
   await page.shot(shots + "/032-empty.png");
 

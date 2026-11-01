@@ -28,7 +28,9 @@ export default async (page) => {
   await page.evaluate(write("данные.txt", "ДАННЫЕ-ОДИН"));
   await page.evaluate(write("заметка.typ", NOTE));
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.click("text=заметка");
   await page.waitFor(`${pageCount} > 1`, { label: "страницы предпросмотра", timeout: 60000 });
   check(page, (await page.evaluate(previewText)).includes("МЕТКА-ОДИН"), "импорт вошёл в сборку");
@@ -76,11 +78,11 @@ export default async (page) => {
 
   // Ошибка в связанном файле: место названо, по нему можно перейти.
   await page.evaluate(write("оформление.typ", "#let метка = [МЕТКА]\n#let = сломано\n"));
-  await page.waitForElement("button.ts-diagnostics__place", { timeout: 15000 });
-  const place = await page.text("button.ts-diagnostics__place");
-  check(page, place.startsWith("оформление.typ:2:"), `место ошибки названо: ${place}`);
+  await page.waitForElement("button.ts-failure__reveal", { timeout: 15000 });
+  const place = await page.text(".ts-failure__place");
+  check(page, place.startsWith("оформление.typ, строка 2"), `место ошибки названо: ${place}`);
   check(page, (await page.evaluate(pageCount)) > 1, "прежний вид остался на экране");
-  await page.click("button.ts-diagnostics__place");
+  await page.click("button.ts-failure__reveal");
   await page.waitFor(
     `document.querySelector(".ts-editor .cm-content")?.textContent.includes("сломано")`,
     { label: "связанный файл открыт в редакторе" },

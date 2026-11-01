@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type {
   Condition,
+  Diagnostic,
   ElementSpec,
   LibraryStatus,
   ReadError,
@@ -22,6 +23,7 @@ import {
 import { writeBoardSnapshot } from "../boards/exportSnapshot.js";
 import { useNoteEmbeds } from "../boards/useNoteEmbeds.js";
 import { CodeEditor, type CaretPosition, type CodeEditorHandle } from "./CodeEditor.js";
+import { buildErrorMarks } from "./buildErrorMarks.js";
 import {
   InsertMenu,
   type CaretAnchor,
@@ -199,6 +201,11 @@ export interface NoteEditorProps {
    */
   fontSize?: EditorFontSizeControl;
   /**
+   * Ошибки последней сборки открытой заметки (фича 044, артборд 5): места,
+   * попавшие в этот файл, подчёркнуты, число — в строке состояния.
+   */
+  buildErrors?: readonly Diagnostic[];
+  /**
    * Действующие сочетания клавиш. Пропом, а не своим разбором: один разбор на
    * приложение, и подпись в меню вставки обязана совпадать с тем, что работает.
    */
@@ -276,6 +283,7 @@ export function NoteEditor({
   onCaretOffset,
   onSaveAsTemplate,
   fontSize,
+  buildErrors,
   shortcuts,
   paramsRequest = 0,
   selectRequest = null,
@@ -644,12 +652,21 @@ export function NoteEditor({
   const completionPort = useRef(completionState.keys);
   completionPort.current = completionState.keys;
   const completionExtension = useMemo(() => completionKeys(() => completionPort.current), []);
+  const errorPlaces = useMemo(
+    () =>
+      (buildErrors ?? []).flatMap((diagnostic) =>
+        diagnostic.location?.path === document.path ? [diagnostic.location] : [],
+      ),
+    [buildErrors, document.path],
+  );
+  const errorExtension = useMemo(() => buildErrorMarks(errorPlaces), [errorPlaces]);
   const editorExtensions = useMemo(
     () => [
       ...(typst && attachments !== undefined ? [attachmentExtensions] : []),
       ...(typst ? [completionExtension] : []),
+      errorExtension,
     ],
-    [typst, attachments, attachmentExtensions, completionExtension],
+    [typst, attachments, attachmentExtensions, completionExtension, errorExtension],
   );
   const [gotoMessage, setGotoMessage] = useState<string | null>(null);
   caretListeners.current = () => {
@@ -1260,6 +1277,9 @@ export function NoteEditor({
           </span>
         )}
         <SaveIndicator state={snapshot.save} />
+        {active && (buildErrors?.length ?? 0) > 0 && (
+          <span className="ts-statusbar__errors">{t("editor.buildErrors", { count: buildErrors?.length ?? 0 })}</span>
+        )}
         {citationCheck !== null && citationCheck.citations > 0 && (
           <span className={citationCheck.broken > 0 ? "ts-cite-status ts-cite-status--broken" : "ts-cite-status"}>
             {t("sources.status", {

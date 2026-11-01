@@ -1752,3 +1752,101 @@ pub async fn sync_set_author(
 ) -> SyncAnswer<()> {
     typsidian_host::commands::sync_set_author(&home, &sync_state, author).await
 }
+
+#[tauri::command]
+pub async fn ai_settings_get(
+    state: State<'_, Vault>,
+) -> Answer<ai::settings::AiSettings, Failure<()>> {
+    typsidian_host::commands::ai_settings_get(&state).await
+}
+
+#[tauri::command]
+pub async fn ai_settings_set(
+    state: State<'_, Vault>,
+    settings: ai::settings::AiSettings,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_settings_set(&state, settings).await
+}
+
+#[tauri::command]
+pub async fn ai_key_state(
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+) -> Answer<bool, ai::AiFailure> {
+    typsidian_host::commands::ai_key_state(&home, vault_id, provider).await
+}
+
+#[tauri::command]
+pub async fn ai_key_set(
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+    key: String,
+) -> Answer<(), ai::AiFailure> {
+    typsidian_host::commands::ai_key_set(&home, vault_id, provider, key).await
+}
+
+#[tauri::command]
+pub async fn ai_key_delete(
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    provider: ai::settings::AiProvider,
+) -> Answer<(), ai::AiFailure> {
+    typsidian_host::commands::ai_key_delete(&home, vault_id, provider).await
+}
+
+#[tauri::command]
+pub async fn ai_models(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    request_id: String,
+    allow_custom: bool,
+) -> Answer<Vec<String>, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_models(&state, &home, vault_id, request_id, allow_custom).await
+}
+
+#[tauri::command]
+pub async fn ai_probe(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    request_id: String,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::client::ProbeResult, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_probe(&state, &home, vault_id, request_id, now, allow_custom).await
+}
+
+#[tauri::command]
+pub async fn ai_approve_endpoint(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    insecure_ok: bool,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_approve_endpoint(&state, &home, vault_id, insecure_ok).await
+}
+
+#[tauri::command]
+pub fn ai_cancel(vault_id: String, request_id: String) {
+    typsidian_host::commands::ai_cancel(vault_id, request_id)
+}
+
+#[tauri::command]
+pub async fn ai_journal(
+    state: State<'_, Vault>,
+) -> Answer<Vec<ai::journal::JournalEntry>, Failure<()>> {
+    typsidian_host::commands::ai_journal(&state).await
+}
+
+#[tauri::command]
+pub async fn ai_journal_clear(state: State<'_, Vault>) -> Answer<u32, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_journal_clear(&state).await
+}
+
+#[tauri::command]
+pub async fn ai_check_access(state: State<'_, Vault>, path: String) -> Answer<bool, Failure<()>> {
+    typsidian_host::commands::ai_check_access(&state, path).await
+}

@@ -83,7 +83,9 @@ export default async (page) => {
   };
   const noticeText = () => page.text(".ts-tree-notice");
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.waitForElement(row("Входящие/идея.typ"), { timeout: 30000 });
 
   // 1. Заметка → папка: подсветка цели, ярлык, итог и сообщение.

@@ -66,6 +66,13 @@ pub const TASKS_FILE_NAME: &str = "tasks.json";
 /// устройству, поэтому входят в производные пути.
 pub const IMPORTS_DIR_NAME: &str = "imports";
 
+/// Настройки обучения с ИИ (фича 050): не производный путь, едет с синхронизацией.
+pub const AI_SETTINGS_FILE_NAME: &str = "ai.json";
+
+/// Журнал отправленного (фича 050, FR-013): содержит текст запросов, принадлежит
+/// устройству, поэтому входит в производные пути.
+pub const AI_JOURNAL_FILE_NAME: &str = "ai-journal.jsonl";
+
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
 /// Существует только ради уборки: при первом открытии vault новой версией файл
@@ -87,6 +94,16 @@ pub fn vault_settings_path() -> PathBuf {
 /// Папка временных файлов записи относительно корня vault.
 pub fn tmp_dir() -> PathBuf {
     service_dir().join(TMP_DIR_NAME)
+}
+
+/// Настройки обучения с ИИ относительно корня vault (фича 050).
+pub fn ai_settings_path() -> PathBuf {
+    service_dir().join(AI_SETTINGS_FILE_NAME)
+}
+
+/// Журнал отправленного относительно корня vault (фича 050).
+pub fn ai_journal_path() -> PathBuf {
+    service_dir().join(AI_JOURNAL_FILE_NAME)
 }
 
 /// Папка снимков заметок относительно корня vault (фича 029).
@@ -136,6 +153,7 @@ pub fn derived_paths() -> Vec<String> {
         format!("{SERVICE_DIR_NAME}/{SNAPSHOTS_DIR_NAME}"),
         format!("{SERVICE_DIR_NAME}/{TASKS_FILE_NAME}"),
         format!("{SERVICE_DIR_NAME}/{IMPORTS_DIR_NAME}"),
+        format!("{SERVICE_DIR_NAME}/{AI_JOURNAL_FILE_NAME}"),
         // Скачиваемые шаблоны (фича 041): всё скачанное, пространство имён
         // реестра Typst — его можно скачать, даже если положено руками, — и
         // перечень скачанного прежних версий.
@@ -152,6 +170,23 @@ pub fn derived_paths() -> Vec<String> {
         // устройство со старой версией ещё может его создавать.
         format!("{LEGACY_CACHE_FILE_NAME}*"),
     ]
+}
+
+/// Подпадает ли путь (относительно корня vault, через `/`) под [`derived_paths`].
+///
+/// Нужен истории версий: правила в `.gitignore` ставятся один раз и для vault,
+/// заведённых до нового производного пути, его не знают. Без этой проверки
+/// журнал отправленного модели ушёл бы в снимок (050, ревью безопасности M3).
+pub fn is_derived(path: &str) -> bool {
+    derived_paths().iter().any(|rule| match rule.strip_suffix('*') {
+        Some(prefix) => path.starts_with(prefix),
+        None => {
+            path == rule
+                || path
+                    .strip_prefix(rule.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+    })
 }
 
 /// Лежит ли путь внутри служебного места.
@@ -172,6 +207,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn derived_matches_files_folders_and_prefixes() {
+        for path in [
+            ".typsidian/ai-journal.jsonl",
+            ".typsidian/cache.sqlite-wal",
+            ".typsidian/snapshots/a/b.json",
+            ".typsidian-cache.sqlite",
+        ] {
+            assert!(is_derived(path), "{path}");
+        }
+        for path in [
+            ".typsidian/ai.json",
+            ".typsidian/snapshots-old",
+            ".typsidian/ai-journal.jsonl.bak",
+            "заметка.typ",
+        ] {
+            assert!(!is_derived(path), "{path}");
+        }
+    }
+
+    #[test]
     fn derived_paths_cover_caches_but_not_settings() {
         let derived = derived_paths();
         assert_eq!(
@@ -182,6 +237,7 @@ mod tests {
                 ".typsidian/snapshots",
                 ".typsidian/tasks.json",
                 ".typsidian/imports",
+                ".typsidian/ai-journal.jsonl",
                 ".typsidian/downloads",
                 ".typsidian/packages/preview",
                 ".typsidian/packages/installed.json",
@@ -191,6 +247,10 @@ mod tests {
         assert!(!derived
             .iter()
             .any(|path| path.contains(VAULT_SETTINGS_FILE_NAME)));
+        // Настройки обучения с ИИ едут с синхронизацией, журнал — нет (фича 050).
+        assert!(!derived
+            .iter()
+            .any(|path| path.ends_with(AI_SETTINGS_FILE_NAME)));
     }
 
     #[test]

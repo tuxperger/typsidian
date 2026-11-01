@@ -26,7 +26,9 @@ export default async (page) => {
     await second.close();
   })()`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.click("text=заметка");
   await page.waitFor(`(${previewText}).includes("Привет")`, { label: "первая сборка", timeout: 60000 });
 

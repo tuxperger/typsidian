@@ -108,7 +108,9 @@ export default async (page) => {
   await page.evaluate(write("Пустая.typ", EMPTY));
   await page.evaluate(write("Ошибка.typ", BROKEN));
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await openNote(page, "Глава");
 
   // ── US1: открытие сочетанием и строение ────────────────────────────────
@@ -142,7 +144,7 @@ export default async (page) => {
     JSON.stringify(shown.map(([level, text]) => [level, text])) === JSON.stringify(expected),
     `порядок и уровни заголовков: ${JSON.stringify(shown.map(([l, t]) => `${l}:${t}`))}`,
   );
-  const badge = await page.evaluate(`document.querySelector(".ts-notepanel__tag")?.textContent`);
+  const badge = await page.evaluate(`document.querySelector(".ts-notepanel__mode--on .ts-notepanel__count")?.textContent`);
   failures += check(page, badge === "7", `счётчик в шапке — 7 (${badge})`);
 
   // ── US1: переход к последнему пункту ───────────────────────────────────
@@ -231,7 +233,7 @@ export default async (page) => {
 
   await page.sleep(800); // запись состояния колонки — с паузой 400 мс
   await page.reload();
-  await page.click("text=Открыть vault").catch(() => undefined);
+  await page.click("text=Открыть папку…").catch(() => undefined);
   await openNote(page, "Глава");
   await page.waitForElement(".ts-outline__tree", { timeout: 15000 }).catch(() => undefined);
   shown = await rows(page);
@@ -243,7 +245,7 @@ export default async (page) => {
 
   // ── FR-012: пустые состояния ───────────────────────────────────────────
   await openNote(page, "Пустая");
-  await page.waitForElement(".ts-outline__empty", { timeout: 5000 });
+  await page.waitFor(`document.querySelector(".ts-outline__empty")?.textContent.includes("нет заголовков")`, { label: "пустое оглавление", timeout: 10000 }).catch(() => undefined);
   const empty = await page.text(".ts-outline__empty");
   failures += check(page, empty.includes("нет заголовков"), `заметка без заголовков: «${empty.trim()}»`);
 
@@ -310,7 +312,7 @@ async function perf(page) {
   for (let i = 1; i <= 2000; i += 1) blocks.push(`== Раздел ${i}\nТекст раздела ${i}.\nЕщё строка.\nИ ещё одна.\n`);
   await page.evaluate(write("Большая.typ", `= Большая заметка\n${blocks.join("")}`));
   await page.reload();
-  await page.click("text=Открыть vault").catch(() => undefined);
+  await page.click("text=Открыть папку…").catch(() => undefined);
   await page.waitForElement("text=Большая", { timeout: 30000 });
 
   // SC-001: от открытия заметки (текст в редакторе) до оглавления; колонка в

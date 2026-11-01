@@ -124,7 +124,7 @@ export const tree: Translation<typeof en> = {
   "tree.move.a11y.denied": "Сюда нельзя",
   // Низ дерева (фича 043).
   "tree.footer.newNote": "Заметка",
-  "tree.footer.outline": "Оглавление",
+  "tree.footer.tasks": "Задачи",
   "tree.footer.sources": "Источники",
   "tree.footer.settings": "Настройки",
 };

@@ -127,6 +127,10 @@ import type {
   Transition,
   VaultEvent,
   VaultOverrides,
+  AiProvider,
+  AiSettings,
+  JournalEntry,
+  ProbeResult,
   WorkspaceAction,
   WorkspaceState,
   WorkspaceView,
@@ -583,6 +587,7 @@ export interface VaultClient {
 
   /** Снимки, история, возврат и удалённые заметки: правила — в ядре. */
   readonly snapshots: SnapshotsClient;
+  readonly ai: AiClient;
 
   // ── Показ слайдов (фича 019) ────────────────────────────────────────
 
@@ -795,6 +800,29 @@ export interface SpellingClient {
   removeWord(word: string): Promise<SpellConfig>;
   /** Исправления слова, до пяти. */
   suggest(word: string): Promise<string[]>;
+}
+
+/**
+ * Обучение с ИИ (фича 050). Правила — в ядре (`ai`). `vaultId` выбирает ключ
+ * устройства; на сервере его подставляет сервер. Отказ — исключение `AiFailure`.
+ */
+export interface AiClient {
+  settings(): Promise<AiSettings>;
+  setSettings(settings: AiSettings): Promise<void>;
+  keyState(vaultId: string, provider: AiProvider): Promise<boolean>;
+  setKey(vaultId: string, provider: AiProvider, key: string): Promise<void>;
+  deleteKey(vaultId: string, provider: AiProvider): Promise<void>;
+  models(vaultId: string, requestId: string): Promise<string[]>;
+  probe(vaultId: string, requestId: string): Promise<ProbeResult>;
+  /**
+   * Одобрить на этом устройстве свой адрес из настроек vault (ревью безопасности
+   * 050, M1): без одобрения запрос туда не уйдёт. `insecureOk` — пользователь здесь
+   * подтвердил незашифрованное соединение.
+   */
+  approveEndpoint(vaultId: string, insecureOk: boolean): Promise<void>;
+  cancel(vaultId: string, requestId: string): void;
+  journal(): Promise<JournalEntry[]>;
+  clearJournal(): Promise<number>;
 }
 
 /**

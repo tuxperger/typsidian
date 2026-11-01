@@ -9,7 +9,8 @@ function check(page, ok, label) {
 }
 
 export default async (page) => {
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Настройки", { timeout: 30000 });
   await page.click("text=Настройки");
   await page.click("text=Дополнительно");

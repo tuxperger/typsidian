@@ -43,11 +43,11 @@ export default async (page) => {
     await page.click(`text=${note}`);
     await page.sleep(4000);
     const problems = await page.evaluate(
-      `document.querySelectorAll("button.ts-diagnostics__place").length`,
+      `document.querySelectorAll(".ts-failure__card").length`,
     );
     page.log(`— ${note}: ошибок сборки ${problems}`);
     if (problems > 0) {
-      page.log(await page.text(".ts-diagnostics"));
+      page.log(await page.text(".ts-failure"));
       throw new Error(`заметка «${note}» собирается с ошибками`);
     }
     if (note === "Обзор проектов" && process.env.DEMO_SHOT_WORK) {

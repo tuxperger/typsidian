@@ -23,7 +23,9 @@ import {
   describeLink,
   describeProgress,
   describeSyncError,
+  indicatorText,
 } from "./describe.js";
+import { Icon } from "../icons/Icons.js";
 import { EnableHistoryWizard } from "./EnableHistoryWizard.js";
 import { IgnoreEditor } from "./IgnoreEditor.js";
 import { MergeEditor } from "./MergeEditor.js";
@@ -77,6 +79,11 @@ export function SyncPanel({
     if (focus === "conflicts") conflictsRef.current?.scrollIntoView({ block: "start" });
   }, [focus]);
 
+  const { label: headLabel, tone: headTone } =
+    overview !== null && overview.conflicts > 0 && sync.activity === null && sync.error === null
+      ? { label: t("sync.panel.needsDecision"), tone: "attention" as const }
+      : indicatorText(t, overview, sync.activity, sync.error);
+
   const openRemote = useCallback(() => {
     setRemoteError(null);
     void sync.client
@@ -89,10 +96,21 @@ export function SyncPanel({
   return (
     <aside className="ts-sync" aria-label={t("sync.panel.title")}>
       <div className="ts-sync__head">
-        <span className="ts-eyebrow">{t("sync.panel.title")}</span>
+        <h2 className="ts-eyebrow">{t("sync.panel.title")}</h2>
         <span className="ts-spacer" />
-        <button type="button" className="ts-btn" onClick={onClose}>
-          {t("common.close")}
+        {/* Состояние словами — тем же, что у индикатора в шапке (044, артборд 6). */}
+        <span className="ts-sync__state" data-tone={headTone}>
+          <span className="ts-sync-pill__dot" aria-hidden="true" />
+          {headLabel}
+        </span>
+        <button
+          type="button"
+          className="ts-modal__close"
+          aria-label={t("sync.panel.close")}
+          title={t("sync.panel.close")}
+          onClick={onClose}
+        >
+          <Icon name="x" size={12} />
         </button>
       </div>
 
@@ -114,6 +132,13 @@ export function SyncPanel({
               />
             ))}
 
+            {/* Конфликты — первыми: пока они есть, это главное в панели (артборд 6). */}
+            <ConflictsSection
+              sync={sync}
+              overview={overview}
+              sectionRef={conflictsRef}
+              onMerge={setMerging}
+            />
             <HistorySection
               sync={sync}
               overview={overview}
@@ -123,12 +148,6 @@ export function SyncPanel({
             />
             <RemoteSection sync={sync} overview={overview} i18n={i18n} onConnect={openRemote} />
             <SyncthingSection sync={sync} overview={overview} />
-            <ConflictsSection
-              sync={sync}
-              overview={overview}
-              sectionRef={conflictsRef}
-              onMerge={setMerging}
-            />
             <KeeperSection sync={sync} overview={overview} i18n={i18n} />
             <RulesSection onOpen={setRulesFile} />
 
@@ -1137,6 +1156,13 @@ function ConflictsSection({
         {t("sync.conflicts.title")}
         {overview.conflicts > 0 && ` · ${overview.conflicts}`}
       </h2>
+
+      {conflicts.length > 0 && (
+        <div className="ts-sync-plaque" role="status">
+          <b>{t("sync.conflicts.plaqueTitle", { count: conflicts.length })}</b>
+          <span>{t("sync.conflicts.plaqueHint")}</span>
+        </div>
+      )}
 
       {shownReport !== null && (
         <div className="ts-sync-bulk-report" role="status">

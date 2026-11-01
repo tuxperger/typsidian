@@ -33,6 +33,10 @@ const REINDEX_COMMAND: &str = "vault_reindex_properties";
 const SYNC_OPEN_COMMAND: &str = "sync_open";
 /// Подключение удалённого репозитория: адрес проверяется до ядра (038 research.md §3).
 const SYNC_CONNECT_COMMAND: &str = "sync_connect_remote";
+/// Команды обучения с ИИ (фича 050).
+const AI_COMMAND_PREFIX: &str = "ai_";
+/// Команды обучения с ИИ, которые ходят в сеть к провайдеру.
+const AI_NETWORK_COMMANDS: &[&str] = &["ai_models", "ai_probe"];
 /// Команды, которые ходят в сеть к удалённому репозиторию.
 const EXCHANGE_COMMANDS: &[&str] = &[
     "sync_connect_remote",
@@ -89,6 +93,11 @@ pub async fn invoke(
 ) -> ApiResult<Response> {
     if !allowed(&command) {
         tracing::warn!(login = %authed.account.login, command = %command, "отказ: команда вне белого списка");
+        return Err(ApiError::Forbidden);
+    }
+    // Гость анонимен: запросы к моделям от имени сервера ему закрыты (фича 050).
+    if state.config.demo_mode && command.starts_with(AI_COMMAND_PREFIX) {
+        tracing::warn!(login = %authed.account.login, command = %command, "отказ: обучение с ИИ на демо-сервере");
         return Err(ApiError::Forbidden);
     }
     let open = open(&state, &authed, &name).await?;
@@ -157,6 +166,24 @@ pub async fn invoke(
         if !state.config.template_sources || state.config.demo_mode {
             strip_template_sources(&mut arguments);
         }
+        // `vaultId` и `allowCustom` клиента не используются: иначе он выбирал бы, чьи
+        // ключи читать и куда сервер пойдёт по сети (FR-019). Тело-массив serde
+        // разобрал бы по порядку полей мимо подстановки, поэтому принимается только
+        // объект (ревью безопасности 050, п. 1).
+        if command.starts_with(AI_COMMAND_PREFIX) {
+            let Some(object) = arguments.as_object_mut() else {
+                return Err(ApiError::Invalid {
+                    field: "body",
+                    reason: "NotObject",
+                });
+            };
+            let sync_id = state.store.vault_sync_id(&authed.account.id, &name).await?;
+            object.insert("vaultId".to_owned(), Value::String(sync_id));
+            object.insert(
+                "allowCustom".to_owned(),
+                Value::Bool(state.config.ai_custom_endpoint),
+            );
+        }
         if command == SYNC_CONNECT_COMMAND
             && !state.config.sync_private_remotes
             && crate::sync::internal_remote(
@@ -172,6 +199,22 @@ pub async fn invoke(
         }
         // Обмены всех аккаунтов делят пул блокирующих потоков: их число на
         // сервер ограничено (038, ревью безопасности).
+        // Запросы к моделям ограничены на весь сервер (050, ревью безопасности L2).
+        let _ai_request = if AI_NETWORK_COMMANDS.contains(&command.as_str()) {
+            match state.ai_requests.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    tracing::warn!("отказ: предел одновременных запросов к моделям");
+                    return Ok((
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "kind": "RateLimited" })),
+                    )
+                        .into_response());
+                }
+            }
+        } else {
+            None
+        };
         let _exchange = if EXCHANGE_COMMANDS.contains(&command.as_str()) {
             match state.exchanges.try_acquire() {
                 Ok(permit) => Some(permit),

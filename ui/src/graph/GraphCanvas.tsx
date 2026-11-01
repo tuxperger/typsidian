@@ -395,7 +395,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       const node = nodes[i]!;
       const group = node.group;
       const entry = group === undefined || group === null ? undefined : data.current.groups[group];
-      const color = entry === undefined ? palette.plain : palette.group[entry.color];
+      // Открытая заметка залита акцентом (фича 044, артборд 7), группа её не
+      // перекрашивает: это «вы здесь», а не принадлежность.
+      const color =
+        i === current ? palette.edgeHot : entry === undefined ? palette.plain : palette.group[entry.color];
       const dim = hot !== null && hot[i] === 0;
       const shape = shapeList[i]!;
       const key = `${color}|${shape}|${dim ? 1 : 0}`;

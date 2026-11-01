@@ -126,7 +126,7 @@ export const tree = {
   "tree.move.a11y.denied": "Cannot drop here",
   // Низ дерева (фича 043).
   "tree.footer.newNote": "Note",
-  "tree.footer.outline": "Outline",
+  "tree.footer.tasks": "Tasks",
   "tree.footer.sources": "Sources",
   "tree.footer.settings": "Settings",
 } as const satisfies Entries;

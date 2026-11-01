@@ -18,7 +18,9 @@ export default async (page) => {
     await write(".gitignore", "*.pdf\\n");
   })()`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Синхронизация", { timeout: 30000 });
   await page.click("text=Синхронизация");
   await page.waitForElement("text=Открыть", { timeout: 30000 });

@@ -3,6 +3,10 @@ import type { sync as en } from "../en/sync.js";
 
 export const sync: Translation<typeof en> = {
   "sync.panel.title": "Синхронизация",
+  "sync.panel.close": "Закрыть синхронизацию",
+  "sync.panel.needsDecision": "нужно решение",
+  "sync.conflicts.plaqueTitle": (p) => ruN(p.count, "# конфликт после получения", "# конфликта после получения", "# конфликтов после получения"),
+  "sync.conflicts.plaqueHint": "Правки с другого устройства и с этого пересеклись. Остальное получено.",
   "sync.cancelOperation": "Прервать",
   "sync.autoPrefix": "Снимок",
 

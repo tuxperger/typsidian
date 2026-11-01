@@ -595,3 +595,70 @@ async fn impossible_logins_are_refused_without_work() {
     let (status, _, _) = server.login("anna", PASSWORD).await;
     assert_eq!(status, StatusCode::OK);
 }
+
+/// Обучение с ИИ (050 FR-019): ключи разделены, даже если клиент назвал чужой id, а
+/// свой адрес модели без разрешения администратора недоступен.
+#[tokio::test]
+async fn ai_keys_are_per_user_and_custom_endpoint_is_closed() {
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let bob = server.enter("bob").await;
+    for client in [&anna, &bob] {
+        let (status, _, _) = server
+            .call(
+                Method::POST,
+                "/api/vaults",
+                Some(client),
+                Some(json!({ "name": "Общее имя" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let provider = "Anthropic";
+    let (status, body) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_key_set",
+            json!({ "vaultId": "поддельный", "provider": provider, "key": "ключ-анны" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let state = json!({ "vaultId": "поддельный", "provider": provider });
+    let (_, of_anna) = server
+        .invoke(&anna, "Общее имя", "ai_key_state", state.clone())
+        .await;
+    assert_eq!(of_anna, json!(true));
+    let (_, of_bob) = server
+        .invoke(&bob, "Общее имя", "ai_key_state", state)
+        .await;
+    assert_eq!(of_bob, json!(false));
+
+    let settings = json!({ "settings": {
+        "enabled": true,
+        "provider": "Custom",
+        "custom_endpoint": "http://127.0.0.1:9/v1",
+        "insecure_confirmed_for": null,
+        "model": "m",
+        "denied_folders": [],
+    }});
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_settings_set", settings)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_probe",
+            json!({ "vaultId": "", "requestId": "1", "now": 0, "allowCustom": true }),
+        )
+        .await;
+    assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
+
+    // Аргументы массивом по порядку полей не обходят подстановку сервера.
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_probe", json!(["", "1", 0, true]))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}

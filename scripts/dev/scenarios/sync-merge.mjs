@@ -46,9 +46,10 @@ export default async (page) => {
   );
   // Экран выбора места (037): папка на устройстве.
   await page.click("text=Продолжить");
-  await page.click("text=Открыть vault");
-  await page.waitForElement("text=Синхронизация", { timeout: 30000 });
-  await page.click("text=Синхронизация");
+  await page.click("text=Открыть папку…");
+  // Вход в панель — статус синхронизации в шапке (фича 043).
+  await page.waitForElement(".ts-sync-pill", { timeout: 30000 });
+  await page.click(".ts-sync-pill");
   await page.waitForElement("text=Включить историю…", { timeout: 30000 });
   await page.click("text=Включить историю…");
   await page.waitForElement(".ts-sync-wizard");
@@ -84,7 +85,7 @@ export default async (page) => {
   // Панель перечитывает конфликты при открытии.
   await page.press("Escape");
   await page.sleep(500);
-  await page.click("text=Синхронизация");
+  await page.click(".ts-sync-pill");
   await page.waitForElement(".ts-sync-conflicts", { timeout: 30000 });
   await page.sleep(800);
   page.log("— список:\n" + (await page.text(".ts-sync-conflicts")));

@@ -64,6 +64,10 @@ export interface CompileStatus {
   isBuilding: boolean;
   /** Сколько заняла последняя сборка; `null` — её ещё не было. */
   lastMs: number | null;
+  /** Страниц в показанном листе (окно экспорта, фича 044); 0 — листа нет. */
+  pages: number;
+  /** Ошибки последней сборки — для подчёркивания в тексте (044, артборд 5). */
+  errors: readonly Diagnostic[];
 }
 
 export interface PreviewPaneProps {
@@ -250,10 +254,6 @@ export function PreviewPane({
   );
   const canInstall = Boolean(client?.installTemplate && vaultOverrides);
 
-  // Шапка узнаёт о сборке отсюда, а не считает её сама.
-  useEffect(() => {
-    onStatusRef.current?.({ isBuilding: state.isBuilding, lastMs });
-  }, [state.isBuilding, lastMs]);
 
   // Ctrl/⌘ + колесо — тот же жест, что в любом просмотрщике документов.
   // Слушатель вешается вручную: `onWheel` React ставит пассивным, а пассивный
@@ -340,6 +340,12 @@ export function PreviewPane({
     () => state.diagnostics.filter((d) => d.severity === "Error"),
     [state.diagnostics],
   );
+
+  // Шапка узнаёт о сборке отсюда, а не считает её сама.
+  const shownPages = state.shown?.pages.length ?? 0;
+  useEffect(() => {
+    onStatusRef.current?.({ isBuilding: state.isBuilding, lastMs, pages: shownPages, errors });
+  }, [state.isBuilding, lastMs, shownPages, errors]);
   const warnings = useMemo(
     () => state.diagnostics.filter((d) => d.severity === "Warning"),
     [state.diagnostics],
@@ -443,6 +449,33 @@ export function PreviewPane({
 
       </div>
 
+      {/* Ошибки — карточками между полосой и листом (фича 044, артборд 5): не
+          прокручиваются вместе с листом, и главное на панели сейчас они. Список
+          полный и в порядке появления (FR-016 фичи 005). */}
+      {(errors.length > 0 || state.failure !== null) && (
+        <div className="ts-failure" role="alert">
+          {state.failure !== null && (
+            <div className="ts-failure__card">
+              <div className="ts-failure__title">{t("preview.buildFailed", { detail: state.failure })}</div>
+              <div className="ts-failure__place">
+                {state.shown ? t("preview.failure.previous") : t("preview.failedNothingToShow")}
+              </div>
+            </div>
+          )}
+          {errors.map((d, i) => (
+            <FailureCard
+              key={`e${i}`}
+              diagnostic={d}
+              showingPrevious={Boolean(state.shown)}
+              onInstall={canInstall ? install : undefined}
+              installing={installing}
+              onReveal={onReveal}
+              canReveal={canReveal}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Масштаб уходит в CSS переменной: ширину листа и деления линеек считает
           раскладка, а не JS — пересчитывать их в React значило бы дублировать
           то, что браузер уже умеет через `calc`. */}
@@ -506,38 +539,14 @@ export function PreviewPane({
       >
         <div className="ts-preview__rows">
           <div className="ts-preview__stack" ref={stackRef}>
-            {/* Ошибки — на месте предпросмотра, а не строчкой внизу: собранного
-                вида всё равно нет или он устарел, и главное на панели сейчас
-                они. Список остаётся полным и в порядке появления (FR-016). */}
-            {(errors.length > 0 || state.failure !== null) && (
-              <div className="ts-failure" role="alert">
-                <p className="ts-failure__head">
-                  {state.shown
-                    ? t("preview.failedShowingPrevious")
-                    : t("preview.failedNothingToShow")}
-                </p>
-                <ul className="ts-failure__list">
-                  {state.failure !== null && (
-                    <li className="ts-diagnostics__error">
-                      {t("preview.buildFailed", { detail: state.failure })}
-                    </li>
-                  )}
-                  {errors.map((d, i) => (
-                    <DiagnosticItem
-                      key={`e${i}`}
-                      diagnostic={d}
-                      onInstall={canInstall ? install : undefined}
-                      installing={installing}
-                      onReveal={onReveal}
-                      canReveal={canReveal}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-
             {state.shown ? (
-              <div className="ts-preview__pages" ref={pagesRef}>
+              // Лист прошлой сборки при ошибке бледнеет (фича 044, артборд 5):
+              // он остаётся ориентиром, но уже не то, что получится.
+              <div
+                className="ts-preview__pages"
+                ref={pagesRef}
+                data-stale={errors.length > 0 || state.failure !== null ? "true" : undefined}
+              >
                 {state.shown.pages.map((page) => (
                   <PreviewPage key={page.index} page={page} />
                 ))}
@@ -662,6 +671,70 @@ function DiagnosticItem({
         </>
       )}
     </li>
+  );
+}
+
+/**
+ * Карточка ошибки сборки (фича 044, артборд 5): сообщение, место словами и
+ * «Перейти к строке». Сообщение Typst — как есть, приложения — на языке
+ * интерфейса (010 FR-004).
+ */
+function FailureCard({
+  diagnostic,
+  showingPrevious,
+  onInstall,
+  installing,
+  onReveal,
+  canReveal,
+}: {
+  diagnostic: Diagnostic;
+  showingPrevious: boolean;
+  onInstall?: ((spec: string) => void | Promise<void>) | undefined;
+  installing: string | null;
+  onReveal?: ((place: DiagnosticLocation) => void) | undefined;
+  canReveal?: ((path: string) => boolean) | undefined;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const template = diagnostic.template;
+  const place = diagnostic.location;
+  const where =
+    place === undefined || place === null
+      ? null
+      : t("preview.failure.place", { file: place.path, line: place.line });
+  const reveal = place && onReveal && canReveal?.(place.path) ? () => onReveal(place) : null;
+  return (
+    <div className="ts-failure__card">
+      <div className="ts-failure__title">{diagnosticText(t, diagnostic)}</div>
+      <div className="ts-failure__place">
+        {[where, showingPrevious ? t("preview.failure.previous") : null]
+          .filter((part) => part !== null)
+          .join(" · ")}
+      </div>
+      {(reveal !== null || (template && onInstall)) && (
+        <div className="ts-failure__actions">
+          {reveal !== null && place && (
+            <button
+              type="button"
+              className="ts-btn ts-failure__reveal"
+              title={t("preview.reveal", { place: placeText(place) })}
+              onClick={reveal}
+            >
+              {t("preview.failure.goToLine")}
+            </button>
+          )}
+          {template && onInstall && (
+            <button
+              type="button"
+              className="ts-btn"
+              disabled={installing !== null}
+              onClick={() => void onInstall(template)}
+            >
+              {installing === template ? t("preview.installing") : t("preview.install")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

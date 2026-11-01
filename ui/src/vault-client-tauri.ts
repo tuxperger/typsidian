@@ -83,6 +83,9 @@ import type {
   RestoreOutcome,
   SnapshotReason,
   SnapshotUsage,
+  AiSettings,
+  JournalEntry,
+  ProbeResult,
   TakeOutcome,
   SpellConfig,
   EmbedInsertion,
@@ -653,6 +656,25 @@ export function tauriVaultClient(
       addWord: (word) => invoke<SpellConfig>("spell_add_word", { word }),
       removeWord: (word) => invoke<SpellConfig>("spell_remove_word", { word }),
       suggest: (word) => invoke<string[]>("spell_suggest", { word }),
+    },
+
+    // ── Обучение с ИИ (фича 050) ──────────────────────────────────────
+    // `allowCustom`: своя машина пользователя разрешает свой адрес; сервер заменяет
+    // это значение и `vaultId` своими.
+    ai: {
+      settings: () => invoke<AiSettings>("ai_settings_get"),
+      setSettings: (settings) => invoke<void>("ai_settings_set", { settings }),
+      keyState: (vaultId, provider) => invoke<boolean>("ai_key_state", { vaultId, provider }),
+      setKey: (vaultId, provider, key) => invoke<void>("ai_key_set", { vaultId, provider, key }),
+      deleteKey: (vaultId, provider) => invoke<void>("ai_key_delete", { vaultId, provider }),
+      models: (vaultId, requestId) =>
+        invoke<string[]>("ai_models", { vaultId, requestId, allowCustom: true }),
+      probe: (vaultId, requestId) =>
+        invoke<ProbeResult>("ai_probe", { vaultId, requestId, now: Date.now(), allowCustom: true }),
+      approveEndpoint: (vaultId, insecureOk) => invoke<void>("ai_approve_endpoint", { vaultId, insecureOk }),
+      cancel: (vaultId, requestId) => void invoke<void>("ai_cancel", { vaultId, requestId }),
+      journal: () => invoke<JournalEntry[]>("ai_journal"),
+      clearJournal: () => invoke<number>("ai_journal_clear"),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

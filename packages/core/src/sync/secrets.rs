@@ -20,6 +20,15 @@ pub enum SecretKind {
     /// только этому адресу (T068).
     RemoteOrigin,
     SyncthingApiKey,
+    /// Ключи моделей для обучения с ИИ (фича 050): у каждого подключения свой.
+    AiAnthropicKey,
+    AiOpenAiKey,
+    AiCustomKey,
+    /// Свой адрес модели, одобренный на этом устройстве (050, ревью безопасности
+    /// M1). Настройки vault едут с синхронизацией, и адрес в них может поменять
+    /// другое устройство; запрос уходит только на адрес, одобренный здесь, как
+    /// токен репозитория — только на `RemoteOrigin`.
+    AiCustomOrigin,
 }
 
 impl SecretKind {
@@ -29,6 +38,10 @@ impl SecretKind {
             SecretKind::RemoteToken => "remote-token",
             SecretKind::RemoteOrigin => "remote-origin",
             SecretKind::SyncthingApiKey => "syncthing-api-key",
+            SecretKind::AiAnthropicKey => "ai-anthropic-key",
+            SecretKind::AiOpenAiKey => "ai-openai-key",
+            SecretKind::AiCustomKey => "ai-custom-key",
+            SecretKind::AiCustomOrigin => "ai-custom-origin",
         }
     }
 }

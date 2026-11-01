@@ -284,3 +284,8 @@ async fn conflicts_carry_line_marks() {
 async fn bulk_counts_repeats_once_and_refuses_huge_batches() {
     cases::bulk_counts_repeats_once_and_refuses_huge_batches().await;
 }
+
+#[wasm_bindgen_test]
+async fn derived_files_stay_out_of_history_with_old_rules() {
+    cases::derived_files_stay_out_of_history_with_old_rules().await;
+}

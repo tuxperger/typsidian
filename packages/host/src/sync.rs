@@ -103,11 +103,15 @@ impl DynSecretStore for Memory {
 }
 
 /// Все виды секретов: удаление vault удаляет каждый.
-const ALL_KINDS: [SecretKind; 4] = [
+const ALL_KINDS: [SecretKind; 8] = [
     SecretKind::RemoteUser,
     SecretKind::RemoteToken,
     SecretKind::RemoteOrigin,
     SecretKind::SyncthingApiKey,
+    SecretKind::AiAnthropicKey,
+    SecretKind::AiOpenAiKey,
+    SecretKind::AiCustomKey,
+    SecretKind::AiCustomOrigin,
 ];
 
 /// Секреты в файле JSON с правами только для владельца: приватный файл

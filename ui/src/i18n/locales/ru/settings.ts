@@ -4,6 +4,7 @@ import type { settings as en } from "../en/settings.js";
 export const settings: Translation<typeof en> = {
   "settings.loading": "Загружаем настройки…",
   "settings.sections": "Разделы настроек",
+  "settings.savedInstantly": "Настройки сохраняются сразу",
   "settings.vaultNotOpen": "vault не открыт",
   "settings.vaultName": (p) => `vault: ${p.name}`,
   "settings.folderSettings": (p) => `настройки папки · ${p.name}`,

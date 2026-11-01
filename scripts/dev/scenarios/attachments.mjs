@@ -48,7 +48,8 @@ export default async (page) => {
     await stream.write("= Глава\\n\\nПервая строка.\\nВторая строка.\\n");
     await stream.close();
   })()`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Диссертация", { timeout: 30000 });
   // Первый тик сверки видит записанный тестом файл; правка до него дала бы
   // ложный конфликт — свойство стенда, а не вложений.

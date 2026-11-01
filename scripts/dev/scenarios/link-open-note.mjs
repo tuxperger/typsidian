@@ -41,7 +41,8 @@ export default async (page) => {
     await window.__opfs.write("Цель.typ", "= Цель\\n");
     await window.__opfs.write("Источник.typ", "= Источник\\n\\nЗдесь упомянута Цель без ссылки.\\n");
   })()`);
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=Источник");
 
   // Источник открыт, в нём несохранённая правка в конце.

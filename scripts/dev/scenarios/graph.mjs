@@ -49,7 +49,7 @@ const note = (page, label, value) => {
   page.log(`  замер: ${label} = ${value}`);
 };
 
-const GRAPH_BUTTON = "button[title='Граф связей']";
+const GRAPH_BUTTON = "button[aria-label='Открыть граф связей']"; // низ дерева (043, 044)
 const CANVAS = ".ts-graph__surface";
 
 const pick = async (page, predicate) => {
@@ -162,7 +162,9 @@ export default async (page) => {
   else names = await smallVault(page);
   page.log(`  vault записан за ${((Date.now() - t0) / 1000).toFixed(1)} с`);
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Продолжить"); // экран выбора места (037)
+
+  await page.click("text=Открыть папку…");
   await page.waitForElement(scale ? "text=пап0" : "text=проекты", { timeout: 60000 });
   // Пауза после открытия: в режиме масштаба — сколько дать ядру доиндексировать vault
   // (GRAPH_SETTLE_MS), иначе замер «до первого движения» ловит очередь вызовов wasm.
@@ -313,7 +315,7 @@ export default async (page) => {
   const json = await page.evaluate(`window.__opfs.read(".typsidian/vault.json")`);
   expect(page, json.includes("graph") && json.includes("show_tags"), "настройки графа записаны в vault.json");
   await page.reload();
-  await page.click("text=Открыть vault").catch(() => {});
+  await page.click("text=Открыть папку…").catch(() => {});
   await page.waitForElement("text=проекты", { timeout: 30000 });
   await page.sleep(2000);
   await page.click(GRAPH_BUTTON);
@@ -344,9 +346,12 @@ export default async (page) => {
   await page.shot(`${shots}/graph-g2.png`);
 
   // ── Колонка заметки (G3) и щелчок по узлу ───────────────────────────────
-  await page.click("text=Workspace");
+  await page.click("text=Рядом"); // выход из графа — вид в шапке (044)
   await page.sleep(600);
-  await page.click("text=Панель заметки");
+  // Колонка заметки — командой палитры (кнопка «Панель заметки» в шапке убрана в 043).
+  await page.click(".ts-cmdfield");
+  await page.type("оглавлен");
+  await page.press("Enter");
   await page.waitForElement(".ts-notepanel");
   await pick(page, (el) => el.textContent === 'Граф' && el.closest('.ts-notepanel') !== null);
   await page.sleep(1500);
@@ -364,7 +369,8 @@ export default async (page) => {
   await page.mouse("mouseMoved", click.x, click.y);
   await page.mouse("mousePressed", click.x, click.y);
   await page.mouse("mouseReleased", click.x, click.y);
-  await page.waitFor(`!document.querySelector('${CANVAS}')`, { label: "щелчок по узлу открыл заметку и закрыл граф" });
+  // Колонка заметки со своим графом остаётся — закрыться должен экран графа.
+  await page.waitFor(`!document.querySelector(".ts-graph")`, { label: "щелчок по узлу открыл заметку и закрыл граф" });
   expect(page, true, "щелчок по узлу открыл заметку");
 
   // ── Пустое состояние (G4) ────────────────────────────────────────────────

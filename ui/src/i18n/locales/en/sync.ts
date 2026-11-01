@@ -2,6 +2,10 @@ import { enN, type Entries } from "../define.js";
 
 export const sync = {
   "sync.panel.title": "Sync",
+  "sync.panel.close": "Close sync",
+  "sync.panel.needsDecision": "needs a decision",
+  "sync.conflicts.plaqueTitle": (p: { count: number }) => enN(p.count, "# conflict after receiving", "# conflicts after receiving"),
+  "sync.conflicts.plaqueHint": "Edits from another device and this one overlapped. Everything else was received.",
   "sync.cancelOperation": "Cancel operation",
   "sync.autoPrefix": "Snapshot",
 

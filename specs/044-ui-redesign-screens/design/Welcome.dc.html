@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Стартовый экран</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#14171a}
+a{color:#ff8a33}a:hover{color:#ffc7a3}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+button:focus-visible,a:focus-visible{outline:2px solid #ff6a00;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 48px 16px; box-sizing: border-box; background: #14171a; color: #c2c8ce; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+<div style="width: 100%; max-width: 866px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 40px 60px">
+
+<section aria-label="Начало работы" style="flex: 1 1 300px; max-width: 360px; display: flex; flex-direction: column; gap: 14px">
+<h1 style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 38px; line-height: 1; font-weight: 600; letter-spacing: -0.02em; color: #eceff1"><span style="color: #ff6a00">/</span>typsidian</h1>
+<p style="margin: 0; font-size: 16px; line-height: 1.4; color: #dde1e5; text-wrap: pretty">Заметки и документы на Typst в обычной папке.</p>
+<p style="margin: 0; font-size: 12px; color: #9aa3ac; text-wrap: pretty">Vault — это папка с файлами <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace">.typ</span>. Typsidian добавляет в неё только служебную <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace">.typsidian/</span> и папку вложений.</p>
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; box-sizing: border-box; border: 1px solid #ff6a00; border-radius: 2px; background: #ff6a00; color: #1b1006; font-size: 12px; font-weight: 600; text-decoration: none"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>Открыть папку…</a>
+<button type="button" style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 3v10M3 8h10"></path></svg>Создать новый vault</button>
+<button type="button" style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10"></path></svg>Импорт из Obsidian</button>
+</div>
+<a href="Settings.dc.html" style="align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 26px; color: #9aa3ac; font-size: 12px; text-decoration: none"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M3 5h10M3 11h10"></path><circle cx="6" cy="5" r="1.6" style="fill: #14171a"></circle><circle cx="10" cy="11" r="1.6" style="fill: #14171a"></circle></svg>Настройки приложения</a>
+</section>
+
+<section aria-labelledby="recent-title" style="flex: 999 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 8px">
+<h2 id="recent-title" style="margin: 0; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9aa3ac">Недавние</h2>
+<div style="display: flex; flex-direction: column; border: 1px solid #262b31; border-radius: 2px; background: #1b1f24">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 8px; padding: 14px; border-bottom: 1px solid #262b31; box-shadow: inset 2px 0 0 #ff6a00; color: #c2c8ce; font-size: 12px; text-decoration: none">
+<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: #ff6a00; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>
+<span style="min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 600; color: #eceff1">диссертация-2026</span><span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">~/Документы/диссертация-2026</span></span>
+<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">сегодня</span>
+</a>
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 8px; padding: 14px; border-bottom: 1px solid #262b31; color: #c2c8ce; font-size: 12px; text-decoration: none">
+<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>
+<span style="min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 600; color: #eceff1">notes</span><span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">~/media/notes</span></span>
+<span style="margin-left: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; color: #9aa3ac">вчера</span>
+</a>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px; color: #c2c8ce; font-size: 12px">
+<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round"><path d="M2 4.5V12.5h12V5.8H7.3L6 4.5z"></path></svg>
+<span style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 600; color: #eceff1">лаборатория</span><span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #9aa3ac; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">/Volumes/LAB/лаборатория</span><span style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ffe14d"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #ffd400; flex: none"></span>Папка недоступна: диск не подключён</span></span>
+<button type="button" style="margin-left: auto; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; box-sizing: border-box; border: 1px solid #353c44; border-radius: 2px; background: #1b1f24; color: #dde1e5; font-size: 12px; white-space: nowrap">Указать заново</button>
+</div>
+</div>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":750}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

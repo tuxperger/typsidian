@@ -14,7 +14,7 @@ export const links: Translation<typeof en> = {
   "notePanel.openNote": "Откройте заметку, чтобы увидеть её связи.",
 
   // ── Режим «Связи» ──────────────────────────────────────────────────
-  "links.mode": "Связи",
+  "links.mode": "Ссылки",
   "links.backlinks.title": "Обратные ссылки",
   "links.mentions.title": "Упоминания",
   "links.backlinks.collecting": "Собираю сведения о ссылках vault… Список появится сам.",

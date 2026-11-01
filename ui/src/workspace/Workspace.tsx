@@ -50,6 +50,7 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import { ExportCenter } from "../export/ExportCenter.js";
 import { ExportToast } from "../export/ExportToast.js";
+import { ExportDialog } from "../export/ExportDialog.js";
 import { useAttachments } from "../attachments/useAttachments.js";
 import { AttachmentNotices } from "../attachments/AttachmentNotices.js";
 import { LargeImageDialog } from "../attachments/LargeImageDialog.js";
@@ -364,6 +365,8 @@ function WorkspaceView({
   const [tasksOpen, setTasksOpen] = useState(false);
   // Окно «Экспорт презентации» (фича 035).
   const [slidesExportOpen, setSlidesExportOpen] = useState(false);
+  // Окно экспорта открытой заметки из шапки (фича 044, артборд 10).
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   // Запрос формы блока выборки из поиска (Mod+Enter, макет B3 -> B4).
   const [selectRequest, setSelectRequest] = useState<{ id: number; conditions: Condition[] } | null>(null);
   // select.typ правили вручную и оставили как есть: предупреждение в колонке свойств.
@@ -381,6 +384,8 @@ function WorkspaceView({
   const [compile, setCompile] = useState<CompileStatus>({
     isBuilding: false,
     lastMs: null,
+    pages: 0,
+    errors: [],
   });
   const [rebuildToken, setRebuildToken] = useState(0);
   // «Параметры элемента» из палитры (фича 008, FR-006): редактор ловит смену
@@ -1453,6 +1458,23 @@ function WorkspaceView({
 
   const noteModes = useMemo<NotePanelModeSpec[]>(
     () => [
+      // Порядок вкладок — артборд 4 фичи 044: «Оглавление», «Ссылки», «Свойства».
+      {
+        id: "outline",
+        title: "outline.mode",
+        badge: outlineBadge,
+        render: () => (
+          <OutlineMode
+            target={outlineTarget}
+            outline={noteOutline}
+            kinds={outlineKinds}
+            onKinds={notePanel.setOutlineKinds}
+            onJump={jumpToOutlineRow}
+            onFocusEditor={focusEditor}
+            focusFilter={narrow || drawer}
+          />
+        ),
+      },
       {
         id: "links",
         title: "links.mode",
@@ -1468,22 +1490,6 @@ function WorkspaceView({
             mentionsExpanded={notePanel.mentionsExpanded}
             onMentionsExpanded={notePanel.setMentionsExpanded}
             onReveal={revealPlace}
-          />
-        ),
-      },
-      {
-        id: "outline",
-        title: "outline.mode",
-        badge: outlineBadge,
-        render: () => (
-          <OutlineMode
-            target={outlineTarget}
-            outline={noteOutline}
-            kinds={outlineKinds}
-            onKinds={notePanel.setOutlineKinds}
-            onJump={jumpToOutlineRow}
-            onFocusEditor={focusEditor}
-            focusFilter={narrow || drawer}
           />
         ),
       },
@@ -1896,6 +1902,17 @@ function WorkspaceView({
     setView((current) => (current === "workspace" ? "graph" : "workspace"));
   }, []);
 
+  // Выбор вида «Текст / Рядом / Документ» — это и возврат к рабочей области с
+  // экрана графа или настроек (фича 044, US4 AS3).
+  const chooseView = useCallback(
+    (mode: PaneView) => {
+      panes.setView(mode);
+      setView("workspace");
+      setShowSettings(false);
+    },
+    [panes.setView],
+  );
+
   // ── Команды вкладок (фича 014) ───────────────────────────────────────────
   //
   // Что команда значит, решает ядро: здесь только выбор действия по показу.
@@ -2130,7 +2147,7 @@ function WorkspaceView({
         title: t("workspace.view.command", { view: t(VIEW_LABEL[mode]) }),
         titleEn: tEn("workspace.view.command", { view: tEn(VIEW_LABEL[mode]) }),
         icon: "layout" as const,
-        run: () => panes.setView(mode),
+        run: () => chooseView(mode),
       })),
       {
         id: "search",
@@ -2662,22 +2679,12 @@ function WorkspaceView({
     />
   );
 
-  // Лист настроек — и над рабочей областью, и над стартовым экраном
-  // («Настройки приложения», фича 043).
+  // Настройки — экран под шапкой (фича 044, артборд 9): разделы слева, внизу
+  // строка «Настройки сохраняются сразу» и «Закрыть» (на стартовом экране шапки
+  // с видом нет, а Esc на сенсорном экране нажать нечем).
   const settingsSheet = showSettings && (
-        <div className="ts-overlay">
-          <div className="ts-sheet">
-            <div className="ts-sheet__head">
-              <span className="ts-eyebrow">{t("workspace.settings")}</span>
-              <span className="ts-spacer" />
-              <button
-                type="button"
-                className="ts-btn"
-                onClick={() => setShowSettings(false)}
-              >
-                {t("common.close")}
-              </button>
-            </div>
+        <div className="ts-overlay ts-overlay--screen">
+          <div className="ts-sheet ts-sheet--screen" role="region" aria-label={t("workspace.settings")}>
             {/* Без внутренних отступов: панель настроек сама задаёт раскладку
                 в два столбца (меню слева, содержимое справа), и обёртка со
                 своим padding сдвинула бы границу между ними. */}
@@ -2688,6 +2695,13 @@ function WorkspaceView({
                 state.preview ?? preview ?? null,
                 { sync, onCloneVault: openClone },
               )}
+            </div>
+            <div className="ts-statusbar ts-sheet__foot">
+              <span>{t("settings.savedInstantly")}</span>
+              <span className="ts-spacer" />
+              <button type="button" className="ts-statusbar__action" onClick={() => setShowSettings(false)}>
+                {t("common.close")}
+              </button>
             </div>
           </div>
         </div>
@@ -2817,7 +2831,15 @@ function WorkspaceView({
             onOpenFolder={() => void openVault()}
             onManage={settings === undefined ? undefined : () => setShowSettings(true)}
           />
-          <Breadcrumb path={activePath} />
+          {/* Экраны графа и настроек называют себя вместо пути заметки (фича 044,
+              FR-009). */}
+          {showSettings ? (
+            <ScreenCrumb title={t("workspace.settings")} />
+          ) : view === "graph" ? (
+            <ScreenCrumb title={t("graph.title")} />
+          ) : (
+            <Breadcrumb path={activePath} />
+          )}
           {/* Телефон (макет 1c): «Назад», «Вперёд» и название открытой заметки —
               вместо полосы вкладок. Шапка уже скрывает крошки. */}
           {layout !== null && layout.presentation === "List" && view === "workspace" && shownPhonePane !== "tree" && (
@@ -2846,10 +2868,10 @@ function WorkspaceView({
             )}
           </button>
 
-          {view === "workspace" && !phone && (
+          {!phone && (
             <ViewSwitch
               value={workspaceView}
-              onChange={panes.setView}
+              onChange={chooseView}
               disabled={viewLocked}
               disabledHint={t("workspace.view.boardHint")}
             />
@@ -2927,7 +2949,7 @@ function WorkspaceView({
               className="ts-btn ts-btn--accent ts-header__primary"
               disabled={openNotePath === null || previewClient === null || exporter.busy}
               title={shortcuts.displayOf("export-pdf") || undefined}
-              onClick={exportCurrent}
+              onClick={() => setExportDialogOpen(true)}
             >
               <Icon name="download" size={13} />
               {t("workspace.exportPdfShort")}
@@ -3012,7 +3034,7 @@ function WorkspaceView({
         )}
       </div>
 
-      {view === "graph" ? (
+      {view === "graph" && phone ? (
         <GraphView
           client={state.client}
           currentPath={activePath}
@@ -3028,7 +3050,7 @@ function WorkspaceView({
       <>
       {/* Экран заметки на телефоне (фича 043, US3; экран 4 Typsidian.pdf):
           «Назад» к дереву, название и путь, «Текст / Документ». */}
-      {phone && shownPhonePane !== "tree" && (
+      {phone && view === "workspace" && shownPhonePane !== "tree" && (
         <div className="ts-phone-note">
           <div className="ts-phone-note__head">
             <button
@@ -3095,7 +3117,8 @@ function WorkspaceView({
               onCreated={(path) => void openPath(path)}
               onError={setOperationError}
               onOpenGraph={toggleView}
-              onToggleOutline={phone ? undefined : toggleOutline}
+              onOpenTasks={phone ? undefined : () => setTasksOpen(true)}
+              graphOpen={view === "graph"}
               onToggleSources={phone ? undefined : toggleSources}
               onQuickNote={phone ? openManualCapture : undefined}
               onOpenSettings={settings === undefined ? undefined : () => setShowSettings(true)}
@@ -3139,19 +3162,33 @@ function WorkspaceView({
           </>
         )}
 
-        {/* Колонка заметки (013): между деревом и редактором, а при открытой
-            доске — рядом с контейнером полотна, в его DOM не входя. На узком
-            окне вместо неё шторка (ниже). */}
-        {!narrow && !drawer && notePanel.shown && (
-          <NotePanel
-            modes={noteModes}
-            active={notePanel.mode}
-            onSelect={notePanel.setMode}
-            presentation="column"
-            onClose={notePanel.toggle}
+        {/* Синхронизация (фича 011) — колонкой слева от текста (фича 044,
+            артборд 6): не модальна, работа с заметкой рядом продолжается
+            (FR-019). На телефоне — поверх, как прежде (ниже). */}
+        {sync !== null && syncPanel !== null && !phone && (
+          <SyncPanel
+            sync={sync}
+            focus={syncPanel.focus}
+            onOpenFileHistory={openFileHistory}
+            onClose={() => setSyncPanel(null)}
           />
         )}
 
+        {/* Граф (фича 025) — на месте текста и листа, дерево остаётся слева
+            (фича 044, артборд 7). */}
+        {view === "graph" ? (
+          <GraphView
+            client={state.client}
+            currentPath={activePath}
+            settings={graphSettings}
+            scope={graphScope}
+            onScopeChange={setGraphScope}
+            depth={graphDepth}
+            onDepthChange={setGraphDepth}
+            onOpenPath={openPathFromGraph}
+          />
+        ) : (
+        <>
         {/* Группы вкладок (фича 014): одна или две, сколько показать — решает ядро
             по ширине окна. FR-006, FR-007 фичи 002: доска — вкладка того же
             окна, отдельного окна не открывается. При активной доске и одной
@@ -3175,6 +3212,7 @@ function WorkspaceView({
               onCaretOffset: noteOutline.noticeCaret,
               onSaveAsTemplate: setSavingTemplate,
               fontSize: editorFontSize,
+              buildErrors: compile.errors,
               shortcuts,
               paramsRequest,
               selectRequest,
@@ -3248,6 +3286,22 @@ function WorkspaceView({
               />
             )}
           </>
+        )}
+
+        {/* Колонка заметки (013) — у правого края, после текста и листа
+            (фича 044, research.md Decision 3); при открытой доске — рядом с
+            контейнером полотна, в его DOM не входя. На узком окне вместо неё
+            шторка (ниже). */}
+        {!narrow && !drawer && notePanel.shown && (
+          <NotePanel
+            modes={noteModes}
+            active={notePanel.mode}
+            onSelect={notePanel.setMode}
+            presentation="column"
+            onClose={notePanel.toggle}
+          />
+        )}
+        </>
         )}
       </div>
       </>
@@ -3432,6 +3486,27 @@ function WorkspaceView({
         />
       )}
 
+      {exportDialogOpen && openNotePath !== null && previewClient !== null && (
+        <ExportDialog
+          notePath={openNotePath}
+          pages={compile.pages > 0 ? compile.pages : null}
+          folder={vaultSettings.overrides?.export_folder ?? "export"}
+          onExportPdf={exportCurrent}
+          onExportHtml={() =>
+            exporter.startBatch([openNotePath], false, "Html", {
+              contents: t("export.html.contents"),
+              outside: t("export.html.outside"),
+            })
+          }
+          onOpenSlides={() => setSlidesExportOpen(true)}
+          onChangeFolder={() => {
+            setExportDialogOpen(false);
+            setShowSettings(true);
+          }}
+          onClose={() => setExportDialogOpen(false)}
+        />
+      )}
+
       {importer.dialogOpen && <ImportDialog control={importer} />}
 
       {captureSheet}
@@ -3497,7 +3572,7 @@ function WorkspaceView({
 
       {/* Синхронизация (фича 011). Панель не модальна: она сбоку, и работа с
           заметкой под ней продолжается (FR-019). */}
-      {sync !== null && syncPanel !== null && (
+      {sync !== null && syncPanel !== null && phone && (
         <SyncPanel
           sync={sync}
           focus={syncPanel.focus}
@@ -3585,6 +3660,15 @@ function noteStem(path: string | null): string {
   const file = path.split("/").pop() ?? path;
   const dot = file.lastIndexOf(".");
   return dot > 0 ? file.slice(0, dot) : file;
+}
+
+/** Название экрана в шапке на месте пути (фича 044, артборды 7 и 9). */
+function ScreenCrumb({ title }: { title: string }): React.JSX.Element {
+  return (
+    <span className="ts-crumb">
+      <span className="ts-crumb__file">{title}</span>
+    </span>
+  );
 }
 
 function Breadcrumb({ path }: { path: string | null }): React.JSX.Element {

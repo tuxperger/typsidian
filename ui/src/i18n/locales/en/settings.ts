@@ -3,6 +3,7 @@ import { enN, type Entries } from "../define.js";
 export const settings = {
   "settings.loading": "Loading settings…",
   "settings.sections": "Settings sections",
+  "settings.savedInstantly": "Settings are saved immediately",
   "settings.vaultNotOpen": "no vault open",
   "settings.vaultName": (p: { name: string }) => `vault: ${p.name}`,
   "settings.folderSettings": (p: { name: string }) => `folder settings · ${p.name}`,

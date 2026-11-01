@@ -29,6 +29,7 @@ export type SharedEditorProps = Pick<
   | "onCaretOffset"
   | "onSaveAsTemplate"
   | "fontSize"
+  | "buildErrors"
   | "shortcuts"
   | "paramsRequest"
   | "selectRequest"

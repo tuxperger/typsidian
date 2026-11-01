@@ -239,6 +239,18 @@ pub const COMMANDS: &[&str] = &[
     "sync_tick",
     "sync_device_values",
     "sync_set_author",
+    "ai_settings_get",
+    "ai_settings_set",
+    "ai_key_state",
+    "ai_key_set",
+    "ai_key_delete",
+    "ai_models",
+    "ai_probe",
+    "ai_approve_endpoint",
+    "ai_cancel",
+    "ai_journal",
+    "ai_journal_clear",
+    "ai_check_access",
 ];
 
 fn args<A: DeserializeOwned>(value: Value) -> Result<A, Value> {
@@ -2847,6 +2859,164 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 Ok(a) => answer(
                     commands::sync_set_author(&host.sync_home, &host.sync_state, a.author).await,
                 ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_settings_get" => {
+            let _ = arguments;
+            answer(commands::ai_settings_get(&host.vault).await)
+        }
+        "ai_settings_set" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                settings: ai::settings::AiSettings,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_settings_set(&host.vault, a.settings).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_key_state" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                provider: ai::settings::AiProvider,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => {
+                    answer(commands::ai_key_state(&host.sync_home, a.vault_id, a.provider).await)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "ai_key_set" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                provider: ai::settings::AiProvider,
+                key: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_key_set(&host.sync_home, a.vault_id, a.provider, a.key).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_key_delete" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                provider: ai::settings::AiProvider,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => {
+                    answer(commands::ai_key_delete(&host.sync_home, a.vault_id, a.provider).await)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "ai_models" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                request_id: String,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_models(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.request_id,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_probe" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                request_id: String,
+                now: i64,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_probe(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.request_id,
+                        a.now,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_approve_endpoint" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                insecure_ok: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_approve_endpoint(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.insecure_ok,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_cancel" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                request_id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => {
+                    commands::ai_cancel(a.vault_id, a.request_id);
+                    value(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "ai_journal" => {
+            let _ = arguments;
+            answer(commands::ai_journal(&host.vault).await)
+        }
+        "ai_journal_clear" => {
+            let _ = arguments;
+            answer(commands::ai_journal_clear(&host.vault).await)
+        }
+        "ai_check_access" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_check_access(&host.vault, a.path).await),
                 Err(error) => Err(error),
             }
         }

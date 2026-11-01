@@ -84,7 +84,7 @@ export default async (page) => {
     })()`);
   const typFiles = async () => (await listing("vault")).filter((e) => e.includes("из-obsidian/") && e.split(":")[0].endsWith(".typ"));
 
-  await page.click("text=Открыть vault");
+  await page.click("text=Открыть папку…");
   await page.waitForElement("text=корень");
   await page.sleep(1500);
 
