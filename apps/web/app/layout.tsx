@@ -4,7 +4,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
 import "@typsidian/ui/styles/app.css";
 
 /**
- * IBM Plex Sans/Mono — шрифты дизайн-системы «Спецформа» (handoff §
+ * IBM Plex Sans/Mono — шрифты дизайн-системы (handoff §
  * Typography). `next/font` кладёт файлы в статику приложения и раздаёт с его
  * же origin: обращений к Google Fonts во время работы не происходит, чего
  * требует FR-042 фичи 004 («ни одного сетевого обращения»).

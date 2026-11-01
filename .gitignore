@@ -41,11 +41,19 @@ apps/mobile/src-tauri/gen/schemas/
 # (разрешение на общую память в AndroidManifest.xml и MainActivity.kt). Своим
 # .gitignore проект Gradle сам отсекает всё пересобираемое.
 
+# Android-часть плагина быстрого захвата (022): вывод Gradle и копия tauri-api,
+# которую Tauri раскладывает при сборке плагина.
+apps/mobile/src-tauri/plugins/capture/android/build/
+apps/mobile/src-tauri/plugins/capture/android/.tauri/
+
 # --- Локальное состояние ---
 .claude/settings.local.json
 .env
 .env.local
 .env.*.local
+# Каталог данных сервера по умолчанию (037): база аккаунтов, их vault и секреты
+# синхронизации — данные пользователей, а не исходники.
+/typsidian-data/
 
 # --- Логи ---
 *.log
@@ -58,3 +66,14 @@ yarn-error.log*
 Thumbs.db
 *.swp
 *~
+
+# Выгрузка в Claude Design (/design-sync): сборка и рабочие файлы
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+
+# Выгрузки макетов из Claude Design (zip с артбордами): разобранные артборды
+# фичи лежат в её каталоге — `specs/NNN-*/design/`.
+new_design/

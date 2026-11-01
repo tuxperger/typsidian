@@ -18,7 +18,7 @@
 **Storage**: вид рабочей области — в раскладке колонок устройства (`usePaneLayout`, localStorage)
 **Testing**: сценарий `scripts/dev/scenarios/redesign.mjs` (снимки экранов 1–4), гейт `ui`
 **Target Platform**: web, рабочий стол, Android (общий `ui/`)
-**Constraints**: только токены «Спецформы»; тексты из `ui/src/i18n/locales/`; новых сочетаний нет
+**Constraints**: только токены дизайн-системы; тексты из `ui/src/i18n/locales/`; новых сочетаний нет
 
 ## Constitution Check
 

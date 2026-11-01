@@ -1,0 +1,78 @@
+{
+  "projectId": "3e5d00e7-0a16-4a2b-9630-00c541c1e3d1",
+  "shape": "package",
+  "pkg": "@typsidian/ui",
+  "globalName": "TypsidianUI",
+  "buildCmd": "nix develop -c pnpm -F @typsidian/ui build && cp .design-sync/ds-entry.js .design-sync/ds-entry.d.ts ui/dist/ && nix develop -c node .design-sync/flatten-css.mjs",
+  "entry": "ui/dist/ds-entry.js",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": "dist/styles/ds.css",
+  "provider": {
+    "component": "I18nProvider",
+    "props": {
+      "choice": "ru"
+    },
+    "inner": {
+      "component": "ContextMenuProvider"
+    }
+  },
+  "componentSrcMap": {
+    "Icon": "src/icons/Icons.tsx",
+    "IconSprite": null,
+    "ViewSwitch": "src/workspace/ViewSwitch.tsx",
+    "PaneDivider": "src/workspace/PaneDivider.tsx",
+    "CommandPalette": "src/workspace/CommandPalette.tsx",
+    "WelcomeScreen": "src/workspace/WelcomeScreen.tsx",
+    "VaultSwitcher": "src/workspace/VaultSwitcher.tsx",
+    "TabStrip": "src/workspace/tabs/TabStrip.tsx",
+    "CloseRefusedNotice": "src/workspace/tabs/CloseRefusedNotice.tsx",
+    "SyncIndicator": "src/sync/SyncIndicator.tsx",
+    "MoveNotice": "src/vault-tree/MoveNotice.tsx",
+    "ErrorBanner": "src/vault-tree/ErrorBanner.tsx",
+    "AccessStateBanner": "src/vault-tree/AccessStateBanner.tsx",
+    "BulkChangeIndicator": "src/vault-tree/BulkChangeIndicator.tsx",
+    "BacklinksConfirmDialog": "src/vault-tree/BacklinksConfirmDialog.tsx",
+    "LargeImageDialog": "src/attachments/LargeImageDialog.tsx",
+    "InsertBoardDialog": "src/boards/InsertBoardDialog.tsx",
+    "CompletionPopup": "src/completion/CompletionPopup.tsx"
+  },
+  "dtsPropsFor": {
+    "ViewSwitch": "value: \"text\" | \"side\" | \"document\"; onChange: (view: \"text\" | \"side\" | \"document\") => void; disabled?: boolean; disabledHint?: string;",
+    "VaultSwitcher": "rootName: string; device: { snapshot(): Promise<{ settings: { current_vault?: string }; knownVaults: { id: string; location: string }[] }> } | undefined; onOpenKnown: ((id: string) => void) | undefined; onOpenFolder: () => void; onManage: (() => void) | undefined;",
+    "WelcomeScreen": "isLoading: boolean; error: unknown | null; device: { snapshot(): Promise<{ settings: { current_vault?: string }; knownVaults: { id: string; location: string }[] }> } | undefined; onOpenFolder: () => void; onOpenKnown: ((id: string) => void) | undefined; onClone: (() => void) | undefined; onSettings: (() => void) | undefined; extra?: React.ReactNode;"
+  },
+  "overrides": {
+    "BacklinksConfirmDialog": {
+      "cardMode": "single",
+      "viewport": "720x460"
+    },
+    "LargeImageDialog": {
+      "cardMode": "single",
+      "viewport": "720x400"
+    },
+    "InsertBoardDialog": {
+      "cardMode": "single",
+      "viewport": "720x460"
+    },
+    "CommandPalette": {
+      "cardMode": "single",
+      "viewport": "800x520"
+    },
+    "WelcomeScreen": {
+      "cardMode": "single",
+      "viewport": "1000x600"
+    },
+    "CompletionPopup": {
+      "cardMode": "single",
+      "viewport": "760x460"
+    },
+    "TabStrip": {
+      "cardMode": "column"
+    },
+    "AccessStateBanner": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
