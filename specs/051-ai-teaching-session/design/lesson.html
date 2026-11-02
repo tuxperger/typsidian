@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 051: урок с ИИ-учителем, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:620px;max-width:100%}
+.board.narrow{width:340px}.board.mid{width:460px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.tabs{display:flex;background:var(--s900);border-bottom:1px solid var(--s800);font-size:12px}
+.tabs span{padding:7px 12px;color:var(--s500);border-right:1px solid var(--s800)}
+.tabs .act{color:var(--s100);background:var(--s950);box-shadow:inset 0 2px 0 var(--o500)}
+.lhead{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--s800)}
+.goal{flex:1;min-width:0}
+.goal b{display:block;font-size:13px;font-weight:600;color:var(--s100)}
+.goal small{font:11px var(--mono);color:var(--s500)}
+.meter{font:11px var(--mono);color:var(--s400);text-align:right;white-space:nowrap}
+.meter b{color:var(--s200);font-weight:500}
+.feed{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.t{max-width:92%}
+.who{font:600 10.5px var(--mono);color:var(--s500);letter-spacing:.04em;margin-bottom:3px}
+.t.teacher .body{color:var(--s200)}
+.t.user{align-self:flex-end;max-width:80%}
+.t.user .body{background:var(--s900);border:1px solid var(--s800);border-radius:8px;padding:8px 10px;color:var(--s200)}
+.t.user .who{text-align:right}
+.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--s700);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--s400)}
+.chip.o{border-color:var(--o500);color:var(--o400)}
+.think{margin-top:6px;border-left:2px solid var(--s700);padding-left:8px;color:var(--s400);font-size:12px;font-style:italic}
+.read{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--s400);border:1px dashed var(--s700);border-radius:6px;padding:6px 10px}
+.read a{color:var(--o400);text-decoration:none;font-family:var(--mono)}
+.read.deny{border-color:var(--err);color:var(--err)}
+.q{border:1px solid var(--s700);border-radius:8px;padding:12px;background:var(--s900)}
+.q .qt{font-weight:600;color:var(--s100);margin-bottom:8px}
+.opt{display:flex;gap:8px;align-items:flex-start;padding:7px 9px;border:1px solid var(--s700);border-radius:6px;margin-bottom:6px;color:var(--s300)}
+.opt .k{font:11px var(--mono);color:var(--s500)}
+.opt.sel{border-color:var(--o500);color:var(--s100)}
+.opt.sel .k{color:var(--o400)}
+.lbl{font-size:11.5px;color:var(--s400);margin:10px 0 5px}
+.seg{display:inline-flex;border:1px solid var(--s700);border-radius:6px;overflow:hidden}
+.seg span{padding:4px 10px;font-size:11px;color:var(--s400);border-right:1px solid var(--s700)}
+.seg span:last-child{border:0}.seg .sel{background:var(--s800);color:var(--o400)}
+.ta{min-height:54px;border:1px solid var(--s700);border-radius:6px;background:var(--s950);padding:7px 9px;font-size:12px;color:var(--s300)}
+.ta.ph{color:var(--s600)}
+.acts{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px;flex-wrap:wrap}
+.acts .hint{margin-right:auto}
+.hint{font-size:10.5px;color:var(--s500)}
+kbd{font:10px var(--mono);border:1px solid var(--s700);border-radius:3px;padding:0 4px;color:var(--s400)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:12px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.btn.dis{opacity:.45}
+.stream:after{content:"▍";color:var(--o400);margin-left:1px}
+.status{display:flex;align-items:center;gap:8px;padding:8px 16px;border-top:1px solid var(--s800);font-size:11.5px;color:var(--s400)}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.box.e{border-color:var(--err)}.box.w{border-color:var(--warn)}
+.bad{color:var(--err)}.wr{color:var(--warn)}.ok{color:var(--ok)}
+.sep{display:flex;align-items:center;gap:8px;color:var(--s500);font-size:11px}
+.sep:before,.sep:after{content:"";flex:1;border-top:1px dashed var(--s700)}
+.in{height:30px;padding:0 9px;border:1px solid var(--s700);border-radius:6px;background:var(--s900);color:var(--s200);font-size:12px;display:flex;align-items:center}
+.in.big{height:auto;min-height:60px;align-items:flex-start;padding:8px 9px}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--s800)}
+.row:last-child{border-bottom:0}
+.row .txt{flex:1;min-width:0}
+.row .nm{color:var(--s200);font-size:12.5px}
+.row .sub{font:11px var(--mono);color:var(--s500)}
+.st{font-size:11px;white-space:nowrap}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.empty{padding:28px 8px;text-align:center;color:var(--s500);font-size:12px}
+.ro{background:var(--s900);border-bottom:1px solid var(--s800);padding:7px 16px;font-size:11.5px;color:var(--s400)}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 051: сессия урока с ИИ-учителем</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Палитра и кегли — токены проекта, как в макете 050. Урок — файл vault с расширением <code>.lesson</code> в папке «Уроки»; открывается вкладкой, как доска. Новый урок — команда палитры «Новый урок» и кнопка в списке уроков. Внутри урока: <kbd>Mod</kbd>+<kbd>Enter</kbd> — отправить ответ, <kbd>Esc</kbd> — остановить ответ учителя. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board"><h2>A. УРОК: ВОПРОС С ВАРИАНТАМИ</h2><div class="panel">
+<div class="tabs"><span>Импульс.typ</span><span class="act">◆ Почему сохраняется импульс</span></div>
+<div class="lhead"><div class="goal"><b>Понять, почему сохраняется импульс</b><small>Уроки/Почему сохраняется импульс.lesson · claude-sonnet-5-5</small></div><div class="meter">≈ <b>$0,04</b><br>18 тыс. ед. объёма</div></div>
+<div class="feed">
+<div class="t user"><div class="who">ВЫ</div><div class="body">Хочу понять, почему импульс сохраняется, а не просто запомнить формулу.</div></div>
+<div class="read">📄 Учитель прочитал <a href="#">Физика/Импульс.typ</a> · отправлено модели, есть в журнале</div>
+<div class="t teacher"><div class="who">УЧИТЕЛЬ</div><div class="body">В вашей заметке импульс определён как <i>p = mv</i>. Начнём с того, что вы уже знаете о силах между двумя телами.</div></div>
+<div class="q"><div class="qt">Тележка A толкает тележку B с силой 3 Н. С какой силой B действует на A?</div>
+<div class="opt sel"><span class="k">1</span>3 Н, в противоположную сторону</div>
+<div class="opt"><span class="k">2</span>0 Н — толкает только A</div>
+<div class="opt"><span class="k">3</span>Зависит от масс тележек</div>
+<div class="lbl">Насколько вы уверены?</div><span class="seg"><span>Угадываю</span><span class="sel">Скорее да</span><span>Уверен</span></span>
+<div class="lbl">Думаю вслух <span class="hint">— необязательно</span></div>
+<div class="ta">Третий закон Ньютона, но не до конца понимаю, почему тела тогда вообще двигаются.</div>
+<div class="acts"><span class="hint"><kbd>Mod</kbd>+<kbd>Enter</kbd> — отправить</span><span class="btn acc">Ответить</span></div></div>
+</div>
+</div></section>
+
+<section class="board"><h2>B. УЧИТЕЛЬ ОТВЕЧАЕТ (ПОТОКОМ) И РАЗБИРАЕТ ПУТАНИЦУ</h2><div class="panel">
+<div class="lhead"><div class="goal"><b>Понять, почему сохраняется импульс</b><small>Уроки/Почему сохраняется импульс.lesson · claude-sonnet-5-5</small></div><div class="meter">≈ <b>$0,05</b><br>21 тыс. ед. объёма</div></div>
+<div class="feed">
+<div class="t user"><div class="who">ВЫ</div><div class="body">1 — 3 Н, в противоположную сторону</div><div class="meta"><span class="chip">уверенность: скорее да</span></div><div class="think">Третий закон Ньютона, но не до конца понимаю, почему тела тогда вообще двигаются.</div></div>
+<div class="t teacher"><div class="who">УЧИТЕЛЬ</div><div class="body stream">Верно — силы равны и противоположны. А вот вторая часть вашей мысли — важная путаница, разберём её прежде чем идти дальше: эти две силы приложены к <b>разным</b> телам, поэтому они не «гасят» друг друга</div></div>
+</div>
+<div class="status"><span>◌ Учитель отвечает…</span><span class="btn" style="margin-left:auto">Остановить <kbd>Esc</kbd></span></div>
+</div></section>
+
+<section class="board"><h2>C. СВОБОДНЫЙ ОТВЕТ</h2><div class="panel"><div class="feed">
+<div class="q"><div class="qt">Своими словами: что происходит с суммой импульсов двух тележек за время толчка?</div>
+<div class="ta ph">Ваш ответ…</div>
+<div class="lbl">Насколько вы уверены?</div><span class="seg"><span>Угадываю</span><span>Скорее да</span><span>Уверен</span></span>
+<div class="lbl">Думаю вслух <span class="hint">— необязательно</span></div>
+<div class="ta ph">Как вы рассуждали, в чём сомневаетесь…</div>
+<div class="acts"><span class="hint">Уверенность можно не отмечать</span><span class="btn acc dis">Ответить</span></div></div>
+</div></div></section>
+
+<section class="board mid"><h2>D. НОВЫЙ УРОК</h2><div class="panel pad">
+<p class="title">Новый урок</p>
+<div class="lbl" style="margin-top:0">Что вы хотите понять?</div>
+<div class="in big">Почему сохраняется импульс</div>
+<div class="lbl">Опереться на заметки <span class="hint">— необязательно</span></div>
+<div><span class="chip o">Физика/Импульс.typ ✕</span> <span class="btn" style="height:24px">Добавить…</span></div>
+<p class="hint" style="margin-top:10px">Урок сохранится в «Уроки/». Выбранные заметки уйдут модели anthropic · claude-sonnet-5-5 и попадут в журнал.</p>
+<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Начать урок</span></div>
+</div></section>
+
+<section class="board mid"><h2>E. НЕЛЬЗЯ НАЧАТЬ</h2><div class="panel pad">
+<p class="title">Новый урок</p>
+<div class="box">Обучение с ИИ выключено для этого vault. Включите его и подключите модель в настройках.<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Открыть настройки</span></div></div>
+<div class="box" style="margin-top:10px">Модель не подключена: на этом устройстве нет ключа Anthropic.<div class="acts"><span class="btn acc">Открыть настройки</span></div></div>
+</div></section>
+
+<section class="board"><h2>F. ОБРЫВ, ОТКАЗ, ЗАПРЕЩЁННАЯ ПАПКА, СЖАТИЕ</h2><div class="panel"><div class="feed">
+<div class="sep">шаги 1–34 сжаты для модели · полная переписка выше</div>
+<div class="read deny">⛔ Учитель запросил <span style="font-family:var(--mono)">Личное/Дневник.typ</span> — папка закрыта для агента, ничего не отправлено</div>
+<div class="t teacher"><div class="who">УЧИТЕЛЬ · ОТВЕТ ОБОРВАН</div><div class="body">Представьте, что тележки стоят на льду. После толчка</div></div>
+<div class="box e"><span class="bad">Нет связи с провайдером.</span> Полученная часть ответа и ваше сообщение сохранены в уроке.<div class="acts"><span class="btn acc">Запросить ответ снова</span></div></div>
+<div class="box e"><span class="bad">Исчерпан лимит запросов.</span> Повторите позже.<div class="acts"><span class="btn">Повторить</span></div></div>
+</div></div></section>
+
+<section class="board mid"><h2>G. СПИСОК УРОКОВ</h2><div class="panel pad">
+<div style="display:flex;align-items:center;margin-bottom:6px"><p class="title" style="margin:0;flex:1">Уроки</p><span class="btn acc">Новый урок</span></div>
+<div class="row"><div class="txt"><div class="nm">Почему сохраняется импульс</div><div class="sub">сегодня, 22:41 · 12 шагов</div></div><span class="st wr">ждёт ответа</span></div>
+<div class="row"><div class="txt"><div class="nm">Собственные векторы без формул</div><div class="sub">вчера · 31 шаг</div></div><span class="st bad">ответ оборван</span></div>
+<div class="row"><div class="txt"><div class="nm">Как работает git rebase</div><div class="sub">28 окт · 9 шагов</div></div><span class="st ok">завершён</span></div>
+<div class="row"><div class="txt"><div class="nm">Ряды Фурье на пальцах</div><div class="sub">20 окт · 4 шага</div></div><span class="st">остановлен</span></div>
+</div></section>
+
+<section class="board mid"><h2>H. СПИСОК ПУСТ</h2><div class="panel pad"><p class="title">Уроки</p><div class="empty">Уроков ещё нет. Назовите, что хотите понять, — учитель проведёт вас шаг за шагом.<div class="acts" style="justify-content:center"><span class="btn acc">Новый урок</span></div></div></div></section>
+
+<section class="board"><h2>I. УРОК ИЗМЕНИЛСЯ В ДРУГОМ ОКНЕ; ЯЗЫК</h2><div class="panel">
+<div class="ro">Урок изменился в другом окне или на другом устройстве — переписка обновлена, ваш ответ не отправлен.</div>
+<div class="lhead"><div class="goal"><b>Ряды Фурье на пальцах</b><small>Уроки/Ряды Фурье на пальцах.lesson · qwen3:32b</small></div><div class="meter">стоимость <b>неизвестно</b><br>9 тыс. ед. объёма</div></div>
+<div class="feed"><div class="acts" style="justify-content:flex-start;margin:0"><span class="hint">Язык учителя</span><span class="seg"><span class="sel">Русский</span><span>English</span></span><span class="btn" style="margin-left:auto">Завершить урок</span></div></div>
+</div></section>
+
+<section class="board narrow"><h2>J. ТЕЛЕФОН</h2><div class="panel">
+<div class="lhead"><div class="goal"><b>Почему сохраняется импульс</b><small>≈ $0,04</small></div></div>
+<div class="feed">
+<div class="t teacher"><div class="who">УЧИТЕЛЬ</div><div class="body">Силы равны, но приложены к разным телам.</div></div>
+<div class="q"><div class="qt">Что происходит с суммой импульсов?</div>
+<div class="opt sel"><span class="k">1</span>Не меняется</div><div class="opt"><span class="k">2</span>Растёт</div>
+<div class="lbl">Уверенность</div><span class="seg"><span>Угадываю</span><span class="sel">Скорее</span><span>Уверен</span></span>
+<div class="ta ph">Думаю вслух…</div>
+<div class="acts"><span class="btn acc">Ответить</span></div></div>
+</div></div></section>
+
+</div>
+</body>
+</html>
