@@ -73,6 +73,10 @@ pub const AI_SETTINGS_FILE_NAME: &str = "ai.json";
 /// устройству, поэтому входит в производные пути.
 pub const AI_JOURNAL_FILE_NAME: &str = "ai-journal.jsonl";
 
+/// Промежуточные файлы идущих ответов учителя (фича 051, research.md §5):
+/// принадлежат устройству, поэтому входят в производные пути.
+pub const LESSON_PARTIAL_DIR_NAME: &str = "lesson-partial";
+
 /// Где кэш индекса лежал до фичи 006 — в корне vault, отдельным файлом.
 ///
 /// Существует только ради уборки: при первом открытии vault новой версией файл
@@ -104,6 +108,11 @@ pub fn ai_settings_path() -> PathBuf {
 /// Журнал отправленного относительно корня vault (фича 050).
 pub fn ai_journal_path() -> PathBuf {
     service_dir().join(AI_JOURNAL_FILE_NAME)
+}
+
+/// Папка промежуточных файлов ответов учителя относительно корня vault (фича 051).
+pub fn lesson_partial_dir() -> PathBuf {
+    service_dir().join(LESSON_PARTIAL_DIR_NAME)
 }
 
 /// Папка снимков заметок относительно корня vault (фича 029).
@@ -154,6 +163,7 @@ pub fn derived_paths() -> Vec<String> {
         format!("{SERVICE_DIR_NAME}/{TASKS_FILE_NAME}"),
         format!("{SERVICE_DIR_NAME}/{IMPORTS_DIR_NAME}"),
         format!("{SERVICE_DIR_NAME}/{AI_JOURNAL_FILE_NAME}"),
+        format!("{SERVICE_DIR_NAME}/{LESSON_PARTIAL_DIR_NAME}"),
         // Скачиваемые шаблоны (фича 041): всё скачанное, пространство имён
         // реестра Typst — его можно скачать, даже если положено руками, — и
         // перечень скачанного прежних версий.
@@ -240,6 +250,7 @@ mod tests {
                 ".typsidian/tasks.json",
                 ".typsidian/imports",
                 ".typsidian/ai-journal.jsonl",
+                ".typsidian/lesson-partial",
                 ".typsidian/downloads",
                 ".typsidian/packages/preview",
                 ".typsidian/packages/installed.json",

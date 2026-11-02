@@ -1748,7 +1748,14 @@ impl VaultBackend for NativeBackend {
                 }
             }
         }
-        std::fs::write(&full, content).map_err(|_| WriteError::Io)?;
+        // Урок дописывается целиком, а его строки нельзя потерять: запись атомарна
+        // (ревью безопасности 051, L5). Заметки пишутся как раньше.
+        if crate::vault::classify(path) == crate::vault::FileKind::Lesson {
+            write_atomically(&self.root_path, path, content.as_bytes())
+                .map_err(|_| WriteError::Io)?;
+        } else {
+            std::fs::write(&full, content).map_err(|_| WriteError::Io)?;
+        }
         // Сохранение снимает несохранённое состояние вместе со всем, что от
         // него зависело: версия пользователя теперь на диске, и конфликт по
         // ней больше не о чем (FR-021 — конфликт существует, только пока
@@ -1766,7 +1773,10 @@ impl VaultBackend for NativeBackend {
                 // FR-031: исходящие ссылки заметки обновляются в том же шаге,
                 // что и её содержимое, — иначе таблица `links` отстаёт от диска
                 // до ближайшего внешнего события.
-                record_links(cache, path, content).await;
+                // Урок — JSON Lines, а не Typst: ссылок в нём нет.
+                if crate::vault::classify(path) != crate::vault::FileKind::Lesson {
+                    record_links(cache, path, content).await;
+                }
             }
         }
         Ok(())

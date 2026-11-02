@@ -10,7 +10,6 @@ use super::{
     ActiveNote, Direction, Facts, Group, GroupSlot, GroupView, Presentation, TabView,
     WorkspaceState, WorkspaceView, COMPACT_MAX_WIDTH_PX, SPLIT_MIN_WIDTH_PX,
 };
-use crate::vault::FileKind;
 
 /// Что показывать. См. описание модуля.
 pub fn view(state: &WorkspaceState, facts: &Facts) -> WorkspaceView {
@@ -55,7 +54,7 @@ pub fn view(state: &WorkspaceState, facts: &Facts) -> WorkspaceView {
         && state.groups.len() == 1
         && active
             .as_ref()
-            .is_some_and(|note| note.kind != FileKind::Board || state.groups[0].tabs.len() > 1);
+            .is_some_and(|note| !note.kind.is_single_tab() || state.groups[0].tabs.len() > 1);
     WorkspaceView {
         presentation,
         groups,
@@ -70,9 +69,7 @@ pub fn view(state: &WorkspaceState, facts: &Facts) -> WorkspaceView {
 }
 
 fn exists(facts: &Facts, path: &str) -> bool {
-    facts
-        .note(path)
-        .is_some_and(|fact| matches!(fact.kind, FileKind::Note | FileKind::Board))
+    facts.note(path).is_some_and(|fact| fact.kind.is_openable())
 }
 
 fn tab_view(group: &Group, slot: GroupSlot, index: usize, facts: &Facts) -> TabView {

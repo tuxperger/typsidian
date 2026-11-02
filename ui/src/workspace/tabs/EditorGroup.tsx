@@ -4,6 +4,7 @@ import { useMemo, useRef } from "react";
 import type { GroupView, TabView, WorkspaceView } from "../../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../../vault-client.js";
 import { BoardTab } from "../../boards/BoardTab.js";
+import { LessonTab } from "../../lessons/LessonTab.js";
 import type { BoardControllers } from "../../boards/boardControllers.js";
 import { NoteEditor, type NoteEditorProps } from "../../editor/NoteEditor.js";
 import type { NoteDocumentRegistry } from "../../editor/noteDocuments.js";
@@ -141,6 +142,8 @@ export function EditorGroup(props: EditorGroupProps): React.JSX.Element {
             name={basename(activeTab.path)}
             controllers={props.boardControllers}
           />
+        ) : activeTab.kind === "Lesson" ? (
+          <LessonTab key={activeTab.id} client={props.client} path={activeTab.path} />
         ) : (
           <NoteTab
             key={activeTab.id}

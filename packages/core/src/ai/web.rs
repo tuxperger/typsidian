@@ -7,9 +7,8 @@ use super::access::check_access;
 use super::cancel::{cancel, cancellable};
 use super::client::{
     approve_endpoint, begin_probe, finish_probe, prepare_models, provider_key, require_approved,
-    send_models, send_probe, PreparedProbe, ProbeResult,
+    send_models, send_probe, Connection, PreparedProbe, ProbeResult,
 };
-use super::endpoint::base_url;
 use super::journal::{journal_clear, journal_entries, JournalEntry};
 use super::protocol::ProbeReply;
 use super::settings::{load_settings, save_settings, AiProvider, AiSettings};
@@ -71,11 +70,12 @@ pub async fn ai_begin_probe_js(
     now: f64,
 ) -> Result<PreparedProbe, AiFailure> {
     let settings = load_settings(backend).await;
-    if settings.enabled {
-        base_url(&settings, true)?;
-        require_approved(&IdbSecretStore, &vault_id, &settings).await?;
+    if !settings.enabled {
+        return Err(AiFailure::Disabled);
     }
-    begin_probe(backend, &id, now as i64, true).await
+    let verified = Connection::verify(&settings, true)?;
+    require_approved(&IdbSecretStore, &vault_id, &settings).await?;
+    begin_probe(backend, &id, now as i64, true, &verified).await
 }
 
 /// Сеть. Отказ возвращается значением, чтобы итог попал в журнал следующим шагом.
@@ -88,7 +88,12 @@ pub async fn ai_send_probe_js(
     cancellable(
         &vault_id,
         &prepared.id,
-        send_probe(&DefaultTransport, &prepared, key.as_deref()),
+        send_probe(
+            &DefaultTransport,
+            &prepared,
+            key.as_deref(),
+            &Connection::of_request(prepared.provider, &prepared.request.url),
+        ),
     )
     .await
 }

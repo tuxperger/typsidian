@@ -386,6 +386,27 @@ export function AiSection({ client, vaultId }: AiSectionProps): React.JSX.Elemen
         </datalist>
       </label>
 
+      <label className="ts-srow">
+        <span className="ts-srow__text">
+          <span className="ts-srow__label">{t("ai.lessonsFolder")}</span>
+          <span className="ts-srow__hint">{t("ai.lessonsFolderHint")}</span>
+        </span>
+        <input
+          key={settings.lessons_folder ?? ""}
+          className="ts-field__input ts-ai__input"
+          defaultValue={settings.lessons_folder ?? ""}
+          onBlur={(event) => {
+            // Пустая папка — не значение: урок негде создать, остаётся прежняя.
+            const folder = event.target.value.trim().replace(/^\/+|\/+$/g, "");
+            if (folder === "") {
+              event.target.value = settings.lessons_folder ?? "";
+              return;
+            }
+            if (folder !== (settings.lessons_folder ?? "")) void save({ lessons_folder: folder });
+          }}
+        />
+      </label>
+
       {saveFailure !== undefined && <p role="alert">{failureText(saveFailure)}</p>}
 
       {check.state === "running" && (

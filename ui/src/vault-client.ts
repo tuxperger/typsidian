@@ -129,6 +129,12 @@ import type {
   VaultOverrides,
   AiProvider,
   AiSettings,
+  Language,
+  LessonProgress,
+  LessonState,
+  LessonSummary,
+  LessonView,
+  UserAnswer,
   JournalEntry,
   ProbeResult,
   WorkspaceAction,
@@ -588,6 +594,8 @@ export interface VaultClient {
   /** Снимки, история, возврат и удалённые заметки: правила — в ядре. */
   readonly snapshots: SnapshotsClient;
   readonly ai: AiClient;
+  /** Урок с ИИ-учителем (фича 051). */
+  readonly lessons: LessonClient;
 
   // ── Показ слайдов (фича 019) ────────────────────────────────────────
 
@@ -823,6 +831,36 @@ export interface AiClient {
   cancel(vaultId: string, requestId: string): void;
   journal(): Promise<JournalEntry[]>;
   clearJournal(): Promise<number>;
+}
+
+/**
+ * Урок с ИИ-учителем (фича 051). Формат файла, ход, сжатие и продолжение решает
+ * ядро (`ai::lesson`); клиент ведёт цикл вызовов там, где ядро живёт в этом
+ * процессе (web), или отдаёт его целиком (рабочий стол, сервер). Отказ — исключение
+ * `AiFailure`; после него урок надо перечитать (`open`): оборванная реплика уже в файле.
+ */
+export interface LessonClient {
+  list(): Promise<LessonSummary[]>;
+  /** Создаёт файл урока и отдаёт его путь. */
+  create(goal: string, notes: string[], language: Language): Promise<string>;
+  open(path: string): Promise<LessonView>;
+  /**
+   * Ответ пользователя и весь ход учителя с автопродолжениями. `answer` не задан —
+   * «Запросить ответ снова». `expected` — число событий, которое видит интерфейс.
+   * `requestId` — по нему ход отменяют (`ai.cancel`) и опрашивают (`progress`).
+   * Отдаёт урок после последнего хода.
+   */
+  answer(
+    vaultId: string,
+    path: string,
+    requestId: string,
+    answer: UserAnswer | undefined,
+    expected: number,
+  ): Promise<LessonView>;
+  progress(vaultId: string, requestId: string): Promise<LessonProgress | undefined>;
+  checkpoint(vaultId: string, path: string, requestId: string): Promise<void>;
+  setState(path: string, state: LessonState): Promise<LessonView>;
+  setLanguage(path: string, language: Language): Promise<LessonView>;
 }
 
 /**

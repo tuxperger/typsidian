@@ -390,6 +390,7 @@ function TabStripView(props: TabStripProps): React.JSX.Element {
                 <span className="ts-tab__tag ts-tab__tag--warn">{t("workspace.tabs.conflict")}</span>
               )}
               {tab.kind === "Board" && <span className="ts-tab__tag">{t("workspace.tabs.board")}</span>}
+              {tab.kind === "Lesson" && <span className="ts-tab__tag">{t("lessons.tag")}</span>}
               <button
                 type="button"
                 className="ts-tab__close"

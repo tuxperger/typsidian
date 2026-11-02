@@ -76,8 +76,19 @@ import {
   aiSendProbe,
   aiSetSettings,
   aiSettings,
+  lessonBegin,
+  lessonCheckpoint,
+  lessonCreate,
+  lessonFinish,
+  lessonList,
+  lessonOpen,
+  lessonProgress,
+  lessonSend,
+  lessonSetLanguage,
+  lessonSetState,
   type AiFailure,
   type ProbeReply,
+  type TurnReply,
   linksMentionsAvailability,
   linksMentionsCancel,
   linksMentionsIn,
@@ -541,6 +552,41 @@ export function webVaultClient(
       cancel: (vaultId, requestId) => aiCancel(vaultId, requestId),
       journal: () => call(() => aiJournal(backend)),
       clearJournal: () => call(() => aiJournalClear(backend)),
+    },
+
+    // ── Урок с ИИ-учителем (фича 051) ─────────────────────────────────
+    // Цикл «начать — отправить — завершить» крутим здесь: сеть идёт вне очереди, и
+    // `backend` на время запроса свободен (research.md §13). Продолжать или ждать
+    // пользователя, решает ядро (`Next`).
+    lessons: {
+      list: () => call(() => lessonList(backend)),
+      create: (goal, notes, language) => call(() => lessonCreate(backend, goal, notes, language, Date.now())),
+      open: (path) => call(() => lessonOpen(backend, path)),
+      answer: async (vaultId, path, requestId, answer, expected) => {
+        let next = answer;
+        let seen = expected;
+        for (;;) {
+          const prepared = await call(() =>
+            lessonBegin(backend, vaultId, path, requestId, next, seen, Date.now()),
+          );
+          let reply: TurnReply | undefined;
+          let failure: AiFailure | undefined;
+          try {
+            reply = await lessonSend(vaultId, prepared);
+          } catch (error) {
+            failure = error as AiFailure;
+          }
+          // Отказ тоже завершается: ядро запишет оборванную реплику и бросит его.
+          const done = await call(() => lessonFinish(backend, vaultId, prepared, Date.now(), reply, failure));
+          if (done.next === "WaitUser") return done.view;
+          next = undefined;
+          seen = done.view.events_len;
+        }
+      },
+      progress: async (vaultId, requestId) => lessonProgress(vaultId, requestId),
+      checkpoint: (vaultId, path, requestId) => call(() => lessonCheckpoint(backend, vaultId, path, requestId)),
+      setState: (path, state) => call(() => lessonSetState(backend, path, state, Date.now())),
+      setLanguage: (path, language) => call(() => lessonSetLanguage(backend, path, language, Date.now())),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

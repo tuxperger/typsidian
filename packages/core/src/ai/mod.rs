@@ -12,6 +12,7 @@ pub mod cancel;
 pub mod client;
 pub mod endpoint;
 pub mod journal;
+pub mod lesson;
 pub mod price;
 pub mod protocol;
 pub mod settings;
@@ -74,4 +75,12 @@ pub enum AiFailure {
     SettingsFailed,
     #[error("хранилище секретов недоступно")]
     SecretsUnavailable,
+    /// Урок изменился с тех пор, как его видел интерфейс (фича 051, research §10).
+    #[error("урок изменился")]
+    LessonChanged,
+    /// У файла урока нет читаемой шапки или формат новее известного.
+    #[error("урок не читается")]
+    LessonUnreadable,
+    #[error("цель урока пуста")]
+    GoalEmpty,
 }

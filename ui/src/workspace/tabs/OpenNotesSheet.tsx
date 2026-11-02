@@ -97,6 +97,7 @@ export function OpenNotesSheet({
                 {tab.kind === "Board" && (
                   <span className="ts-tab__tag">{t("workspace.tabs.board")}</span>
                 )}
+                {tab.kind === "Lesson" && <span className="ts-tab__tag">{t("lessons.tag")}</span>}
               </button>
               <button
                 type="button"

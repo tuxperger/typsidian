@@ -176,3 +176,8 @@ async fn facts_of_reads_the_index() {
 async fn restore_with_skips_missing_notes() {
     cases::restore_with_skips_missing_notes().await;
 }
+
+#[test]
+fn a_lesson_is_one_tab_per_path_and_closes_freely() {
+    cases::a_lesson_is_one_tab_per_path_and_closes_freely();
+}

@@ -28,11 +28,16 @@ struct Client {
 
 impl Server {
     async fn new() -> Server {
+        Server::with_config(|_| {}).await
+    }
+
+    async fn with_config(edit: impl FnOnce(&mut Config)) -> Server {
         let data = tempfile::tempdir().unwrap();
-        let config = Config {
+        let mut config = Config {
             data: data.path().to_path_buf(),
             ..Config::default()
         };
+        edit(&mut config);
         let store = Store::memory().await.unwrap();
         let hash = hash_password(PASSWORD).unwrap();
         for login in ["anna", "bob"] {
@@ -661,4 +666,158 @@ async fn ai_keys_are_per_user_and_custom_endpoint_is_closed() {
         .invoke(&anna, "Общее имя", "ai_probe", json!(["", "1", 0, true]))
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+/// Уроки с ИИ-учителем (051 FR-014): урок — файл vault своего аккаунта, настройки и
+/// запреты у каждого свои, а своего адреса модели без разрешения администратора нет
+/// и для хода урока; до отказа ответ в файл не пишется.
+#[tokio::test]
+async fn ai_lessons_are_per_user_and_answer_obeys_the_server_limits() {
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let bob = server.enter("bob").await;
+    for client in [&anna, &bob] {
+        let (status, _, _) = server
+            .call(
+                Method::POST,
+                "/api/vaults",
+                Some(client),
+                Some(json!({ "name": "Общее имя" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let settings = json!({ "settings": {
+        "enabled": true,
+        "provider": "Custom",
+        "custom_endpoint": "http://127.0.0.1:9/v1",
+        "model": "m",
+    }});
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_settings_set", settings)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // У Боба обучение выключено: урока нет, а у Анны он создаётся.
+    let create = json!({ "goal": "Цель Анны", "notes": [], "language": "ru", "now": 1 });
+    let (_, refused) = server
+        .invoke(&bob, "Общее имя", "ai_lesson_create", create.clone())
+        .await;
+    assert_eq!(refused["kind"], "Disabled", "{refused}");
+    let (status, path) = server
+        .invoke(&anna, "Общее имя", "ai_lesson_create", create)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{path}");
+    let path = path.as_str().expect("путь урока").to_owned();
+    assert!(path.ends_with(".lesson"), "{path}");
+
+    let (_, of_anna) = server
+        .invoke(&anna, "Общее имя", "ai_lesson_list", json!({}))
+        .await;
+    assert_eq!(of_anna.as_array().map(Vec::len), Some(1), "{of_anna}");
+    assert_eq!(of_anna[0]["goal"], "Цель Анны");
+    let (_, of_bob) = server
+        .invoke(&bob, "Общее имя", "ai_lesson_list", json!({}))
+        .await;
+    assert_eq!(of_bob, json!([]));
+    let (_, foreign) = server
+        .invoke(&bob, "Общее имя", "ai_lesson_open", json!({ "path": path }))
+        .await;
+    assert_eq!(foreign["kind"], "LessonUnreadable", "{foreign}");
+
+    // Ход урока: клиентские `vaultId` и `allowCustom` сервер подменяет, поэтому свой адрес
+    // закрыт, и ничего не записано.
+    let answer = json!({
+        "vaultId": "поддельный", "path": path, "requestId": "1",
+        "answer": { "text": "привет" }, "expected": 0, "now": 2, "allowCustom": true,
+    });
+    let (_, refused) = server
+        .invoke(&anna, "Общее имя", "ai_lesson_answer", answer.clone())
+        .await;
+    assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
+    let (_, view) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_open",
+            json!({ "path": path }),
+        )
+        .await;
+    assert_eq!(view["events_len"], 0, "{view}");
+
+    // Массив по порядку полей обходил бы подстановку сервера.
+    let (status, body) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_answer",
+            json!(["", path, "1", null, 0, 2, true]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (_, idle) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_progress",
+            json!({ "requestId": "1" }),
+        )
+        .await;
+    assert_eq!(idle, Value::Null);
+}
+
+/// 051, ревью безопасности M5: у одного аккаунта не больше двух одновременных запросов к
+/// моделям; чужие запросы его предел не занимают, а брошенный запрос место освобождает.
+#[tokio::test]
+async fn ai_requests_are_limited_per_account() {
+    use typsidian_server::{AccountAiSlot, MAX_AI_REQUESTS_PER_ACCOUNT};
+
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let bob = server.enter("bob").await;
+    for client in [&anna, &bob] {
+        let (status, _, _) = server
+            .call(
+                Method::POST,
+                "/api/vaults",
+                Some(client),
+                Some(json!({ "name": "Общее имя" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let anna_id = server
+        .state
+        .store
+        .account_by_login("anna")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let busy: Vec<_> = (0..MAX_AI_REQUESTS_PER_ACCOUNT)
+        .map(|_| AccountAiSlot::acquire(&server.state, &anna_id).expect("место"))
+        .collect();
+    assert!(AccountAiSlot::acquire(&server.state, &anna_id).is_none());
+
+    let probe = json!({ "requestId": "1", "now": 0 });
+    for command in ["ai_probe", "ai_models", "ai_lesson_answer"] {
+        let args = if command == "ai_lesson_answer" {
+            json!({ "path": "Уроки/а.lesson", "requestId": "1", "expected": 0, "now": 0 })
+        } else {
+            probe.clone()
+        };
+        let (status, refused) = server
+            .invoke(&anna, "Общее имя", command, args.clone())
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{command}");
+        assert_eq!(refused["kind"], "RateLimited", "{command}: {refused}");
+        // Боб предела Анны не касается: его запрос доходит до проверок настроек.
+        let (_, other) = server.invoke(&bob, "Общее имя", command, args).await;
+        assert_eq!(other["kind"], "Disabled", "{command}: {other}");
+    }
+
+    // Брошенный запрос (оборвано соединение) место освобождает.
+    drop(busy);
+    let (_, freed) = server.invoke(&anna, "Общее имя", "ai_probe", probe).await;
+    assert_eq!(freed["kind"], "Disabled", "{freed}");
 }

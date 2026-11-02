@@ -2422,12 +2422,16 @@ pub async fn ai_probe(
     // Ключа нет или адрес не одобрен здесь — запроса не будет: журнал такой
     // попытки не получает.
     let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
-    if settings.enabled {
-        ai::endpoint::base_url(&settings, allow_custom).map_err(Failure::Core)?;
-        ai::client::require_approved(home.secrets(), &vault_id, &settings)
-            .await
-            .map_err(Failure::Core)?;
+    if !settings.enabled {
+        return Err(Failure::Core(ai::AiFailure::Disabled));
     }
+    // Проверенный снимок подключения идёт в оба шага: настройки между ними могут
+    // смениться синхронизацией, и ключ не должен уйти на новый адрес (051, H1).
+    let verified =
+        ai::client::Connection::verify(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
     let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
         .await
         .map_err(Failure::Core)?;
@@ -2435,14 +2439,20 @@ pub async fn ai_probe(
         backend,
         &request_id,
         now,
-        allow_custom
+        allow_custom,
+        &verified
     )
     .await
     .map_err(Failure::Core))?;
     let outcome = ai::cancel::cancellable(
         &vault_id,
         &request_id,
-        ai::client::send_probe(&ai::transport::DefaultTransport, &prepared, key.as_deref()),
+        ai::client::send_probe(
+            &ai::transport::DefaultTransport,
+            &prepared,
+            key.as_deref(),
+            &verified,
+        ),
     )
     .await;
     with_vault!(state, |backend| ai::client::finish_probe(
@@ -2487,4 +2497,176 @@ pub async fn ai_check_access(state: &Vault, path: String) -> Answer<bool, Failur
         let settings = ai::settings::load_settings(backend).await;
         Ok(ai::access::check_access_in(backend, &path, &settings).await)
     })
+}
+
+// ── Урок с ИИ-учителем (фича 051) ───────────────────────────────────────────
+//
+// Те же правила, что у `ai_probe`: блокировка vault снимается на время сети, `vault_id`
+// и `allow_custom` на сервере подставляет сам сервер. Ответ пользователя ложится в файл
+// урока до журнала и сети.
+
+pub async fn ai_lesson_list(state: &Vault) -> Answer<Vec<ai::lesson::LessonSummary>, Failure<()>> {
+    with_vault!(state, |backend| Ok(ai::lesson::list_lessons(backend).await))
+}
+
+pub async fn ai_lesson_create(
+    state: &Vault,
+    goal: String,
+    notes: Vec<String>,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<String, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::create_lesson(
+        backend, &goal, &notes, language, now
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+pub async fn ai_lesson_open(
+    state: &Vault,
+    path: String,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::open_lesson(backend, &path)
+        .await
+        .map_err(Failure::Core))
+}
+
+/// Весь цикл ответа: ход учителя и, пока ядро говорит `Continue` (чтение заметки,
+/// сжатие), следующие ходы без участия пользователя. `answer: None` — повтор оборванного
+/// ответа. `expected` — число событий, которое видит интерфейс (`LessonChanged`).
+/// Отказ возвращается после записи оборванной реплики; урок интерфейс перечитывает.
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_lesson_answer(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    path: String,
+    request_id: String,
+    answer: Option<ai::lesson::UserAnswer>,
+    expected: u32,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    // Один цикл на `request_id`: второй с тем же id не должен писать в тот же урок и
+    // трогать буфер первого. Отмена запоминается на весь цикл, в том числе между ходами
+    // (051, L1, L2); цикл закрывается и при обрыве соединения (M6).
+    let Some(cycle) = ai::cancel::Cycle::open(&vault_id, &request_id) else {
+        return Err(Failure::Core(ai::AiFailure::Cancelled));
+    };
+    // Ключа нет или адрес не одобрен здесь — ничего не записывается и не отправляется.
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    if !settings.enabled {
+        return Err(Failure::Core(ai::AiFailure::Disabled));
+    }
+    // Снимок подключения идёт в каждый ход: `ai.json` приходит с синхронизацией и может
+    // смениться посреди цикла, а ключ прежнего подключения не должен уйти на новый адрес
+    // (051, H1).
+    let verified =
+        ai::client::Connection::verify(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+
+    let mut answer = answer;
+    let mut expected = expected;
+    // Предел страхует от зацикливания: ядро и так разрешает не больше четырёх
+    // продолжений и одного сжатия.
+    for _ in 0..12 {
+        if cycle.is_cancelled() {
+            return Err(Failure::Core(ai::AiFailure::Cancelled));
+        }
+        // Сброс будущего на любом шаге снимает буфер хода: иначе он остался бы навсегда, а
+        // урок считался бы идущим (M6). Слот отмены снимает `cancellable`.
+        let _buffer = ai::lesson::partial::BufferGuard::new(&vault_id, &request_id);
+        let prepared = with_vault!(state, |backend| ai::lesson::turn::begin_turn(
+            backend,
+            &path,
+            &request_id,
+            answer.take(),
+            expected,
+            now,
+            allow_custom,
+            &verified
+        )
+        .await
+        .map_err(Failure::Core))?;
+        let outcome = ai::lesson::turn::send_turn(
+            &ai::transport::DefaultTransport,
+            &vault_id,
+            &prepared,
+            key.as_deref(),
+            &verified,
+        )
+        .await;
+        let done = with_vault!(state, |backend| ai::lesson::turn::finish_turn(
+            backend, &vault_id, &prepared, now, outcome
+        )
+        .await
+        .map_err(Failure::Core))?;
+        if done.next == ai::lesson::Next::WaitUser {
+            return Ok(done.view);
+        }
+        expected = done.view.events_len;
+    }
+    with_vault!(state, |backend| ai::lesson::open_lesson(backend, &path)
+        .await
+        .map_err(Failure::Core))
+}
+
+/// Что накопил идущий ход: интерфейс опрашивает раз в 150 мс.
+pub fn ai_lesson_progress(
+    vault_id: String,
+    request_id: String,
+) -> Option<ai::lesson::LessonProgress> {
+    ai::lesson::partial::progress(&vault_id, &request_id)
+}
+
+/// Раз в секунду, пока идёт ход: накопленное — в промежуточный файл устройства.
+pub async fn ai_lesson_checkpoint(
+    state: &Vault,
+    vault_id: String,
+    path: String,
+    request_id: String,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::partial::checkpoint(
+        backend,
+        &vault_id,
+        &path,
+        &request_id
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+pub async fn ai_lesson_set_state(
+    state: &Vault,
+    path: String,
+    lesson_state: ai::lesson::LessonState,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::set_state(
+        backend,
+        &path,
+        lesson_state,
+        now
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+pub async fn ai_lesson_set_language(
+    state: &Vault,
+    path: String,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::set_language(
+        backend, &path, language, now
+    )
+    .await
+    .map_err(Failure::Core))
 }

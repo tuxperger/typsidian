@@ -84,6 +84,9 @@ import type {
   SnapshotReason,
   SnapshotUsage,
   AiSettings,
+  LessonProgress,
+  LessonSummary,
+  LessonView,
   JournalEntry,
   ProbeResult,
   TakeOutcome,
@@ -675,6 +678,33 @@ export function tauriVaultClient(
       cancel: (vaultId, requestId) => void invoke<void>("ai_cancel", { vaultId, requestId }),
       journal: () => invoke<JournalEntry[]>("ai_journal"),
       clearJournal: () => invoke<number>("ai_journal_clear"),
+    },
+
+    // ── Урок с ИИ-учителем (фича 051) ─────────────────────────────────
+    // Весь цикл хода (с автопродолжениями) идёт в `ai_lesson_answer`; `answer: null` — повтор.
+    lessons: {
+      list: () => invoke<LessonSummary[]>("ai_lesson_list"),
+      create: (goal, notes, language) =>
+        invoke<string>("ai_lesson_create", { goal, notes, language, now: Date.now() }),
+      open: (path) => invoke<LessonView>("ai_lesson_open", { path }),
+      answer: (vaultId, path, requestId, answer, expected) =>
+        invoke<LessonView>("ai_lesson_answer", {
+          vaultId,
+          path,
+          requestId,
+          answer: answer ?? null,
+          expected,
+          now: Date.now(),
+          allowCustom: true,
+        }),
+      progress: async (vaultId, requestId) =>
+        (await invoke<LessonProgress | null>("ai_lesson_progress", { vaultId, requestId })) ?? undefined,
+      checkpoint: (vaultId, path, requestId) =>
+        invoke<void>("ai_lesson_checkpoint", { vaultId, path, requestId }),
+      setState: (path, state) =>
+        invoke<LessonView>("ai_lesson_set_state", { path, lessonState: state, now: Date.now() }),
+      setLanguage: (path, language) =>
+        invoke<LessonView>("ai_lesson_set_language", { path, language, now: Date.now() }),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

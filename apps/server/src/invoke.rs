@@ -36,7 +36,7 @@ const SYNC_CONNECT_COMMAND: &str = "sync_connect_remote";
 /// Команды обучения с ИИ (фича 050).
 const AI_COMMAND_PREFIX: &str = "ai_";
 /// Команды обучения с ИИ, которые ходят в сеть к провайдеру.
-const AI_NETWORK_COMMANDS: &[&str] = &["ai_models", "ai_probe"];
+const AI_NETWORK_COMMANDS: &[&str] = &["ai_models", "ai_probe", "ai_lesson_answer"];
 /// Команды, которые ходят в сеть к удалённому репозиторию.
 const EXCHANGE_COMMANDS: &[&str] = &[
     "sync_connect_remote",
@@ -200,6 +200,22 @@ pub async fn invoke(
         // Обмены всех аккаунтов делят пул блокирующих потоков: их число на
         // сервер ограничено (038, ревью безопасности).
         // Запросы к моделям ограничены на весь сервер (050, ревью безопасности L2).
+        // Не больше двух одновременных запросов на аккаунт (051, M5).
+        let _ai_account = if AI_NETWORK_COMMANDS.contains(&command.as_str()) {
+            match crate::AccountAiSlot::acquire(&state, &authed.account.id) {
+                Some(slot) => Some(slot),
+                None => {
+                    tracing::warn!("отказ: предел одновременных запросов к моделям на аккаунт");
+                    return Ok((
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "kind": "RateLimited" })),
+                    )
+                        .into_response());
+                }
+            }
+        } else {
+            None
+        };
         let _ai_request = if AI_NETWORK_COMMANDS.contains(&command.as_str()) {
             match state.ai_requests.try_acquire() {
                 Ok(permit) => Some(permit),

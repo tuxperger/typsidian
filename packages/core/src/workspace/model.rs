@@ -44,9 +44,9 @@ pub fn apply(state: WorkspaceState, action: &WorkspaceAction, facts: &Facts) -> 
     }
 }
 
-/// Открываются вкладкой только заметки и доски.
+/// Открываются вкладкой заметки, доски и уроки.
 fn is_openable(kind: FileKind) -> bool {
-    matches!(kind, FileKind::Note | FileKind::Board)
+    kind.is_openable()
 }
 
 /// Две группы, но окно уже порога: показана одна слитая полоса (research.md
@@ -145,7 +145,7 @@ impl Ctx<'_> {
             group
                 .tabs
                 .iter()
-                .find(|t| t.kind == FileKind::Board && t.path == path)
+                .find(|t| t.kind.is_single_tab() && t.path == path)
                 .map(|t| (g, t.id))
         })
     }
@@ -263,7 +263,7 @@ impl Ctx<'_> {
             .filter(|kind| is_openable(*kind))
             .ok_or(Rejection::NotFound)?;
 
-        let existing = if kind == FileKind::Board {
+        let existing = if kind.is_single_tab() {
             self.find_board(path)
         } else {
             let group = self.active_index();
@@ -327,7 +327,7 @@ impl Ctx<'_> {
         self.state.groups[group].history.cursor = index;
 
         // Открывает запись без новой записи в историю.
-        let (target_group, id) = if kind == FileKind::Board {
+        let (target_group, id) = if kind.is_single_tab() {
             match self.find_board(&entry.path) {
                 Some(found) => found,
                 None => (group, self.push_tab(group, &entry.path, kind)),
@@ -359,6 +359,10 @@ impl Ctx<'_> {
     /// Причина, по которой вкладку нельзя закрыть, решается только по фактам
     /// (FR-005, SC-004).
     fn refusal_for(&self, tab: &Tab, board_unsaved: bool) -> Option<RefusalReason> {
+        if tab.kind == FileKind::Lesson {
+            // Урок целиком на диске: несохранённого у него нет (фича 051).
+            return None;
+        }
         if tab.kind == FileKind::Board {
             return board_unsaved.then_some(RefusalReason::Unsaved);
         }
@@ -557,7 +561,7 @@ impl Ctx<'_> {
             .and_then(|id| group.tabs.iter().find(|t| t.id == id))
             .cloned()
             .ok_or(Rejection::NothingToSplit)?;
-        if active.kind == FileKind::Board && group.tabs.len() == 1 {
+        if active.kind.is_single_tab() && group.tabs.len() == 1 {
             return Err(Rejection::NothingToSplit);
         }
 
@@ -565,7 +569,7 @@ impl Ctx<'_> {
             .history
             .note_leaving(&active.path, leaving);
 
-        let second_tab = if active.kind == FileKind::Board {
+        let second_tab = if active.kind.is_single_tab() {
             // Доска существует в одном экземпляре: переносится, а не
             // дублируется (research.md §8).
             self.remove_from_first_group(active.id);
@@ -701,12 +705,12 @@ impl Ctx<'_> {
         for group in &self.state.groups {
             let mut seen: Vec<&str> = Vec::new();
             for tab in &group.tabs {
-                let board_seen = tab.kind == FileKind::Board && boards.contains(&tab.path.as_str());
+                let board_seen = tab.kind.is_single_tab() && boards.contains(&tab.path.as_str());
                 if seen.contains(&tab.path.as_str()) || board_seen {
                     duplicates.push(tab.id);
                 } else {
                     seen.push(&tab.path);
-                    if tab.kind == FileKind::Board {
+                    if tab.kind.is_single_tab() {
                         boards.push(&tab.path);
                     }
                 }
@@ -794,7 +798,7 @@ pub fn check_invariants(state: &WorkspaceState) -> Result<(), String> {
                 return Err(format!("группа {index}: повтор пути {}", tab.path));
             }
             paths.push(&tab.path);
-            if tab.kind == FileKind::Board {
+            if tab.kind.is_single_tab() {
                 if boards.contains(&tab.path.as_str()) {
                     return Err(format!("доска {} дважды", tab.path));
                 }

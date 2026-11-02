@@ -16,6 +16,9 @@ use super::settings::{load_settings, save_settings, AiSettings};
 use crate::vault::backend::VaultBackend;
 use crate::vault::service_dir::SERVICE_DIR_NAME;
 
+/// Папка версий Syncthing в корне vault.
+const VERSIONS_DIR_NAME: &str = ".stversions";
+
 /// Относительный путь внутри vault без `.` и `..`; иначе `None`.
 fn clean(path: &Path) -> Option<PathBuf> {
     let mut parts = PathBuf::new();
@@ -60,7 +63,12 @@ pub fn check_access(path: &str, settings: &AiSettings) -> bool {
     let Some(path) = folded(Path::new(path)) else {
         return false;
     };
-    if path.first().map(String::as_str) == Some(SERVICE_DIR_NAME) {
+    // Служебное место приложения и история версий Syncthing: в ней лежат старые копии
+    // заметок, в том числе из запрещённых папок и уже удалённые (ревью безопасности 051, L9).
+    if path
+        .first()
+        .is_some_and(|first| first == SERVICE_DIR_NAME || first == VERSIONS_DIR_NAME)
+    {
         return false;
     }
     !settings

@@ -68,6 +68,8 @@ pub fn names_git_dir(part: &str) -> bool {
 pub const NOTE_EXTENSION: &str = "typ";
 /// Расширение доски для рисования (фича 002, research.md §2).
 pub const BOARD_EXTENSION: &str = "excalidraw";
+/// Расширение урока с ИИ-учителем (фича 051, research.md §1): JSON Lines.
+pub const LESSON_EXTENSION: &str = "lesson";
 /// Суффикс папки со снимками вставленных досок по **прежнему** правилу
 /// (фича 002, research.md §4): `<имя заметки>.assets` рядом с заметкой.
 ///
@@ -98,6 +100,8 @@ pub enum FileKind {
     Note,
     /// Доска для рисования.
     Board,
+    /// Урок с ИИ-учителем (фича 051): файл JSON Lines, открывается вкладкой урока.
+    Lesson,
     /// Снимок доски, принадлежащий вставке в заметке.
     Snapshot,
     /// Служебное состояние приложения: всё внутри `.typsidian/` (фича 006,
@@ -117,7 +121,18 @@ impl FileKind {
     /// снимки, служебные и посторонние файлы — нет (FR-021 фичи 002,
     /// FR-022 фичи 006).
     pub fn is_listed(self) -> bool {
-        matches!(self, FileKind::Note | FileKind::Board)
+        matches!(self, FileKind::Note | FileKind::Board | FileKind::Lesson)
+    }
+
+    /// Открывается ли файл вкладкой: то же, что виден в дереве.
+    pub fn is_openable(self) -> bool {
+        self.is_listed()
+    }
+
+    /// Файл открыт в окне одной вкладкой на путь, в какой бы группе ни был: доска и
+    /// урок существуют в одном экземпляре (фича 002 research §8, фича 051 research §10).
+    pub fn is_single_tab(self) -> bool {
+        matches!(self, FileKind::Board | FileKind::Lesson)
     }
 }
 
@@ -171,6 +186,7 @@ pub fn classify(path: &Path) -> FileKind {
     match path.extension().and_then(|extension| extension.to_str()) {
         Some(NOTE_EXTENSION) => FileKind::Note,
         Some(BOARD_EXTENSION) => FileKind::Board,
+        Some(LESSON_EXTENSION) => FileKind::Lesson,
         _ => FileKind::Other,
     }
 }

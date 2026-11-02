@@ -31,6 +31,10 @@ import { useVaultSettings } from "../settings/useVaultSettings.js";
 import { refreshSpelling } from "../editor/highlight/typstHighlight.js";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel.js";
 import { TasksScreen } from "../tasks/TasksScreen.js";
+import { LessonsScreen } from "../lessons/LessonsScreen.js";
+import { NewLessonDialog } from "../lessons/NewLessonDialog.js";
+import { LessonEnvProvider } from "../lessons/lessonEnv.js";
+import { useVaultId } from "../lessons/useVaultId.js";
 import { SlidesExportDialog } from "../slides/SlidesExportDialog.js";
 import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
 import { useBookmarks, type BookmarkAddResult } from "../bookmarks/useBookmarks.js";
@@ -363,6 +367,9 @@ function WorkspaceView({
   const [revealFolder, setRevealFolder] = useState<{ path: string; seq: number } | null>(null);
   // Окно «Задачи» (фича 033).
   const [tasksOpen, setTasksOpen] = useState(false);
+  // Уроки с ИИ-учителем (фича 051): список и диалог «Новый урок».
+  const [lessonsOpen, setLessonsOpen] = useState(false);
+  const [newLessonOpen, setNewLessonOpen] = useState(false);
   // Окно «Экспорт презентации» (фича 035).
   const [slidesExportOpen, setSlidesExportOpen] = useState(false);
   // Окно экспорта открытой заметки из шапки (фича 044, артборд 10).
@@ -774,8 +781,19 @@ function WorkspaceView({
   const activePath = active?.path ?? null;
   // Вид открытого файла берёт ядро (`ActiveNote.kind`), а не расширение здесь
   // (принцип I): вкладка может быть и доской.
-  const isBoardOpen = active?.kind === "Board";
+  // Урок, как и доска, — не заметка: у него нет текста, предпросмотра и свойств.
+  const isLessonOpen = active?.kind === "Lesson";
+  const isBoardOpen = active?.kind === "Board" || isLessonOpen;
   const { open: openTab, dispatch: dispatchTab } = tabs;
+  const lessonVaultId = useVaultId(device, state.client);
+  const lessonEnv = useMemo(
+    () => ({
+      vaultId: lessonVaultId,
+      openNote: (path: string) => void openTab(path),
+      openSettings: () => setShowSettings(true),
+    }),
+    [lessonVaultId, openTab],
+  );
   // Колонка предпросмотра: доска при одной группе её не имеет (research.md §9).
   const showPreview = !(isBoardOpen && (layout?.groups.length ?? 1) < 2);
 
@@ -984,7 +1002,7 @@ function WorkspaceView({
     enabled: outlineShown,
   });
   const outlineTarget: OutlineTarget =
-    active === null
+    active === null || isLessonOpen
       ? "none"
       : isBoardOpen
         ? "board"
@@ -1771,7 +1789,7 @@ function WorkspaceView({
       ...new Set(
         (layout?.groups ?? [])
           .flatMap((group) => group.tabs)
-          .filter((tab) => tab.kind !== "Board")
+          .filter((tab) => tab.kind !== "Board" && tab.kind !== "Lesson")
           .map((tab) => tab.path),
       ),
     ],
@@ -2312,6 +2330,23 @@ function WorkspaceView({
         icon: "download",
         run: () => setSlidesExportOpen(true),
       });
+    }
+    // Фича 051. Уроки с ИИ-учителем: список и новый урок — при открытом vault.
+    if (state.client !== null) {
+      items.push(
+        {
+          id: "lessons-new",
+          ...titled("lessons.command.new"),
+          icon: "plus",
+          run: () => setNewLessonOpen(true),
+        },
+        {
+          id: "lessons",
+          ...titled("lessons.command.list"),
+          icon: "list",
+          run: () => setLessonsOpen(true),
+        },
+      );
     }
     // Фича 033. «Задачи» — всегда при открытом vault; «Переключить задачу» —
     // у открытой заметки Typst.
@@ -3196,6 +3231,7 @@ function WorkspaceView({
             место пары «редактор + предпросмотр», при двух группах колонка
             остаётся с пустым состоянием, чтобы раскладка не прыгала. */}
         {layout !== null && registry !== null ? (
+          <LessonEnvProvider value={lessonEnv}>
           <EditorGroups
             view={layout}
             tabs={tabs}
@@ -3232,6 +3268,7 @@ function WorkspaceView({
             }
             solo={!previewShown}
           />
+          </LessonEnvProvider>
         ) : (
           <div className="ts-groups ts-groups--solo" aria-busy="true" />
         )}
@@ -3257,7 +3294,7 @@ function WorkspaceView({
             {isBoardOpen ? (
               <section className="ts-pane ts-pane--preview" aria-label={t("preview.label")}>
                 <div className="ts-placeholder">
-                  <p role="status">{t("workspace.tabs.boardNoPreview")}</p>
+                  <p role="status">{isLessonOpen ? t("lessons.noPreview") : t("workspace.tabs.boardNoPreview")}</p>
                 </div>
               </section>
             ) : (
@@ -3394,6 +3431,40 @@ function WorkspaceView({
           text={() => noteEditors.textOf(openNotePath)}
           overrides={vaultSettings.overrides ?? NOTHING_OVERRIDDEN}
           onClose={() => setSlidesExportOpen(false)}
+        />
+      )}
+
+      {lessonsOpen && state.client !== null && (
+        <LessonsScreen
+          client={state.client}
+          revision={state.notes}
+          onOpen={(path) => {
+            setLessonsOpen(false);
+            void openTab(path);
+          }}
+          onNew={() => {
+            setLessonsOpen(false);
+            setNewLessonOpen(true);
+          }}
+          onClose={() => setLessonsOpen(false)}
+        />
+      )}
+
+      {newLessonOpen && state.client !== null && (
+        <NewLessonDialog
+          client={state.client}
+          vaultId={lessonVaultId}
+          notes={state.notes}
+          language={lang.startsWith("ru") ? "ru" : "en"}
+          onCreated={(path) => {
+            setNewLessonOpen(false);
+            void openTab(path);
+          }}
+          onOpenSettings={() => {
+            setNewLessonOpen(false);
+            setShowSettings(true);
+          }}
+          onCancel={() => setNewLessonOpen(false)}
         />
       )}
 

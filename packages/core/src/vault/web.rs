@@ -1176,7 +1176,10 @@ impl VaultBackend for WebBackend {
             let note = Note::new(path.to_path_buf(), stamp_from_content(content));
             self.index.insert(note.clone());
             self.cache.upsert_note(&note).await;
-            record_links(&mut self.cache, path, content).await;
+            // Урок — JSON Lines, а не Typst: ссылок в нём нет (паритет с native).
+            if crate::vault::classify(path) != crate::vault::FileKind::Lesson {
+                record_links(&mut self.cache, path, content).await;
+            }
         }
         Ok(())
     }

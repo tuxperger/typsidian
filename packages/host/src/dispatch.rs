@@ -251,6 +251,14 @@ pub const COMMANDS: &[&str] = &[
     "ai_journal",
     "ai_journal_clear",
     "ai_check_access",
+    "ai_lesson_list",
+    "ai_lesson_create",
+    "ai_lesson_open",
+    "ai_lesson_answer",
+    "ai_lesson_progress",
+    "ai_lesson_checkpoint",
+    "ai_lesson_set_state",
+    "ai_lesson_set_language",
 ];
 
 fn args<A: DeserializeOwned>(value: Value) -> Result<A, Value> {
@@ -3017,6 +3025,126 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
             }
             match args::<A>(arguments) {
                 Ok(a) => answer(commands::ai_check_access(&host.vault, a.path).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_list" => {
+            let _ = arguments;
+            answer(commands::ai_lesson_list(&host.vault).await)
+        }
+        "ai_lesson_create" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                goal: String,
+                notes: Vec<String>,
+                language: ai::lesson::Language,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_create(&host.vault, a.goal, a.notes, a.language, a.now)
+                        .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_open" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_lesson_open(&host.vault, a.path).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_answer" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                path: String,
+                request_id: String,
+                answer: Option<ai::lesson::UserAnswer>,
+                expected: u32,
+                now: i64,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_answer(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.path,
+                        a.request_id,
+                        a.answer,
+                        a.expected,
+                        a.now,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_progress" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                request_id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::ai_lesson_progress(a.vault_id, a.request_id)),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_checkpoint" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                path: String,
+                request_id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_checkpoint(&host.vault, a.vault_id, a.path, a.request_id)
+                        .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_set_state" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                lesson_state: ai::lesson::LessonState,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_set_state(&host.vault, a.path, a.lesson_state, a.now).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_set_language" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                language: ai::lesson::Language,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_set_language(&host.vault, a.path, a.language, a.now).await,
+                ),
                 Err(error) => Err(error),
             }
         }

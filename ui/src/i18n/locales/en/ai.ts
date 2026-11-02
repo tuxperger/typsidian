@@ -85,4 +85,9 @@ export const ai = {
   "ai.failure.JournalFailed": "Could not write the sent log, so the request was not sent.",
   "ai.failure.SettingsFailed": "Could not save the settings.",
   "ai.failure.SecretsUnavailable": "The device's secret storage is unavailable. The key was not saved.",
+  "ai.failure.LessonChanged": "The lesson changed in another window or on another device. The conversation is refreshed; your answer was not sent.",
+  "ai.failure.LessonUnreadable": "The lesson file cannot be read: it is damaged or newer than this version of the app.",
+  "ai.failure.GoalEmpty": "Say what you want to understand: the goal of the lesson is empty.",
+  "ai.lessonsFolder": "Lessons folder",
+  "ai.lessonsFolderHint": "New lessons are saved here. Lessons moved elsewhere stay lessons.",
 } satisfies Entries;

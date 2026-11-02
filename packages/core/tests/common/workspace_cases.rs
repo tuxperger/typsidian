@@ -22,6 +22,8 @@ const WIDE: u32 = 1200;
 fn kind_of(path: &str) -> FileKind {
     if path.ends_with(".excalidraw") {
         FileKind::Board
+    } else if path.ends_with(".lesson") {
+        FileKind::Lesson
     } else {
         FileKind::Note
     }
@@ -58,6 +60,7 @@ fn place(line: u32, column: u32) -> TextPlace {
 }
 
 const ALL: &[&str] = &[
+    "u.lesson",
     "a.typ",
     "b.typ",
     "c.typ",
@@ -356,6 +359,45 @@ pub fn an_unsaved_board_refuses_to_close() {
     );
     assert!(t.refused.is_empty());
     assert_eq!(paths(&t.state, 0), ["a.typ"]);
+}
+
+/// Урок с ИИ-учителем (фича 051, research §10): вкладка одна на путь, как у доски, и
+/// закрывается всегда — несохранённого у урока нет, он целиком в файле.
+pub fn a_lesson_is_one_tab_per_path_and_closes_freely() {
+    let f = facts(ALL, WIDE);
+    let s = split(opened(&["a.typ", "u.lesson"]));
+    assert_eq!(paths(&s, 1), ["u.lesson"]);
+    // Повторное открытие в другой группе не заводит второй вкладки.
+    let s = step(
+        s,
+        A::FocusGroup {
+            group: GroupSlot::First,
+            leaving: None,
+        },
+        &f,
+    )
+    .state;
+    let s = open(s, "u.lesson");
+    assert_eq!(s.groups[0].tabs.len(), 1);
+    assert_eq!(s.active_group, GroupSlot::Second);
+    assert!(check_invariants(&s).is_ok());
+
+    let only = opened(&["u.lesson"]);
+    assert!(!view(&only, &f).can_split);
+    let t = step(only, A::Split { leaving: None }, &f);
+    assert_eq!(t.rejected, Some(Rejection::NothingToSplit));
+
+    // Флаг «доска не сохранена» уроку не относится.
+    let lesson = tab_id(&s, 1, "u.lesson");
+    let t = step(
+        s,
+        A::Close {
+            tab: lesson,
+            board_unsaved: true,
+        },
+        &f,
+    );
+    assert!(t.refused.is_empty());
 }
 
 pub fn close_others_closes_clean_tabs_and_lists_refusals() {

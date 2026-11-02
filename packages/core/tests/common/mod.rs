@@ -63,6 +63,8 @@ pub struct MemoryVault {
     /// Пути, запись байтов по которым отказывает `Io` (фича 016): так
     /// проверяется, что отказ не оставляет файла и текст не меняется (FR-014).
     write_failures: std::collections::HashSet<PathBuf>,
+    /// Пути, которые объявлены символическими ссылками (фича 051, ревью безопасности M1).
+    symlinks: std::collections::HashSet<PathBuf>,
 }
 
 impl MemoryVault {
@@ -81,6 +83,7 @@ impl MemoryVault {
             lagging: HashMap::new(),
             conflict_once: HashMap::new(),
             write_failures: Default::default(),
+            symlinks: Default::default(),
         }
     }
 
@@ -140,6 +143,11 @@ impl MemoryVault {
 
     pub fn read_only(mut self) -> Self {
         self.access_state = AccessState::ReadOnly;
+        self
+    }
+    /// Объявляет путь символической ссылкой: сам файл или папка на пути к файлу.
+    pub fn with_symlink(mut self, path: &str) -> Self {
+        self.symlinks.insert(PathBuf::from(path));
         self
     }
 
@@ -395,6 +403,16 @@ impl VaultBackend for MemoryVault {
             .into_iter()
             .filter(|note| note.path.parent() == Some(folder))
             .collect()
+    }
+
+    async fn crosses_symlink(&self, path: &Path) -> bool {
+        path.ancestors()
+            .skip(1)
+            .any(|ancestor| self.symlinks.contains(ancestor))
+    }
+
+    async fn is_symlink(&self, path: &Path) -> bool {
+        self.symlinks.contains(path)
     }
 
     /// Папка существует, если в ней лежит хоть один файл, — иначе её нет.
@@ -678,6 +696,7 @@ pub mod html_export_cases;
 pub mod import_cases;
 pub mod install_cases;
 pub mod language_cases;
+pub mod lesson_cases;
 pub mod links_cases;
 pub mod merge_view_cases;
 pub mod message_cases;

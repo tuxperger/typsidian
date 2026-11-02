@@ -1850,3 +1850,93 @@ pub async fn ai_journal_clear(state: State<'_, Vault>) -> Answer<u32, Failure<ai
 pub async fn ai_check_access(state: State<'_, Vault>, path: String) -> Answer<bool, Failure<()>> {
     typsidian_host::commands::ai_check_access(&state, path).await
 }
+
+#[tauri::command]
+pub async fn ai_lesson_list(
+    state: State<'_, Vault>,
+) -> Answer<Vec<ai::lesson::LessonSummary>, Failure<()>> {
+    typsidian_host::commands::ai_lesson_list(&state).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_create(
+    state: State<'_, Vault>,
+    goal: String,
+    notes: Vec<String>,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<String, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_create(&state, goal, notes, language, now).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_open(
+    state: State<'_, Vault>,
+    path: String,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_open(&state, path).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_answer(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    path: String,
+    request_id: String,
+    answer: Option<ai::lesson::UserAnswer>,
+    expected: u32,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_answer(
+        &state,
+        &home,
+        vault_id,
+        path,
+        request_id,
+        answer,
+        expected,
+        now,
+        allow_custom,
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn ai_lesson_progress(
+    vault_id: String,
+    request_id: String,
+) -> Option<ai::lesson::LessonProgress> {
+    typsidian_host::commands::ai_lesson_progress(vault_id, request_id)
+}
+
+#[tauri::command]
+pub async fn ai_lesson_checkpoint(
+    state: State<'_, Vault>,
+    vault_id: String,
+    path: String,
+    request_id: String,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_checkpoint(&state, vault_id, path, request_id).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_set_state(
+    state: State<'_, Vault>,
+    path: String,
+    lesson_state: ai::lesson::LessonState,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_set_state(&state, path, lesson_state, now).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_set_language(
+    state: State<'_, Vault>,
+    path: String,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_set_language(&state, path, language, now).await
+}

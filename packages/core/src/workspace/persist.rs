@@ -99,7 +99,7 @@ pub fn restore(saved: &SavedWorkspace, notes: &[Note]) -> WorkspaceState {
             if group.tabs.iter().any(|tab| &tab.path == path) {
                 continue;
             }
-            if kind == FileKind::Board {
+            if kind.is_single_tab() {
                 if boards.contains(&path.as_str()) {
                     continue;
                 }
@@ -152,7 +152,7 @@ fn openable_kinds<'a>(saved: &'a SavedWorkspace, notes: &[Note]) -> HashMap<&'a 
         .map(|path| (path.as_str(), None))
         .collect();
     for note in notes {
-        if !matches!(note.kind, FileKind::Note | FileKind::Board) {
+        if !note.kind.is_openable() {
             continue;
         }
         if let Some(slot) = wanted.get_mut(note.path.to_string_lossy().as_ref()) {

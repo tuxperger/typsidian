@@ -33,19 +33,71 @@ pub struct ProbeResult {
     pub cost_usd: Option<f64>,
 }
 
+/// Проверенный снимок подключения: провайдер и базовый адрес, для которых оболочка
+/// проверила одобрение адреса и взяла ключ (ревью безопасности 051, H1).
+///
+/// Настройки читаются заново на каждом шаге, а `ai.json` едет с синхронизацией: между
+/// проверкой и отправкой они могут смениться. Шаг, построивший запрос, и шаг, который
+/// отправляет его с ключом, сверяются со снимком, и ключ прежнего подключения не уйдёт
+/// на новый адрес.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connection {
+    provider: AiProvider,
+    base: String,
+}
+
+impl Connection {
+    /// Снимок текущих настроек; отказ — та же причина, что у [`base_url`].
+    pub fn verify(settings: &AiSettings, allow_custom: bool) -> Result<Self, AiFailure> {
+        Ok(Connection {
+            provider: settings.provider,
+            base: base_url(settings, allow_custom)?,
+        })
+    }
+
+    /// Снимок по самому запросу — для wasm, где «начать» и «отправить» отдельные вызовы
+    /// клиента: запрос построен в одном вызове под блокировкой vault сразу после проверки
+    /// настроек, и между вызовами сменить их нечем. Сверка тогда тривиальна; нужна, чтобы
+    /// сигнатура отправки была одной на всех таргетах.
+    pub fn of_request(provider: AiProvider, url: &str) -> Self {
+        Connection {
+            provider,
+            base: url.to_owned(),
+        }
+    }
+
+    /// Отправляется ли запрос тому провайдеру и на тот адрес, что в снимке.
+    pub fn covers(&self, provider: AiProvider, url: &str) -> bool {
+        provider == self.provider
+            && url
+                .strip_prefix(self.base.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    }
+
+    /// Совпадают ли со снимком текущие настройки.
+    pub fn is_current(&self, settings: &AiSettings, allow_custom: bool) -> bool {
+        Connection::verify(settings, allow_custom).is_ok_and(|current| current == *self)
+    }
+}
+
 /// Шаг 1. Выключенная функция отказывает до любой сети (FR-002), отказ записи
-/// журнала останавливает запрос (FR-012).
+/// журнала останавливает запрос (FR-012). Настройки, сменившиеся с момента проверки
+/// `verified`, — отказ `EndpointNotApproved` до записи журнала.
 pub async fn begin_probe<B: VaultBackend>(
     backend: &mut B,
     id: &str,
     now: i64,
     allow_custom: bool,
+    verified: &Connection,
 ) -> Result<PreparedProbe, AiFailure> {
     let settings = load_settings(backend).await;
     if !settings.enabled {
         return Err(AiFailure::Disabled);
     }
     let base = base_url(&settings, allow_custom)?;
+    if !verified.is_current(&settings, allow_custom) {
+        return Err(AiFailure::EndpointNotApproved);
+    }
     let model = settings.model.clone().ok_or(AiFailure::ModelMissing)?;
     let request = probe_request(settings.provider, &base, &model);
     record_sent(
@@ -144,7 +196,11 @@ pub async fn send_probe<T: AiTransport>(
     transport: &T,
     prepared: &PreparedProbe,
     key: Option<&str>,
+    verified: &Connection,
 ) -> Result<ProbeReply, AiFailure> {
+    if !verified.covers(prepared.provider, &prepared.request.url) {
+        return Err(AiFailure::EndpointNotApproved);
+    }
     let mut request = prepared.request.clone();
     authorize(&mut request, prepared.provider, key);
     let response = transport.send(request).await?;

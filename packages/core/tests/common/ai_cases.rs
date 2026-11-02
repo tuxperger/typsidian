@@ -10,7 +10,7 @@ use typsidian_core::ai::access::{check_access, move_denied_folders};
 use typsidian_core::ai::cancel::{cancel, cancellable};
 use typsidian_core::ai::client::{
     approve_endpoint, begin_probe, finish_probe, prepare_models, provider_key, require_approved,
-    send_models, send_probe,
+    send_models, send_probe, Connection, PreparedProbe,
 };
 use typsidian_core::ai::endpoint::base_url;
 use typsidian_core::ai::journal::{journal_clear, journal_entries, JournalState, MAX_ENTRIES};
@@ -56,6 +56,16 @@ const ANTHROPIC_OK: &str = r#"{"content":[{"type":"thinking","thinking":""},
 const OPENAI_OK: &str = r#"{"choices":[{"message":{"content":"готово"}}],
     "usage":{"prompt_tokens":3,"completion_tokens":1}}"#;
 
+fn custom(endpoint: &str) -> AiSettings {
+    AiSettings {
+        enabled: true,
+        provider: AiProvider::Custom,
+        custom_endpoint: Some(endpoint.to_owned()),
+        model: Some("своя".to_owned()),
+        ..AiSettings::default()
+    }
+}
+
 fn enabled(provider: AiProvider, model: &str) -> AiSettings {
     AiSettings {
         enabled: true,
@@ -63,6 +73,22 @@ fn enabled(provider: AiProvider, model: &str) -> AiSettings {
         model: Some(model.to_owned()),
         ..AiSettings::default()
     }
+}
+
+/// Начало пробного запроса с проверенным снимком текущих настроек, как у оболочки.
+async fn begin(vault: &mut MemoryVault, id: &str, now: i64) -> Result<PreparedProbe, AiFailure> {
+    let verified = Connection::verify(&load_settings(vault).await, true)?;
+    begin_probe(vault, id, now, true, &verified).await
+}
+
+/// Отправка со снимком по самому запросу, как в wasm.
+async fn send(
+    transport: &FakeTransport,
+    prepared: &PreparedProbe,
+    key: Option<&str>,
+) -> Result<typsidian_core::ai::protocol::ProbeReply, AiFailure> {
+    let verified = Connection::of_request(prepared.provider, &prepared.request.url);
+    send_probe(transport, prepared, key, &verified).await
 }
 
 async fn vault_with(settings: &AiSettings) -> MemoryVault {
@@ -93,7 +119,7 @@ pub async fn missing_or_broken_settings_mean_disabled() {
 pub async fn disabled_makes_no_requests() {
     let mut vault = MemoryVault::new();
     assert_eq!(
-        begin_probe(&mut vault, "1", 0, true).await.unwrap_err(),
+        begin(&mut vault, "1", 0).await.unwrap_err(),
         AiFailure::Disabled
     );
     assert_eq!(
@@ -105,7 +131,7 @@ pub async fn disabled_makes_no_requests() {
 
 pub async fn journal_gets_request_before_sending_and_never_the_key() {
     let mut vault = vault_with(&enabled(AiProvider::Anthropic, "claude-opus-5-5")).await;
-    let prepared = begin_probe(&mut vault, "1", 100, true).await.unwrap();
+    let prepared = begin(&mut vault, "1", 100).await.unwrap();
 
     // До сети запись уже есть и показывается как оборванная.
     let entries = journal_entries(&vault).await;
@@ -113,7 +139,7 @@ pub async fn journal_gets_request_before_sending_and_never_the_key() {
     assert!(entries[0].request.contains(PROBE_TEXT));
 
     let transport = FakeTransport::replying(200, ANTHROPIC_OK);
-    let reply = send_probe(&transport, &prepared, Some(KEY)).await;
+    let reply = send(&transport, &prepared, Some(KEY)).await;
     let result = finish_probe(&mut vault, &prepared, 200, reply)
         .await
         .unwrap();
@@ -143,7 +169,7 @@ pub async fn journal_failure_stops_the_request() {
     let settings = enabled(AiProvider::Anthropic, "claude-opus-5-5");
     let mut vault = vault_with(&settings).await.with_write_failure(JOURNAL);
     assert_eq!(
-        begin_probe(&mut vault, "1", 0, true).await.unwrap_err(),
+        begin(&mut vault, "1", 0).await.unwrap_err(),
         AiFailure::JournalFailed
     );
 }
@@ -154,14 +180,14 @@ pub async fn unknown_price_is_not_zero() {
         ..enabled(AiProvider::Custom, "qwen3:32b")
     };
     let mut vault = vault_with(&settings).await;
-    let prepared = begin_probe(&mut vault, "1", 0, true).await.unwrap();
+    let prepared = begin(&mut vault, "1", 0).await.unwrap();
     assert_eq!(
         prepared.request.url,
         "http://127.0.0.1:11434/v1/chat/completions"
     );
 
     let transport = FakeTransport::replying(200, OPENAI_OK);
-    let reply = send_probe(&transport, &prepared, None).await;
+    let reply = send(&transport, &prepared, None).await;
     let result = finish_probe(&mut vault, &prepared, 1, reply).await.unwrap();
     assert_eq!(result.reply.input_tokens, Some(3));
     assert_eq!(result.cost_usd, None);
@@ -172,8 +198,8 @@ pub async fn unknown_price_is_not_zero() {
         ..enabled(AiProvider::Custom, "claude-opus-5-5")
     };
     let mut vault = vault_with(&settings).await;
-    let prepared = begin_probe(&mut vault, "2", 0, true).await.unwrap();
-    let reply = send_probe(&transport, &prepared, None).await;
+    let prepared = begin(&mut vault, "2", 0).await.unwrap();
+    let reply = send(&transport, &prepared, None).await;
     assert_eq!(
         finish_probe(&mut vault, &prepared, 1, reply)
             .await
@@ -185,9 +211,9 @@ pub async fn unknown_price_is_not_zero() {
 
 pub async fn failure_is_recorded_and_carries_no_server_text() {
     let mut vault = vault_with(&enabled(AiProvider::Anthropic, "claude-opus-5-5")).await;
-    let prepared = begin_probe(&mut vault, "1", 0, true).await.unwrap();
+    let prepared = begin(&mut vault, "1", 0).await.unwrap();
     let transport = FakeTransport::replying(401, "invalid x-api-key sk-утечка");
-    let reply = send_probe(&transport, &prepared, Some(KEY)).await;
+    let reply = send(&transport, &prepared, Some(KEY)).await;
     assert_eq!(reply.clone().unwrap_err(), AiFailure::BadKey);
     assert_eq!(
         finish_probe(&mut vault, &prepared, 1, reply)
@@ -227,9 +253,7 @@ pub async fn statuses_map_to_failures() {
 pub async fn journal_keeps_last_entries_and_clears() {
     let mut vault = vault_with(&enabled(AiProvider::Anthropic, "m")).await;
     for id in 0..MAX_ENTRIES + 3 {
-        begin_probe(&mut vault, &id.to_string(), id as i64, true)
-            .await
-            .unwrap();
+        begin(&mut vault, &id.to_string(), id as i64).await.unwrap();
     }
     let entries = journal_entries(&vault).await;
     assert_eq!(entries.len(), MAX_ENTRIES);
@@ -479,4 +503,33 @@ pub async fn custom_endpoint_needs_approval_on_this_device() {
         .await
         .unwrap();
     assert_eq!(require_approved(&secrets, "v", &settings).await, Ok(()));
+}
+
+/// H1 для пробного запроса 050: настройки сменились после проверки оболочки.
+pub async fn probe_refuses_a_connection_that_changed_after_the_check() {
+    let mut vault = vault_with(&custom("https://models.example.org/v1")).await;
+    let verified = Connection::verify(&load_settings(&vault).await, true).unwrap();
+    save_settings(&mut vault, &custom("https://evil.example.net/v1"))
+        .await
+        .unwrap();
+
+    // Построение запроса: отказ раньше записи в журнал.
+    assert_eq!(
+        begin_probe(&mut vault, "1", 0, true, &verified)
+            .await
+            .unwrap_err(),
+        AiFailure::EndpointNotApproved
+    );
+    assert!(vault.bytes_of(JOURNAL).is_none());
+
+    // Отправка: запрос на новый адрес со старым снимком ключ не получает.
+    let moved = begin(&mut vault, "2", 0).await.unwrap();
+    let transport = FakeTransport::replying(200, ANTHROPIC_OK);
+    assert_eq!(
+        send_probe(&transport, &moved, Some(KEY), &verified)
+            .await
+            .unwrap_err(),
+        AiFailure::EndpointNotApproved
+    );
+    assert!(transport.sent.borrow().is_empty());
 }

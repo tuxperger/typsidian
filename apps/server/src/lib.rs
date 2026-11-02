@@ -35,6 +35,11 @@ pub const MAX_EXCHANGES: usize = 32;
 /// безопасности L2): каждый живёт до 30 с и держит буфер ответа.
 pub const MAX_AI_REQUESTS: usize = 16;
 
+/// Сколько запросов к моделям идут одновременно у одного аккаунта (051, ревью безопасности
+/// M5): поток урока живёт до 10 минут, и без предела один аккаунт занял бы весь общий
+/// предел сервера.
+pub const MAX_AI_REQUESTS_PER_ACCOUNT: u32 = 2;
+
 /// Состояние сервера, общее для всех запросов.
 pub struct AppState {
     pub config: Config,
@@ -48,6 +53,8 @@ pub struct AppState {
     pub exchanges: tokio::sync::Semaphore,
     /// Одновременных запросов к моделям на весь сервер (050).
     pub ai_requests: tokio::sync::Semaphore,
+    /// Идущих запросов к моделям по аккаунтам (051).
+    pub ai_by_account: std::sync::Mutex<std::collections::HashMap<String, u32>>,
     /// Старты гостей по одному: проверка предела по адресу и запись гостя
     /// (фича 039).
     pub demo_starts: tokio::sync::Mutex<()>,
@@ -57,6 +64,41 @@ pub struct AppState {
 }
 
 pub type Shared = Arc<AppState>;
+
+/// Место аккаунта среди идущих запросов к моделям; освобождается при сбросе, в том числе
+/// когда клиент оборвал соединение и ожидание ответа бросили.
+pub struct AccountAiSlot {
+    state: Shared,
+    account: String,
+}
+
+impl AccountAiSlot {
+    pub fn acquire(state: &Shared, account: &str) -> Option<AccountAiSlot> {
+        let mut running = state.ai_by_account.lock().ok()?;
+        let count = running.entry(account.to_owned()).or_insert(0);
+        if *count >= MAX_AI_REQUESTS_PER_ACCOUNT {
+            return None;
+        }
+        *count += 1;
+        Some(AccountAiSlot {
+            state: state.clone(),
+            account: account.to_owned(),
+        })
+    }
+}
+
+impl Drop for AccountAiSlot {
+    fn drop(&mut self) {
+        if let Ok(mut running) = self.state.ai_by_account.lock() {
+            if let Some(count) = running.get_mut(&self.account) {
+                *count -= 1;
+                if *count == 0 {
+                    running.remove(&self.account);
+                }
+            }
+        }
+    }
+}
 
 impl AppState {
     pub fn new(config: Config, store: Store) -> Shared {
@@ -74,6 +116,7 @@ impl AppState {
             sync: sync::SyncHomes::default(),
             exchanges: tokio::sync::Semaphore::new(MAX_EXCHANGES),
             ai_requests: tokio::sync::Semaphore::new(MAX_AI_REQUESTS),
+            ai_by_account: std::sync::Mutex::default(),
             demo_starts: tokio::sync::Mutex::new(()),
             demo_secret: std::sync::OnceLock::new(),
         })
