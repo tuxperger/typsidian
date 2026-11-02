@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 054: граф знаний, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:620px;max-width:100%}.board.wide{width:900px}.board.mid{width:460px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.bar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--s800)}
+.bar b{font-size:13px}
+.seg{display:inline-flex;border:1px solid var(--s700);border-radius:6px;overflow:hidden}
+.seg span{padding:4px 10px;font-size:11px;color:var(--s400);border-right:1px solid var(--s700)}
+.seg span:last-child{border:0}.seg .sel{background:var(--s800);color:var(--o400)}
+.search{height:26px;flex:0 1 220px;border:1px solid var(--s700);border-radius:6px;background:var(--s900);font-size:11.5px;color:var(--s500);display:flex;align-items:center;padding:0 8px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:12px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.btn.sm{height:24px;padding:0 8px;font-size:11px}
+.btn.dng{color:var(--err);border-color:var(--err)}
+.split{display:flex;min-height:420px}
+.split .main{flex:1;position:relative;border-right:1px solid var(--s800)}
+.split .side{width:300px;padding:12px 14px;font-size:12px}
+svg text{font:10.5px var(--sans);fill:var(--s300)}
+svg .cl{font:600 10px var(--mono);fill:var(--s500)}
+.hint{font-size:10.5px;color:var(--s500)}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.lbl{font:600 10.5px var(--mono);color:var(--s500);margin:12px 0 4px}
+.ph{color:var(--s200);font-size:12.5px;margin-bottom:4px}
+.alt{color:var(--s400);font-size:11.5px;font-style:italic}
+.ch{border:1px solid var(--s700);border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:11.5px;color:var(--s300)}
+.ch .ar{color:var(--o400)}
+.srcl{display:flex;gap:6px;align-items:center;font-size:11.5px;padding:3px 0}
+.srcl a{color:var(--o400);text-decoration:none}
+.job{display:flex;align-items:center;gap:8px;padding:6px 14px;border-top:1px solid var(--s800);font-size:11.5px;color:var(--s400)}
+.prog{flex:0 0 120px;height:4px;background:var(--s800);border-radius:2px;overflow:hidden}.prog i{display:block;height:100%;width:60%;background:var(--o500)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:var(--s500);font-weight:500;padding:6px;border-bottom:1px solid var(--s800);font-size:11px}
+td{padding:7px 6px;border-bottom:1px solid var(--s800);color:var(--s300);vertical-align:top}
+td .ar{color:var(--o400)}
+td.s{font:11px var(--mono);color:var(--s500)}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.box.e{border-color:var(--err)}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--s800)}
+.row:last-child{border:0}
+.row .txt{flex:1}.row .lb{font-size:12px;color:var(--s200)}
+.sw{flex:0 0 30px;height:16px;border-radius:9px;background:var(--s700);position:relative}
+.sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--s500)}
+.sw.on{background:var(--o500)}.sw.on:after{left:16px;background:var(--s950)}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--s700);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--s400)}
+.read{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--s400);border:1px dashed var(--s700);border-radius:6px;padding:6px 10px}
+.gone{color:var(--s500);text-decoration:line-through}
+.empty{padding:28px 8px;text-align:center;color:var(--s500);font-size:12px}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 054: граф знаний из уроков</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Граф знаний — вид на месте текста, как граф заметок 044 (команда палитры «Граф знаний» и кнопка в списке уроков). Колонка справа — выбранное утверждение. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board wide"><h2>A. КАРТА: УТВЕРЖДЕНИЯ, ЦЕПОЧКИ, ГРУППЫ ПО УРОКАМ</h2><div class="panel">
+<div class="bar"><b>Граф знаний</b><span class="seg"><span class="sel">Карта</span><span>Цепочки</span></span><span class="search">Найти утверждение…</span><span style="flex:1"></span><span class="hint">142 утверждения · 61 цепочка · 6 источников</span></div>
+<div class="split"><div class="main">
+<svg viewBox="0 0 600 420" width="100%" height="420">
+<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a525b"/></marker></defs>
+<rect x="20" y="20" width="300" height="250" rx="14" fill="none" stroke="#262b31"/><text class="cl" x="34" y="40">ПОЧЕМУ СОХРАНЯЕТСЯ ИМПУЛЬС</text>
+<rect x="340" y="60" width="240" height="200" rx="14" fill="none" stroke="#262b31"/><text class="cl" x="354" y="80">ФИЗИКА/ИМПУЛЬС.TYP</text>
+<rect x="120" y="290" width="330" height="110" rx="14" fill="none" stroke="#262b31"/><text class="cl" x="134" y="310">СОБСТВЕННЫЕ ВЕКТОРЫ</text>
+<g stroke="#4a525b" stroke-width="1.2" fill="none" marker-end="url(#a)">
+<path d="M90,90 L150,140"/><path d="M230,90 L170,140"/><path d="M160,160 L160,205"/><path d="M400,130 L190,215"/>
+</g>
+<circle cx="160" cy="150" r="3" fill="#6b757f"/>
+<g><circle cx="90" cy="80" r="6" fill="#9aa3ac"/><text x="40" y="66">Силы взаимодействия равны</text></g>
+<g><circle cx="230" cy="80" r="6" fill="#9aa3ac"/><text x="200" y="66">Сила = скорость изменения p</text></g>
+<g><circle cx="160" cy="215" r="8" fill="#ff6a00"/><text x="176" y="219">Импульс замкнутой системы постоянен</text></g>
+<g><circle cx="400" cy="120" r="6" fill="#9aa3ac"/><text x="350" y="106">Внешних сил нет — система замкнута</text></g>
+<g><circle cx="460" cy="190" r="6" fill="#9aa3ac"/><text x="400" y="210">p = mv</text></g>
+<g><circle cx="200" cy="350" r="6" fill="#9aa3ac"/><text x="150" y="372">Собственный вектор не меняет направление</text></g>
+<g><circle cx="360" cy="340" r="6" fill="#9aa3ac"/><text x="300" y="330">Собственное значение — множитель</text></g>
+</svg></div>
+<div class="side">
+<div class="title">Импульс замкнутой системы постоянен</div>
+<div class="alt">Также: «Полный импульс системы без внешних сил сохраняется»</div>
+<div class="lbl">ВЫВОДИТСЯ ИЗ</div>
+<div class="ch">Силы взаимодействия равны <span class="ar">+</span> Сила = скорость изменения p <span class="ar">→</span> это утверждение</div>
+<div class="ch">Внешних сил нет — система замкнута <span class="ar">→</span> это утверждение</div>
+<div class="lbl">ИСТОЧНИКИ</div>
+<div class="srcl">◆ <a href="#">Почему сохраняется импульс</a>, шаг 9</div>
+<div class="srcl">📄 <a href="#">Физика/Импульс.typ</a></div>
+<div class="acts"><span class="btn sm dng">Удалить утверждение…</span></div>
+</div></div>
+<div class="job"><span>◌ Пополняем граф из «Почему сохраняется импульс» · шаги 9–12</span><span class="prog"><i></i></span><span class="btn sm" style="margin-left:auto">Отменить</span></div>
+</div></section>
+
+<section class="board"><h2>B. ЦЕПОЧКИ (ТАБЛИЦА; ТАКЖЕ ДЛЯ УЗКОГО ЭКРАНА)</h2><div class="panel">
+<div class="bar"><b>Граф знаний</b><span class="seg"><span>Карта</span><span class="sel">Цепочки</span></span><span class="search">импульс</span></div>
+<table><thead><tr><th>Посылки</th><th></th><th>Вывод</th><th>Источник</th></tr></thead><tbody>
+<tr><td>Силы взаимодействия равны<br>Сила = скорость изменения p</td><td class="ar">→</td><td>Импульс замкнутой системы постоянен</td><td class="s">урок, шаг 9</td></tr>
+<tr><td>Внешних сил нет — система замкнута</td><td class="ar">→</td><td>Импульс замкнутой системы постоянен</td><td class="s">Импульс.typ</td></tr>
+<tr><td>p = mv<br>Масса не меняется</td><td class="ar">→</td><td>Изменение p = m·Δv</td><td class="s">урок, шаг 4</td></tr>
+</tbody></table>
+</div></section>
+
+<section class="board mid"><h2>C. В УРОКЕ: ПОПОЛНИТЬ ГРАФ</h2><div class="panel pad">
+<div class="read">◇ В граф добавлено 4 утверждения и 2 цепочки из шагов 9–12 · <a href="#" style="color:var(--o400)">открыть</a></div>
+<div class="acts" style="justify-content:flex-start"><span class="btn">Пополнить граф</span><span class="hint" style="align-self:center">виден, когда автоматическое пополнение выключено</span></div>
+</div></section>
+
+<section class="board mid"><h2>D. НАСТРОЙКИ ГРАФА (РАЗДЕЛ «ОБУЧЕНИЕ С ИИ»)</h2><div class="panel pad">
+<div class="row"><div class="txt"><div class="lb">Пополнять граф после шагов урока</div><div class="hint">В граф уходят только объяснения учителя, не ваши ответы.</div></div><span class="sw on"></span></div>
+<div class="row"><div class="txt"><div class="lb">Агент может сам читать граф</div><div class="hint">Иначе граф уходит модели только по вашему выбору.</div></div><span class="sw"></span></div>
+<div class="row"><div class="txt"><div class="lb">Показывать картой</div><div class="hint">Выключено — только таблица цепочек.</div></div><span class="sw on"></span></div>
+</div></section>
+
+<section class="board mid"><h2>E. УДАЛЕНИЕ</h2><div class="panel pad">
+<div class="box e">Удалить утверждение «p = mv»? 2 цепочки, где оно посылка, станут неполными.<div class="acts"><span class="btn">Отмена</span><span class="btn dng">Удалить</span></div></div>
+<div class="box" style="margin-top:10px">Удалить урок «Ряды Фурье на пальцах»?<div style="margin-top:8px"><label><input type="radio" checked> Оставить его вклад в графе</label><br><label><input type="radio"> Удалить и вклад: 7 утверждений, 3 цепочки</label></div><div class="acts"><span class="btn">Отмена</span><span class="btn dng">Удалить урок</span></div></div>
+<div class="srcl" style="margin-top:10px">◆ <span class="gone">Ряды Фурье на пальцах</span> <span class="hint">источник удалён</span></div>
+</div></section>
+
+<section class="board mid"><h2>F. ГРАФ ПУСТ</h2><div class="panel"><div class="bar"><b>Граф знаний</b></div><div class="empty">Граф пополняется из уроков: учитель объясняет — здесь появляются утверждения и связи между ними.</div></div></section>
+
+</div>
+</body>
+</html>
