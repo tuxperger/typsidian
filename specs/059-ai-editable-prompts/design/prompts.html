@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 059: инструкции агентов, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:760px;max-width:100%}.board.mid{width:460px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.split{display:flex;min-height:360px}
+.list{width:210px;border-right:1px solid var(--s800);padding:8px 0}
+.it{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:12px;color:var(--s300)}
+.it.sel{background:var(--s900);color:var(--s100);box-shadow:inset 2px 0 0 var(--o500)}
+.it .m{margin-left:auto;font:10px var(--mono);color:var(--s500)}
+.it .m.ed{color:var(--o400)}.it .m.up{color:var(--warn)}
+.ed{flex:1;display:flex;flex-direction:column}
+.eh{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--s800);font-size:12px}
+.eh b{flex:1}
+.code{flex:1;margin:0;padding:12px 14px;font:11.5px/1.6 var(--mono);color:var(--s300);white-space:pre-wrap;background:var(--s950)}
+.code .add{background:color-mix(in srgb,var(--ok) 25%,transparent);color:var(--s100)}
+.code .del{background:color-mix(in srgb,var(--err) 25%,transparent);text-decoration:line-through;color:var(--s400)}
+.foot{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--s800)}
+.foot .hint{margin-right:auto}
+.hint{font-size:10.5px;color:var(--s500)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:11.5px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.btn.dis{opacity:.45}
+.tag{font:600 10px var(--mono);border-radius:8px;padding:0 6px;border:1px solid var(--s600);color:var(--s400)}
+.tag.ed{border-color:var(--o500);color:var(--o400)}.tag.up{border-color:var(--warn);color:var(--warn)}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.box.w{border-color:var(--warn)}.box.e{border-color:var(--err)}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+.cols{display:flex}.cols>div{flex:1}.cols>div+div{border-left:1px solid var(--s800)}
+.ch{font:600 10.5px var(--mono);color:var(--s500);padding:6px 14px;border-bottom:1px solid var(--s800)}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 059: видимые и редактируемые инструкции агентов</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Подраздел «Инструкции агентов» раздела «Обучение с ИИ» (<a style="color:var(--o400)" href="https://claude.ai/artifact/THhvsXAbinBudJvjoU9EvR">макет 050</a>): слева агенты, справа текст — тот, что уходит модели. Правки хранятся с vault. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board"><h2>A. ИСХОДНАЯ ИНСТРУКЦИЯ</h2><div class="panel"><div class="split">
+<div class="list"><div class="it sel">Учитель<span class="m">исходная</span></div><div class="it">Замер понимания<span class="m">исходная</span></div><div class="it">Практика<span class="m ed">правлена</span></div><div class="it">Извлечение графа<span class="m up">обновилась</span></div><div class="it">Сжатие переписки<span class="m">исходная</span></div><div class="it">Исследование<span class="m">исходная</span></div></div>
+<div class="ed"><div class="eh"><b>Учитель</b><span class="tag">ИСХОДНАЯ · ru · v3</span></div>
+<pre class="code">Ты — учитель. Ведёшь человека от того, что он уже понимает, к цели урока.
+
+Каждый шаг: попроси предсказать → объясни → проверь вопросом.
+Строй только на том, что уже проверено. Если ответ выдаёт путаницу,
+разбери её прежде, чем идти дальше.
+
+Вопросы задавай инструментом ask_question: с вариантами, когда
+ошибки показательны, и свободные, когда важно рассуждение…</pre>
+<div class="foot"><span class="hint">≈ 1,2 тыс. единиц на каждый запрос учителя</span><span class="btn">Изменить</span></div></div>
+</div></div></section>
+
+<section class="board"><h2>B. ПРАВКА</h2><div class="panel"><div class="split">
+<div class="list"><div class="it">Учитель</div><div class="it">Замер понимания</div><div class="it sel">Практика<span class="m ed">правлена</span></div></div>
+<div class="ed"><div class="eh"><b>Практика</b><span class="tag ed">ПРАВЛЕНА</span></div>
+<pre class="code">Ставь задачи по выбранному материалу, не называя, какое знание нужно.
+Решение фиксируй в pose_problem до ответа.
+Чаще бери примеры из физики твёрдого тела и космонавтики.</pre>
+<div class="foot"><span class="hint">Действует со следующего запроса; идущий не прерывается.</span><span class="btn">Вернуть исходную…</span><span class="btn">Отмена</span><span class="btn acc">Сохранить</span></div></div>
+</div></div></section>
+
+<section class="board"><h2>C. ИСХОДНАЯ ОБНОВИЛАСЬ: СРАВНЕНИЕ</h2><div class="panel">
+<div class="eh"><b>Извлечение графа</b><span class="tag up">ИСХОДНАЯ ОБНОВИЛАСЬ</span><span class="btn">Взять новую исходную</span><span class="btn acc">Оставить свою</span></div>
+<div class="cols"><div><div class="ch">ВАША ПРАВКА</div><pre class="code">Выделяй утверждения короче 20 слов.
+<span class="del">Цепочки — только из двух посылок.</span></pre></div>
+<div><div class="ch">НОВАЯ ИСХОДНАЯ (v4)</div><pre class="code">Выделяй объективные утверждения из объяснений учителя.
+<span class="add">Цепочка может иметь сколько угодно посылок.</span></pre></div></div>
+</div></section>
+
+<section class="board mid"><h2>D. ПРЕДУПРЕЖДЕНИЯ И ВОЗВРАТ</h2><div class="panel pad">
+<div class="box e">Пустую инструкцию сохранить нельзя. <span class="btn" style="margin-left:6px">Вернуть исходную</span></div>
+<div class="box w" style="margin-top:10px">Инструкция длинная: ≈ 9 тыс. единиц на каждый запрос — каждый шаг урока станет дороже.</div>
+<div class="box" style="margin-top:10px">Вернуть исходную инструкцию «Практика»? Ваша правка будет удалена.<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Вернуть</span></div></div>
+<p class="hint" style="margin-top:10px">Инструкции не меняют доступ агента: запрещённые папки, журнал и проверки действуют всегда.</p>
+</div></section>
+
+</div>
+</body>
+</html>
