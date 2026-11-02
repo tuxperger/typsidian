@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::file::{
-    append_events, current_language, lesson_path, read_lesson, teacher_run, view_of, Confidence,
-    Language, LessonEvent, LessonQuestion, LessonView, NoteOutcome, ParsedLesson, FORMAT,
+    append_events, current_language, current_phase, lesson_path, probe_count, probe_result,
+    read_lesson, teacher_run, view_of, Confidence, Language, LessonEvent, LessonPhase,
+    LessonQuestion, LessonView, NoteOutcome, ParsedLesson, ProbePart, ProbeState, FORMAT,
     MAX_AUTO_CONTINUES,
 };
 use super::partial;
-use super::prompt::{self, NoteResult};
+use super::plan::{self, PlanError, PlanProgressArgs, PlanSet};
+use super::prompt::{self, NoteResult, ToolSet, PROBE_QUESTIONS_LIMIT};
 use super::stream::{StreamParser, ToolCall, TurnReply};
 use super::MAX_ATTACHED_NOTES;
 use crate::ai::access::{check_access_in, normalize_folder};
@@ -56,6 +58,9 @@ pub struct UserAnswer {
     pub confidence: Option<Confidence>,
     #[serde(default)]
     pub thinking: Option<String>,
+    /// «Не знаю» (кнопка замера): ответ-сведение; текст может быть пустым.
+    #[serde(default)]
+    pub dont_know: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +126,8 @@ struct Context {
     messages: Vec<Message>,
     /// Реплики после последнего изложения: сжимать, когда сжимать нечего, незачем.
     steps_since_summary: usize,
+    /// Инструменты стадии урока.
+    tools: ToolSet,
 }
 
 /// Читает заметку для модели: проверка доступа 050 одна для прикрепления и
@@ -182,9 +189,18 @@ fn user_text(
     choice: Option<u32>,
     confidence: Option<Confidence>,
     thinking: Option<&str>,
+    dont_know: bool,
     previous: Option<&LessonQuestion>,
 ) -> String {
     let mut out = text.trim().to_owned();
+    if dont_know {
+        let label = prompt::dont_know_label(language);
+        out = if out.is_empty() {
+            label.to_owned()
+        } else {
+            format!("{label}\n{out}")
+        };
+    }
     if out.is_empty() {
         if let (Some(index), Some(choices)) = (choice, previous.and_then(|q| q.choices.as_ref())) {
             out = choices.get(index as usize).cloned().unwrap_or_default();
@@ -211,16 +227,66 @@ fn teacher_text(language: Language, text: &str, question: Option<&LessonQuestion
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str(&format!(
-            "{}: {}",
-            prompt::question_label(language),
-            question.question
-        ));
+        match &question.part {
+            Some(part) => out.push_str(&format!(
+                "{} ({} {part}): {}",
+                prompt::question_label(language),
+                prompt::part_label(language),
+                question.question
+            )),
+            None => out.push_str(&format!(
+                "{}: {}",
+                prompt::question_label(language),
+                question.question
+            )),
+        }
         for (index, choice) in question.choices.iter().flatten().enumerate() {
             out.push_str(&format!("\n{}) {choice}", index + 1));
         }
     }
     out
+}
+
+/// Инструменты, которые действуют в следующем ходе урока.
+fn tool_set_of(parsed: &ParsedLesson) -> ToolSet {
+    if current_phase(&parsed.header, &parsed.events) == LessonPhase::Teach {
+        ToolSet::Teach
+    } else if probe_count(&parsed.events) >= PROBE_QUESTIONS_LIMIT {
+        ToolSet::ProbeEnd
+    } else {
+        ToolSet::Probe
+    }
+}
+
+/// Инструкции стадии: замер (с требованием завершить после предела вопросов) или обучение
+/// с правилами плана, итогом замера (или пометкой о пропуске) и текущим планом. Всё это
+/// берётся из событий файла, поэтому переживает перезапуск и сжатие переписки.
+fn stage_system(language: Language, parsed: &ParsedLesson) -> (String, ToolSet) {
+    let tools = tool_set_of(parsed);
+    if tools != ToolSet::Teach {
+        let system =
+            prompt::system_probe(language, &parsed.header.goal, tools == ToolSet::ProbeEnd);
+        return (system, tools);
+    }
+    let mut system = prompt::system(language, &parsed.header.goal);
+    system.push_str("\n\n");
+    system.push_str(prompt::plan_rules(language));
+    if let Some(summary) = probe_result(&parsed.events) {
+        system.push_str("\n\n");
+        system.push_str(&prompt::probe_block(language, &summary));
+    } else if parsed
+        .events
+        .iter()
+        .any(|event| matches!(event, LessonEvent::Phase { skipped: true, .. }))
+    {
+        system.push_str("\n\n");
+        system.push_str(prompt::probe_skipped_block(language));
+    }
+    if let Some(view) = plan::plan_view(&parsed.events, None) {
+        system.push_str("\n\n");
+        system.push_str(&prompt::plan_block(language, &view));
+    }
+    (system, tools)
 }
 
 /// Собирает запрос из файла урока: инструкции с прикреплёнными заметками, изложение (если
@@ -231,7 +297,7 @@ async fn build_context<B: VaultBackend>(
     parsed: &ParsedLesson,
 ) -> Context {
     let language = current_language(parsed);
-    let mut system = prompt::system(language, &parsed.header.goal);
+    let (mut system, tools) = stage_system(language, parsed);
 
     // Прикреплённые заметки читаются заново на каждом ходу: так учитель помнит их весь
     // урок, а запрещённая позже папка перестаёт отдавать текст. Прикреплением считаются
@@ -319,6 +385,7 @@ async fn build_context<B: VaultBackend>(
                 choice,
                 confidence,
                 thinking,
+                dont_know,
                 ..
             } => {
                 steps += 1;
@@ -331,6 +398,7 @@ async fn build_context<B: VaultBackend>(
                         *choice,
                         *confidence,
                         thinking.as_deref(),
+                        *dont_know,
                         previous_question,
                     ),
                 );
@@ -386,6 +454,26 @@ async fn build_context<B: VaultBackend>(
                 };
                 push(&mut messages, Role::User, text);
             }
+            // Отказ инструменту плана и принятый итог замера уходят модели так же, как
+            // результат чтения заметки: один раз, следующим запросом.
+            LessonEvent::PlanRejected { tool, reason, .. }
+                if last_teacher.is_none_or(|teacher| index > teacher) =>
+            {
+                push(
+                    &mut messages,
+                    Role::User,
+                    prompt::tool_rejected(language, tool, reason),
+                );
+            }
+            LessonEvent::ProbeResult { .. }
+                if last_teacher.is_none_or(|teacher| index > teacher) =>
+            {
+                push(
+                    &mut messages,
+                    Role::User,
+                    prompt::probe_done_result(language).to_owned(),
+                );
+            }
             _ => {}
         }
     }
@@ -416,6 +504,7 @@ async fn build_context<B: VaultBackend>(
         system,
         messages,
         steps_since_summary: steps,
+        tools,
     }
 }
 
@@ -436,7 +525,7 @@ fn build_request(
     model: &str,
     system: &str,
     messages: &[Message],
-    tools: bool,
+    tools: Option<ToolSet>,
     max_tokens: u32,
 ) -> HttpRequest {
     let role = |role: Role| match role {
@@ -456,8 +545,8 @@ fn build_request(
                 "system": system,
                 "messages": list,
             });
-            if tools {
-                body["tools"] = prompt::tools(provider);
+            if let Some(set) = tools {
+                body["tools"] = prompt::tools(provider, set);
             }
             ("messages", body)
         }
@@ -470,8 +559,8 @@ fn build_request(
                 "stream_options": {"include_usage": true},
                 "messages": all,
             });
-            if tools {
-                body["tools"] = prompt::tools(provider);
+            if let Some(set) = tools {
+                body["tools"] = prompt::tools(provider, set);
             }
             ("chat/completions", body)
         }
@@ -531,6 +620,7 @@ pub async fn begin_turn<B: VaultBackend>(
             thinking: answer
                 .thinking
                 .filter(|thinking| !thinking.trim().is_empty()),
+            dont_know: answer.dont_know,
         };
         append_events(backend, path, std::slice::from_ref(&event)).await?;
         parsed.events.push(event);
@@ -552,7 +642,7 @@ pub async fn begin_turn<B: VaultBackend>(
             &model,
             &context.system,
             &context.messages,
-            true,
+            Some(context.tools),
             MAX_TOKENS_TEACH,
         ),
         TurnKind::Compact => {
@@ -568,7 +658,7 @@ pub async fn begin_turn<B: VaultBackend>(
                 &model,
                 &context.system,
                 &messages,
-                false,
+                None,
                 MAX_TOKENS_COMPACT,
             )
         }
@@ -638,19 +728,96 @@ pub async fn send_turn<T: AiTransport>(
     cancellable(vault_id, &prepared.request_id, work).await
 }
 
+/// Пределы итога замера (как у вопроса учителя, 051 L8).
+const MAX_PROBE_PARTS: usize = 20;
+const PART_NAME_MAX_CHARS: usize = 100;
+const PROBE_NOTE_MAX_CHARS: usize = 300;
+const PROBE_START_MAX_CHARS: usize = 300;
+
 struct Calls {
     question: Option<LessonQuestion>,
     reads: Vec<String>,
+    probe_done: Option<(Vec<ProbePart>, String)>,
+    plan_set: Option<Result<PlanSet, PlanError>>,
+    plan_progress: Option<PlanProgressArgs>,
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-fn parse_calls(calls: &[ToolCall]) -> Calls {
+/// Вопрос модели с пределами: не больше пяти вариантов и длины (L8).
+fn question_of(input: &Value, part: Option<String>) -> Option<LessonQuestion> {
+    let question = input["question"]
+        .as_str()
+        .map(str::trim)
+        .unwrap_or_default();
+    if question.is_empty() {
+        return None;
+    }
+    // Модель не хозяин интерфейса: не больше пяти вариантов и пределы длины
+    // (ревью безопасности 051, L8).
+    let choices: Vec<String> = input["choices"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|choice| choice.as_str())
+                .map(|choice| clip(choice.trim(), CHOICE_MAX_CHARS))
+                .filter(|choice| !choice.is_empty())
+                .take(MAX_CHOICES)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(LessonQuestion {
+        question: clip(question, QUESTION_MAX_CHARS),
+        choices: (choices.len() >= 2).then_some(choices),
+        part,
+    })
+}
+
+fn probe_parts_of(input: &Value) -> (Vec<ProbePart>, String) {
+    let parts = input["parts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let name = clip(item["name"].as_str()?.trim(), PART_NAME_MAX_CHARS);
+            if name.is_empty() {
+                return None;
+            }
+            let state = match item["state"].as_str().map(str::to_lowercase).as_deref() {
+                Some("known") => ProbeState::Known,
+                Some("partial") => ProbeState::Partial,
+                _ => ProbeState::Unknown,
+            };
+            Some(ProbePart {
+                name,
+                state,
+                note: clip(
+                    item["note"].as_str().map(str::trim).unwrap_or_default(),
+                    PROBE_NOTE_MAX_CHARS,
+                ),
+            })
+        })
+        .take(MAX_PROBE_PARTS)
+        .collect();
+    let start = clip(
+        input["start"].as_str().map(str::trim).unwrap_or_default(),
+        PROBE_START_MAX_CHARS,
+    );
+    (parts, start)
+}
+
+/// Разбор вызовов инструментов. Действуют только инструменты стадии: вызов замера в
+/// обучении и наоборот игнорируется; на ход — не больше одного вопроса, одного
+/// `plan_set`, одного `plan_progress`.
+fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
     let mut parsed = Calls {
         question: None,
         reads: Vec::new(),
+        probe_done: None,
+        plan_set: None,
+        plan_progress: None,
     };
     for call in calls {
         let input: Value = if call.arguments.trim().is_empty() {
@@ -659,33 +826,28 @@ fn parse_calls(calls: &[ToolCall]) -> Calls {
             serde_json::from_str(&call.arguments).unwrap_or(Value::Null)
         };
         match call.name.as_str() {
-            prompt::ASK_QUESTION if parsed.question.is_none() => {
-                let question = input["question"]
-                    .as_str()
-                    .map(str::trim)
-                    .unwrap_or_default();
-                if question.is_empty() {
-                    continue;
-                }
-                // Модель не хозяин интерфейса: не больше пяти вариантов и пределы длины
-                // (ревью безопасности 051, L8).
-                let choices: Vec<String> = input["choices"]
-                    .as_array()
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|choice| choice.as_str())
-                            .map(|choice| clip(choice.trim(), CHOICE_MAX_CHARS))
-                            .filter(|choice| !choice.is_empty())
-                            .take(MAX_CHOICES)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                parsed.question = Some(LessonQuestion {
-                    question: clip(question, QUESTION_MAX_CHARS),
-                    choices: (choices.len() >= 2).then_some(choices),
-                });
+            prompt::ASK_QUESTION if set == ToolSet::Teach && parsed.question.is_none() => {
+                parsed.question = question_of(&input, None);
             }
-            prompt::READ_NOTE if parsed.reads.len() < MAX_NOTE_READS_PER_TURN => {
+            prompt::PROBE_QUESTION if set == ToolSet::Probe && parsed.question.is_none() => {
+                // Название части нужно ленте и подсчёту; без него — прочерк.
+                let part = clip(
+                    input["part"].as_str().map(str::trim).unwrap_or_default(),
+                    PART_NAME_MAX_CHARS,
+                );
+                let part = if part.is_empty() {
+                    "—".to_owned()
+                } else {
+                    part
+                };
+                parsed.question = question_of(&input, Some(part));
+            }
+            prompt::PROBE_DONE if set != ToolSet::Teach && parsed.probe_done.is_none() => {
+                parsed.probe_done = Some(probe_parts_of(&input));
+            }
+            prompt::READ_NOTE
+                if set != ToolSet::ProbeEnd && parsed.reads.len() < MAX_NOTE_READS_PER_TURN =>
+            {
                 if let Some(path) = input["path"].as_str().map(str::trim) {
                     // Путь в чистом виде; негодный остаётся как есть и получит отказ.
                     let path = normalize_folder(Path::new(path)).unwrap_or_else(|| path.to_owned());
@@ -694,8 +856,18 @@ fn parse_calls(calls: &[ToolCall]) -> Calls {
                     }
                 }
             }
+            prompt::PLAN_SET if set == ToolSet::Teach && parsed.plan_set.is_none() => {
+                parsed.plan_set = Some(plan::parse_plan_set(&input));
+            }
+            prompt::PLAN_PROGRESS if set == ToolSet::Teach && parsed.plan_progress.is_none() => {
+                parsed.plan_progress = Some(plan::parse_plan_progress(&input));
+            }
             _ => {}
         }
+    }
+    // Итог замера закрывает стадию: вопрос в том же ходе уже ни к чему.
+    if parsed.probe_done.is_some() {
+        parsed.question = None;
     }
     parsed
 }
@@ -744,7 +916,7 @@ pub async fn finish_turn<B: VaultBackend>(
                 _ => None,
             };
             let mut events: Vec<LessonEvent> = Vec::new();
-            let mut did_read = false;
+            let mut did_tool = false;
             let mut asked = false;
             match prepared.kind {
                 TurnKind::Compact => events.push(LessonEvent::Summary {
@@ -757,7 +929,9 @@ pub async fn finish_turn<B: VaultBackend>(
                     cost_usd,
                 }),
                 TurnKind::Teach => {
-                    let calls = parse_calls(&reply.tool_calls);
+                    let before = read_lesson(backend, &prepared.path).await?;
+                    let language = current_language(&before);
+                    let calls = parse_calls(&reply.tool_calls, tool_set_of(&before));
                     asked = calls.question.is_some();
                     events.push(LessonEvent::Teacher {
                         at: now,
@@ -773,13 +947,75 @@ pub async fn finish_turn<B: VaultBackend>(
                     let settings = load_settings(backend).await;
                     for path in calls.reads {
                         let (outcome, _) = read_note_text(backend, &settings, &path).await;
-                        did_read = true;
+                        did_tool = true;
                         events.push(LessonEvent::NoteRead {
                             at: now,
                             path,
                             by_user: false,
                             outcome,
                         });
+                    }
+                    // Итог замера и план: проверяются ядром против файла урока.
+                    let mut seen: Vec<LessonEvent> = Vec::new();
+                    if calls.plan_set.is_some() || calls.plan_progress.is_some() {
+                        seen = before.events.clone();
+                        seen.extend(events.iter().cloned());
+                    }
+                    if let Some((parts, start)) = calls.probe_done {
+                        did_tool = true;
+                        // После итога замера урок ждёт: пользователь смотрит итог и план и
+                        // сам нажимает «Начать обучение» (макет 052, артборд C).
+                        asked = true;
+                        events.push(LessonEvent::ProbeResult {
+                            at: now,
+                            parts,
+                            start,
+                        });
+                    }
+                    if let Some(result) = calls.plan_set {
+                        match result {
+                            Ok(set) => {
+                                let event = LessonEvent::Plan {
+                                    at: now,
+                                    version: plan::plan_history(&seen).len() as u32 + 1,
+                                    steps: set.steps,
+                                    goal: set.goal,
+                                    current: set.current,
+                                    reason: set.reason,
+                                };
+                                seen.push(event.clone());
+                                events.push(event);
+                            }
+                            Err(error) => {
+                                did_tool = true;
+                                events.push(rejected(language, now, prompt::PLAN_SET, &error));
+                            }
+                        }
+                    }
+                    if let Some(mut args) = calls.plan_progress {
+                        let verdict = match plan::plan_view(&seen, None) {
+                            None => Err(PlanError::NoPlan),
+                            Some(view) => {
+                                let current = args.current.take().unwrap_or(view.current);
+                                let checked = PlanProgressArgs {
+                                    current: Some(current.clone()),
+                                    done: args.done,
+                                };
+                                plan::check_progress(&seen, &checked)
+                                    .map(|()| (current, checked.done))
+                            }
+                        };
+                        match verdict {
+                            Ok((current, done)) => events.push(LessonEvent::PlanProgress {
+                                at: now,
+                                current,
+                                done,
+                            }),
+                            Err(error) => {
+                                did_tool = true;
+                                events.push(rejected(language, now, prompt::PLAN_PROGRESS, &error));
+                            }
+                        }
                     }
                 }
             }
@@ -800,7 +1036,7 @@ pub async fn finish_turn<B: VaultBackend>(
             let next = match prepared.kind {
                 TurnKind::Compact => Next::Continue,
                 TurnKind::Teach
-                    if did_read && !asked && teacher_run(&parsed.events) <= MAX_AUTO_CONTINUES =>
+                    if did_tool && !asked && teacher_run(&parsed.events) <= MAX_AUTO_CONTINUES =>
                 {
                     Next::Continue
                 }
@@ -822,4 +1058,13 @@ pub(super) async fn read_attached<B: VaultBackend>(
     path: &str,
 ) -> (NoteOutcome, Option<String>) {
     read_note_text(backend, settings, path).await
+}
+
+/// Событие отказа инструменту плана: причина — на языке урока.
+fn rejected(language: Language, at: i64, tool: &str, error: &PlanError) -> LessonEvent {
+    LessonEvent::PlanRejected {
+        at,
+        tool: tool.to_owned(),
+        reason: prompt::plan_error(language, error),
+    }
 }

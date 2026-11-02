@@ -16,8 +16,8 @@ use typsidian_core::ai::lesson::stream::StreamParser;
 use typsidian_core::ai::lesson::turn::{begin_turn, finish_turn, send_turn};
 use typsidian_core::ai::lesson::{
     create_lesson, list_lessons, open_lesson, set_language, set_state, Confidence, Language,
-    LessonEvent, LessonState, LessonView, Next, NoteOutcome, TurnDone, TurnKind, UserAnswer,
-    Waiting,
+    LessonEvent, LessonPhase, LessonState, LessonView, Next, NoteOutcome, TurnDone, TurnKind,
+    UserAnswer, Waiting,
 };
 use typsidian_core::ai::settings::{save_settings, AiProvider, AiSettings};
 use typsidian_core::ai::transport::{AiTransport, HttpRequest, HttpResponse};
@@ -302,13 +302,21 @@ fn answer(text: &str) -> Option<UserAnswer> {
         choice: None,
         confidence: None,
         thinking: None,
+        dont_know: false,
     })
 }
 
 async fn new_lesson(vault: &mut MemoryVault) -> String {
-    create_lesson(vault, "Понять замыкания", &[], Language::Ru, 10)
-        .await
-        .unwrap()
+    create_lesson(
+        vault,
+        "Понять замыкания",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap()
 }
 
 /// Цикл хода так, как его ведут host и клиент wasm: ядро решает, продолжать ли.
@@ -412,7 +420,7 @@ pub async fn file_skips_broken_lines_and_appends_after_torn_line() {
 pub async fn goal_name_and_folder_rules() {
     let mut vault = anthropic_vault().await;
     assert_eq!(
-        create_lesson(&mut vault, "   ", &[], Language::Ru, 1)
+        create_lesson(&mut vault, "   ", &[], Language::Ru, LessonPhase::Teach, 1)
             .await
             .unwrap_err(),
         AiFailure::GoalEmpty
@@ -422,6 +430,7 @@ pub async fn goal_name_and_folder_rules() {
         "Что такое: Rust? / ссылки",
         &[],
         Language::Ru,
+        LessonPhase::Teach,
         1,
     )
     .await
@@ -432,6 +441,7 @@ pub async fn goal_name_and_folder_rules() {
         "Что такое: Rust? / ссылки",
         &[],
         Language::Ru,
+        LessonPhase::Teach,
         2,
     )
     .await
@@ -441,14 +451,14 @@ pub async fn goal_name_and_folder_rules() {
     let mut changed = settings(AiProvider::Anthropic, "claude-opus-5-5");
     changed.lessons_folder = "Учёба/Языки".to_owned();
     save_settings(&mut vault, &changed).await.unwrap();
-    let third = create_lesson(&mut vault, "Цель", &[], Language::En, 3)
+    let third = create_lesson(&mut vault, "Цель", &[], Language::En, LessonPhase::Teach, 3)
         .await
         .unwrap();
     assert_eq!(third, "Учёба/Языки/Цель.lesson");
     // Служебное место не папка уроков.
     changed.lessons_folder = ".typsidian/x".to_owned();
     save_settings(&mut vault, &changed).await.unwrap();
-    let fourth = create_lesson(&mut vault, "Цель", &[], Language::En, 3)
+    let fourth = create_lesson(&mut vault, "Цель", &[], Language::En, LessonPhase::Teach, 3)
         .await
         .unwrap();
     assert_eq!(fourth, "Уроки/Цель.lesson");
@@ -557,7 +567,7 @@ pub async fn answer_is_on_disk_before_the_network() {
     // Запрос потоковый, с инструментами; ключ ушёл заголовком, а не в журнал.
     let body: Value = serde_json::from_str(&transport.body(0)).unwrap();
     assert_eq!(body["stream"], true);
-    assert_eq!(body["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(body["tools"].as_array().unwrap().len(), 4);
     assert!(body["system"]
         .as_str()
         .unwrap()
@@ -573,7 +583,7 @@ pub async fn answer_is_on_disk_before_the_network() {
 pub async fn disabled_lesson_makes_no_requests() {
     let mut vault = MemoryVault::new();
     assert_eq!(
-        create_lesson(&mut vault, "цель", &[], Language::Ru, 1)
+        create_lesson(&mut vault, "цель", &[], Language::Ru, LessonPhase::Teach, 1)
             .await
             .unwrap_err(),
         AiFailure::Disabled
@@ -631,6 +641,7 @@ pub async fn question_with_choices_and_open_question() {
             choice: Some(1),
             confidence: Some(Confidence::Guess),
             thinking: Some("наверное, замыкание помнит i".to_owned()),
+            dont_know: false,
         }),
         done.view.events_len,
     )
@@ -725,9 +736,16 @@ pub async fn status_failure_is_a_refusal_without_server_text() {
 
 pub async fn cancel_keeps_the_received_text_and_retry_needs_no_new_answer() {
     let mut vault = anthropic_vault().await;
-    let path = create_lesson(&mut vault, "Отмена хода", &[], Language::Ru, 10)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut vault,
+        "Отмена хода",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap();
     let hang = StreamTransport::with(vec![Script::Hang {
         chunks: anthropic(&["Часть ответа"], None, 1, 1)[..3].to_vec(),
     }]);
@@ -871,9 +889,16 @@ pub async fn language_and_state_are_events() {
 
 pub async fn partial_file_restores_an_interrupted_reply() {
     let mut vault = anthropic_vault().await;
-    let path = create_lesson(&mut vault, "Восстановление ответа", &[], Language::Ru, 10)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut vault,
+        "Восстановление ответа",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap();
     begin_t(&mut vault, &path, "r", answer("вопрос"), 0, 100)
         .await
         .unwrap();
@@ -981,9 +1006,16 @@ pub async fn compaction_summarises_and_keeps_the_full_file() {
 pub async fn list_shows_all_lessons_with_states() {
     let mut vault = anthropic_vault().await;
     let first = new_lesson(&mut vault).await;
-    let second = create_lesson(&mut vault, "Второй", &[], Language::En, 50)
-        .await
-        .unwrap();
+    let second = create_lesson(
+        &mut vault,
+        "Второй",
+        &[],
+        Language::En,
+        LessonPhase::Teach,
+        50,
+    )
+    .await
+    .unwrap();
     let transport = StreamTransport::with(vec![say("реплика")]);
     cycle(&mut vault, &transport, &second, "a", answer("привет"), 0)
         .await
@@ -1037,6 +1069,7 @@ pub async fn attached_note_goes_into_request_and_log() {
         "Замыкания",
         &["Заметки/а.typ".to_owned(), "Заметки/а.typ".to_owned()],
         Language::Ru,
+        LessonPhase::Teach,
         10,
     )
     .await
@@ -1089,9 +1122,16 @@ pub async fn denied_missing_and_outside_notes_are_refused_without_text() {
         "Заметки/нет.typ",
     ]
     .map(str::to_owned);
-    let path = create_lesson(&mut vault, "Цель", &notes, Language::Ru, 10)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut vault,
+        "Цель",
+        &notes,
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap();
     let view = open_lesson(&mut vault, &path).await.unwrap();
     let outcomes: Vec<NoteOutcome> = view
         .events
@@ -1366,9 +1406,16 @@ pub async fn lesson_writes_never_go_through_symlinks() {
         .await
         .is_err());
     assert_eq!(vault.write_count("Уроки/а.lesson"), 0);
-    assert!(create_lesson(&mut vault, "Новый", &[], Language::Ru, 1)
-        .await
-        .is_err());
+    assert!(create_lesson(
+        &mut vault,
+        "Новый",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        1
+    )
+    .await
+    .is_err());
     assert!(vault.paths_under("Уроки/Новый").is_empty());
 
     // Имя занято всем, что существует: висячая ссылка и файл, который не читается.
@@ -1380,7 +1427,7 @@ pub async fn lesson_writes_never_go_through_symlinks() {
             typsidian_core::vault::backend::ReadError::Io,
         );
     save_settings(&mut vault, &config).await.unwrap();
-    let path = create_lesson(&mut vault, "Цель", &[], Language::Ru, 1)
+    let path = create_lesson(&mut vault, "Цель", &[], Language::Ru, LessonPhase::Teach, 1)
         .await
         .unwrap();
     assert_eq!(path, "Уроки/Цель 3.lesson");
@@ -1434,7 +1481,7 @@ pub async fn lesson_settings_are_sanitized_on_read() {
         ".typsidian/ai.json",
         json!({"enabled": true, "model": "m", "lessons_folder": ".typsidian/x"}).to_string(),
     );
-    let path = create_lesson(&mut vault, "Цель", &[], Language::Ru, 1)
+    let path = create_lesson(&mut vault, "Цель", &[], Language::Ru, LessonPhase::Teach, 1)
         .await
         .unwrap();
     assert_eq!(path, "Уроки/Цель.lesson");
@@ -1461,9 +1508,16 @@ pub async fn only_small_notes_are_read_and_lesson_files_have_a_limit() {
         "Заметки/огромная.typ",
     ]
     .map(str::to_owned);
-    let path = create_lesson(&mut vault, "Цель", &notes, Language::Ru, 10)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut vault,
+        "Цель",
+        &notes,
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap();
     let view = open_lesson(&mut vault, &path).await.unwrap();
     let outcomes: Vec<NoteOutcome> = view
         .events
@@ -1514,9 +1568,16 @@ pub async fn attachments_are_limited_normalized_and_initial_only() {
     }
     notes.insert(1, "./Н/0.typ".to_owned());
     notes.insert(2, "Н//0.typ".to_owned());
-    let path = create_lesson(&mut vault, "Цель", &notes, Language::Ru, 10)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut vault,
+        "Цель",
+        &notes,
+        Language::Ru,
+        LessonPhase::Teach,
+        10,
+    )
+    .await
+    .unwrap();
     let view = open_lesson(&mut vault, &path).await.unwrap();
     let attached: Vec<&str> = view
         .events
@@ -1546,6 +1607,7 @@ pub async fn attachments_are_limited_normalized_and_initial_only() {
         goal: "Чужой".to_owned(),
         language: Language::Ru,
         created_at: 1,
+        start: LessonPhase::Teach,
     };
     let events = vec![
         LessonEvent::User {
@@ -1554,6 +1616,7 @@ pub async fn attachments_are_limited_normalized_and_initial_only() {
             choice: None,
             confidence: None,
             thinking: None,
+            dont_know: false,
         },
         LessonEvent::NoteRead {
             at: 3,
@@ -1788,7 +1851,7 @@ pub async fn goal_name_avoids_reserved_names_and_format_characters() {
         "\u{200B}\u{FEFF}Цель\u{2066}",
         "COM10",
     ] {
-        let path = create_lesson(&mut vault, goal, &[], Language::Ru, 1)
+        let path = create_lesson(&mut vault, goal, &[], Language::Ru, LessonPhase::Teach, 1)
             .await
             .unwrap();
         names.push(path.trim_start_matches("Уроки/").to_owned());
@@ -1866,18 +1929,46 @@ pub async fn stignore_report_includes_the_lesson_partial_folder() {
 pub async fn summary_tells_what_the_lesson_waits_for() {
     let mut vault = anthropic_vault().await;
     let start_only = new_lesson(&mut vault).await;
-    let answered = create_lesson(&mut vault, "Ждёт ответа", &[], Language::Ru, 20)
-        .await
-        .unwrap();
-    let cut = create_lesson(&mut vault, "Оборван", &[], Language::Ru, 30)
-        .await
-        .unwrap();
-    let finished = create_lesson(&mut vault, "Завершён", &[], Language::Ru, 40)
-        .await
-        .unwrap();
-    let stopped = create_lesson(&mut vault, "Остановлен", &[], Language::Ru, 50)
-        .await
-        .unwrap();
+    let answered = create_lesson(
+        &mut vault,
+        "Ждёт ответа",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        20,
+    )
+    .await
+    .unwrap();
+    let cut = create_lesson(
+        &mut vault,
+        "Оборван",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        30,
+    )
+    .await
+    .unwrap();
+    let finished = create_lesson(
+        &mut vault,
+        "Завершён",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        40,
+    )
+    .await
+    .unwrap();
+    let stopped = create_lesson(
+        &mut vault,
+        "Остановлен",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        50,
+    )
+    .await
+    .unwrap();
     let transport = StreamTransport::with(vec![say("реплика")]);
     cycle(&mut vault, &transport, &answered, "a", answer("привет"), 0)
         .await
@@ -1906,4 +1997,842 @@ pub async fn summary_tells_what_the_lesson_waits_for() {
     assert_eq!(waiting(&stopped), Waiting::Closed);
     let stopped_summary = lessons.iter().find(|l| l.path == stopped).unwrap();
     assert_eq!(stopped_summary.state, LessonState::Stopped);
+}
+
+// ── Фича 052: замер понимания и план урока ──────────────────────────────────
+
+use typsidian_core::ai::lesson::file::{ProbePart, ProbeState, ProbeSummary};
+use typsidian_core::ai::lesson::plan::{
+    check_progress, layout, parse_plan_progress, parse_plan_set, plan_view, PlanError, PlanStep,
+};
+use typsidian_core::ai::lesson::{skip_probe, PlanStepState};
+
+/// Ответ учителя с одним вызовом инструмента.
+fn tool_reply(text: &str, name: &str, arguments: Value) -> Script {
+    reply(anthropic(&[text], Some((name, arguments)), 100, 10))
+}
+
+fn probe_q(part: &str, question: &str) -> Script {
+    tool_reply(
+        "",
+        "probe_question",
+        json!({"part": part, "question": question}),
+    )
+}
+
+async fn new_probe_lesson(vault: &mut MemoryVault) -> String {
+    create_lesson(
+        vault,
+        "Понять замыкания",
+        &[],
+        Language::Ru,
+        LessonPhase::Probe,
+        10,
+    )
+    .await
+    .unwrap()
+}
+
+fn dont_know() -> Option<UserAnswer> {
+    Some(UserAnswer {
+        text: String::new(),
+        choice: None,
+        confidence: None,
+        thinking: None,
+        dont_know: true,
+    })
+}
+
+fn tool_names(body: &str) -> Vec<String> {
+    let body: Value = serde_json::from_str(body).unwrap();
+    body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+fn plan_events(view: &LessonView) -> usize {
+    view.events
+        .iter()
+        .filter(|event| matches!(event, LessonEvent::Plan { .. }))
+        .count()
+}
+
+fn rejections(view: &LessonView) -> Vec<String> {
+    view.events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::PlanRejected { reason, .. } => Some(reason.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub async fn probe_stage_asks_by_parts_takes_dont_know_and_goes_to_teach() {
+    let mut vault = anthropic_vault().await;
+    let path = new_probe_lesson(&mut vault).await;
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert_eq!(view.phase, LessonPhase::Probe);
+    assert_eq!(view.header.start, LessonPhase::Probe);
+    assert_eq!(view.waiting, Waiting::Start);
+
+    let transport = StreamTransport::with(vec![
+        probe_q("Область видимости", "Что напечатает код?"),
+        probe_q("Захват переменных", "Что запомнит функция?"),
+        tool_reply(
+            "Спасибо, замер окончен.",
+            "probe_done",
+            json!({
+                "parts": [
+                    {"name": "Область видимости", "state": "Known", "note": "ответил верно"},
+                    {"name": "Захват переменных", "state": "Unknown", "note": "не знает"}
+                ],
+                "start": "С захвата переменных"
+            }),
+        ),
+        ask("Начнём.", "Что такое замыкание?", None),
+    ]);
+
+    // Первый вопрос замера: инструкции замера, инструменты замера, без объяснений.
+    let done = cycle(&mut vault, &transport, &path, "a", None, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        tool_names(&transport.body(0)),
+        ["probe_question", "probe_done", "read_note"]
+    );
+    let body: Value = serde_json::from_str(&transport.body(0)).unwrap();
+    let system = body["system"].as_str().unwrap();
+    assert!(system.contains("Ничего не объясняй"));
+    assert!(system.contains("не больше 10 вопросов"));
+    assert!(!system.contains("plan_set"));
+    let question = done.view.last_question.clone().unwrap();
+    assert_eq!(question.part.as_deref(), Some("Область видимости"));
+    assert_eq!(done.view.phase, LessonPhase::Probe);
+    assert_eq!(done.view.probe_count, 1);
+    assert!(done.view.probe_result.is_none());
+
+    // Второй вопрос: ответ пользователя доходит до модели.
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("напечатает 1"),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(1).contains("напечатает 1"));
+    assert!(transport.body(1).contains("часть Область видимости"));
+    assert_eq!(done.view.probe_count, 2);
+
+    // «Не знаю»: событие с флагом, модель получает это как сведение; итог завершает замер,
+    // и урок ждёт: пользователь смотрит итог и план (макет 052, артборд C).
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "c",
+        dont_know(),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(2).contains("Не знаю"));
+    assert_eq!(transport.count(), 3);
+    let view = done.view;
+    assert!(view.events.iter().any(
+        |event| matches!(event, LessonEvent::User { dont_know: true, text, .. } if text.is_empty())
+    ));
+    assert_eq!(view.phase, LessonPhase::Teach);
+    assert_eq!(view.header.start, LessonPhase::Probe);
+    let result = view.probe_result.clone().unwrap();
+    assert_eq!(result.parts.len(), 2);
+    assert_eq!(result.parts[1].name, "Захват переменных");
+    assert_eq!(
+        result.parts[1].state,
+        typsidian_core::ai::lesson::ProbeState::Unknown
+    );
+    assert_eq!(result.start, "С захвата переменных");
+    assert_eq!(view.probe_count, 2);
+    // Итог замера — пауза: урок ждёт «Начать обучение», а не «ответ оборван».
+    assert_eq!(view.waiting, Waiting::User);
+    assert_eq!(done.next, Next::WaitUser);
+    assert!(view.last_question.is_none());
+
+    // «Начать обучение» — повтор без ответа: ход обучения с инструкциями учителя, инструментами
+    // плана и итогом замера в инструкциях.
+    let done = cycle(&mut vault, &transport, &path, "d", None, view.events_len)
+        .await
+        .unwrap();
+    assert_eq!(transport.count(), 4);
+    assert_eq!(
+        tool_names(&transport.body(3)),
+        ["ask_question", "read_note", "plan_set", "plan_progress"]
+    );
+    let body: Value = serde_json::from_str(&transport.body(3)).unwrap();
+    let system = body["system"].as_str().unwrap();
+    assert!(system.contains("Захват переменных: не знает"));
+    assert!(system.contains("С чего начать: С захвата переменных"));
+    assert!(system.contains("предсказание"));
+    assert!(transport.body(3).contains("итог принят"));
+    assert_eq!(done.view.last_question.unwrap().part, None);
+}
+
+pub async fn probe_question_limit_requires_the_result() {
+    let mut vault = anthropic_vault().await;
+    let path = new_probe_lesson(&mut vault).await;
+    let mut scripts: Vec<Script> = (0..15)
+        .map(|i| probe_q(&format!("Часть {i}"), "Вопрос?"))
+        .collect();
+    // Лишний вопрос после предела игнорируется: действует только итог.
+    scripts.push(probe_q("Часть 16", "Ещё вопрос?"));
+    let transport = StreamTransport::with(scripts);
+    let mut expected = 0;
+    let mut first = None;
+    for i in 0..15 {
+        let done = cycle(
+            &mut vault,
+            &transport,
+            &path,
+            &format!("q{i}"),
+            if i == 0 { None } else { answer("ответ") },
+            expected,
+        )
+        .await
+        .unwrap();
+        expected = done.view.events_len;
+        assert_eq!(done.view.probe_count, i + 1);
+        first = Some(done.view);
+    }
+    assert_eq!(first.unwrap().probe_count, 15);
+    for index in 0..15 {
+        assert_eq!(
+            tool_names(&transport.body(index)).len(),
+            3,
+            "до предела вопросы замера разрешены"
+        );
+        assert!(!transport.body(index).contains("это предел"));
+    }
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "last",
+        answer("ответ"),
+        expected,
+    )
+    .await
+    .unwrap();
+    assert_eq!(tool_names(&transport.body(15)), ["probe_done"]);
+    assert!(transport.body(15).contains("Задано 15 вопросов замера"));
+    assert_eq!(
+        done.view.probe_count, 15,
+        "вопрос после предела не засчитан"
+    );
+    assert_eq!(done.view.phase, LessonPhase::Probe);
+}
+
+pub async fn skipping_the_probe_and_old_lessons_without_start() {
+    let mut vault = anthropic_vault().await;
+    let path = new_probe_lesson(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        probe_q("Область видимости", "Что напечатает код?"),
+        ask("Начнём без замера.", "Что такое замыкание?", None),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 0)
+        .await
+        .unwrap();
+    assert!(done.view.last_question.is_some());
+
+    // Пропуск: стадия Teach, событие Phase, вопрос замера больше не ждёт ответа.
+    let view = skip_probe(&mut vault, &path, 300).await.unwrap();
+    assert_eq!(view.phase, LessonPhase::Teach);
+    assert_eq!(view.waiting, Waiting::Retry);
+    assert!(view.last_question.is_none());
+    assert!(view.probe_result.is_none());
+    assert!(matches!(
+        view.events.last().unwrap(),
+        LessonEvent::Phase {
+            phase: LessonPhase::Teach,
+            skipped: true,
+            ..
+        }
+    ));
+    // Повторный пропуск ничего не пишет.
+    let again = skip_probe(&mut vault, &path, 301).await.unwrap();
+    assert_eq!(again.events_len, view.events_len);
+
+    let done = cycle(&mut vault, &transport, &path, "b", None, view.events_len)
+        .await
+        .unwrap();
+    assert!(tool_names(&transport.body(1)).contains(&"plan_set".to_owned()));
+    let body: Value = serde_json::from_str(&transport.body(1)).unwrap();
+    assert!(body["system"]
+        .as_str()
+        .unwrap()
+        .contains("Замер понимания пропущен"));
+    assert_eq!(done.view.phase, LessonPhase::Teach);
+
+    // Урок без `start` в шапке (051) — сразу Teach и ведётся как раньше.
+    let mut vault = vault.with_file(
+        "Уроки/старый.lesson",
+        "{\"format\":1,\"goal\":\"Старый\",\"language\":\"ru\",\"created_at\":1}\n",
+    );
+    let old = open_lesson(&mut vault, "Уроки/старый.lesson")
+        .await
+        .unwrap();
+    assert_eq!(old.header.start, LessonPhase::Teach);
+    assert_eq!(old.phase, LessonPhase::Teach);
+    assert!(old.plan.is_none());
+    assert!(old.plan_history.is_empty());
+    assert_eq!(old.probe_count, 0);
+    // Пропуск в уроке, уже идущем как обучение, ничего не пишет.
+    let same = skip_probe(&mut vault, "Уроки/старый.lesson", 5)
+        .await
+        .unwrap();
+    assert_eq!(same.events_len, 0);
+    // Команды принимают только уроки (L6).
+    assert!(skip_probe(&mut vault, "Заметки/а.typ", 5).await.is_err());
+}
+
+fn step(id: &str, after: &[&str]) -> Value {
+    json!({"id": id, "title": format!("Шаг {id}"), "after": after})
+}
+
+fn plan_args(steps: Vec<Value>, goal: &str, current: &str) -> Value {
+    json!({"steps": steps, "goal": goal, "current": current})
+}
+
+pub async fn plan_is_accepted_laid_out_and_progress_marks_steps() {
+    let mut vault = anthropic_vault().await;
+    let path = new_lesson(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        tool_reply(
+            "Вот план.",
+            "plan_set",
+            plan_args(
+                vec![
+                    step("a", &[]),
+                    step("b", &["a"]),
+                    step("c", &["a"]),
+                    step("d", &["b", "c"]),
+                ],
+                "d",
+                "a",
+            ),
+        ),
+        tool_reply(
+            "Идём дальше.",
+            "plan_progress",
+            json!({"current": "b", "done": ["a"]}),
+        ),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", answer("начнём"), 0)
+        .await
+        .unwrap();
+    let view = done.view;
+    assert_eq!(plan_events(&view), 1);
+    let plan = view.plan.clone().unwrap();
+    assert_eq!(plan.version, 1);
+    assert_eq!(plan.changes, 0);
+    assert_eq!(plan.goal, "d");
+    assert_eq!(plan.current, "a");
+    assert_eq!((plan.cols, plan.rows), (3, 2));
+    let cell = |id: &str| {
+        let s = plan.steps.iter().find(|s| s.id == id).unwrap();
+        (s.x, s.y)
+    };
+    assert_eq!(cell("a"), (0, 0));
+    assert_eq!(cell("b"), (1, 0));
+    assert_eq!(cell("c"), (1, 1));
+    assert_eq!(cell("d"), (2, 0));
+    assert_eq!(plan.edges.len(), 4);
+    assert!(plan.edges.iter().any(|e| e.from == "c" && e.to == "d"));
+    assert!(plan.steps.iter().all(|s| !s.added));
+    assert_eq!(plan.steps[0].state, PlanStepState::Current);
+    assert_eq!(plan.steps[1].state, PlanStepState::Todo);
+    // Якорь — реплика учителя того хода, на котором шаг стал текущим.
+    let teacher = view
+        .events
+        .iter()
+        .position(|e| matches!(e, LessonEvent::Teacher { .. }))
+        .unwrap();
+    assert_eq!(plan.steps[0].anchor, Some(teacher as u32));
+    assert_eq!(plan.steps[1].anchor, None);
+    assert_eq!(view.plan_history.len(), 1);
+
+    // Инструкции следующего хода содержат план: модель знает id шагов.
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("понял"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    let body: Value = serde_json::from_str(&transport.body(1)).unwrap();
+    assert!(body["system"].as_str().unwrap().contains("[>] a: Шаг a"));
+    let view = done.view;
+    let plan = view.plan.clone().unwrap();
+    assert_eq!(plan.version, 1, "прогресс не меняет версию");
+    assert_eq!(plan.current, "b");
+    let states: Vec<PlanStepState> = plan.steps.iter().map(|s| s.state).collect();
+    assert_eq!(
+        states,
+        [
+            PlanStepState::Done,
+            PlanStepState::Current,
+            PlanStepState::Todo,
+            PlanStepState::Todo
+        ]
+    );
+    let second_teacher = view
+        .events
+        .iter()
+        .rposition(|e| matches!(e, LessonEvent::Teacher { .. }))
+        .unwrap();
+    assert_eq!(
+        plan.steps[0].anchor,
+        Some(teacher as u32),
+        "пройденный помнит свой якорь"
+    );
+    assert_eq!(plan.steps[1].anchor, Some(second_teacher as u32));
+    assert_eq!(view.plan_history.len(), 1);
+}
+
+pub async fn broken_plans_are_refused_with_a_reason_and_never_shown() {
+    let many: Vec<Value> = (0..41).map(|i| step(&format!("s{i}"), &[])).collect();
+    let long_id = "я".repeat(65);
+    let cases: Vec<(Value, &str)> = vec![
+        (
+            plan_args(vec![step("a", &["b"]), step("b", &["a"])], "a", "a"),
+            "цикл",
+        ),
+        (plan_args(vec![step("a", &["a"])], "a", "a"), "цикл"),
+        (
+            plan_args(vec![step("a", &[]), step("b", &["нет"])], "b", "a"),
+            "несуществующий шаг: b -> нет",
+        ),
+        (plan_args(many, "s0", "s0"), "цель слишком широкая"),
+        (
+            plan_args(vec![step("a", &[]), step("a", &[])], "a", "a"),
+            "id шага повторяется: a",
+        ),
+        (
+            plan_args(vec![step("a", &[])], "x", "a"),
+            "goal — не существующий шаг",
+        ),
+        (
+            plan_args(vec![step("a", &[])], "a", "x"),
+            "current — не существующий шаг",
+        ),
+        (
+            plan_args(vec![step(&long_id, &[])], &long_id, &long_id),
+            "слишком длинный id",
+        ),
+        (json!({"goal": "a", "current": "a"}), "разобрать не удалось"),
+        (plan_args(vec![], "a", "a"), "нет шагов"),
+    ];
+    for (args, reason) in cases {
+        let mut vault = anthropic_vault().await;
+        let path = new_lesson(&mut vault).await;
+        let transport = StreamTransport::with(vec![
+            tool_reply("План.", "plan_set", args.clone()),
+            ask("Исправил.", "Что такое замыкание?", None),
+        ]);
+        let done = cycle(&mut vault, &transport, &path, "a", answer("начнём"), 0)
+            .await
+            .unwrap();
+        // Урок не прервался: отказ ушёл модели результатом инструмента, ход продолжился.
+        assert_eq!(transport.count(), 2, "{reason}");
+        assert_eq!(done.next, Next::WaitUser);
+        assert!(done.view.last_question.is_some());
+        let found = rejections(&done.view);
+        assert_eq!(found.len(), 1, "{reason}");
+        assert!(found[0].contains(reason), "{reason}: {}", found[0]);
+        assert!(transport.body(1).contains("Результат plan_set: отклонено"));
+        assert!(transport.body(1).contains(reason), "{reason}");
+        assert_eq!(plan_events(&done.view), 0);
+        assert!(done.view.plan.is_none(), "{reason}");
+        assert!(done.view.plan_history.is_empty());
+        let opened = open_lesson(&mut vault, &path).await.unwrap();
+        assert!(opened.plan.is_none());
+    }
+
+    // Прогресс до плана и с несуществующим шагом — отказ, структура не меняется.
+    let mut vault = anthropic_vault().await;
+    let path = new_lesson(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        tool_reply(
+            "Отметка.",
+            "plan_progress",
+            json!({"current": "a", "done": []}),
+        ),
+        tool_reply(
+            "План.",
+            "plan_set",
+            plan_args(vec![step("a", &[])], "a", "a"),
+        ),
+        tool_reply(
+            "Отметка.",
+            "plan_progress",
+            json!({"current": "a", "done": ["нет"]}),
+        ),
+        ask("Вопрос.", "Что такое замыкание?", None),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", answer("начнём"), 0)
+        .await
+        .unwrap();
+    assert_eq!(rejections(&done.view).len(), 1);
+    assert!(done.view.plan.is_some());
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("дальше"),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    let found = rejections(&done.view);
+    assert_eq!(found.len(), 2);
+    assert!(found[0].contains("плана ещё нет"));
+    assert!(found[1].contains("нет"));
+    let plan = done.view.plan.unwrap();
+    assert_eq!(plan.version, 1);
+    assert!(plan.steps.iter().all(|s| s.state != PlanStepState::Done));
+
+    // Слишком длинное название обрезается, идентификатор не обрезается молча.
+    let mut vault = anthropic_vault().await;
+    let path = new_lesson(&mut vault).await;
+    let title = "Ю".repeat(500);
+    let transport = StreamTransport::with(vec![tool_reply(
+        "План.",
+        "plan_set",
+        json!({"steps": [{"id": "a", "title": title}], "goal": "a", "current": "a",
+            "reason": "п".repeat(1000)}),
+    )]);
+    let done = cycle(&mut vault, &transport, &path, "a", answer("начнём"), 0)
+        .await
+        .unwrap();
+    let plan = done.view.plan.unwrap();
+    assert_eq!(plan.steps[0].title.chars().count(), 120);
+    assert_eq!(plan.last_reason.unwrap().chars().count(), 300);
+
+    // Событие с ошибкой структуры, пришедшее в файл с синхронизацией, в вид не попадает.
+    let bad = |at, version| LessonEvent::Plan {
+        at,
+        version,
+        steps: vec![
+            PlanStep {
+                id: "x".to_owned(),
+                title: "x".to_owned(),
+                after: vec!["y".to_owned()],
+                known: false,
+            },
+            PlanStep {
+                id: "y".to_owned(),
+                title: "y".to_owned(),
+                after: vec!["x".to_owned()],
+                known: false,
+            },
+        ],
+        goal: "x".to_owned(),
+        current: "x".to_owned(),
+        reason: None,
+    };
+    typsidian_core::ai::lesson::file::append_events(&mut vault, &path, &[bad(500, 2)])
+        .await
+        .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert_eq!(view.plan.unwrap().version, 1);
+    assert_eq!(view.plan_history.len(), 1);
+}
+
+pub async fn layout_has_no_overlaps_and_layers_follow_the_longest_path() {
+    // Алмаз с длинной веткой: слой — самый длинный путь.
+    let s = |id: &str, after: &[&str]| PlanStep {
+        id: id.to_owned(),
+        title: id.to_owned(),
+        after: after.iter().map(|a| (*a).to_owned()).collect(),
+        known: false,
+    };
+    let steps = vec![
+        s("a", &[]),
+        s("b", &["a"]),
+        s("c", &["b"]),
+        s("d", &["a", "c"]),
+        s("e", &[]),
+    ];
+    let (cells, cols, rows) = layout(&steps).unwrap();
+    assert_eq!(cells[3].0, 3, "d после самого длинного пути a-b-c");
+    assert_eq!(cells[4], (0, 1), "независимый шаг — в первом слое");
+    assert_eq!((cols, rows), (4, 2));
+
+    // Один проход уменьшения пересечений: шаги слоя встают напротив своих зависимостей.
+    let steps = vec![s("p", &[]), s("q", &[]), s("r", &["q"]), s("t", &["p"])];
+    let (cells, _, _) = layout(&steps).unwrap();
+    assert!(cells[3].1 < cells[2].1, "t связан с p (выше), r с q (ниже)");
+
+    // 40 шагов: клетки не повторяются, каждый шаг на месте.
+    let big: Vec<PlanStep> = (0..40usize)
+        .map(|i| {
+            let mut after: Vec<String> = if i < 5 {
+                Vec::new()
+            } else {
+                vec![format!("n{}", i - 5), format!("n{}", (i * 3) % (i - 1))]
+            };
+            after.sort();
+            after.dedup();
+            PlanStep {
+                id: format!("n{i}"),
+                title: format!("n{i}"),
+                after,
+                known: false,
+            }
+        })
+        .collect();
+    let (cells, cols, rows) = layout(&big).unwrap();
+    assert_eq!(cells.len(), 40);
+    let unique: std::collections::HashSet<(u32, u32)> = cells.iter().copied().collect();
+    assert_eq!(unique.len(), 40, "наложений нет");
+    assert!(cells.iter().all(|(x, y)| *x < cols && *y < rows));
+    for (i, step) in big.iter().enumerate() {
+        for dep in &step.after {
+            let j = big.iter().position(|b| &b.id == dep).unwrap();
+            assert!(cells[j].0 < cells[i].0, "зависимость левее");
+        }
+    }
+    // Цикл не раскладывается.
+    assert!(layout(&[s("a", &["b"]), s("b", &["a"])]).is_none());
+}
+
+pub async fn plan_rebuild_makes_versions_with_added_marks_and_history() {
+    let mut vault = anthropic_vault().await;
+    let path = new_lesson(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        tool_reply(
+            "План.",
+            "plan_set",
+            plan_args(vec![step("a", &[]), step("b", &["a"])], "b", "a"),
+        ),
+        tool_reply(
+            "Перестроил.",
+            "plan_set",
+            json!({
+                "steps": [step("a", &[]), step("c", &["a"]), step("b", &["c"])],
+                "goal": "b", "current": "c", "reason": "не хватало основы"
+            }),
+        ),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", answer("начнём"), 0)
+        .await
+        .unwrap();
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("не понял основу"),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    let view = done.view;
+    let plan = view.plan.clone().unwrap();
+    assert_eq!(plan.version, 2);
+    assert_eq!(plan.changes, 1);
+    assert_eq!(plan.last_reason.as_deref(), Some("не хватало основы"));
+    let added: Vec<&str> = plan
+        .steps
+        .iter()
+        .filter(|s| s.added)
+        .map(|s| s.id.as_str())
+        .collect();
+    assert_eq!(added, ["c"]);
+    assert_eq!(plan.current, "c");
+    assert_eq!(view.plan_history.len(), 2);
+    assert_eq!(view.plan_history[0].version, 1);
+    assert_eq!(view.plan_history[0].steps, 2);
+    assert_eq!(view.plan_history[0].reason, None);
+    assert_eq!(view.plan_history[1].steps, 3);
+    assert_eq!(
+        view.plan_history[1].reason.as_deref(),
+        Some("не хватало основы")
+    );
+
+    // Прежняя версия доступна с её раскладкой; несуществующей нет.
+    let first = typsidian_core::ai::lesson::plan_version(&vault, &path, 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.version, 1);
+    assert_eq!(first.steps.len(), 2);
+    assert_eq!(first.changes, 0);
+    assert_eq!(first.current, "a");
+    assert!(first.steps.iter().all(|s| !s.added));
+    assert_eq!(first.cols, 2);
+    let second = typsidian_core::ai::lesson::plan_version(&vault, &path, 2)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second, plan);
+    assert!(typsidian_core::ai::lesson::plan_version(&vault, &path, 3)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(typsidian_core::ai::lesson::plan_version(&vault, &path, 0)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        typsidian_core::ai::lesson::plan_version(&vault, "Заметки/а.typ", 1)
+            .await
+            .is_err()
+    );
+}
+
+// ── Фича 052: исправления ревью безопасности (T018–T022) ─────────────────────
+
+fn plan_step(id: &str, title: &str, after: Vec<String>) -> PlanStep {
+    PlanStep {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        after,
+        known: false,
+    }
+}
+
+fn plan_event(steps: Vec<PlanStep>, goal: &str, current: &str) -> LessonEvent {
+    LessonEvent::Plan {
+        at: 1,
+        version: 1,
+        steps,
+        goal: goal.to_owned(),
+        current: current.to_owned(),
+        reason: None,
+    }
+}
+
+/// M1: сотни тысяч `PlanProgress` без реплик открываются за линейное время.
+pub async fn plan_view_of_a_huge_progress_log_is_linear() {
+    let mut events = vec![plan_event(
+        vec![plan_step("a", "А", vec![]), plan_step("b", "Б", vec![])],
+        "b",
+        "a",
+    )];
+    for i in 0..200_000 {
+        events.push(LessonEvent::PlanProgress {
+            at: 2 + i,
+            current: if i % 2 == 0 { "b" } else { "a" }.to_owned(),
+            done: Vec::new(),
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let started = std::time::Instant::now();
+    let view = plan_view(&events, None).unwrap();
+    assert!(view.steps.iter().all(|s| s.anchor.is_some()));
+    #[cfg(not(target_arch = "wasm32"))]
+    assert!(started.elapsed().as_secs_f64() < 2.0);
+
+    // С репликой якорь — она.
+    let mut events = vec![
+        LessonEvent::Teacher {
+            at: 1,
+            text: "Привет".to_owned(),
+            question: None,
+            interrupted: false,
+            failure: None,
+            model: "m".to_owned(),
+            input_tokens: None,
+            output_tokens: None,
+            cost_usd: None,
+        },
+        plan_event(vec![plan_step("a", "А", vec![])], "a", "a"),
+    ];
+    events.push(LessonEvent::PlanProgress {
+        at: 3,
+        current: "a".to_owned(),
+        done: Vec::new(),
+    });
+    let view = plan_view(&events, None).unwrap();
+    assert_eq!(view.steps[0].anchor, Some(0));
+}
+
+/// M2: список `after` длиннее предела обрывается ошибкой, повторы не помогают обойти предел.
+pub async fn plan_set_after_over_the_limit_is_malformed() {
+    let after: Vec<Value> = (0..41).map(|i| json!(format!("s{i}"))).collect();
+    let args = plan_args(
+        vec![json!({"id": "a", "title": "А", "after": after})],
+        "a",
+        "a",
+    );
+    assert_eq!(parse_plan_set(&args).unwrap_err(), PlanError::Malformed);
+    // Миллион одинаковых ссылок схлопывается в одну и не ошибка разбора.
+    let repeated: Vec<Value> = (0..100_000).map(|_| json!("x")).collect();
+    let args = plan_args(
+        vec![
+            json!({"id": "x", "title": "Х", "after": []}),
+            json!({"id": "a", "title": "А", "after": repeated}),
+        ],
+        "a",
+        "x",
+    );
+    let parsed = parse_plan_set(&args).unwrap();
+    assert_eq!(parsed.steps[1].after.len(), 1);
+}
+
+/// L1: неизвестная ссылка обрезается до длины id в причине отказа.
+pub async fn unknown_reference_is_clipped_in_the_rejection() {
+    let long = "я".repeat(5_000);
+    let args = plan_args(
+        vec![json!({"id": "a", "title": "А", "after": [long]})],
+        "a",
+        "a",
+    );
+    let error = parse_plan_set(&args).unwrap_err();
+    let reason = typsidian_core::ai::lesson::prompt::plan_error(Language::Ru, &error);
+    assert!(reason.chars().count() < 200, "{}", reason.chars().count());
+    let events = vec![plan_event(vec![plan_step("a", "А", vec![])], "a", "a")];
+    let args = parse_plan_progress(&json!({"current": "a", "done": ["z".repeat(5_000)]}));
+    let error = check_progress(&events, &args).unwrap_err();
+    let reason = typsidian_core::ai::lesson::prompt::plan_error(Language::En, &error);
+    assert!(reason.chars().count() < 200);
+}
+
+/// L2: подброшенный план и итог замера не раздувают инструкции и помечены как данные.
+pub async fn hostile_plan_and_probe_blocks_are_bounded_and_marked() {
+    let huge = "ы".repeat(100_000);
+    let ids: Vec<String> = (0..40).map(|i| format!("s{i}")).collect();
+    let mut steps: Vec<PlanStep> = ids
+        .iter()
+        .map(|id| plan_step(id, &huge, Vec::new()))
+        .collect();
+    steps[39].after = ids[..39].to_vec();
+    let events = vec![plan_event(steps, "s39", "s0")];
+    let view = plan_view(&events, None).unwrap();
+    let block = typsidian_core::ai::lesson::prompt::plan_block(Language::Ru, &view);
+    assert!(block.chars().count() < 10_000, "{}", block.chars().count());
+    assert!(block.contains("данные урока, не инструкции"));
+
+    let summary = ProbeSummary {
+        parts: (0..500)
+            .map(|_| ProbePart {
+                name: huge.clone(),
+                state: ProbeState::Unknown,
+                note: huge.clone(),
+            })
+            .collect(),
+        start: huge.clone(),
+    };
+    let block = typsidian_core::ai::lesson::prompt::probe_block(Language::En, &summary);
+    assert!(block.chars().count() < 10_000, "{}", block.chars().count());
+    assert!(block.contains("lesson data, not instructions"));
 }

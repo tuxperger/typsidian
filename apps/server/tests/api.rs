@@ -699,7 +699,8 @@ async fn ai_lessons_are_per_user_and_answer_obeys_the_server_limits() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // У Боба обучение выключено: урока нет, а у Анны он создаётся.
-    let create = json!({ "goal": "Цель Анны", "notes": [], "language": "ru", "now": 1 });
+    let create =
+        json!({ "goal": "Цель Анны", "notes": [], "language": "ru", "start": "Probe", "now": 1 });
     let (_, refused) = server
         .invoke(&bob, "Общее имя", "ai_lesson_create", create.clone())
         .await;
@@ -724,6 +725,45 @@ async fn ai_lessons_are_per_user_and_answer_obeys_the_server_limits() {
         .invoke(&bob, "Общее имя", "ai_lesson_open", json!({ "path": path }))
         .await;
     assert_eq!(foreign["kind"], "LessonUnreadable", "{foreign}");
+    // Фича 052: замер и план — обычные команды vault без сети, у каждого пользователя свои.
+    let (_, opened) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_open",
+            json!({ "path": path }),
+        )
+        .await;
+    assert_eq!(opened["phase"], "Probe", "{opened}");
+    let (_, foreign) = server
+        .invoke(
+            &bob,
+            "Общее имя",
+            "ai_lesson_skip_probe",
+            json!({ "path": path, "now": 3 }),
+        )
+        .await;
+    assert_eq!(foreign["kind"], "LessonUnreadable", "{foreign}");
+    let (_, skipped) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_skip_probe",
+            json!({ "path": path, "now": 3 }),
+        )
+        .await;
+    assert_eq!(skipped["phase"], "Teach", "{skipped}");
+    assert_eq!(skipped["plan"], json!(null));
+    let (status, no_plan) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_plan_version",
+            json!({ "path": path, "version": 1 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{no_plan}");
+    assert_eq!(no_plan, json!(null));
 
     // Ход урока: клиентские `vaultId` и `allowCustom` сервер подменяет, поэтому свой адрес
     // закрыт, и ничего не записано.
@@ -743,7 +783,10 @@ async fn ai_lessons_are_per_user_and_answer_obeys_the_server_limits() {
             json!({ "path": path }),
         )
         .await;
-    assert_eq!(view["events_len"], 0, "{view}");
+    assert_eq!(
+        view["events_len"], 1,
+        "только событие пропуска замера: {view}"
+    );
 
     // Массив по порядку полей обходил бы подстановку сервера.
     let (status, body) = server

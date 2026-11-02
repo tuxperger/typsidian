@@ -1864,9 +1864,10 @@ pub async fn ai_lesson_create(
     goal: String,
     notes: Vec<String>,
     language: ai::lesson::Language,
+    start: ai::lesson::LessonPhase,
     now: i64,
 ) -> Answer<String, Failure<ai::AiFailure>> {
-    typsidian_host::commands::ai_lesson_create(&state, goal, notes, language, now).await
+    typsidian_host::commands::ai_lesson_create(&state, goal, notes, language, start, now).await
 }
 
 #[tauri::command]
@@ -1939,4 +1940,22 @@ pub async fn ai_lesson_set_language(
     now: i64,
 ) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
     typsidian_host::commands::ai_lesson_set_language(&state, path, language, now).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_skip_probe(
+    state: State<'_, Vault>,
+    path: String,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_skip_probe(&state, path, now).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_plan_version(
+    state: State<'_, Vault>,
+    path: String,
+    version: u32,
+) -> Answer<Option<ai::lesson::PlanView>, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_plan_version(&state, path, version).await
 }

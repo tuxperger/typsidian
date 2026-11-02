@@ -54,6 +54,8 @@ pub const ALLOWED: &[&str] = &[
     "ai_lesson_checkpoint",
     "ai_lesson_set_state",
     "ai_lesson_set_language",
+    "ai_lesson_skip_probe",
+    "ai_lesson_plan_version",
     "snapshots_clear",
     "tasks_view",
     "task_toggle",

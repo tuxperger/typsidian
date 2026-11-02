@@ -130,6 +130,8 @@ import type {
   AiProvider,
   AiSettings,
   Language,
+  LessonPhase,
+  PlanView,
   LessonProgress,
   LessonState,
   LessonSummary,
@@ -841,8 +843,11 @@ export interface AiClient {
  */
 export interface LessonClient {
   list(): Promise<LessonSummary[]>;
-  /** Создаёт файл урока и отдаёт его путь. */
-  create(goal: string, notes: string[], language: Language): Promise<string>;
+  /**
+   * Создаёт файл урока и отдаёт его путь. `start` — стадия, с которой начинается урок
+   * (замер или обучение); по умолчанию обучение.
+   */
+  create(goal: string, notes: string[], language: Language, start?: LessonPhase): Promise<string>;
   open(path: string): Promise<LessonView>;
   /**
    * Ответ пользователя и весь ход учителя с автопродолжениями. `answer` не задан —
@@ -861,6 +866,10 @@ export interface LessonClient {
   checkpoint(vaultId: string, path: string, requestId: string): Promise<void>;
   setState(path: string, state: LessonState): Promise<LessonView>;
   setLanguage(path: string, language: Language): Promise<LessonView>;
+  /** Пропуск замера (052): стадия становится обучением. */
+  skipProbe(path: string): Promise<LessonView>;
+  /** План версии `version` с раскладкой; `undefined` — такой версии нет (052). */
+  planVersion(path: string, version: number): Promise<PlanView | undefined>;
 }
 
 /**

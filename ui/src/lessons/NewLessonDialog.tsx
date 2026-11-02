@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import type { AiProvider, AiSettings, Note } from "../wasm-core/typsidian_core.js";
+import type { AiProvider, AiSettings, LessonPhase, Note } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
@@ -53,6 +53,8 @@ export function NewLessonDialog({
   const [chosen, setChosen] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
+  // Замер понимания перед уроком — по умолчанию (052, макет A); его можно пропустить.
+  const [start, setStart] = useState<LessonPhase>("Probe");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,7 +93,7 @@ export function NewLessonDialog({
     setBusy(true);
     setError(null);
     try {
-      const path = await client.lessons.create(goal.trim(), chosen, language);
+      const path = await client.lessons.create(goal.trim(), chosen, language, start);
       requestLessonStart(path);
       onCreated(path);
     } catch (failure) {
@@ -206,6 +208,20 @@ export function NewLessonDialog({
                 </ul>
               </div>
             )}
+
+            <div className="ts-lesson__lbl" id={`${id}-start`}>
+              {t("lessons.new.startLabel")}
+            </div>
+            <span className="ts-lesson__seg" role="group" aria-labelledby={`${id}-start`}>
+              {(["Probe", "Teach"] as const).map((item) => (
+                <button key={item} type="button" aria-pressed={start === item} onClick={() => setStart(item)}>
+                  {item === "Probe" ? t("lessons.new.start.probe") : t("lessons.new.start.teach")}
+                </button>
+              ))}
+            </span>
+            <p className="ts-lesson__hint ts-lesson__start-hint">
+              {start === "Probe" ? t("lessons.new.start.probeHint") : t("lessons.new.start.teachHint")}
+            </p>
 
             <p className="ts-lesson__hint">
               {t("lessons.new.hint", {

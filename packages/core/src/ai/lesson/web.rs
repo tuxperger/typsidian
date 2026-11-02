@@ -6,11 +6,14 @@
 
 use wasm_bindgen::prelude::*;
 
-use super::file::{Language, LessonState, LessonSummary, LessonView};
+use super::file::{Language, LessonPhase, LessonState, LessonSummary, LessonView};
 use super::partial::{checkpoint, progress, LessonProgress};
+use super::plan::PlanView;
 use super::stream::TurnReply;
 use super::turn::{begin_turn, finish_turn, send_turn, PreparedTurn, TurnDone, UserAnswer};
-use super::{create_lesson, list_lessons, open_lesson, set_language, set_state};
+use super::{
+    create_lesson, list_lessons, open_lesson, plan_version, set_language, set_state, skip_probe,
+};
 use crate::ai::client::{provider_key, require_approved, Connection};
 use crate::ai::settings::load_settings;
 use crate::ai::transport::DefaultTransport;
@@ -29,9 +32,10 @@ pub async fn lesson_create_js(
     goal: String,
     notes: Vec<String>,
     language: Language,
+    start: LessonPhase,
     now: f64,
 ) -> Result<String, AiFailure> {
-    create_lesson(backend, &goal, &notes, language, now as i64).await
+    create_lesson(backend, &goal, &notes, language, start, now as i64).await
 }
 
 #[wasm_bindgen(js_name = lessonOpen)]
@@ -141,4 +145,24 @@ pub async fn lesson_set_language_js(
     now: f64,
 ) -> Result<LessonView, AiFailure> {
     set_language(backend, &path, language, now as i64).await
+}
+
+/// Пропуск замера: событие `Phase { Teach, skipped }` (052).
+#[wasm_bindgen(js_name = lessonSkipProbe)]
+pub async fn lesson_skip_probe_js(
+    backend: &mut WebBackend,
+    path: String,
+    now: f64,
+) -> Result<LessonView, AiFailure> {
+    skip_probe(backend, &path, now as i64).await
+}
+
+/// План версии `version` с раскладкой; `undefined`, если такой версии нет (052).
+#[wasm_bindgen(js_name = lessonPlanVersion)]
+pub async fn lesson_plan_version_js(
+    backend: &WebBackend,
+    path: String,
+    version: u32,
+) -> Result<Option<PlanView>, AiFailure> {
+    plan_version(backend, &path, version).await
 }

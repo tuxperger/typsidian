@@ -811,6 +811,8 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::ai_lesson_checkpoint,
             commands::ai_lesson_set_state,
             commands::ai_lesson_set_language,
+            commands::ai_lesson_skip_probe,
+            commands::ai_lesson_plan_version,
             commands::file_kind,
             commands::begin_edit,
             commands::pending_conflict,

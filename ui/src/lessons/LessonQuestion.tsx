@@ -34,9 +34,11 @@ export interface LessonQuestionProps {
   draft: AnswerDraft;
   onDraft(draft: AnswerDraft): void;
   onSubmit(): void;
+  /** «Не знаю» — только у вопросов замера (052): ответ-сведение без текста. */
+  onDontKnow?: () => void;
 }
 
-export function LessonQuestion({ question, draft, onDraft, onSubmit }: LessonQuestionProps): React.JSX.Element {
+export function LessonQuestion({ question, draft, onDraft, onSubmit, onDontKnow }: LessonQuestionProps): React.JSX.Element {
   const { t } = useI18n();
   const id = useId();
   const choices = question?.choices ?? [];
@@ -59,6 +61,7 @@ export function LessonQuestion({ question, draft, onDraft, onSubmit }: LessonQue
         if (ready) onSubmit();
       }}
     >
+      {question?.part != null && <PartKicker part={question.part} />}
       {question !== undefined && <p className="ts-lesson__qt">{question.question}</p>}
 
       {choices.length > 0 ? (
@@ -128,10 +131,17 @@ export function LessonQuestion({ question, draft, onDraft, onSubmit }: LessonQue
 
       <div className="ts-lesson__acts">
         <span className="ts-lesson__hint ts-lesson__acts-hint">
-          {choices.length === 0 && draft.confidence === null && !ready
-            ? t("lessons.q.confidenceOptional")
-            : t("lessons.q.sendHint", { keys: modEnterLabel() })}
+          {onDontKnow !== undefined
+            ? t("lessons.q.dontKnowHint")
+            : choices.length === 0 && draft.confidence === null && !ready
+              ? t("lessons.q.confidenceOptional")
+              : t("lessons.q.sendHint", { keys: modEnterLabel() })}
         </span>
+        {onDontKnow !== undefined && (
+          <button type="button" className="ts-btn" onClick={onDontKnow}>
+            {t("lessons.q.dontKnow")}
+          </button>
+        )}
         <button type="submit" className="ts-btn ts-btn--accent" disabled={!ready}>
           {t("lessons.q.send")}
         </button>
@@ -140,11 +150,18 @@ export function LessonQuestion({ question, draft, onDraft, onSubmit }: LessonQue
   );
 }
 
+/** Метка части цели над вопросом замера (макет 052, B). */
+function PartKicker({ part }: { part: string }): React.JSX.Element {
+  const { t } = useI18n();
+  return <div className="ts-lesson__kicker">{t("lessons.q.part", { part })}</div>;
+}
+
 /** Вопрос из истории: только чтение. */
 export function PastQuestion({ question }: { question: QuestionData }): React.JSX.Element {
   const choices = question.choices ?? [];
   return (
     <div className="ts-lesson__q ts-lesson__q--past">
+      {question.part != null && <PartKicker part={question.part} />}
       <p className="ts-lesson__qt">{question.question}</p>
       {choices.length > 0 && (
         <ol className="ts-lesson__plist">

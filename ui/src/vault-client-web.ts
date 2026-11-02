@@ -82,10 +82,12 @@ import {
   lessonFinish,
   lessonList,
   lessonOpen,
+  lessonPlanVersion,
   lessonProgress,
   lessonSend,
   lessonSetLanguage,
   lessonSetState,
+  lessonSkipProbe,
   type AiFailure,
   type ProbeReply,
   type TurnReply,
@@ -560,7 +562,8 @@ export function webVaultClient(
     // пользователя, решает ядро (`Next`).
     lessons: {
       list: () => call(() => lessonList(backend)),
-      create: (goal, notes, language) => call(() => lessonCreate(backend, goal, notes, language, Date.now())),
+      create: (goal, notes, language, start = "Teach") =>
+        call(() => lessonCreate(backend, goal, notes, language, start, Date.now())),
       open: (path) => call(() => lessonOpen(backend, path)),
       answer: async (vaultId, path, requestId, answer, expected) => {
         let next = answer;
@@ -587,6 +590,8 @@ export function webVaultClient(
       checkpoint: (vaultId, path, requestId) => call(() => lessonCheckpoint(backend, vaultId, path, requestId)),
       setState: (path, state) => call(() => lessonSetState(backend, path, state, Date.now())),
       setLanguage: (path, language) => call(() => lessonSetLanguage(backend, path, language, Date.now())),
+      skipProbe: (path) => call(() => lessonSkipProbe(backend, path, Date.now())),
+      planVersion: (path, version) => call(() => lessonPlanVersion(backend, path, version)),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

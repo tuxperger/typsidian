@@ -106,4 +106,73 @@ export const lessons = {
   "lessons.cannot.noModel": "No model chosen. Choose one in the settings.",
   "lessons.cannot.noEndpoint": "No address entered for the custom connection. Enter it in the settings.",
   "lessons.cannot.openSettings": "Open settings",
+
+  // ── Understanding probe (052, A–C) ─────────────────────────────────
+  "lessons.new.startLabel": "Start",
+  "lessons.new.start.probe": "With an understanding probe",
+  "lessons.new.start.teach": "Straight to the lesson",
+  "lessons.new.start.probeHint":
+    "Probe: the teacher asks a few questions about what the goal stands on and explains nothing until it finds where to begin.",
+  "lessons.new.start.teachHint": "The teacher starts with the goal and builds the plan along the way.",
+  "lessons.phase.probe": "PROBE",
+  "lessons.phase.probeCount": (p: { count: number }) => `PROBE · ${p.count} of ~10`,
+  "lessons.phase.probeMore": (p: { count: number }) => `PROBE · ${p.count}`,
+  "lessons.q.part": (p: { part: string }) => `PART: ${p.part}`,
+  "lessons.q.dontKnow": "I don’t know",
+  "lessons.q.dontKnowHint": "“I don’t know” is an answer too",
+  "lessons.q.dontKnowSaid": "I don’t know",
+  "lessons.probe.skip": "Skip the probe",
+  "lessons.probe.skipped": "probe skipped",
+  "lessons.probe.title": "Where we start",
+  "lessons.probe.state.Known": "clear",
+  "lessons.probe.state.Partial": "partly",
+  "lessons.probe.state.Unknown": "unfamiliar",
+  "lessons.probe.startWith": "We begin with",
+  "lessons.probe.showPlan": "Show the plan",
+  "lessons.probe.begin": "Start learning",
+
+  // ── Plan (052, D–G) ────────────────────────────────────────────────
+  "lessons.plan.title": "Plan",
+  "lessons.plan.toggle": "Plan ◧",
+  "lessons.plan.close": "Close the plan",
+  "lessons.plan.view": "Plan view",
+  "lessons.plan.map": "Map",
+  "lessons.plan.list": "List",
+  "lessons.plan.mapLabel": "Plan map",
+  "lessons.plan.listLabel": "Plan steps",
+  "lessons.plan.summary": (p: { current: number; total: number }) => `step ${p.current} of ${p.total}`,
+  "lessons.plan.summaryChanged": (p: { current: number; total: number; changes: number }) =>
+    `step ${p.current} of ${p.total} · plan changed ${enN(p.changes, "# time", "# times")}`,
+  "lessons.plan.state.Done": "done",
+  "lessons.plan.state.Current": "current",
+  "lessons.plan.state.Todo": "ahead",
+  "lessons.plan.state.Known": "already known",
+  "lessons.plan.now": "now",
+  "lessons.plan.added": "added",
+  "lessons.plan.goal": "goal",
+  "lessons.plan.fromProbe": "probe",
+  "lessons.plan.after": (p: { steps: string }) => `← ${p.steps}`,
+  "lessons.plan.jump": (p: { title: string }) => `Show where “${p.title}” was covered`,
+  "lessons.plan.hint": "A completed step opens the place in the lesson where it was covered.",
+  "lessons.plan.changed": "The plan changed.",
+  "lessons.plan.history": "History",
+  "lessons.plan.noReason": "The teacher did not give a reason.",
+  "lessons.plan.created": (p: { count: number }) => `plan made · ${enN(p.count, "# step", "# steps")}`,
+  "lessons.plan.changedSep": (p: { version: number }) => `plan changed · version ${p.version}`,
+  "lessons.plan.rejected": (p: { reason: string }) =>
+    `The teacher proposed a plan that was not accepted: ${p.reason} The teacher is fixing it. The lesson goes on.`,
+  "lessons.plan.rejectedProgress": (p: { reason: string }) =>
+    `A step mark was not accepted: ${p.reason} The lesson goes on.`,
+
+  // ── Plan history (F) ───────────────────────────────────────────────
+  "lessons.plan.history.title": "Plan history",
+  "lessons.plan.history.back": "Back to the plan",
+  "lessons.plan.history.version": (p: { version: number; steps: number }) =>
+    `Version ${p.version} · ${enN(p.steps, "# step", "# steps")}`,
+  "lessons.plan.history.open": "Open",
+  "lessons.plan.history.openLabel": (p: { version: number }) => `Open plan version ${p.version}`,
+  "lessons.plan.history.viewing": (p: { version: number; total: number }) =>
+    `Version ${p.version} of ${p.total} — not the current plan.`,
+  "lessons.plan.history.current": "To the current plan",
+  "lessons.plan.history.failed": "That version could not be opened.",
 } satisfies Entries;

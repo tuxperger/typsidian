@@ -320,3 +320,60 @@ async fn summary_tells_what_the_lesson_waits_for() {
 async fn probe_refuses_a_connection_that_changed_after_the_check() {
     cases::probe_refuses_a_connection_that_changed_after_the_check().await;
 }
+
+// ── Фича 052: замер и план ──
+
+#[wasm_bindgen_test]
+async fn probe_stage_asks_by_parts_takes_dont_know_and_goes_to_teach() {
+    lesson::probe_stage_asks_by_parts_takes_dont_know_and_goes_to_teach().await;
+}
+
+#[wasm_bindgen_test]
+async fn probe_question_limit_requires_the_result() {
+    lesson::probe_question_limit_requires_the_result().await;
+}
+
+#[wasm_bindgen_test]
+async fn skipping_the_probe_and_old_lessons_without_start() {
+    lesson::skipping_the_probe_and_old_lessons_without_start().await;
+}
+
+#[wasm_bindgen_test]
+async fn plan_is_accepted_laid_out_and_progress_marks_steps() {
+    lesson::plan_is_accepted_laid_out_and_progress_marks_steps().await;
+}
+
+#[wasm_bindgen_test]
+async fn broken_plans_are_refused_with_a_reason_and_never_shown() {
+    lesson::broken_plans_are_refused_with_a_reason_and_never_shown().await;
+}
+
+#[wasm_bindgen_test]
+async fn layout_has_no_overlaps_and_layers_follow_the_longest_path() {
+    lesson::layout_has_no_overlaps_and_layers_follow_the_longest_path().await;
+}
+
+#[wasm_bindgen_test]
+async fn plan_rebuild_makes_versions_with_added_marks_and_history() {
+    lesson::plan_rebuild_makes_versions_with_added_marks_and_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn plan_view_of_a_huge_progress_log_is_linear() {
+    lesson::plan_view_of_a_huge_progress_log_is_linear().await;
+}
+
+#[wasm_bindgen_test]
+async fn plan_set_after_over_the_limit_is_malformed() {
+    lesson::plan_set_after_over_the_limit_is_malformed().await;
+}
+
+#[wasm_bindgen_test]
+async fn unknown_reference_is_clipped_in_the_rejection() {
+    lesson::unknown_reference_is_clipped_in_the_rejection().await;
+}
+
+#[wasm_bindgen_test]
+async fn hostile_plan_and_probe_blocks_are_bounded_and_marked() {
+    lesson::hostile_plan_and_probe_blocks_are_bounded_and_marked().await;
+}

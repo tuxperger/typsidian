@@ -131,6 +131,7 @@ export default async (page) => {
   await page.waitForElement(".ts-lesson-dialog textarea");
   await page.type("Понять, почему сохраняется импульс");
   await page.shot(`${shots}/lesson-D.png`);
+  await page.click("text=Сразу с урока");
   await page.click("text=Начать урок");
 
   // ── Первый ход потоком; вопрос с вариантами (артборд A) ──
@@ -201,7 +202,7 @@ export default async (page) => {
   await page.waitForElement(".ts-lessons__row");
   const list = await page.text(".ts-lessons");
   check(page, list.includes("Понять, почему сохраняется импульс"), "урок в списке");
-  check(page, list.includes("идёт"), "состояние урока в списке");
+  check(page, list.includes("ждёт ответа"), "состояние урока в списке (ждёт ответа)");
   await page.shot(`${shots}/lesson-G.png`);
   await page.press("Escape");
   await page.sleep(300);

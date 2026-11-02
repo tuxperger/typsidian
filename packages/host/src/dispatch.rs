@@ -259,6 +259,8 @@ pub const COMMANDS: &[&str] = &[
     "ai_lesson_checkpoint",
     "ai_lesson_set_state",
     "ai_lesson_set_language",
+    "ai_lesson_skip_probe",
+    "ai_lesson_plan_version",
 ];
 
 fn args<A: DeserializeOwned>(value: Value) -> Result<A, Value> {
@@ -3039,12 +3041,20 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 goal: String,
                 notes: Vec<String>,
                 language: ai::lesson::Language,
+                start: ai::lesson::LessonPhase,
                 now: i64,
             }
             match args::<A>(arguments) {
                 Ok(a) => answer(
-                    commands::ai_lesson_create(&host.vault, a.goal, a.notes, a.language, a.now)
-                        .await,
+                    commands::ai_lesson_create(
+                        &host.vault,
+                        a.goal,
+                        a.notes,
+                        a.language,
+                        a.start,
+                        a.now,
+                    )
+                    .await,
                 ),
                 Err(error) => Err(error),
             }
@@ -3145,6 +3155,32 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 Ok(a) => answer(
                     commands::ai_lesson_set_language(&host.vault, a.path, a.language, a.now).await,
                 ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_skip_probe" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_lesson_skip_probe(&host.vault, a.path, a.now).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_plan_version" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                path: String,
+                version: u32,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => {
+                    answer(commands::ai_lesson_plan_version(&host.vault, a.path, a.version).await)
+                }
                 Err(error) => Err(error),
             }
         }

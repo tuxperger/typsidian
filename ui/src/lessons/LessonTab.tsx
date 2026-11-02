@@ -24,6 +24,8 @@ import {
   PastQuestion,
   type AnswerDraft,
 } from "./LessonQuestion.js";
+import { LessonPlan, planProgressOf } from "./LessonPlan.js";
+import { ProbeResultCard } from "./ProbeResult.js";
 
 // Вкладка урока (фича 051, макет A–C, F, I). Формат, ход и продолжение решает ядро;
 // здесь — показ переписки, форма ответа и опрос потока: текст идущего ответа
@@ -31,6 +33,24 @@ import {
 
 const PROGRESS_MS = 150;
 const CHECKPOINT_MS = 1000;
+/** Уже этой ширины вкладки план — лист со списком, а не колонка (052, макет E). */
+const NARROW_PX = 640;
+/** Ориентир замера в подписи стадии (инструкции учителя, 052 research §6). */
+const PROBE_TARGET = 10;
+
+/** Ширина вкладки, а не окна: рядом могут стоять другие колонки. */
+function useNarrow(target: React.RefObject<HTMLElement | null>, active: boolean): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const element = target.current;
+    if (!active || element === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setNarrow(element.clientWidth < NARROW_PX));
+    observer.observe(element);
+    setNarrow(element.clientWidth < NARROW_PX);
+    return () => observer.disconnect();
+  }, [target, active]);
+  return narrow;
+}
 
 export interface LessonTabProps {
   client: VaultClient;
@@ -57,9 +77,14 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [changed, setChanged] = useState(false);
   const [draft, setDraft] = useState<AnswerDraft>(EMPTY_DRAFT);
+  // `null` — как решит ширина: колонка открыта, лист закрыт.
+  const [planOpen, setPlanOpen] = useState<boolean | null>(null);
   const feedEnd = useRef<HTMLDivElement | null>(null);
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const stopRef = useRef<HTMLButtonElement | null>(null);
   const running = useRef(false);
+  const narrow = useNarrow(sectionRef, view !== null);
 
   useEffect(() => {
     let alive = true;
@@ -83,8 +108,8 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   }, [client, path]);
 
   const run = useCallback(
-    async (answer: UserAnswer | undefined): Promise<void> => {
-      if (view === null || running.current) return;
+    async (answer: UserAnswer | undefined, base: LessonView | null = view): Promise<void> => {
+      if (base === null || running.current) return;
       running.current = true;
       const requestId = newRequestId();
       setTurn({ requestId, text: "", reading: undefined, pending: answer });
@@ -92,7 +117,7 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       setChanged(false);
       let keepDraft = false;
       try {
-        setView(await client.lessons.answer(env.vaultId, path, requestId, answer, view.events_len));
+        setView(await client.lessons.answer(env.vaultId, path, requestId, answer, base.events_len));
       } catch (error) {
         const kind = failureKind(error);
         if (kind === "LessonChanged") {
@@ -218,6 +243,39 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     [client, path, reload],
   );
 
+  // «Не знаю» в замере: ответ-сведение без текста (052 FR-002, сценарий 4).
+  const dontKnow = useCallback((): void => {
+    void run({ text: "", dont_know: true });
+  }, [run]);
+
+  // «Пропустить замер»: стадия меняется, и учитель сразу продолжает с цели.
+  const skipProbe = useCallback(async (): Promise<void> => {
+    if (running.current) return;
+    try {
+      const next = await client.lessons.skipProbe(path);
+      setView(next);
+      await run(undefined, next);
+    } catch {
+      await reload();
+    }
+  }, [client, path, reload, run]);
+
+  // Нажатие на шаг плана: лента прокручивается к реплике, с которой шаг стал текущим.
+  const jumpTo = useCallback((anchor: number): void => {
+    const holder = feedRef.current?.querySelector(`[data-event="${anchor}"]`);
+    const target = holder?.firstElementChild ?? holder;
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    target.setAttribute("data-flash", "on");
+    window.setTimeout(() => target.removeAttribute("data-flash"), 1600);
+    setPlanOpen((open) => (narrow ? false : open));
+  }, [narrow]);
+
+  const loadVersion = useCallback(
+    (version: number) => client.lessons.planVersion(path, version),
+    [client, path],
+  );
+
   const model = useMemo(() => {
     if (view === null) return "";
     for (let i = view.events.length - 1; i >= 0; i -= 1) {
@@ -255,26 +313,52 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       : t("lessons.meter.volume", { count: formatNumber(volume) });
 
   const lastIndex = view.events.length - 1;
-  const answering = view.waiting === "User" && turn === null && !view.read_only;
   const lastTeacher = view.events[lastIndex];
   // Вопрос последней реплики учителя переходит в форму ответа, даже если после неё в ленте
   // уже есть строки чтения заметок или смена языка.
-  let lastTeacherIndex = -1;
-  for (let i = lastIndex; i >= 0; i -= 1) {
-    if (view.events[i]?.kind === "Teacher") {
-      lastTeacherIndex = i;
-      break;
+  const lastOf = (kind: LessonEvent["kind"]): number => {
+    for (let i = lastIndex; i >= 0; i -= 1) {
+      if (view.events[i]?.kind === kind) return i;
     }
-  }
+    return -1;
+  };
+  const lastTeacherIndex = lastOf("Teacher");
+  // Итог замера (артборд C): после него идёт ожидание без вопроса, пока пользователь не нажмёт
+  // «Начать обучение». Ядро отдаёт `User` (позже — `Retry`), поэтому смотрим на события.
+  const lastProbeIndex = lastOf("ProbeResult");
+  const probeResult = view.probe_result ?? undefined;
+  const probePending =
+    probeResult !== undefined &&
+    !view.read_only &&
+    turn === null &&
+    (view.waiting === "User" || view.waiting === "Retry") &&
+    view.last_question == null &&
+    lastProbeIndex > lastTeacherIndex &&
+    lastProbeIndex > lastOf("User");
+  const answering = view.waiting === "User" && turn === null && !view.read_only && !probePending;
+  const plan = view.plan ?? undefined;
+  const planShown = plan !== undefined && (planOpen ?? !narrow);
+  const planProgress = plan === undefined ? undefined : planProgressOf(plan);
+  const probing = view.phase === "Probe";
+  const question = view.last_question ?? undefined;
+  const probeQuestion = answering && probing && question?.part != null;
+  const phaseText =
+    view.probe_count === 0
+      ? t("lessons.phase.probe")
+      : view.probe_count <= PROBE_TARGET
+        ? t("lessons.phase.probeCount", { count: view.probe_count })
+        : t("lessons.phase.probeMore", { count: view.probe_count });
   const cutFailure: Failure | null =
     failure ?? (lastTeacher?.kind === "Teacher" && lastTeacher.interrupted ? (lastTeacher.failure?.kind ?? null) : null);
-  const retryShown = view.waiting === "Retry" && turn === null && !view.read_only;
+  // Итог замера ждёт «Начать обучение» — это не оборванный ответ.
+  const retryShown = view.waiting === "Retry" && turn === null && !view.read_only && !probePending;
   const language = view.language;
 
   const failureText = (kind: Failure): string => t(`ai.failure.${kind}`);
 
   return (
     <section
+      ref={sectionRef}
       className="ts-pane ts-lesson"
       aria-label={view.header.goal}
       onKeyDown={(event) => {
@@ -301,7 +385,33 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
         <div className="ts-lesson__goal">
           <b>{view.header.goal}</b>
           <small>{model === "" ? view.path : `${view.path} · ${model}`}</small>
+          {plan !== undefined && planProgress !== undefined && (
+            <small>
+              {plan.changes > 0
+                ? t("lessons.plan.summaryChanged", {
+                    current: planProgress.current,
+                    total: planProgress.total,
+                    changes: plan.changes,
+                  })
+                : t("lessons.plan.summary", { current: planProgress.current, total: planProgress.total })}
+            </small>
+          )}
         </div>
+        {probing && (
+          <span className="ts-lesson__phase" role="status">
+            {phaseText}
+          </span>
+        )}
+        {plan !== undefined && (
+          <button
+            type="button"
+            className="ts-btn ts-btn--sm"
+            aria-pressed={planShown}
+            onClick={() => setPlanOpen(!planShown)}
+          >
+            {t("lessons.plan.toggle")}
+          </button>
+        )}
         <div className="ts-lesson__meter" role="group" aria-label={t("lessons.meter.label")}>
           <b>{costText}</b>
           <br />
@@ -346,16 +456,27 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
         )}
       </div>
 
-      <div className="ts-lesson__feed" role="log" aria-label={t("lessons.feed")}>
+      <div className="ts-lesson__split">
+      <div className="ts-lesson__main">
+      <div ref={feedRef} className="ts-lesson__feed" role="log" aria-label={t("lessons.feed")}>
         <Bubble who={t("lessons.who.you")}>{view.header.goal}</Bubble>
 
         {view.events.map((event, index) => (
-          <EventRow
-            key={`${index}:${event.kind}:${event.at}`}
-            event={event}
-            hideQuestion={answering && index === lastTeacherIndex}
-            onOpenNote={env.openNote}
-          />
+          <div key={`${index}:${event.kind}:${event.at}`} className="ts-lesson__ev" data-event={index}>
+            <EventRow
+              event={event}
+              hideQuestion={answering && index === lastTeacherIndex}
+              onOpenNote={env.openNote}
+              {...(probePending && index === lastProbeIndex
+                ? {
+                    probeActions: {
+                      onStart: () => void run(undefined),
+                      ...(plan !== undefined ? { onShowPlan: () => setPlanOpen(true) } : {}),
+                    },
+                  }
+                : {})}
+            />
+          </div>
         ))}
 
         {turn?.pending !== undefined && (
@@ -381,11 +502,19 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
 
         {answering && (
           <LessonQuestion
-            question={view.last_question ?? undefined}
+            question={question}
             draft={draft}
             onDraft={setDraft}
-            onSubmit={() => canAnswer(view.last_question ?? undefined, draft) && submit()}
+            onSubmit={() => canAnswer(question, draft) && submit()}
+            {...(probeQuestion ? { onDontKnow: dontKnow } : {})}
           />
+        )}
+        {answering && probing && (
+          <div className="ts-lesson__acts">
+            <button type="button" className="ts-btn ts-btn--sm" onClick={() => void skipProbe()}>
+              {t("lessons.probe.skip")}
+            </button>
+          </div>
         )}
 
         {(retryShown || (failure !== null && turn === null)) && (
@@ -431,6 +560,19 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
           </button>
         </div>
       )}
+      </div>
+
+      {plan !== undefined && planShown && (
+        <LessonPlan
+          plan={plan}
+          history={view.plan_history}
+          sheet={narrow}
+          onClose={() => setPlanOpen(false)}
+          onJump={jumpTo}
+          loadVersion={loadVersion}
+        />
+      )}
+      </div>
     </section>
   );
 }
@@ -458,7 +600,11 @@ function UserBubble({ answer }: { answer: UserAnswer }): React.JSX.Element {
   return (
     <div className="ts-lesson__t ts-lesson__t--user">
       <div className="ts-lesson__who">{t("lessons.who.you")}</div>
-      <div className="ts-lesson__body">{answer.text}</div>
+      {answer.dont_know === true && answer.text === "" ? (
+        <div className="ts-lesson__body ts-lesson__body--soft">{t("lessons.q.dontKnowSaid")}</div>
+      ) : (
+        <div className="ts-lesson__body">{answer.text}</div>
+      )}
       {answer.confidence != null && (
         <div className="ts-lesson__meta">
           <ConfidenceChip level={answer.confidence} />
@@ -489,10 +635,13 @@ function EventRow({
   event,
   hideQuestion,
   onOpenNote,
+  probeActions,
 }: {
   event: LessonEvent;
   hideQuestion: boolean;
   onOpenNote(path: string): void;
+  /** Кнопки итога замера: только у последнего итога, после которого урок ждёт. */
+  probeActions?: { onStart(): void; onShowPlan?: () => void };
 }): React.JSX.Element | null {
   const { t } = useI18n();
   switch (event.kind) {
@@ -503,6 +652,7 @@ function EventRow({
             text: event.text,
             ...(event.confidence !== undefined ? { confidence: event.confidence } : {}),
             ...(event.thinking !== undefined ? { thinking: event.thinking } : {}),
+            ...(event.dont_know === true ? { dont_know: true } : {}),
           }}
         />
       );
@@ -563,9 +713,40 @@ function EventRow({
               : t("lessons.sep.resumed")}
         </div>
       );
+    // События фичи 052: стадия, итог замера, план. Отметки шагов (`PlanProgress`) видны в
+    // колонке плана, в ленте им места нет.
+    case "Phase":
+      return event.skipped === true ? <div className="ts-lesson__sep">{t("lessons.probe.skipped")}</div> : null;
+    case "ProbeResult":
+      return <ProbeResultCard parts={event.parts} start={event.start} {...(probeActions !== undefined ? { actions: probeActions } : {})} />;
+    case "Plan":
+      return event.version <= 1 ? (
+        <div className="ts-lesson__sep">{t("lessons.plan.created", { count: event.steps.length })}</div>
+      ) : (
+        <div className="ts-lesson__change" role="status">
+          <b>{t("lessons.plan.changedSep", { version: event.version })}</b>
+          {event.reason != null && event.reason !== "" && <span> {event.reason}</span>}
+        </div>
+      );
+    case "PlanProgress":
+      return null;
+    case "PlanRejected":
+      return (
+        <div className="ts-lesson__box ts-lesson__box--warn" role="status">
+          {t(event.tool === "plan_progress" ? "lessons.plan.rejectedProgress" : "lessons.plan.rejected", {
+            reason: sentence(event.reason),
+          })}
+        </div>
+      );
     default: {
       const exhaustive: never = event;
       return exhaustive;
     }
   }
+}
+
+/** Причина отказа как законченное предложение: дальше в тексте идёт ещё одно. */
+function sentence(reason: string): string {
+  const text = reason.trim();
+  return /[.!?…]$/.test(text) ? text : `${text}.`;
 }

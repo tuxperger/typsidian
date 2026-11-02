@@ -197,7 +197,7 @@ async fn dropped_lesson_request_releases_everything() {
             &anna,
             "Общее имя",
             "ai_lesson_create",
-            json!({ "goal": "Обрыв", "notes": [], "language": "ru", "now": 1 }),
+            json!({ "goal": "Обрыв", "notes": [], "language": "ru", "start": "Teach", "now": 1 }),
         )
         .await;
     let path = path.as_str().expect("путь урока").to_owned();

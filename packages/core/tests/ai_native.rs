@@ -514,7 +514,7 @@ async fn probe_refuses_a_connection_that_changed_after_the_check() {
 async fn lesson_append_is_atomic_and_never_follows_a_symlink() {
     use std::os::unix::fs::symlink;
     use typsidian_core::ai::lesson::{
-        create_lesson, open_lesson, set_state, Language, LessonState,
+        create_lesson, open_lesson, set_state, Language, LessonPhase, LessonState,
     };
     use typsidian_core::ai::settings::{save_settings, AiSettings};
     use typsidian_core::vault::backend::VaultBackend;
@@ -556,9 +556,16 @@ async fn lesson_append_is_atomic_and_never_follows_a_symlink() {
     );
 
     // Обычный урок: цель со ссылкой вида `[[…]]`, дописывание, ни одного временного файла.
-    let path = create_lesson(&mut backend, "[[Нет такой]] цель", &[], Language::Ru, 1)
-        .await
-        .unwrap();
+    let path = create_lesson(
+        &mut backend,
+        "[[Нет такой]] цель",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        1,
+    )
+    .await
+    .unwrap();
     set_state(&mut backend, &path, LessonState::Stopped, 2)
         .await
         .unwrap();
@@ -577,9 +584,16 @@ async fn lesson_append_is_atomic_and_never_follows_a_symlink() {
     let mut linked = config.clone();
     linked.lessons_folder = "Внешняя/папка".to_owned();
     save_settings(&mut backend, &linked).await.unwrap();
-    assert!(create_lesson(&mut backend, "Цель", &[], Language::Ru, 3)
-        .await
-        .is_err());
+    assert!(create_lesson(
+        &mut backend,
+        "Цель",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        3
+    )
+    .await
+    .is_err());
     assert!(std::fs::read_dir(outside.path())
         .unwrap()
         .flatten()
@@ -617,4 +631,61 @@ async fn stream_over_the_total_time_is_cut() {
         .unwrap_err();
     assert_eq!(failure, AiFailure::Timeout);
     assert!(received > 0);
+}
+
+// ── Фича 052: замер и план ──
+
+#[tokio::test]
+async fn probe_stage_asks_by_parts_takes_dont_know_and_goes_to_teach() {
+    lesson::probe_stage_asks_by_parts_takes_dont_know_and_goes_to_teach().await;
+}
+
+#[tokio::test]
+async fn probe_question_limit_requires_the_result() {
+    lesson::probe_question_limit_requires_the_result().await;
+}
+
+#[tokio::test]
+async fn skipping_the_probe_and_old_lessons_without_start() {
+    lesson::skipping_the_probe_and_old_lessons_without_start().await;
+}
+
+#[tokio::test]
+async fn plan_is_accepted_laid_out_and_progress_marks_steps() {
+    lesson::plan_is_accepted_laid_out_and_progress_marks_steps().await;
+}
+
+#[tokio::test]
+async fn broken_plans_are_refused_with_a_reason_and_never_shown() {
+    lesson::broken_plans_are_refused_with_a_reason_and_never_shown().await;
+}
+
+#[tokio::test]
+async fn layout_has_no_overlaps_and_layers_follow_the_longest_path() {
+    lesson::layout_has_no_overlaps_and_layers_follow_the_longest_path().await;
+}
+
+#[tokio::test]
+async fn plan_rebuild_makes_versions_with_added_marks_and_history() {
+    lesson::plan_rebuild_makes_versions_with_added_marks_and_history().await;
+}
+
+#[tokio::test]
+async fn plan_view_of_a_huge_progress_log_is_linear() {
+    lesson::plan_view_of_a_huge_progress_log_is_linear().await;
+}
+
+#[tokio::test]
+async fn plan_set_after_over_the_limit_is_malformed() {
+    lesson::plan_set_after_over_the_limit_is_malformed().await;
+}
+
+#[tokio::test]
+async fn unknown_reference_is_clipped_in_the_rejection() {
+    lesson::unknown_reference_is_clipped_in_the_rejection().await;
+}
+
+#[tokio::test]
+async fn hostile_plan_and_probe_blocks_are_bounded_and_marked() {
+    lesson::hostile_plan_and_probe_blocks_are_bounded_and_marked().await;
 }

@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::plan::{self, PlanStep, PlanVersionInfo, PlanView};
 use crate::ai::access::normalize_folder;
 use crate::ai::AiFailure;
 use crate::vault::backend::VaultBackend;
@@ -48,6 +49,17 @@ pub enum LessonState {
     Stopped,
 }
 
+/// Стадия урока (фича 052, research.md §1): замер понимания или обучение.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum LessonPhase {
+    Probe,
+    /// По умолчанию: уроки 051 без поля `start` читаются как раньше.
+    #[default]
+    Teach,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
@@ -56,6 +68,9 @@ pub struct LessonHeader {
     pub goal: String,
     pub language: Language,
     pub created_at: i64,
+    /// С какой стадии начался урок.
+    #[serde(default)]
+    pub start: LessonPhase,
 }
 
 /// Вопрос учителя (инструмент `ask_question`).
@@ -66,6 +81,43 @@ pub struct LessonQuestion {
     pub question: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices: Option<Vec<String>>,
+    /// Часть цели, о которой вопрос замера (`probe_question`); у вопросов учителя нет.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+}
+
+/// Знание части цели по итогам замера.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum ProbeState {
+    Known,
+    Partial,
+    Unknown,
+}
+
+/// Часть цели в итоге замера.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct ProbePart {
+    pub name: String,
+    pub state: ProbeState,
+    pub note: String,
+}
+
+/// Итог замера для вида урока.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct ProbeSummary {
+    pub parts: Vec<ProbePart>,
+    /// С чего начать урок.
+    pub start: String,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Чем кончилось чтение заметки: текст в урок не пишется, он есть в заметке и в
@@ -95,6 +147,9 @@ pub enum LessonEvent {
         confidence: Option<Confidence>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thinking: Option<String>,
+        /// «Не знаю»: ответ-сведение, а не ошибка (052, research.md §2).
+        #[serde(default, skip_serializing_if = "is_false")]
+        dont_know: bool,
     },
     /// Итог хода учителя: целиком или оборванный.
     Teacher {
@@ -142,6 +197,42 @@ pub enum LessonEvent {
         at: i64,
         state: LessonState,
     },
+    /// Смена стадии. `skipped` — пользователь пропустил замер.
+    Phase {
+        at: i64,
+        phase: LessonPhase,
+        #[serde(default, skip_serializing_if = "is_false")]
+        skipped: bool,
+    },
+    /// Итог замера (инструмент `probe_done`); стадия становится `Teach`.
+    ProbeResult {
+        at: i64,
+        parts: Vec<ProbePart>,
+        start: String,
+    },
+    /// Принятая версия плана (инструмент `plan_set`).
+    Plan {
+        at: i64,
+        version: u32,
+        steps: Vec<PlanStep>,
+        goal: String,
+        current: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    /// Отметки хода по плану (инструмент `plan_progress`).
+    PlanProgress {
+        at: i64,
+        current: String,
+        done: Vec<String>,
+    },
+    /// Отказ ядра инструменту плана: причина уходит модели результатом инструмента, урок
+    /// не прерывается. В вид плана такой отказ не попадает.
+    PlanRejected {
+        at: i64,
+        tool: String,
+        reason: String,
+    },
 }
 
 impl LessonEvent {
@@ -152,7 +243,12 @@ impl LessonEvent {
             | LessonEvent::NoteRead { at, .. }
             | LessonEvent::Summary { at, .. }
             | LessonEvent::Language { at, .. }
-            | LessonEvent::State { at, .. } => *at,
+            | LessonEvent::State { at, .. }
+            | LessonEvent::Phase { at, .. }
+            | LessonEvent::ProbeResult { at, .. }
+            | LessonEvent::Plan { at, .. }
+            | LessonEvent::PlanProgress { at, .. }
+            | LessonEvent::PlanRejected { at, .. } => *at,
         }
     }
 }
@@ -201,6 +297,15 @@ pub struct LessonView {
     pub events_len: u32,
     /// Формат файла новее известного: смотреть можно, вести урок нельзя.
     pub read_only: bool,
+    /// Действующая стадия: `start` шапки, итог замера или пропуск.
+    pub phase: LessonPhase,
+    /// Сколько вопросов замера задано.
+    pub probe_count: u32,
+    pub probe_result: Option<ProbeSummary>,
+    /// Последняя принятая версия плана с раскладкой.
+    pub plan: Option<PlanView>,
+    /// Версии плана, от первой.
+    pub plan_history: Vec<PlanVersionInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -374,10 +479,26 @@ fn waiting_of(events: &[LessonEvent], state: LessonState) -> Waiting {
         LessonEvent::Teacher { question, .. } => {
             // Учитель прочитал заметки и должен продолжить сам, но приложение закрыли
             // раньше. Если предел автопродолжений исчерпан, ход за пользователем.
-            let pending_tool = events[last + 1..]
+            let pending_tool = events[last + 1..].iter().any(|event| {
+                matches!(
+                    event,
+                    LessonEvent::NoteRead { by_user: false, .. } | LessonEvent::PlanRejected { .. }
+                )
+            });
+            // Пропуск замера требует продолжения учителя; итог замера — пауза: урок ждёт
+            // «Начать обучение» (research.md §7).
+            let must_go_on = events[last + 1..]
                 .iter()
-                .any(|event| matches!(event, LessonEvent::NoteRead { by_user: false, .. }));
-            if question.is_none() && pending_tool && teacher_run(events) <= MAX_AUTO_CONTINUES {
+                .any(|event| matches!(event, LessonEvent::Phase { skipped: true, .. }));
+            let probe_done = events[last + 1..]
+                .iter()
+                .any(|event| matches!(event, LessonEvent::ProbeResult { .. }));
+            if !probe_done
+                && (must_go_on
+                    || (question.is_none()
+                        && pending_tool
+                        && teacher_run(events) <= MAX_AUTO_CONTINUES))
+            {
                 Waiting::Retry
             } else {
                 Waiting::User
@@ -446,6 +567,11 @@ pub fn view_of(path: &str, parsed: ParsedLesson) -> LessonView {
         cost_usd,
         events_len: parsed.events.len() as u32,
         read_only: parsed.header.format > FORMAT,
+        phase: current_phase(&parsed.header, &parsed.events),
+        probe_count: probe_count(&parsed.events),
+        probe_result: probe_result(&parsed.events),
+        plan: plan::plan_view(&parsed.events, None),
+        plan_history: plan::plan_history(&parsed.events),
         header: parsed.header,
         events: parsed.events,
     }
@@ -475,4 +601,44 @@ pub fn summary_of(path: &str, parsed: &ParsedLesson) -> LessonSummary {
         state,
         waiting: waiting_of(&parsed.events, state),
     }
+}
+
+/// Действующая стадия: итог замера и пропуск переводят в `Teach`, иначе — `start` шапки.
+pub fn current_phase(header: &LessonHeader, events: &[LessonEvent]) -> LessonPhase {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            LessonEvent::Phase { phase, .. } => Some(*phase),
+            LessonEvent::ProbeResult { .. } => Some(LessonPhase::Teach),
+            _ => None,
+        })
+        .unwrap_or(header.start)
+}
+
+/// Вопросы замера: реплики учителя с вопросом, заданные, пока шла стадия `Probe`.
+pub fn probe_count(events: &[LessonEvent]) -> u32 {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                LessonEvent::Teacher {
+                    question: Some(LessonQuestion { part: Some(_), .. }),
+                    interrupted: false,
+                    ..
+                }
+            )
+        })
+        .count() as u32
+}
+
+pub fn probe_result(events: &[LessonEvent]) -> Option<ProbeSummary> {
+    events.iter().rev().find_map(|event| match event {
+        LessonEvent::ProbeResult { parts, start, .. } => Some(ProbeSummary {
+            parts: parts.clone(),
+            start: start.clone(),
+        }),
+        _ => None,
+    })
 }

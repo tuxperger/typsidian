@@ -2514,10 +2514,11 @@ pub async fn ai_lesson_create(
     goal: String,
     notes: Vec<String>,
     language: ai::lesson::Language,
+    start: ai::lesson::LessonPhase,
     now: i64,
 ) -> Answer<String, Failure<ai::AiFailure>> {
     with_vault!(state, |backend| ai::lesson::create_lesson(
-        backend, &goal, &notes, language, now
+        backend, &goal, &notes, language, start, now
     )
     .await
     .map_err(Failure::Core))
@@ -2666,6 +2667,30 @@ pub async fn ai_lesson_set_language(
 ) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
     with_vault!(state, |backend| ai::lesson::set_language(
         backend, &path, language, now
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+/// Пропуск замера понимания (фича 052): событие `Phase { Teach, skipped }`.
+pub async fn ai_lesson_skip_probe(
+    state: &Vault,
+    path: String,
+    now: i64,
+) -> Answer<ai::lesson::LessonView, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::skip_probe(backend, &path, now)
+        .await
+        .map_err(Failure::Core))
+}
+
+/// План версии `version` с раскладкой (фича 052); `None`, если такой версии нет.
+pub async fn ai_lesson_plan_version(
+    state: &Vault,
+    path: String,
+    version: u32,
+) -> Answer<Option<ai::lesson::PlanView>, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::plan_version(
+        backend, &path, version
     )
     .await
     .map_err(Failure::Core))

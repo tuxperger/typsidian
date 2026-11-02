@@ -87,6 +87,7 @@ import type {
   LessonProgress,
   LessonSummary,
   LessonView,
+  PlanView,
   JournalEntry,
   ProbeResult,
   TakeOutcome,
@@ -684,8 +685,8 @@ export function tauriVaultClient(
     // Весь цикл хода (с автопродолжениями) идёт в `ai_lesson_answer`; `answer: null` — повтор.
     lessons: {
       list: () => invoke<LessonSummary[]>("ai_lesson_list"),
-      create: (goal, notes, language) =>
-        invoke<string>("ai_lesson_create", { goal, notes, language, now: Date.now() }),
+      create: (goal, notes, language, start = "Teach") =>
+        invoke<string>("ai_lesson_create", { goal, notes, language, start, now: Date.now() }),
       open: (path) => invoke<LessonView>("ai_lesson_open", { path }),
       answer: (vaultId, path, requestId, answer, expected) =>
         invoke<LessonView>("ai_lesson_answer", {
@@ -705,6 +706,9 @@ export function tauriVaultClient(
         invoke<LessonView>("ai_lesson_set_state", { path, lessonState: state, now: Date.now() }),
       setLanguage: (path, language) =>
         invoke<LessonView>("ai_lesson_set_language", { path, language, now: Date.now() }),
+      skipProbe: (path) => invoke<LessonView>("ai_lesson_skip_probe", { path, now: Date.now() }),
+      planVersion: (path, version) =>
+        invoke<PlanView | null>("ai_lesson_plan_version", { path, version }).then((plan) => plan ?? undefined),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

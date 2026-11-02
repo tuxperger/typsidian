@@ -5,6 +5,7 @@
 
 pub mod file;
 pub mod partial;
+pub mod plan;
 pub mod prompt;
 pub mod stream;
 pub mod turn;
@@ -14,10 +15,11 @@ pub mod web;
 use std::path::Path;
 
 pub use file::{
-    Confidence, Language, LessonEvent, LessonHeader, LessonQuestion, LessonState, LessonSummary,
-    LessonView, NoteOutcome, Waiting,
+    Confidence, Language, LessonEvent, LessonHeader, LessonPhase, LessonQuestion, LessonState,
+    LessonSummary, LessonView, NoteOutcome, ProbePart, ProbeState, ProbeSummary, Waiting,
 };
 pub use partial::LessonProgress;
+pub use plan::{PlanEdge, PlanStep, PlanStepState, PlanStepView, PlanVersionInfo, PlanView};
 pub use stream::{ToolCall, TurnReply};
 pub use turn::{Next, PreparedTurn, TurnDone, TurnKind, UserAnswer};
 
@@ -93,6 +95,7 @@ pub async fn create_lesson<B: VaultBackend>(
     goal: &str,
     notes: &[String],
     language: Language,
+    start: LessonPhase,
     now: i64,
 ) -> Result<String, AiFailure> {
     let settings = load_settings(backend).await;
@@ -130,6 +133,7 @@ pub async fn create_lesson<B: VaultBackend>(
         goal: goal.clone(),
         language,
         created_at: now,
+        start,
     };
     let text = initial_text(&header, &events)?;
 
@@ -258,4 +262,37 @@ pub async fn set_language<B: VaultBackend>(
     now: i64,
 ) -> Result<LessonView, AiFailure> {
     append_and_view(backend, path, LessonEvent::Language { at: now, language }).await
+}
+
+/// Пропускает замер: событие `Phase { Teach, skipped }`, дальше учитель ведёт урок без
+/// итога замера. Урок уже в стадии обучения остаётся как есть (повторный вызов безвреден).
+pub async fn skip_probe<B: VaultBackend>(
+    backend: &mut B,
+    path: &str,
+    now: i64,
+) -> Result<LessonView, AiFailure> {
+    let parsed = read_lesson(backend, path).await?;
+    if parsed.header.format > FORMAT {
+        return Err(AiFailure::LessonUnreadable);
+    }
+    if file::current_phase(&parsed.header, &parsed.events) != LessonPhase::Probe {
+        return open_lesson(backend, path).await;
+    }
+    let event = LessonEvent::Phase {
+        at: now,
+        phase: LessonPhase::Teach,
+        skipped: true,
+    };
+    append_events(backend, path, std::slice::from_ref(&event)).await?;
+    open_lesson(backend, path).await
+}
+
+/// План версии `version` с раскладкой; `None`, если такой версии нет (research.md §3).
+pub async fn plan_version<B: VaultBackend>(
+    backend: &B,
+    path: &str,
+    version: u32,
+) -> Result<Option<PlanView>, AiFailure> {
+    let parsed = read_lesson(backend, path).await?;
+    Ok(plan::plan_view(&parsed.events, Some(version)))
 }

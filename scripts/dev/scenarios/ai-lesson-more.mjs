@@ -211,6 +211,7 @@ export default async (page) => {
     },
     { reply: { text: "Теперь вопрос.", tools: [{ name: "ask_question", input: { question: "Что такое импульс?" } }] } },
   ]);
+  await page.click("text=Сразу с урока");
   await page.click("text=Начать урок");
   await page.waitForElement(".ts-lesson__q", { timeout: 30000 });
   await settled(page, "первый ход закончен");
