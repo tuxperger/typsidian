@@ -57,7 +57,11 @@ impl AiTransport for DefaultTransport {
         let literal = reqwest::Url::parse(&request.url)
             .map_err(|_| AiFailure::BadEndpoint)?
             .host_str()
-            .map(|host| host.trim_start_matches('[').trim_end_matches(']').to_owned())
+            .map(|host| {
+                host.trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .to_owned()
+            })
             .and_then(|host| host.parse::<std::net::IpAddr>().ok());
         if literal.is_some_and(server_policy::refuses_ip) {
             return Err(AiFailure::InternalAddress);
@@ -167,7 +171,7 @@ impl AiTransport for DefaultTransport {
         if declared.is_some_and(|length| length > MAX_RESPONSE_BYTES as u64) {
             return Err(AiFailure::BadResponse);
         }
-        let text =JsFuture::from(response.text().map_err(|_| AiFailure::BadResponse)?)
+        let text = JsFuture::from(response.text().map_err(|_| AiFailure::BadResponse)?)
             .await
             .map_err(|error| fetch_failure(&error))?
             .as_string()

@@ -2021,7 +2021,15 @@ pub async fn derived_files_stay_out_of_history_with_old_rules() {
     f.put(".gitignore", &old_rules).await;
     let ctx = f.ctx();
     f.session
-        .snapshot(&f.vault, &ctx, None, "старые правила", "Снимок", true, false)
+        .snapshot(
+            &f.vault,
+            &ctx,
+            None,
+            "старые правила",
+            "Снимок",
+            true,
+            false,
+        )
         .await
         .unwrap();
     f.put(".typsidian/ai-journal.jsonl", "{\"text\":\"секрет\"}\n")

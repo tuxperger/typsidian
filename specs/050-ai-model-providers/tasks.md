@@ -50,16 +50,16 @@
 
 ## Phase 7: Завершение
 
-- [ ] T027 Гейты `gates.sh all` (оба таргета, тесты, типы, i18n)
-- [ ] T028 Проверка `security-review-agent`, правка находок (конституция, принцип IX)
-- [ ] T029 `/speckit-converge`, цепочка ядро → биндинг → `ui/src`, README, `**Status**: Implemented`
+- [X] T027 Гейты `gates.sh all` (оба таргета, тесты, типы, i18n)
+- [X] T028 Проверка `security-review-agent`, правка находок (конституция, принцип IX)
+- [X] T029 `/speckit-converge`, цепочка ядро → биндинг → `ui/src`, README, `**Status**: Implemented`
 
 ## Phase 8: Находки ревью безопасности (T028)
 
-- [ ] T030 [US4] M1: адрес своей модели одобряется на устройстве — `SecretKind::AiCustomEndpoint`, отказ `EndpointNotApproved`, запись при `ai_settings_set` (host, shell, сервер, wasm, `ui/src`), локали и тесты
-- [ ] T031 [US4] M2: на сервере транспорт ИИ разрешает имя через `server_policy` и отказывает адресам-числам во внутренней сети в `packages/core/src/ai/transport.rs`
-- [ ] T032 [US2] M3: производные пути не попадают в изменения истории — фильтр в `packages/core/src/sync/session.rs`, тест
-- [ ] T033 [US3] M4, L5: `check_access` без учёта регистра и Unicode-формы, без хвостовых точек и пробелов, `false` при выключенной функции; `check_access_in` отказывает симлинкам; тесты
-- [ ] T034 [US4] L1: в wasm предел ответа по `content-length` до чтения тела
-- [ ] T035 [US4] L2: предел одновременных сетевых команд `ai_*` на сервере в `apps/server/src/invoke.rs`
-- [ ] T036 [US4] L3: повтор `requestId` занятого запроса — отказ, слот не затирается, в `packages/core/src/ai/cancel.rs`
+- [X] T030 [US4] M1: адрес своей модели одобряется на устройстве — `SecretKind::AiCustomEndpoint`, отказ `EndpointNotApproved`, запись при `ai_settings_set` (host, shell, сервер, wasm, `ui/src`), локали и тесты
+- [X] T031 [US4] M2: на сервере транспорт ИИ разрешает имя через `server_policy` и отказывает адресам-числам во внутренней сети в `packages/core/src/ai/transport.rs`
+- [X] T032 [US2] M3: производные пути не попадают в изменения истории — фильтр в `packages/core/src/sync/session.rs`, тест
+- [X] T033 [US3] M4, L5: `check_access` без учёта регистра и Unicode-формы, без хвостовых точек и пробелов, `false` при выключенной функции; `check_access_in` отказывает симлинкам; тесты
+- [X] T034 [US4] L1: в wasm предел ответа по `content-length` до чтения тела
+- [X] T035 [US4] L2: предел одновременных сетевых команд `ai_*` на сервере в `apps/server/src/invoke.rs`
+- [X] T036 [US4] L3: повтор `requestId` занятого запроса — отказ, слот не затирается, в `packages/core/src/ai/cancel.rs`

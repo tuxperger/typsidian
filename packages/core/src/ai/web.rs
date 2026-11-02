@@ -5,11 +5,11 @@ use wasm_bindgen::prelude::*;
 
 use super::access::check_access;
 use super::cancel::{cancel, cancellable};
-use super::endpoint::base_url;
 use super::client::{
     approve_endpoint, begin_probe, finish_probe, prepare_models, provider_key, require_approved,
     send_models, send_probe, PreparedProbe, ProbeResult,
 };
+use super::endpoint::base_url;
 use super::journal::{journal_clear, journal_entries, JournalEntry};
 use super::protocol::ProbeReply;
 use super::settings::{load_settings, save_settings, AiProvider, AiSettings};

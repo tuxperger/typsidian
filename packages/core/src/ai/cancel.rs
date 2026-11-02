@@ -48,7 +48,10 @@ where
         Either::Right(_) => Err(AiFailure::Cancelled),
     };
     if let Ok(mut pending) = PENDING.lock() {
-        if pending.get(&slot).is_some_and(|(owner, _)| *owner == ticket) {
+        if pending
+            .get(&slot)
+            .is_some_and(|(owner, _)| *owner == ticket)
+        {
             pending.remove(&slot);
         }
     }

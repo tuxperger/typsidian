@@ -178,15 +178,17 @@ pub fn derived_paths() -> Vec<String> {
 /// заведённых до нового производного пути, его не знают. Без этой проверки
 /// журнал отправленного модели ушёл бы в снимок (050, ревью безопасности M3).
 pub fn is_derived(path: &str) -> bool {
-    derived_paths().iter().any(|rule| match rule.strip_suffix('*') {
-        Some(prefix) => path.starts_with(prefix),
-        None => {
-            path == rule
-                || path
-                    .strip_prefix(rule.as_str())
-                    .is_some_and(|rest| rest.starts_with('/'))
-        }
-    })
+    derived_paths()
+        .iter()
+        .any(|rule| match rule.strip_suffix('*') {
+            Some(prefix) => path.starts_with(prefix),
+            None => {
+                path == rule
+                    || path
+                        .strip_prefix(rule.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            }
+        })
 }
 
 /// Лежит ли путь внутри служебного места.

@@ -450,7 +450,9 @@ pub async fn custom_endpoint_needs_approval_on_this_device() {
         require_approved(&secrets, "v", &settings).await,
         Err(AiFailure::EndpointNotApproved)
     );
-    approve_endpoint(&secrets, "v", &settings, false).await.unwrap();
+    approve_endpoint(&secrets, "v", &settings, false)
+        .await
+        .unwrap();
     assert_eq!(require_approved(&secrets, "v", &settings).await, Ok(()));
     // Одобрение — у этого vault, не у соседнего.
     assert_eq!(
@@ -473,6 +475,8 @@ pub async fn custom_endpoint_needs_approval_on_this_device() {
         require_approved(&secrets, "v", &settings).await,
         Err(AiFailure::EndpointNotApproved)
     );
-    approve_endpoint(&secrets, "v", &settings, true).await.unwrap();
+    approve_endpoint(&secrets, "v", &settings, true)
+        .await
+        .unwrap();
     assert_eq!(require_approved(&secrets, "v", &settings).await, Ok(()));
 }
