@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 055: заметки в граф знаний, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:460px;max-width:100%}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.menu{width:240px;background:var(--s900);border:1px solid var(--s700);border-radius:6px;padding:4px 0;font-size:12px}
+.menu div{padding:5px 12px;color:var(--s300)}.menu .sep{border-top:1px solid var(--s700);padding:0;margin:4px 0}
+.menu .hl{background:var(--s800);color:var(--s100)}
+.tree{font-size:12px;color:var(--s300);padding:10px 12px;border-right:1px solid var(--s800);width:200px}
+.tree div{padding:3px 0}.tree .sel{color:var(--o400)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:12px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.btn.sm{height:24px;padding:0 8px;font-size:11px}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
+.kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.kv span:first-child{color:var(--s400)}
+.hint{font-size:10.5px;color:var(--s500)}
+.f{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.f:last-child{border:0}
+.f .nm{flex:1;font-family:var(--mono);font-size:11.5px;color:var(--s300)}
+.ok{color:var(--ok)}.bad{color:var(--err)}.wr{color:var(--warn)}.mu{color:var(--s500)}
+.prog{height:4px;background:var(--s800);border-radius:2px;overflow:hidden;margin:8px 0}.prog i{display:block;height:100%;width:45%;background:var(--o500)}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 055: заметки и PDF в граф знаний</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Вход — контекстное меню дерева (файл, папка, несколько выбранных) и кнопка «Добавить заметки…» в виде графа знаний (<a style="color:var(--o400)" href="https://claude.ai/artifact/DYKd7aRYDi5qoEj1WFLXPF">макет 054</a>). Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board"><h2>A. МЕНЮ ДЕРЕВА</h2><div class="panel" style="display:flex">
+<div class="tree"><div>▾ Физика</div><div class="sel">&nbsp;&nbsp;▸ Механика</div><div>&nbsp;&nbsp;Импульс.typ</div><div>▸ Личное</div></div>
+<div class="pad"><div class="menu"><div>Новая заметка</div><div>Переименовать</div><div class="sep"></div><div class="hl">Добавить в граф знаний…</div></div></div>
+</div></section>
+
+<section class="board"><h2>B. ПОДТВЕРЖДЕНИЕ ДО ОТПРАВКИ</h2><div class="panel pad">
+<p class="title">Добавить «Физика/Механика» в граф знаний?</p>
+<div class="kv"><span>Файлов уйдёт модели</span><span>14 (12 заметок, 2 PDF)</span></div>
+<div class="kv"><span>Объём</span><span>≈ 96 тыс. единиц</span></div>
+<div class="kv"><span>Примерная стоимость</span><span>≈ $0,31 · claude-sonnet-5-5</span></div>
+<div class="kv"><span>Пропущено</span><span>3 — закрытые для агента и неподдерживаемые</span></div>
+<p class="hint" style="margin-top:8px">Текст файлов попадёт в журнал отправленного. Импорт идёт в фоне, его можно отменить.</p>
+<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Добавить</span></div>
+</div></section>
+
+<section class="board"><h2>C. ИДЁТ ИМПОРТ</h2><div class="panel pad">
+<p class="title">Импорт в граф знаний · 6 из 14</p>
+<div class="prog"><i></i></div>
+<div class="f"><span class="ok">✓</span><span class="nm">Механика/Импульс.typ</span><span class="hint">+5 утв.</span></div>
+<div class="f"><span class="ok">✓</span><span class="nm">Механика/Энергия.typ</span><span class="hint">+8 утв.</span></div>
+<div class="f"><span class="mu">◌</span><span class="nm">Механика/Ландау, гл. 2.pdf</span><span class="hint">часть 3 из 7</span></div>
+<div class="acts"><span class="btn">Отменить</span></div>
+</div></section>
+
+<section class="board"><h2>D. ИТОГ</h2><div class="panel pad">
+<p class="title">Импорт завершён</p>
+<div class="f"><span class="ok">✓</span><span class="nm">Механика/Импульс.typ</span><span class="hint">готово</span></div>
+<div class="f"><span class="wr">◐</span><span class="nm">Механика/Ландау, гл. 2.pdf</span><span class="hint">частично: 2 части не обработаны</span><span class="btn sm">Повторить</span></div>
+<div class="f"><span class="mu">—</span><span class="nm">Механика/Скан задачника.pdf</span><span class="hint">пропущен: нет текстового слоя</span></div>
+<div class="f"><span class="mu">—</span><span class="nm">Механика/Схема.board</span><span class="hint">пропущен: не поддерживается</span></div>
+<div class="f"><span class="bad">⛔</span><span class="nm">Личное/Мысли.typ</span><span class="hint">пропущен: папка закрыта для агента</span></div>
+<div class="f"><span class="bad">✕</span><span class="nm">Механика/Работа.typ</span><span class="hint">сбой: нет связи</span><span class="btn sm">Повторить</span></div>
+<div class="acts"><span class="btn acc">Открыть граф</span></div>
+</div></section>
+
+</div>
+</body>
+</html>
