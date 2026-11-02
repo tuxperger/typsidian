@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 056: фоновое исследование, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:560px;max-width:100%}.board.mid{width:460px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.feed{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.card{border:1px solid var(--s700);border-radius:8px;background:var(--s900);padding:10px 12px}
+.ch{display:flex;align-items:center;gap:8px;font-size:12px}
+.ch .ic{font:600 10.5px var(--mono);color:var(--s500)}
+.ch .q{flex:1;color:var(--s200)}
+.st{font-size:11px}
+.ok{color:var(--ok)}.bad{color:var(--err)}.wr{color:var(--warn)}.mu{color:var(--s500)}.run{color:var(--o400)}
+.body{margin-top:8px;font-size:12px;color:var(--s300)}
+.src{margin-top:8px;font-size:11.5px}
+.src div{padding:2px 0;color:var(--s400)}.src a{color:var(--o400);text-decoration:none}
+.mark{display:inline-block;margin-top:8px;font:10.5px var(--mono);color:var(--warn);border:1px solid var(--warn);border-radius:10px;padding:0 7px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:11.5px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap}
+.who{font:600 10.5px var(--mono);color:var(--s500);margin-bottom:3px}
+.t{color:var(--s200);font-size:12.5px}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--s800)}
+.row:last-child{border:0}.row .txt{flex:1}.row .lb{font-size:12px;color:var(--s200)}
+.hint{font-size:10.5px;color:var(--s500)}
+.sw{flex:0 0 30px;height:16px;border-radius:9px;background:var(--s700);position:relative}
+.sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--s500)}
+.sw.on{background:var(--o500)}.sw.on:after{left:16px;background:var(--s950)}
+.in{height:28px;border:1px solid var(--s700);border-radius:6px;background:var(--s950);font-size:12px;color:var(--s300);display:flex;align-items:center;padding:0 8px;flex:1}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.kv{display:flex;justify-content:space-between;padding:4px 0;font-size:12px}.kv span:first-child{color:var(--s400)}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 056: фоновое исследование в уроке</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Карточки исследований — в ленте урока 051 (<a style="color:var(--o400)" href="https://claude.ai/artifact/5HgfE8QuCSKK5eRAeioLEY">макет 051</a>); урок продолжается, пока они идут. Отправить вопрос может учитель или вы — полем под лентой «Исследовать…». Результат — заметка Typst рядом с уроком. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board"><h2>A. ИССЛЕДОВАНИЕ ИДЁТ, УРОК ПРОДОЛЖАЕТСЯ</h2><div class="panel"><div class="feed">
+<div class="card"><div class="ch"><span class="ic">ВЕБ</span><span class="q">Как импульс сохраняется в релятивистских столкновениях?</span><span class="st run">◌ идёт · 3 источника</span><span class="btn">Отменить</span></div></div>
+<div><div class="who">УЧИТЕЛЬ</div><div class="t">Пока ищу подробности о релятивистском случае, вернёмся к тележкам. Что будет, если масса B вдвое больше?</div></div>
+<div style="display:flex;gap:8px"><span class="in" style="color:var(--s600)">Исследовать…</span><span class="btn">В вебе</span><span class="btn">В PDF…</span></div>
+</div></div></section>
+
+<section class="board"><h2>B. РЕЗУЛЬТАТ С ИСТОЧНИКАМИ</h2><div class="panel"><div class="feed">
+<div class="card"><div class="ch"><span class="ic">ВЕБ</span><span class="q">Как импульс сохраняется в релятивистских столкновениях?</span><span class="st ok">✓ готово</span></div>
+<div class="body">Сохраняется релятивистский импульс p = γmv; классическое mv при скоростях, близких к c, не сохраняется. Энергия и импульс объединяются в четырёхвектор…</div>
+<div class="src"><div>1. <a href="#">Relativistic momentum — en.wikipedia.org</a></div><div>2. <a href="#">Lecture 12: Collisions — ocw.mit.edu</a></div></div>
+<span class="mark">найдено моделью — проверяйте источники</span>
+<div class="acts"><span class="btn">Открыть заметку</span></div></div>
+<div class="card"><div class="ch"><span class="ic">PDF</span><span class="q">Ландау, гл. 2.pdf — что такое центр инерции</span><span class="st ok">✓ готово</span></div>
+<div class="body">Центр инерции движется равномерно и прямолинейно, если система замкнута (с. 23)…</div>
+<div class="src"><div>с. 23, с. 25–26 · <a href="#">Механика/Ландау, гл. 2.pdf</a></div></div></div>
+</div></div></section>
+
+<section class="board mid"><h2>C. ЧТЕНИЕ PDF: ОЦЕНКА ДО ОТПРАВКИ</h2><div class="panel pad">
+<div class="kv"><span>Файл</span><span>Механика/Ландау, гл. 2.pdf</span></div>
+<div class="kv"><span>Объём</span><span>≈ 38 тыс. единиц · 24 страницы</span></div>
+<div class="kv"><span>Примерная стоимость</span><span>≈ $0,12</span></div>
+<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Изучить</span></div>
+</div></section>
+
+<section class="board mid"><h2>D. СОСТОЯНИЯ И ОТКАЗЫ</h2><div class="panel"><div class="feed">
+<div class="card"><div class="ch"><span class="ic">ВЕБ</span><span class="q">Закон сохранения в квантовой механике</span><span class="st mu">отменено</span></div></div>
+<div class="card"><div class="ch"><span class="ic">ВЕБ</span><span class="q">История закона сохранения импульса</span><span class="st wr">прервано</span><span class="btn">Повторить</span></div><div class="hint" style="margin-top:4px">Приложение закрылось до конца исследования; частичного результата нет.</div></div>
+<div class="box">Поиск в вебе выключен. Учитель продолжит без него. <a href="#" style="color:var(--o400)">Включить в настройках</a></div>
+<div class="box">Поиск в вебе недоступен для своего адреса модели. Изучение PDF работает.</div>
+<div class="box">⛔ «Личное/Выписка.pdf» в закрытой папке — не отправлено.</div>
+</div></div></section>
+
+<section class="board mid"><h2>E. НАСТРОЙКИ (РАЗДЕЛ «ОБУЧЕНИЕ С ИИ»)</h2><div class="panel pad">
+<div class="row"><div class="txt"><div class="lb">Поиск в вебе для исследований</div><div class="hint">Через поиск, встроенный в провайдера модели. Запросы поиска уходят в открытый интернет.</div></div><span class="sw"></span></div>
+<div class="row"><div class="txt"><div class="lb">Одновременных исследований</div><div class="hint">Остальные ждут в очереди.</div></div><span class="in" style="flex:0 0 60px">2</span></div>
+</div></section>
+
+</div>
+</body>
+</html>
