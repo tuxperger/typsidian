@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 052: замер понимания и план урока, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:620px;max-width:100%}.board.wide{width:860px}.board.mid{width:460px}.board.narrow{width:340px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.lhead{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--s800)}
+.goal{flex:1;min-width:0}.goal b{display:block;font-size:13px;font-weight:600}.goal small{font:11px var(--mono);color:var(--s500)}
+.seg{display:inline-flex;border:1px solid var(--s700);border-radius:6px;overflow:hidden}
+.seg span{padding:4px 10px;font-size:11px;color:var(--s400);border-right:1px solid var(--s700)}
+.seg span:last-child{border:0}.seg .sel{background:var(--s800);color:var(--o400)}
+.phase{display:inline-flex;gap:6px;align-items:center;font:600 10.5px var(--mono);color:var(--o400);border:1px solid var(--o500);border-radius:10px;padding:1px 8px}
+.feed{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.q{border:1px solid var(--s700);border-radius:8px;padding:12px;background:var(--s900)}
+.q .qt{font-weight:600;margin-bottom:8px}
+.qk{font:10.5px var(--mono);color:var(--s500);margin-bottom:6px}
+.opt{display:flex;gap:8px;padding:7px 9px;border:1px solid var(--s700);border-radius:6px;margin-bottom:6px;color:var(--s300)}
+.opt .k{font:11px var(--mono);color:var(--s500)}
+.opt.sel{border-color:var(--o500);color:var(--s100)}
+.lbl{font-size:11.5px;color:var(--s400);margin:10px 0 5px}
+.ta{min-height:44px;border:1px solid var(--s700);border-radius:6px;background:var(--s950);padding:7px 9px;font-size:12px;color:var(--s600)}
+.acts{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px;flex-wrap:wrap}
+.acts .hint{margin-right:auto}
+.hint{font-size:10.5px;color:var(--s500)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:12px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.btn.sm{height:24px;padding:0 8px;font-size:11px}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.part{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.part:last-child{border:0}
+.part .nm{flex:1;color:var(--s200)}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
+.d-ok{background:var(--ok)}.d-no{background:var(--err)}.d-half{background:var(--warn)}.d-todo{border:1.5px solid var(--s500)}.d-cur{background:var(--o500);box-shadow:0 0 0 3px color-mix(in srgb,var(--o500) 30%,transparent)}
+.st{font-size:11px;color:var(--s400)}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.box.w{border-color:var(--warn)}
+.split{display:flex;min-height:420px}
+.split .main{flex:1;border-right:1px solid var(--s800)}
+.split .side{width:330px;display:flex;flex-direction:column}
+.sidehead{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--s800);font-size:12px}
+.sidehead b{flex:1}
+svg text{font:11px var(--sans);fill:var(--s200)}
+svg .sub{font:10px var(--mono);fill:var(--s500)}
+.list{padding:6px 12px}
+.li{display:flex;gap:8px;align-items:center;padding:6px 0;font-size:12px;color:var(--s300)}
+.li.cur{color:var(--s100);font-weight:600}
+.li .dep{font:10px var(--mono);color:var(--s500);margin-left:auto}
+.chg{border-left:2px solid var(--warn);padding:6px 10px;font-size:11.5px;color:var(--s300);background:var(--s900);margin:8px 12px;border-radius:0 6px 6px 0}
+.chg b{color:var(--warn);font-weight:600}
+.ver{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.ver:last-child{border:0}.ver .when{font:11px var(--mono);color:var(--s500);width:70px}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 052: замер понимания и план урока</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Продолжение вкладки урока 051 (<a style="color:var(--o400)" href="https://claude.ai/artifact/5HgfE8QuCSKK5eRAeioLEY">макет 051</a>). Замер — первая стадия урока, отмеченная в шапке; план — боковая колонка вкладки урока, переключатель «Карта / Список». На узком экране план — отдельный лист со списком. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board mid"><h2>A. НОВЫЙ УРОК: С ЗАМЕРОМ ИЛИ БЕЗ</h2><div class="panel pad">
+<p class="title">Новый урок</p>
+<div class="lbl" style="margin-top:0">Что вы хотите понять?</div>
+<div class="ta" style="color:var(--s200)">Почему сохраняется импульс</div>
+<div class="lbl">Начать</div>
+<span class="seg"><span class="sel">С замера понимания</span><span>Сразу с урока</span></span>
+<p class="hint" style="margin-top:6px">Замер: учитель задаст несколько вопросов о том, на чём стоит цель, и ничего не будет объяснять, пока не найдёт, с чего начинать.</p>
+<div class="acts"><span class="btn">Отмена</span><span class="btn acc">Начать урок</span></div>
+</div></section>
+
+<section class="board"><h2>B. ИДЁТ ЗАМЕР</h2><div class="panel">
+<div class="lhead"><div class="goal"><b>Почему сохраняется импульс</b><small>Уроки/Почему сохраняется импульс.lesson</small></div><span class="phase">ЗАМЕР · 3 из ~6</span></div>
+<div class="feed">
+<div class="q"><div class="qk">ЧАСТЬ: второй закон Ньютона · вспомните сами</div><div class="qt">Как связаны сила, действующая на тело, и изменение его импульса?</div>
+<div class="ta">Ваш ответ…</div>
+<div class="lbl">Насколько вы уверены?</div><span class="seg"><span>Угадываю</span><span>Скорее да</span><span>Уверен</span></span>
+<div class="acts"><span class="hint">«Не знаю» — тоже ответ</span><span class="btn">Не знаю</span><span class="btn acc">Ответить</span></div></div>
+<div class="acts" style="margin-top:0"><span class="btn sm">Пропустить замер</span></div>
+</div></div></section>
+
+<section class="board mid"><h2>C. ИТОГ ЗАМЕРА</h2><div class="panel pad">
+<p class="title">С чего начнём</p>
+<div class="part"><span class="dot d-ok"></span><span class="nm">Скорость и масса</span><span class="st">понятно</span></div>
+<div class="part"><span class="dot d-ok"></span><span class="nm">Третий закон Ньютона</span><span class="st">понятно</span></div>
+<div class="part"><span class="dot d-half"></span><span class="nm">Второй закон через импульс</span><span class="st">частично</span></div>
+<div class="part"><span class="dot d-no"></span><span class="nm">Замкнутая система</span><span class="st">не знакомо</span></div>
+<div class="box" style="margin-top:10px">Начнём со <b>второго закона через импульс</b>: формулу вы помните, но связь с изменением импульса пока не видна.</div>
+<div class="acts"><span class="btn">Показать план</span><span class="btn acc">Начать обучение</span></div>
+</div></section>
+
+<section class="board wide"><h2>D. УРОК С ПЛАНОМ: КАРТА</h2><div class="panel">
+<div class="lhead"><div class="goal"><b>Почему сохраняется импульс</b><small>шаг 2 из 5 · план изменён 1 раз</small></div><span class="btn sm">План ◧</span></div>
+<div class="split"><div class="main"><div class="feed">
+<div class="q"><div class="qt">Тележка A толкает тележку B с силой 3 Н. С какой силой B действует на A?</div>
+<div class="opt sel"><span class="k">1</span>3 Н, в противоположную сторону</div><div class="opt"><span class="k">2</span>0 Н</div></div>
+</div></div>
+<div class="side"><div class="sidehead"><b>План</b><span class="seg"><span class="sel">Карта</span><span>Список</span></span></div>
+<svg viewBox="0 0 330 300" width="330" height="300">
+<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a525b"/></marker></defs>
+<g stroke="#4a525b" stroke-width="1.3" fill="none" marker-end="url(#a)">
+<path d="M80,52 L150,104"/><path d="M250,52 L180,104"/><path d="M165,130 L165,170"/><path d="M80,182 L150,236"/><path d="M165,196 L165,230"/>
+</g>
+<g><circle cx="70" cy="40" r="7" fill="color-mix(in srgb,#2e7d4f,#d9efe2)"/><text x="82" y="44">Третий закон</text></g>
+<g><circle cx="260" cy="40" r="7" fill="color-mix(in srgb,#2e7d4f,#d9efe2)"/><text x="196" y="26">Скорость и масса</text></g>
+<g><circle cx="165" cy="117" r="9" fill="#ff6a00" stroke="#ff8a33" stroke-width="3" stroke-opacity=".35"/><text x="180" y="121">2-й закон через p</text><text class="sub" x="180" y="134">сейчас</text></g>
+<g><circle cx="165" cy="183" r="7" fill="none" stroke="#6b757f" stroke-width="1.5"/><text x="180" y="187">Замкнутая система</text></g>
+<g><circle cx="70" cy="170" r="7" fill="none" stroke="#e8a300" stroke-width="1.5"/><text x="18" y="160">Силы — разным телам</text><text class="sub" x="18" y="200">добавлено</text></g>
+<g><circle cx="165" cy="245" r="8" fill="none" stroke="#ff8a33" stroke-width="1.5"/><text x="180" y="249">Цель: сохранение p</text></g>
+</svg>
+<div class="chg"><b>План изменён.</b> Добавлен шаг «Силы приложены к разным телам»: ответ показал, что это место путает. <a href="#" style="color:var(--o400)">История</a></div>
+</div></div>
+</div></section>
+
+<section class="board mid"><h2>E. ПЛАН: СПИСОК (И ДЛЯ ТЕЛЕФОНА)</h2><div class="panel">
+<div class="sidehead"><b>План</b><span class="seg"><span>Карта</span><span class="sel">Список</span></span></div>
+<div class="list">
+<div class="li"><span class="dot d-ok"></span>Скорость и масса<span class="dep">замер</span></div>
+<div class="li"><span class="dot d-ok"></span>Третий закон Ньютона<span class="dep">замер</span></div>
+<div class="li cur"><span class="dot d-cur"></span>Второй закон через импульс<span class="dep">← 1, 2</span></div>
+<div class="li"><span class="dot d-todo" style="border-color:var(--warn)"></span>Силы приложены к разным телам<span class="dep">← 2 · добавлено</span></div>
+<div class="li"><span class="dot d-todo"></span>Замкнутая система<span class="dep">← 3</span></div>
+<div class="li"><span class="dot d-todo" style="border-color:var(--o400)"></span>Цель: сохранение импульса<span class="dep">← 4, 5</span></div>
+</div>
+<p class="hint" style="padding:0 12px 10px">Пройденный шаг открывает место урока, где он разбирался.</p>
+</div></section>
+
+<section class="board mid"><h2>F. ИСТОРИЯ ПЛАНА</h2><div class="panel pad">
+<p class="title">История плана</p>
+<div class="ver"><span class="when">22:48</span><span style="flex:1">Версия 2 — добавлен шаг «Силы приложены к разным телам»</span><span class="btn sm">Открыть</span></div>
+<div class="ver"><span class="when">22:41</span><span style="flex:1">Версия 1 — после замера, 5 шагов</span><span class="btn sm">Открыть</span></div>
+</div></section>
+
+<section class="board mid"><h2>G. ПЛАН ОТКЛОНЁН / ЦЕЛЬ ШИРОКА</h2><div class="panel pad">
+<div class="box w">Учитель предложил план с циклом зависимостей — он не принят, учитель исправляет его. Урок продолжается.</div>
+<div class="box" style="margin-top:10px">Цель «Вся физика» слишком широкая: план вышел бы больше 40 шагов. Учитель предлагает сузить её, например до <i>«Законы сохранения в механике»</i>, и ждёт вашего ответа в уроке.</div>
+</div></section>
+
+</div>
+</body>
+</html>
