@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 058: диктовка, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:520px;max-width:100%}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.lbl{font-size:11.5px;color:var(--s400);margin:10px 0 5px}
+.fld{position:relative}
+.ta{min-height:64px;border:1px solid var(--s700);border-radius:6px;background:var(--s950);padding:7px 36px 7px 9px;font-size:12px;color:var(--s300)}
+.ta.ph{color:var(--s600)}
+.mic{position:absolute;right:6px;top:6px;width:26px;height:26px;border-radius:50%;border:1px solid var(--s700);display:flex;align-items:center;justify-content:center;color:var(--s400);font-size:13px}
+.mic.rec{background:var(--err);border-color:var(--err);color:var(--s950)}
+.recbar{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11.5px;color:var(--s300)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--err)}
+.wave{flex:1;height:18px;display:flex;align-items:center;gap:2px}
+.wave i{display:block;width:3px;background:var(--s500);border-radius:2px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:11.5px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.hint{font-size:10.5px;color:var(--s500)}
+.new{background:color-mix(in srgb,var(--o500) 18%,transparent);color:var(--s100);border-radius:2px}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300);margin-top:10px}
+.box.e{border-color:var(--err)}.box.w{border-color:var(--warn)}
+.bad{color:var(--err)}.wr{color:var(--warn)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--s800)}
+.row:last-child{border:0}.row .txt{flex:1}.row .lb{font-size:12px;color:var(--s200)}
+.seg{display:inline-flex;border:1px solid var(--s700);border-radius:6px;overflow:hidden}
+.seg span{padding:4px 10px;font-size:11px;color:var(--s400);border-right:1px solid var(--s700)}
+.seg span:last-child{border:0}.seg .sel{background:var(--s800);color:var(--o400)}
+.in{height:28px;border:1px solid var(--s700);border-radius:6px;background:var(--s900);font:11px var(--mono);color:var(--s200);display:flex;align-items:center;padding:0 8px;width:220px}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 058: диктовка ответов в уроке</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Кнопка микрофона — в полях ответа и «думаю вслух» урока 051 и практики 053. Распознанный текст вставляется на место курсора и сам не отправляется. Подключение распознавания — отдельный блок раздела «Обучение с ИИ» (рядом с подключением модели 050). Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board"><h2>A. ПОЛЕ С МИКРОФОНОМ</h2><div class="panel pad">
+<div class="lbl" style="margin-top:0">Думаю вслух</div>
+<div class="fld"><div class="ta ph">Как вы рассуждали, в чём сомневаетесь…</div><span class="mic">🎙</span></div>
+<p class="hint" style="margin-top:6px">Микрофон: записать голосом, распознает OpenAI · whisper-1</p>
+</div></section>
+
+<section class="board"><h2>B. ИДЁТ ЗАПИСЬ</h2><div class="panel pad">
+<div class="fld"><div class="ta">Третий закон Ньютона, но</div><span class="mic rec">■</span></div>
+<div class="recbar"><span class="dot"></span><span>0:23 из 2:00</span><span class="wave"><i style="height:6px"></i><i style="height:12px"></i><i style="height:16px"></i><i style="height:9px"></i><i style="height:14px"></i><i style="height:5px"></i><i style="height:11px"></i><i style="height:15px"></i><i style="height:7px"></i></span><span class="btn">Отменить</span><span class="btn acc">Готово</span></div>
+</div></section>
+
+<section class="board"><h2>C. ТЕКСТ ВСТАВЛЕН, МОЖНО ПРАВИТЬ</h2><div class="panel pad">
+<div class="fld"><div class="ta">Третий закон Ньютона, но <span class="new">не понимаю, почему тела тогда вообще двигаются, если силы равны</span></div><span class="mic">🎙</span></div>
+<p class="hint" style="margin-top:6px">Распознано за 1,4 с. Запись не сохранена — только текст.</p>
+</div></section>
+
+<section class="board"><h2>D. ОТКАЗЫ</h2><div class="panel pad">
+<div class="box w" style="margin-top:0"><span class="wr">Нет доступа к микрофону.</span> Разрешите его в настройках системы для Typsidian и попробуйте снова.</div>
+<div class="box e"><span class="bad">Нет связи.</span> Запись сохранена до конца сеанса — повторить распознавание? <div class="acts"><span class="btn">Удалить запись</span><span class="btn acc">Повторить</span></div></div>
+<div class="box">Через 10 секунд запись остановится: предел 2 минуты.</div>
+</div></section>
+
+<section class="board"><h2>E. ПОДКЛЮЧЕНИЕ РАСПОЗНАВАНИЯ</h2><div class="panel pad">
+<p class="title">Распознавание речи</p>
+<div class="row"><div class="txt"><div class="lb">Подключение</div></div><span class="seg"><span class="sel">OpenAI</span><span>Свой адрес</span><span>Нет</span></span></div>
+<div class="row"><div class="txt"><div class="lb">Ключ API</div><div class="hint">Тот же ключ OpenAI, что у модели, если он задан.</div></div><span class="in">сохранён</span></div>
+<div class="row"><div class="txt"><div class="lb">Модель</div></div><span class="in">whisper-1 ▾</span></div>
+<div class="row"><div class="txt"><div class="lb">Язык</div></div><span class="seg"><span class="sel">Автоопределение</span><span>Русский</span><span>English</span></span></div>
+
+</div></section>
+
+</div>
+</body>
+</html>
