@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typsidian 060: модели по ролям, временный макет</title>
+<style>
+:root{--s950:#14171a;--s900:#1b1f24;--s800:#262b31;--s700:#353c44;--s600:#4a525b;--s500:#6b757f;--s400:#9aa3ac;--s300:#c2c8ce;--s200:#dde1e5;--s100:#eceff1;--o500:#ff6a00;--o400:#ff8a33;
+--ok:color-mix(in srgb,#2e7d4f,#d9efe2);--err:color-mix(in srgb,#c8331f 70%,#fadcd7);--warn:#e8a300;--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"JetBrains Mono",Menlo,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0f11;color:var(--s100);font:13px/1.45 var(--sans);padding:24px}
+h1{font-size:16px;margin:0 0 4px}
+.note{color:var(--s400);max-width:820px;margin:0 0 24px}
+.canvas{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.board{width:640px;max-width:100%}.board.mid{width:460px}
+.board>h2{font:600 11px var(--mono);color:var(--s400);margin:0 0 8px;letter-spacing:.04em}
+.panel{background:var(--s950);border:1px solid var(--s800);border-radius:8px;overflow:hidden}
+.pad{padding:14px 16px}
+.title{font-size:13px;font-weight:600;margin:0 0 8px}
+.hint{font-size:10.5px;color:var(--s500)}
+.r{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.r:last-child{border:0}
+.r .n{width:150px;color:var(--s200)}
+.sel{flex:1;height:28px;border:1px solid var(--s700);border-radius:6px;background:var(--s900);font:11px var(--mono);color:var(--s200);display:flex;align-items:center;padding:0 8px;justify-content:space-between}
+.sel.dflt{color:var(--s500)}
+.sel.bad{border-color:var(--err)}
+.cache{width:150px}
+.adv{font-size:11.5px;color:var(--o400);margin:10px 0 4px}
+.box{border:1px solid var(--s700);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--s300)}
+.box.w{border-color:var(--warn)}.box.e{border-color:var(--err)}
+.bad{color:var(--err)}.wr{color:var(--warn)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--s700);border-radius:6px;background:transparent;color:var(--s300);font:11.5px var(--sans);white-space:nowrap}
+.btn.acc{background:var(--o500);border-color:var(--o500);color:var(--s950);font-weight:600}
+.conn{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--s800);font-size:12px}
+.conn:last-child{border:0}
+.conn .nm{flex:1}.conn .sub{font:11px var(--mono);color:var(--s500)}
+.chip{font:600 10px var(--mono);border:1px solid var(--o500);color:var(--o400);border-radius:8px;padding:0 6px}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;color:var(--s500);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--s800)}
+td{padding:6px;border-bottom:1px solid var(--s800);color:var(--s300)}
+td.m{font-family:var(--mono)}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+</style>
+</head>
+<body>
+<h1>Typsidian, фича 060: разные модели для разных задач</h1>
+<p class="note">Временный макет: Claude Design в этой сессии недоступен. Блок «Модели по ролям» раздела «Обучение с ИИ» под подключением 050 (<a style="color:var(--o400)" href="https://claude.ai/artifact/THhvsXAbinBudJvjoU9EvR">макет 050</a>). Подключений в vault может быть несколько; основное — то, что настроено в 050. Содержимое примерное.</p>
+<div class="canvas">
+
+<section class="board mid"><h2>A. ПОДКЛЮЧЕНИЯ VAULT</h2><div class="panel pad">
+<p class="title">Подключения</p>
+<div class="conn"><span class="nm">Anthropic<div class="sub">ключ сохранён</div></span><span class="chip">ОСНОВНОЕ</span></div>
+<div class="conn"><span class="nm">Свой адрес · http://localhost:11434/v1<div class="sub">одобрен на этом устройстве</div></span><span class="btn">Удалить</span></div>
+<div class="acts"><span class="btn">Добавить подключение</span></div>
+</div></section>
+
+<section class="board"><h2>B. МОДЕЛИ ПО РОЛЯМ</h2><div class="panel pad">
+<p class="title">Модели по ролям</p>
+<p class="hint" style="margin:0 0 6px">Фоновые задачи можно отдать дешёвой или локальной модели.</p>
+<div class="r"><span class="n">Учитель</span><span class="sel dflt">как у основной · claude-opus-5-5 <span>▾</span></span></div>
+<div class="r"><span class="n">Замер понимания</span><span class="sel dflt">как у основной <span>▾</span></span></div>
+<div class="r"><span class="n">Практика</span><span class="sel">Anthropic · claude-sonnet-5-5 <span>▾</span></span></div>
+<div class="r"><span class="n">Извлечение графа</span><span class="sel">Свой адрес · qwen3:32b <span>▾</span></span></div>
+<div class="r"><span class="n">Сжатие переписки</span><span class="sel">Anthropic · claude-haiku-5-5 <span>▾</span></span></div>
+<div class="r"><span class="n">Исследование</span><span class="sel dflt">как у основной <span>▾</span></span></div>
+<div class="r"><span class="n">Распознавание речи</span><span class="sel dflt">как в «Распознавание речи» <span>▾</span></span></div>
+<div class="adv">▾ Дополнительно: хранение кэша контекста</div>
+<div class="r"><span class="n">Учитель</span><span class="sel cache">как у провайдера ▾</span><span class="hint">1 час — дороже запись, дешевле повторы</span></div>
+<div class="r"><span class="n">Извлечение графа</span><span class="sel cache dflt" style="opacity:.5">недоступно ▾</span><span class="hint">свой адрес не поддерживает</span></div>
+</div></section>
+
+<section class="board mid"><h2>C. ОТКАЗЫ РОЛЕЙ</h2><div class="panel pad">
+<div class="box e"><span class="bad">Извлечение графа:</span> модель qwen3:32b не найдена у подключения. Остальные роли работают. <div class="acts"><span class="btn acc">Выбрать модель</span></div></div>
+<div class="box w" style="margin-top:10px"><span class="wr">Практика:</span> подключение удалено — роль вернулась к основному.</div>
+<div class="box" style="margin-top:10px"><span class="bad">Сжатие переписки:</span> ключ не задан на этом устройстве.</div>
+</div></section>
+
+<section class="board"><h2>D. ЖУРНАЛ: РОЛЬ И КЭШ</h2><div class="panel pad">
+<table><thead><tr><th>Время</th><th>Роль</th><th>Модель</th><th>Объём</th><th>Кэш: запись / чтение</th><th>Стоимость</th></tr></thead><tbody>
+<tr><td class="m">22:41</td><td>учитель</td><td class="m">claude-opus-5-5</td><td>18 400</td><td>0 / 16 200</td><td>≈ $0,021</td></tr>
+<tr><td class="m">22:41</td><td>извлечение</td><td class="m">qwen3:32b</td><td>6 100</td><td>—</td><td>неизвестно</td></tr>
+<tr><td class="m">22:38</td><td>сжатие</td><td class="m">claude-haiku-5-5</td><td>41 000</td><td>41 000 / 0</td><td>≈ $0,052</td></tr>
+</tbody></table>
+</div></section>
+
+</div>
+</body>
+</html>
