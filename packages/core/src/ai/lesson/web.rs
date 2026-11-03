@@ -12,7 +12,8 @@ use super::plan::PlanView;
 use super::stream::TurnReply;
 use super::turn::{begin_turn, finish_turn, send_turn, PreparedTurn, TurnDone, UserAnswer};
 use super::{
-    create_lesson, list_lessons, open_lesson, plan_version, set_language, set_state, skip_probe,
+    create_lesson, create_practice, list_lessons, open_lesson, plan_version, set_language,
+    set_state, skip_probe,
 };
 use crate::ai::client::{provider_key, require_approved, Connection};
 use crate::ai::settings::load_settings;
@@ -165,4 +166,28 @@ pub async fn lesson_plan_version_js(
     version: u32,
 ) -> Result<Option<PlanView>, AiFailure> {
     plan_version(backend, &path, version).await
+}
+
+/// Новая практика (053): тот же файл урока с `kind: Practice`; материал — уроки, заметки и
+/// описание темы, собранные один раз.
+#[wasm_bindgen(js_name = practiceCreate)]
+pub async fn practice_create_js(
+    backend: &mut WebBackend,
+    title: String,
+    lessons: Vec<String>,
+    notes: Vec<String>,
+    description: Option<String>,
+    language: Language,
+    now: f64,
+) -> Result<String, AiFailure> {
+    create_practice(
+        backend,
+        &title,
+        &lessons,
+        &notes,
+        description.as_deref(),
+        language,
+        now as i64,
+    )
+    .await
 }

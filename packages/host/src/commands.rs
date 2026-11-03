@@ -2524,6 +2524,29 @@ pub async fn ai_lesson_create(
     .map_err(Failure::Core))
 }
 
+/// Новая практика (фича 053): материал — уроки, заметки и описание темы, собранные один раз.
+pub async fn ai_practice_create(
+    state: &Vault,
+    title: String,
+    lessons: Vec<String>,
+    notes: Vec<String>,
+    description: Option<String>,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<String, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::lesson::create_practice(
+        backend,
+        &title,
+        &lessons,
+        &notes,
+        description.as_deref(),
+        language,
+        now
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
 pub async fn ai_lesson_open(
     state: &Vault,
     path: String,

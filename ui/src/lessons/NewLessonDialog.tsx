@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
-import type { AiProvider, AiSettings, LessonPhase, Note } from "../wasm-core/typsidian_core.js";
+import { useId, useMemo, useState } from "react";
+import type { LessonPhase, Note } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { BlockedNotice, PROVIDER_LABEL, useAiReadiness, useClosedPaths } from "./aiReadiness.js";
 import { failureKind, requestLessonStart } from "./lessonEnv.js";
 
 // Диалог «Новый урок» (фича 051, макет D, E): цель, заметки для опоры и условия, при
@@ -23,17 +24,6 @@ export interface NewLessonDialogProps {
   onCancel: () => void;
 }
 
-type Readiness =
-  | { state: "checking" }
-  | { state: "ready"; settings: AiSettings }
-  | { state: "blocked"; reason: "disabled" | "noModel" | "noKey" | "noEndpoint"; provider: AiProvider };
-
-const PROVIDER_LABEL = {
-  Anthropic: "ai.provider.anthropic",
-  OpenAi: "ai.provider.openai",
-  Custom: "ai.provider.custom",
-} as const;
-
 const PICK_LIMIT = 8;
 
 export function NewLessonDialog({
@@ -48,7 +38,7 @@ export function NewLessonDialog({
   const { t } = useI18n();
   const id = useId();
   useDismissOnEscape(onCancel);
-  const [readiness, setReadiness] = useState<Readiness>({ state: "checking" });
+  const readiness = useAiReadiness(client, vaultId);
   const [goal, setGoal] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
@@ -58,28 +48,6 @@ export function NewLessonDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const settings = await client.ai.settings();
-      const provider = settings.provider ?? "Anthropic";
-      if (!settings.enabled) return { state: "blocked", reason: "disabled", provider } as const;
-      if (provider === "Custom" && (settings.custom_endpoint ?? "") === "") {
-        return { state: "blocked", reason: "noEndpoint", provider } as const;
-      }
-      if ((settings.model ?? "") === "") return { state: "blocked", reason: "noModel", provider } as const;
-      if (provider !== "Custom" && !(await client.ai.keyState(vaultId, provider).catch(() => false))) {
-        return { state: "blocked", reason: "noKey", provider } as const;
-      }
-      return { state: "ready", settings } as const;
-    })()
-      .then((next) => alive && setReadiness(next))
-      .catch(() => alive && setReadiness({ state: "blocked", reason: "disabled", provider: "Anthropic" }));
-    return () => {
-      alive = false;
-    };
-  }, [client, vaultId]);
-
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return notes
@@ -87,6 +55,8 @@ export function NewLessonDialog({
       .filter((note) => needle === "" || note.path.toLowerCase().includes(needle))
       .slice(0, PICK_LIMIT);
   }, [notes, query, chosen]);
+
+  const closed = useClosedPaths(client, [...matches.map((note) => note.path), ...chosen]);
 
   const create = async (): Promise<void> => {
     if (busy || goal.trim() === "" || readiness.state !== "ready") return;
@@ -127,22 +97,7 @@ export function NewLessonDialog({
 
         {readiness.state === "checking" && <p role="status">{t("lessons.new.checking")}</p>}
 
-        {blocked !== null && (
-          <div className="ts-lesson__box ts-lesson__box--warn" role="alert">
-            {blocked.reason === "disabled" && t("lessons.cannot.disabled")}
-            {blocked.reason === "noKey" && t("lessons.cannot.noKey", { provider: t(PROVIDER_LABEL[blocked.provider]) })}
-            {blocked.reason === "noModel" && t("lessons.cannot.noModel")}
-            {blocked.reason === "noEndpoint" && t("lessons.cannot.noEndpoint")}
-            <div className="ts-lesson__acts">
-              <button type="button" className="ts-btn" onClick={onCancel}>
-                {t("lessons.new.cancel")}
-              </button>
-              <button type="button" className="ts-btn ts-btn--accent" autoFocus onClick={onOpenSettings}>
-                {t("lessons.cannot.openSettings")}
-              </button>
-            </div>
-          </div>
-        )}
+        {blocked !== null && <BlockedNotice blocked={blocked} onCancel={onCancel} onOpenSettings={onOpenSettings} />}
 
         {settings !== null && (
           <>
@@ -196,12 +151,16 @@ export function NewLessonDialog({
                       <button
                         type="button"
                         className="ts-lesson__pickrow"
+                        disabled={closed.has(note.path)}
                         onClick={() => {
                           setChosen((list) => [...list, note.path]);
                           setQuery("");
                         }}
                       >
                         {note.path}
+                        {closed.has(note.path) && (
+                          <span className="ts-practice__srcsub ts-practice__srcsub--closed">{t("practice.new.closed")}</span>
+                        )}
                       </button>
                     </li>
                   ))}

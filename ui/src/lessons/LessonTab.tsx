@@ -26,6 +26,8 @@ import {
 } from "./LessonQuestion.js";
 import { LessonPlan, planProgressOf } from "./LessonPlan.js";
 import { ProbeResultCard } from "./ProbeResult.js";
+import { awaitingNext, hintNumbers, PracticeForm, PracticeRow } from "./PracticeFeed.js";
+import { PracticeSummary } from "./PracticeSummary.js";
 
 // Вкладка урока (фича 051, макет A–C, F, I). Формат, ход и продолжение решает ядро;
 // здесь — показ переписки, форма ответа и опрос потока: текст идущего ответа
@@ -79,6 +81,8 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   const [draft, setDraft] = useState<AnswerDraft>(EMPTY_DRAFT);
   // `null` — как решит ширина: колонка открыта, лист закрыт.
   const [planOpen, setPlanOpen] = useState<boolean | null>(null);
+  // Сводка практики (053, макет E): закрыта, пока не открыта кнопкой.
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const feedEnd = useRef<HTMLDivElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -131,7 +135,8 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       } finally {
         running.current = false;
         setTurn(null);
-        if (!keepDraft && answer !== undefined) setDraft(EMPTY_DRAFT);
+        // Подсказка и «Сдаюсь» не отправляют написанное: черновик остаётся.
+        if (!keepDraft && answer !== undefined && (answer.action ?? "Answer") === "Answer") setDraft(EMPTY_DRAFT);
       }
     },
     [client, env.vaultId, path, reload, view],
@@ -243,6 +248,16 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     [client, path, reload],
   );
 
+  // Практика (053): ответ на задачу и действия вместо ответа. Ядро само проверяет, что
+  // действие применимо; устаревший вид кончается «Урок изменился».
+  const sendProblem = useCallback((): void => {
+    const text = draft.text.trim();
+    if (text !== "") void run({ text });
+  }, [draft.text, run]);
+  const requestHint = useCallback((): void => void run({ text: "", action: "HintRequest" }), [run]);
+  const giveUp = useCallback((): void => void run({ text: "", action: "GiveUp" }), [run]);
+  const nextProblem = useCallback((): void => void run({ text: "", action: "NextProblem" }), [run]);
+
   // «Не знаю» в замере: ответ-сведение без текста (052 FR-002, сценарий 4).
   const dontKnow = useCallback((): void => {
     void run({ text: "", dont_know: true });
@@ -269,7 +284,10 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     target.setAttribute("data-flash", "on");
     window.setTimeout(() => target.removeAttribute("data-flash"), 1600);
     setPlanOpen((open) => (narrow ? false : open));
+    if (narrow) setSummaryOpen(false);
   }, [narrow]);
+
+  const hintNumberOf = useMemo(() => hintNumbers(view?.events ?? []), [view]);
 
   const loadVersion = useCallback(
     (version: number) => client.lessons.planVersion(path, version),
@@ -335,7 +353,16 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     view.last_question == null &&
     lastProbeIndex > lastTeacherIndex &&
     lastProbeIndex > lastOf("User");
-  const answering = view.waiting === "User" && turn === null && !view.read_only && !probePending;
+  const isPractice = view.header.kind === "Practice";
+  const practice = view.practice ?? undefined;
+  const waitingUser = view.waiting === "User" && turn === null && !view.read_only;
+  // Практика ждёт ответа на открытую задачу, «Следующую задачу» после итога либо — если
+  // агент не поставил задачу — повтора хода.
+  const practiceOpen = isPractice && waitingUser && practice?.open_problem != null;
+  const practiceNext = isPractice && waitingUser && practice?.open_problem == null && awaitingNext(view.events);
+  const practiceStuck = isPractice && waitingUser && !practiceOpen && !practiceNext;
+  const lastVerdictIndex = lastOf("Verdict");
+  const answering = waitingUser && !probePending && !isPractice;
   const plan = view.plan ?? undefined;
   const planShown = plan !== undefined && (planOpen ?? !narrow);
   const planProgress = plan === undefined ? undefined : planProgressOf(plan);
@@ -402,6 +429,19 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
             {phaseText}
           </span>
         )}
+        {isPractice && (
+          <span className="ts-lesson__kind">{t("practice.tag")}</span>
+        )}
+        {isPractice && practice !== undefined && (
+          <button
+            type="button"
+            className="ts-btn ts-btn--sm"
+            aria-pressed={summaryOpen}
+            onClick={() => setSummaryOpen((open) => !open)}
+          >
+            {t("practice.summary.toggle")}
+          </button>
+        )}
         {plan !== undefined && (
           <button
             type="button"
@@ -442,7 +482,7 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
             disabled={turn !== null || view.read_only}
             onClick={() => void setState("Finished")}
           >
-            {t("lessons.finish")}
+            {isPractice ? t("practice.finish") : t("lessons.finish")}
           </button>
         ) : (
           <button
@@ -451,7 +491,7 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
             disabled={view.read_only}
             onClick={() => void setState("Active")}
           >
-            {t("lessons.resume")}
+            {isPractice ? t("practice.resume") : t("lessons.resume")}
           </button>
         )}
       </div>
@@ -459,13 +499,16 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       <div className="ts-lesson__split">
       <div className="ts-lesson__main">
       <div ref={feedRef} className="ts-lesson__feed" role="log" aria-label={t("lessons.feed")}>
-        <Bubble who={t("lessons.who.you")}>{view.header.goal}</Bubble>
+        {!isPractice && <Bubble who={t("lessons.who.you")}>{view.header.goal}</Bubble>}
 
         {view.events.map((event, index) => (
           <div key={`${index}:${event.kind}:${event.at}`} className="ts-lesson__ev" data-event={index}>
             <EventRow
               event={event}
               hideQuestion={answering && index === lastTeacherIndex}
+              view={view}
+              hintNumber={hintNumberOf.get(index)}
+              onNext={practiceNext && index === lastVerdictIndex ? nextProblem : undefined}
               onOpenNote={env.openNote}
               {...(probePending && index === lastProbeIndex
                 ? {
@@ -491,10 +534,10 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
 
         {view.waiting === "Start" && turn === null && !view.read_only && (
           <div className="ts-lesson__box">
-            {t("lessons.start.hint")}
+            {t(view.header.kind === "Practice" ? "practice.start.hint" : "lessons.start.hint")}
             <div className="ts-lesson__acts">
               <button type="button" className="ts-btn ts-btn--accent" onClick={() => void run(undefined)}>
-                {t("lessons.start.button")}
+                {t(view.header.kind === "Practice" ? "practice.start.button" : "lessons.start.button")}
               </button>
             </div>
           </div>
@@ -514,6 +557,26 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
             <button type="button" className="ts-btn ts-btn--sm" onClick={() => void skipProbe()}>
               {t("lessons.probe.skip")}
             </button>
+          </div>
+        )}
+
+        {practiceOpen && (
+          <PracticeForm
+            text={draft.text}
+            onText={(text) => setDraft({ ...draft, text })}
+            onSend={sendProblem}
+            onHint={requestHint}
+            onGiveUp={giveUp}
+          />
+        )}
+        {practiceStuck && (
+          <div className="ts-lesson__box" role="status">
+            {t("practice.stuck")}
+            <div className="ts-lesson__acts">
+              <button type="button" className="ts-btn ts-btn--accent" onClick={() => void run(undefined)}>
+                {t("lessons.retryRepeat")}
+              </button>
+            </div>
           </div>
         )}
 
@@ -541,7 +604,9 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
 
         {view.waiting === "Closed" && (
           <p className="ts-lesson__hint" role="status">
-            {view.state === "Finished" ? t("lessons.closed.finished") : t("lessons.closed.stopped")}
+            {view.state === "Finished"
+              ? t(isPractice ? "practice.closed.finished" : "lessons.closed.finished")
+              : t(isPractice ? "practice.closed.stopped" : "lessons.closed.stopped")}
           </p>
         )}
         <div ref={feedEnd} />
@@ -572,6 +637,14 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
           loadVersion={loadVersion}
         />
       )}
+      {isPractice && practice !== undefined && summaryOpen && (
+        <PracticeSummary
+          practice={practice}
+          sheet={narrow}
+          onClose={() => setSummaryOpen(false)}
+          onJump={jumpTo}
+        />
+      )}
       </div>
     </section>
   );
@@ -597,10 +670,19 @@ function ConfidenceChip({ level }: { level: Confidence }): React.JSX.Element {
 
 function UserBubble({ answer }: { answer: UserAnswer }): React.JSX.Element {
   const { t } = useI18n();
+  if (answer.action === "NextProblem") return <></>;
+  const said =
+    answer.action === "HintRequest"
+      ? t("practice.said.hint")
+      : answer.action === "GiveUp"
+        ? t("practice.said.giveUp")
+        : undefined;
   return (
     <div className="ts-lesson__t ts-lesson__t--user">
       <div className="ts-lesson__who">{t("lessons.who.you")}</div>
-      {answer.dont_know === true && answer.text === "" ? (
+      {said !== undefined ? (
+        <div className="ts-lesson__body ts-lesson__body--soft">{said}</div>
+      ) : answer.dont_know === true && answer.text === "" ? (
         <div className="ts-lesson__body ts-lesson__body--soft">{t("lessons.q.dontKnowSaid")}</div>
       ) : (
         <div className="ts-lesson__body">{answer.text}</div>
@@ -634,11 +716,20 @@ function NoteLink({ path, onOpen }: { path: string; onOpen(path: string): void }
 function EventRow({
   event,
   hideQuestion,
+  view,
+  hintNumber,
+  onNext,
   onOpenNote,
   probeActions,
 }: {
   event: LessonEvent;
   hideQuestion: boolean;
+  /** Вид урока: практике нужны её задачи и решения. */
+  view: LessonView;
+  /** Номер подсказки внутри задачи (053). */
+  hintNumber: number | undefined;
+  /** «Следующая задача» под последним итогом практики. */
+  onNext: (() => void) | undefined;
   onOpenNote(path: string): void;
   /** Кнопки итога замера: только у последнего итога, после которого урок ждёт. */
   probeActions?: { onStart(): void; onShowPlan?: () => void };
@@ -658,6 +749,8 @@ function EventRow({
       );
     case "Teacher": {
       const cut = event.interrupted === true;
+      // Ход практики из одних инструментов не оставляет текста: пустая подпись не нужна.
+      if (event.text === "" && event.question === undefined && !cut) return null;
       return (
         <>
           <div className="ts-lesson__t">
@@ -730,7 +823,20 @@ function EventRow({
       );
     case "PlanProgress":
       return null;
+    // События фичи 053 (практика): задачи, подсказки и итоги рисует лента практики.
+    case "Material":
+    case "Problem":
+    case "Hint":
+    case "Verdict":
+    case "NextProblem":
+      return <PracticeRow event={event} view={view} hintNumber={hintNumber} onNext={onNext} />;
+    case "HintRequest":
+    case "GiveUp":
+      return <UserBubble answer={{ text: "", action: event.kind }} />;
     case "PlanRejected":
+      if (event.tool === "pose_problem" || event.tool === "give_hint" || event.tool === "conclude") {
+        return null;
+      }
       return (
         <div className="ts-lesson__box ts-lesson__box--warn" role="status">
           {t(event.tool === "plan_progress" ? "lessons.plan.rejectedProgress" : "lessons.plan.rejected", {

@@ -12,7 +12,7 @@
 
 | kind | Поля |
 | --- | --- |
-| `Material` | `at`, `lessons[] {path, goal, chars}`, `notes[]` (через `NoteRead`), `description?` |
+| `Material` | `at`, `lessons[] {path, goal, text, chars}`, `description?`; заметки — событиями `NoteRead` |
 | `Problem` | `at`, `n`, `statement`, `solution?` |
 | `Hint` | `at`, `n`, `text` |
 | `HintRequest` | `at`, `n` |

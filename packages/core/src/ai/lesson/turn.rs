@@ -11,12 +11,13 @@ use serde_json::{json, Value};
 
 use super::file::{
     append_events, current_language, current_phase, lesson_path, probe_count, probe_result,
-    read_lesson, teacher_run, view_of, Confidence, Language, LessonEvent, LessonPhase,
+    read_lesson, teacher_run, view_of, Confidence, Language, LessonEvent, LessonKind, LessonPhase,
     LessonQuestion, LessonView, NoteOutcome, ParsedLesson, ProbePart, ProbeState, FORMAT,
-    MAX_AUTO_CONTINUES,
+    GOAL_MAX_CHARS, MAX_AUTO_CONTINUES,
 };
 use super::partial;
 use super::plan::{self, PlanError, PlanProgressArgs, PlanSet};
+use super::practice::{self, PracticeCall};
 use super::prompt::{self, NoteResult, ToolSet, PROBE_QUESTIONS_LIMIT};
 use super::stream::{StreamParser, ToolCall, TurnReply};
 use super::MAX_ATTACHED_NOTES;
@@ -43,6 +44,8 @@ pub const ATTACHED_TOTAL_CHARS: usize = 300_000;
 const MAX_CHOICES: usize = 5;
 const QUESTION_MAX_CHARS: usize = 1_000;
 const CHOICE_MAX_CHARS: usize = 300;
+/// Материал практики ищется среди первых событий файла: он пишется при создании.
+const MATERIAL_SCAN: usize = 8;
 const MAX_TOKENS_TEACH: u32 = 4096;
 const MAX_TOKENS_COMPACT: u32 = 2048;
 
@@ -61,6 +64,21 @@ pub struct UserAnswer {
     /// «Не знаю» (кнопка замера): ответ-сведение; текст может быть пустым.
     #[serde(default)]
     pub dont_know: bool,
+    /// Что делает пользователь (053); по умолчанию — отвечает, как в уроках 051 и 052.
+    #[serde(default)]
+    pub action: AnswerAction,
+}
+
+/// Действие пользователя в сессии. Кроме `Answer` действуют только в практике.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum AnswerAction {
+    #[default]
+    Answer,
+    HintRequest,
+    GiveUp,
+    NextProblem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,8 +265,16 @@ fn teacher_text(language: Language, text: &str, question: Option<&LessonQuestion
     out
 }
 
+/// Цель урока для инструкций: файл приходит и с синхронизацией, поэтому длина ограничена.
+fn goal_of(parsed: &ParsedLesson) -> String {
+    parsed.header.goal.chars().take(GOAL_MAX_CHARS).collect()
+}
+
 /// Инструменты, которые действуют в следующем ходе урока.
 fn tool_set_of(parsed: &ParsedLesson) -> ToolSet {
+    if parsed.header.kind == LessonKind::Practice {
+        return ToolSet::Practice;
+    }
     if current_phase(&parsed.header, &parsed.events) == LessonPhase::Teach {
         ToolSet::Teach
     } else if probe_count(&parsed.events) >= PROBE_QUESTIONS_LIMIT {
@@ -261,14 +287,25 @@ fn tool_set_of(parsed: &ParsedLesson) -> ToolSet {
 /// Инструкции стадии: замер (с требованием завершить после предела вопросов) или обучение
 /// с правилами плана, итогом замера (или пометкой о пропуске) и текущим планом. Всё это
 /// берётся из событий файла, поэтому переживает перезапуск и сжатие переписки.
-fn stage_system(language: Language, parsed: &ParsedLesson) -> (String, ToolSet) {
+async fn stage_system<B: VaultBackend>(
+    backend: &B,
+    settings: &AiSettings,
+    language: Language,
+    parsed: &ParsedLesson,
+) -> (String, ToolSet) {
+    let goal = goal_of(parsed);
     let tools = tool_set_of(parsed);
+    if tools == ToolSet::Practice {
+        return (
+            practice_system(backend, settings, language, &goal, parsed).await,
+            tools,
+        );
+    }
     if tools != ToolSet::Teach {
-        let system =
-            prompt::system_probe(language, &parsed.header.goal, tools == ToolSet::ProbeEnd);
+        let system = prompt::system_probe(language, &goal, tools == ToolSet::ProbeEnd);
         return (system, tools);
     }
-    let mut system = prompt::system(language, &parsed.header.goal);
+    let mut system = prompt::system(language, &goal);
     system.push_str("\n\n");
     system.push_str(prompt::plan_rules(language));
     if let Some(summary) = probe_result(&parsed.events) {
@@ -289,6 +326,56 @@ fn stage_system(language: Language, parsed: &ParsedLesson) -> (String, ToolSet) 
     (system, tools)
 }
 
+/// Инструкции практики: материал, собранный при создании, и открытая задача с решением
+/// (его знает только модель). Берётся из событий файла, поэтому переживает перезапуск и
+/// сжатие переписки.
+///
+/// Материал урока — снимок, но запрет папки действует и на него (ревью 053 M1): урок с
+/// путём, закрытым `check_access`, из инструкций выкидывается; исчезнувший урок остаётся
+/// снимком.
+async fn practice_system<B: VaultBackend>(
+    backend: &B,
+    settings: &AiSettings,
+    language: Language,
+    goal: &str,
+    parsed: &ParsedLesson,
+) -> String {
+    let mut system = prompt::system_practice(language, goal);
+    for event in parsed.events.iter().take(MATERIAL_SCAN) {
+        if let LessonEvent::Material {
+            lessons,
+            description,
+            ..
+        } = event
+        {
+            let mut open = Vec::new();
+            for lesson in lessons.iter().take(practice::MAX_MATERIAL_LESSONS) {
+                if check_access_in(backend, &lesson.path, settings).await {
+                    open.push(lesson.clone());
+                }
+            }
+            system.push_str("\n\n");
+            system.push_str(&prompt::material_block(
+                language,
+                &open,
+                description.as_deref(),
+            ));
+            break;
+        }
+    }
+    if let Some(open) = practice::open_problem(&parsed.events) {
+        system.push_str("\n\n");
+        system.push_str(&prompt::open_problem_block(
+            language,
+            open.n,
+            open.statement,
+            open.solution,
+            open.hints,
+        ));
+    }
+    system
+}
+
 /// Собирает запрос из файла урока: инструкции с прикреплёнными заметками, изложение (если
 /// было) и события после него. Оборванные реплики модели не показываются.
 async fn build_context<B: VaultBackend>(
@@ -297,7 +384,7 @@ async fn build_context<B: VaultBackend>(
     parsed: &ParsedLesson,
 ) -> Context {
     let language = current_language(parsed);
-    let (mut system, tools) = stage_system(language, parsed);
+    let (mut system, tools) = stage_system(backend, settings, language, parsed).await;
 
     // Прикреплённые заметки читаются заново на каждом ходу: так учитель помнит их весь
     // урок, а запрещённая позже папка перестаёт отдавать текст. Прикреплением считаются
@@ -474,6 +561,38 @@ async fn build_context<B: VaultBackend>(
                     prompt::probe_done_result(language).to_owned(),
                 );
             }
+            LessonEvent::Problem { n, statement, .. } => push(
+                &mut messages,
+                Role::Assistant,
+                prompt::problem_text(language, *n, statement),
+            ),
+            LessonEvent::Hint { text, .. } => push(
+                &mut messages,
+                Role::Assistant,
+                prompt::hint_text(language, text),
+            ),
+            LessonEvent::Verdict {
+                n, outcome, review, ..
+            } => push(
+                &mut messages,
+                Role::Assistant,
+                prompt::verdict_text(language, *n, *outcome, review),
+            ),
+            LessonEvent::HintRequest { .. } => push(
+                &mut messages,
+                Role::User,
+                prompt::hint_request_text(language).to_owned(),
+            ),
+            LessonEvent::GiveUp { .. } => push(
+                &mut messages,
+                Role::User,
+                prompt::give_up_text(language).to_owned(),
+            ),
+            LessonEvent::NextProblem { .. } => push(
+                &mut messages,
+                Role::User,
+                prompt::next_problem_text(language).to_owned(),
+            ),
             _ => {}
         }
     }
@@ -487,7 +606,11 @@ async fn build_context<B: VaultBackend>(
             0,
             Message {
                 role: Role::User,
-                text: prompt::start_message(language).to_owned(),
+                text: if tools == ToolSet::Practice {
+                    prompt::practice_start_message(language).to_owned()
+                } else {
+                    prompt::start_message(language).to_owned()
+                },
             },
         );
     }
@@ -573,6 +696,28 @@ fn build_request(
     }
 }
 
+/// Событие действия пользователя в практике. Подсказка и «Сдаюсь» нужны открытой задаче,
+/// «Следующая задача» — после итога; иначе вид интерфейса устарел (`LessonChanged`), и в
+/// файл ничего не пишется.
+fn action_event(
+    parsed: &ParsedLesson,
+    action: AnswerAction,
+    now: i64,
+) -> Result<LessonEvent, AiFailure> {
+    if parsed.header.kind != LessonKind::Practice {
+        return Err(AiFailure::LessonChanged);
+    }
+    let open = practice::open_problem(&parsed.events).map(|open| open.n);
+    match (action, open) {
+        (AnswerAction::HintRequest, Some(n)) => Ok(LessonEvent::HintRequest { at: now, n }),
+        (AnswerAction::GiveUp, Some(n)) => Ok(LessonEvent::GiveUp { at: now, n }),
+        (AnswerAction::NextProblem, None) if practice::awaiting_next(&parsed.events) => {
+            Ok(LessonEvent::NextProblem { at: now })
+        }
+        _ => Err(AiFailure::LessonChanged),
+    }
+}
+
 /// Шаг 1. Выключенная функция отказывает до любой записи и сети (FR-001). Ответ
 /// пользователя ложится в файл урока до журнала и сети (FR-007), журнал получает запрос
 /// до отправки (FR-012). `expected` — число событий, которое видит интерфейс.
@@ -612,15 +757,18 @@ pub async fn begin_turn<B: VaultBackend>(
     let model = settings.model.clone().ok_or(AiFailure::ModelMissing)?;
 
     if let Some(answer) = answer {
-        let event = LessonEvent::User {
-            at: now,
-            text: answer.text,
-            choice: answer.choice,
-            confidence: answer.confidence,
-            thinking: answer
-                .thinking
-                .filter(|thinking| !thinking.trim().is_empty()),
-            dont_know: answer.dont_know,
+        let event = match answer.action {
+            AnswerAction::Answer => LessonEvent::User {
+                at: now,
+                text: answer.text,
+                choice: answer.choice,
+                confidence: answer.confidence,
+                thinking: answer
+                    .thinking
+                    .filter(|thinking| !thinking.trim().is_empty()),
+                dont_know: answer.dont_know,
+            },
+            action => action_event(&parsed, action, now)?,
         };
         append_events(backend, path, std::slice::from_ref(&event)).await?;
         parsed.events.push(event);
@@ -650,7 +798,11 @@ pub async fn begin_turn<B: VaultBackend>(
             push(
                 &mut messages,
                 Role::User,
-                prompt::compact_request(language).to_owned(),
+                if context.tools == ToolSet::Practice {
+                    prompt::compact_request_practice(language).to_owned()
+                } else {
+                    prompt::compact_request(language).to_owned()
+                },
             );
             build_request(
                 settings.provider,
@@ -740,6 +892,7 @@ struct Calls {
     probe_done: Option<(Vec<ProbePart>, String)>,
     plan_set: Option<Result<PlanSet, PlanError>>,
     plan_progress: Option<PlanProgressArgs>,
+    practice: Option<PracticeCall>,
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -818,6 +971,7 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
         probe_done: None,
         plan_set: None,
         plan_progress: None,
+        practice: None,
     };
     for call in calls {
         let input: Value = if call.arguments.trim().is_empty() {
@@ -842,11 +996,15 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
                 };
                 parsed.question = question_of(&input, Some(part));
             }
-            prompt::PROBE_DONE if set != ToolSet::Teach && parsed.probe_done.is_none() => {
+            prompt::PROBE_DONE
+                if matches!(set, ToolSet::Probe | ToolSet::ProbeEnd)
+                    && parsed.probe_done.is_none() =>
+            {
                 parsed.probe_done = Some(probe_parts_of(&input));
             }
             prompt::READ_NOTE
-                if set != ToolSet::ProbeEnd && parsed.reads.len() < MAX_NOTE_READS_PER_TURN =>
+                if matches!(set, ToolSet::Teach | ToolSet::Probe)
+                    && parsed.reads.len() < MAX_NOTE_READS_PER_TURN =>
             {
                 if let Some(path) = input["path"].as_str().map(str::trim) {
                     // Путь в чистом виде; негодный остаётся как есть и получит отказ.
@@ -861,6 +1019,12 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
             }
             prompt::PLAN_PROGRESS if set == ToolSet::Teach && parsed.plan_progress.is_none() => {
                 parsed.plan_progress = Some(plan::parse_plan_progress(&input));
+            }
+            // Агент практики: первый вызов хода, остальные игнорируются.
+            practice::POSE_PROBLEM | practice::GIVE_HINT | practice::CONCLUDE
+                if set == ToolSet::Practice && parsed.practice.is_none() =>
+            {
+                parsed.practice = practice::parse_call(call.name.as_str(), &input);
             }
             _ => {}
         }
@@ -1014,6 +1178,36 @@ pub async fn finish_turn<B: VaultBackend>(
                             Err(error) => {
                                 did_tool = true;
                                 events.push(rejected(language, now, prompt::PLAN_PROGRESS, &error));
+                            }
+                        }
+                    }
+                    if before.header.kind == LessonKind::Practice {
+                        let mut concluded = false;
+                        if let Some(call) = calls.practice {
+                            let tool = call.tool();
+                            match practice::resolve(&before.events, call, now) {
+                                Ok(event) => {
+                                    concluded = matches!(event, LessonEvent::Verdict { .. });
+                                    asked = true;
+                                    events.push(event);
+                                }
+                                Err(error) => {
+                                    did_tool = true;
+                                    events.push(LessonEvent::PlanRejected {
+                                        at: now,
+                                        tool: tool.to_owned(),
+                                        reason: prompt::practice_error(language, &error),
+                                    });
+                                }
+                            }
+                        }
+                        // «Сдаюсь» без итога от модели: решение показывает ядро.
+                        if !concluded {
+                            if let Some(event) =
+                                practice::forced_verdict(&before.events, &reply.text, now)
+                            {
+                                asked = true;
+                                events.push(event);
                             }
                         }
                     }

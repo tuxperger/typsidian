@@ -48,6 +48,7 @@ pub const ALLOWED: &[&str] = &[
     "ai_check_access",
     "ai_lesson_list",
     "ai_lesson_create",
+    "ai_practice_create",
     "ai_lesson_open",
     "ai_lesson_answer",
     "ai_lesson_progress",

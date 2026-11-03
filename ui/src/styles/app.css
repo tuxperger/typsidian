@@ -13211,6 +13211,7 @@ button.ts-props__chipbtn,
 
 .ts-lesson__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: 10px var(--space-4);
@@ -13218,7 +13219,7 @@ button.ts-props__chipbtn,
 }
 
 .ts-lesson__goal {
-  flex: 1;
+  flex: 1 1 10em;
   min-width: 0;
 }
 
@@ -14240,4 +14241,299 @@ button.ts-plan__row:focus-visible,
 
 .ts-lessons__row:focus-visible {
   outline-offset: -2px;
+}
+
+/* Практика с ИИ (фича 053, макет A–E). */
+.ts-lesson__kind {
+  padding: 1px 8px;
+  border: var(--border-width) solid var(--steel-600);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-300);
+  white-space: nowrap;
+}
+
+.ts-lessons__kind {
+  margin-left: var(--space-2);
+  padding: 0 6px;
+  border: var(--border-width) solid var(--steel-600);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-300);
+  white-space: nowrap;
+}
+
+/* Диалог: выбор материала (A). */
+.ts-practice__srcs {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ts-practice__src {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  cursor: pointer;
+}
+
+.ts-practice__src:last-child {
+  border-bottom: 0;
+}
+
+.ts-practice__srctext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ts-practice__srcname {
+  color: var(--steel-200);
+  overflow-wrap: anywhere;
+}
+
+.ts-practice__srcsub {
+  font-family: var(--font-mono);
+  color: var(--steel-500);
+}
+
+.ts-practice__newhint {
+  margin: 10px 0 0;
+}
+
+/* Лента: задача, подсказка, итог (B, C, D). */
+.ts-practice__prob {
+  align-self: stretch;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-lg);
+  background: var(--steel-900);
+}
+
+.ts-practice__pn {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-500);
+}
+
+.ts-practice__lock {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: var(--border-width) dashed var(--steel-700);
+  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-practice__lock small {
+  display: block;
+  color: var(--steel-600);
+}
+
+.ts-practice__hint {
+  align-self: stretch;
+  padding: 6px 10px;
+  border-left: 2px solid var(--orange-500);
+  border-radius: 0 6px 6px 0;
+  background: var(--steel-900);
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+}
+
+.ts-practice__hint b {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  color: var(--orange-400);
+}
+
+.ts-practice__verdict {
+  font-weight: var(--weight-semibold);
+}
+
+.ts-practice__verdict--Correct {
+  color: var(--ts-ok);
+}
+
+.ts-practice__verdict--Partial {
+  color: var(--warning);
+}
+
+.ts-practice__verdict--Wrong {
+  color: var(--ts-error);
+}
+
+.ts-practice__verdict--Unsolved {
+  color: var(--steel-400);
+}
+
+.ts-practice__review {
+  margin-top: 6px;
+}
+
+.ts-practice__sol {
+  margin-top: var(--space-2);
+  padding: 10px var(--space-3);
+  border: var(--border-width) dashed var(--steel-600);
+  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+}
+
+.ts-practice__soltitle {
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-500);
+}
+
+.ts-practice__nosol {
+  margin-top: var(--space-2);
+}
+
+.ts-practice__form {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-lg);
+  background: var(--steel-900);
+}
+
+.ts-practice__form .ts-lesson__lbl {
+  margin-top: 0;
+}
+
+/* Сводка (E). */
+.ts-practice__sum {
+  padding: var(--space-3);
+}
+
+.ts-practice__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ts-practice__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 7px 4px;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  background: transparent;
+  color: var(--steel-300);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-practice__row:hover .ts-practice__rowtitle {
+  color: var(--orange-400);
+}
+
+.ts-practice__row:focus-visible {
+  outline: 2px solid var(--orange-500);
+  outline-offset: -2px;
+}
+
+.ts-practice__rown {
+  flex: 0 0 24px;
+  font-family: var(--font-mono);
+  color: var(--steel-500);
+}
+
+.ts-practice__rowtitle {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ts-practice__rowout {
+  color: var(--steel-400);
+  text-align: right;
+}
+
+.ts-practice__sumreview {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+
+.ts-lesson-dialog label.ts-lesson__lbl,
+.ts-practice__form label.ts-lesson__lbl {
+  display: block;
+}
+
+.ts-practice__mode {
+  margin-bottom: var(--space-2);
+}
+
+.ts-practice__src input[type="checkbox"] {
+  flex: 0 0 auto;
+  accent-color: var(--orange-500);
+}
+
+/* Закрытые для агента заметки и уроки в диалогах выбора: помечены и не выбираются (053 A). */
+.ts-practice__src--closed {
+  cursor: not-allowed;
+}
+
+.ts-practice__src--closed .ts-practice__srcname {
+  color: var(--steel-500);
+}
+
+.ts-practice__srcsub--closed {
+  color: var(--ts-error);
+}
+
+.ts-lesson__pickrow:disabled {
+  display: flex;
+  flex-direction: column;
+  cursor: not-allowed;
+  color: var(--steel-500);
+}
+
+.ts-lesson__pickrow:disabled:hover {
+  background: transparent;
+  color: var(--steel-500);
+}
+
+.ts-lesson__pickrow:disabled .ts-practice__srcsub {
+  font-family: var(--font-mono);
+}
+
+/* Урок, не вошедший в материал практики: видимый отказ (053 A, ревью L1). */
+.ts-practice__denied {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 7px 10px;
+  border: var(--border-width) dashed var(--steel-700);
+  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+  overflow-wrap: anywhere;
+}
+
+.ts-practice__denied small {
+  display: block;
+  color: var(--ts-error);
 }

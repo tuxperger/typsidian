@@ -67,6 +67,7 @@ import {
   aiBeginProbe,
   aiCancel,
   aiFinishProbe,
+  aiCheckAccess,
   aiJournal,
   aiJournalClear,
   aiKeyDelete,
@@ -79,6 +80,7 @@ import {
   lessonBegin,
   lessonCheckpoint,
   lessonCreate,
+  practiceCreate,
   lessonFinish,
   lessonList,
   lessonOpen,
@@ -554,6 +556,7 @@ export function webVaultClient(
       cancel: (vaultId, requestId) => aiCancel(vaultId, requestId),
       journal: () => call(() => aiJournal(backend)),
       clearJournal: () => call(() => aiJournalClear(backend)),
+      checkAccess: (path) => call(async () => aiCheckAccess(path, await aiSettings(backend))),
     },
 
     // ── Урок с ИИ-учителем (фича 051) ─────────────────────────────────
@@ -564,6 +567,8 @@ export function webVaultClient(
       list: () => call(() => lessonList(backend)),
       create: (goal, notes, language, start = "Teach") =>
         call(() => lessonCreate(backend, goal, notes, language, start, Date.now())),
+      createPractice: (title, lessons, notes, description, language) =>
+        call(() => practiceCreate(backend, title, lessons, notes, description ?? null, language, Date.now())),
       open: (path) => call(() => lessonOpen(backend, path)),
       answer: async (vaultId, path, requestId, answer, expected) => {
         let next = answer;

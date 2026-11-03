@@ -679,6 +679,7 @@ export function tauriVaultClient(
       cancel: (vaultId, requestId) => void invoke<void>("ai_cancel", { vaultId, requestId }),
       journal: () => invoke<JournalEntry[]>("ai_journal"),
       clearJournal: () => invoke<number>("ai_journal_clear"),
+      checkAccess: (path) => invoke<boolean>("ai_check_access", { path }),
     },
 
     // ── Урок с ИИ-учителем (фича 051) ─────────────────────────────────
@@ -687,6 +688,15 @@ export function tauriVaultClient(
       list: () => invoke<LessonSummary[]>("ai_lesson_list"),
       create: (goal, notes, language, start = "Teach") =>
         invoke<string>("ai_lesson_create", { goal, notes, language, start, now: Date.now() }),
+      createPractice: (title, lessons, notes, description, language) =>
+        invoke<string>("ai_practice_create", {
+          title,
+          lessons,
+          notes,
+          description: description ?? null,
+          language,
+          now: Date.now(),
+        }),
       open: (path) => invoke<LessonView>("ai_lesson_open", { path }),
       answer: (vaultId, path, requestId, answer, expected) =>
         invoke<LessonView>("ai_lesson_answer", {

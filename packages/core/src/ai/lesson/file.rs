@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::plan::{self, PlanStep, PlanVersionInfo, PlanView};
+use super::practice::{self, DeniedLesson, LessonMaterial, PracticeView, ProblemOutcome};
 use crate::ai::access::normalize_folder;
 use crate::ai::AiFailure;
 use crate::vault::backend::VaultBackend;
@@ -60,6 +61,16 @@ pub enum LessonPhase {
     Teach,
 }
 
+/// Вид сессии (фича 053): урок или практика. Файлы без поля читаются как уроки.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub enum LessonKind {
+    #[default]
+    Lesson,
+    Practice,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
 #[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
@@ -71,6 +82,9 @@ pub struct LessonHeader {
     /// С какой стадии начался урок.
     #[serde(default)]
     pub start: LessonPhase,
+    /// Урок или практика.
+    #[serde(default)]
+    pub kind: LessonKind,
 }
 
 /// Вопрос учителя (инструмент `ask_question`).
@@ -233,6 +247,47 @@ pub enum LessonEvent {
         tool: String,
         reason: String,
     },
+    /// Материал практики, собранный один раз при создании (053, research.md §4).
+    Material {
+        at: i64,
+        lessons: Vec<LessonMaterial>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        /// Уроки, которые в материал не вошли, и причина (ревью 053 L1).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        denied: Vec<DeniedLesson>,
+    },
+    /// Задача практики. Решение лежит в файле, но вид его не отдаёт до итога (research.md §3).
+    Problem {
+        at: i64,
+        n: u32,
+        statement: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        solution: Option<String>,
+    },
+    Hint {
+        at: i64,
+        n: u32,
+        text: String,
+    },
+    HintRequest {
+        at: i64,
+        n: u32,
+    },
+    GiveUp {
+        at: i64,
+        n: u32,
+    },
+    Verdict {
+        at: i64,
+        n: u32,
+        outcome: ProblemOutcome,
+        review: String,
+    },
+    /// Действие пользователя «Следующая задача».
+    NextProblem {
+        at: i64,
+    },
 }
 
 impl LessonEvent {
@@ -248,7 +303,14 @@ impl LessonEvent {
             | LessonEvent::ProbeResult { at, .. }
             | LessonEvent::Plan { at, .. }
             | LessonEvent::PlanProgress { at, .. }
-            | LessonEvent::PlanRejected { at, .. } => *at,
+            | LessonEvent::PlanRejected { at, .. }
+            | LessonEvent::Material { at, .. }
+            | LessonEvent::Problem { at, .. }
+            | LessonEvent::Hint { at, .. }
+            | LessonEvent::HintRequest { at, .. }
+            | LessonEvent::GiveUp { at, .. }
+            | LessonEvent::Verdict { at, .. }
+            | LessonEvent::NextProblem { at } => *at,
         }
     }
 }
@@ -306,6 +368,8 @@ pub struct LessonView {
     pub plan: Option<PlanView>,
     /// Версии плана, от первой.
     pub plan_history: Vec<PlanVersionInfo>,
+    /// Задачи практики; у урока — `None`. Решение задачи без итога сюда не попадает.
+    pub practice: Option<PracticeView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,6 +385,8 @@ pub struct LessonSummary {
     pub state: LessonState,
     /// Чего ждёт урок: «ждёт ответа», «ответ оборван», «завершён», «остановлен».
     pub waiting: Waiting,
+    /// Урок или практика: список показывает метку «Практика».
+    pub kind: LessonKind,
 }
 
 /// Разбирает файл: шапка обязательна, нечитаемые строки событий пропускаются.
@@ -420,7 +486,15 @@ pub fn teacher_run(events: &[LessonEvent]) -> usize {
     events
         .iter()
         .rev()
-        .take_while(|event| !matches!(event, LessonEvent::User { .. }))
+        .take_while(|event| {
+            !matches!(
+                event,
+                LessonEvent::User { .. }
+                    | LessonEvent::HintRequest { .. }
+                    | LessonEvent::GiveUp { .. }
+                    | LessonEvent::NextProblem { .. }
+            )
+        })
         .filter(|event| {
             matches!(
                 event,
@@ -459,9 +533,45 @@ pub fn current_state(events: &[LessonEvent]) -> LessonState {
         .unwrap_or_default()
 }
 
-fn waiting_of(events: &[LessonEvent], state: LessonState) -> Waiting {
+/// Чего ждёт практика: любое действие пользователя требует хода агента; после хода с
+/// задачей, подсказкой или итогом ждёт пользователя, после отказа ядра инструменту
+/// агент ходит сам.
+fn practice_waiting(events: &[LessonEvent]) -> Waiting {
+    let Some(last) = events.iter().rposition(|event| {
+        matches!(
+            event,
+            LessonEvent::User { .. }
+                | LessonEvent::Teacher { .. }
+                | LessonEvent::HintRequest { .. }
+                | LessonEvent::GiveUp { .. }
+                | LessonEvent::NextProblem { .. }
+        )
+    }) else {
+        return Waiting::Start;
+    };
+    match &events[last] {
+        LessonEvent::Teacher {
+            interrupted: false, ..
+        } => {
+            let rejected = events[last + 1..]
+                .iter()
+                .any(|event| matches!(event, LessonEvent::PlanRejected { .. }));
+            if rejected && teacher_run(events) <= MAX_AUTO_CONTINUES {
+                Waiting::Retry
+            } else {
+                Waiting::User
+            }
+        }
+        _ => Waiting::Retry,
+    }
+}
+
+fn waiting_of(kind: LessonKind, events: &[LessonEvent], state: LessonState) -> Waiting {
     if state != LessonState::Active {
         return Waiting::Closed;
+    }
+    if kind == LessonKind::Practice {
+        return practice_waiting(events);
     }
     let Some(last) = events.iter().rposition(|event| {
         matches!(
@@ -508,8 +618,13 @@ fn waiting_of(events: &[LessonEvent], state: LessonState) -> Waiting {
     }
 }
 
-fn last_question(events: &[LessonEvent], waiting: Waiting) -> Option<LessonQuestion> {
-    if waiting != Waiting::User {
+fn last_question(
+    kind: LessonKind,
+    events: &[LessonEvent],
+    waiting: Waiting,
+) -> Option<LessonQuestion> {
+    // У практики вопросов нет: задачу ведут её инструменты.
+    if waiting != Waiting::User || kind == LessonKind::Practice {
         return None;
     }
     events.iter().rev().find_map(|event| match event {
@@ -554,14 +669,14 @@ fn totals(events: &[LessonEvent]) -> (u64, u64, Option<f64>) {
 pub fn view_of(path: &str, parsed: ParsedLesson) -> LessonView {
     let language = current_language(&parsed);
     let state = current_state(&parsed.events);
-    let waiting = waiting_of(&parsed.events, state);
+    let waiting = waiting_of(parsed.header.kind, &parsed.events, state);
     let (input_tokens, output_tokens, cost_usd) = totals(&parsed.events);
     LessonView {
         path: path.to_owned(),
         language,
         state,
         waiting,
-        last_question: last_question(&parsed.events, waiting),
+        last_question: last_question(parsed.header.kind, &parsed.events, waiting),
         input_tokens,
         output_tokens,
         cost_usd,
@@ -572,8 +687,10 @@ pub fn view_of(path: &str, parsed: ParsedLesson) -> LessonView {
         probe_result: probe_result(&parsed.events),
         plan: plan::plan_view(&parsed.events, None),
         plan_history: plan::plan_history(&parsed.events),
+        practice: (parsed.header.kind == LessonKind::Practice)
+            .then(|| practice::practice_view(&parsed.events)),
         header: parsed.header,
-        events: parsed.events,
+        events: practice::redact(parsed.events),
     }
 }
 
@@ -599,7 +716,8 @@ pub fn summary_of(path: &str, parsed: &ParsedLesson) -> LessonSummary {
             })
             .count() as u32,
         state,
-        waiting: waiting_of(&parsed.events, state),
+        waiting: waiting_of(parsed.header.kind, &parsed.events, state),
+        kind: parsed.header.kind,
     }
 }
 

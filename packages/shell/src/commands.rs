@@ -1871,6 +1871,28 @@ pub async fn ai_lesson_create(
 }
 
 #[tauri::command]
+pub async fn ai_practice_create(
+    state: State<'_, Vault>,
+    title: String,
+    lessons: Vec<String>,
+    notes: Vec<String>,
+    description: Option<String>,
+    language: ai::lesson::Language,
+    now: i64,
+) -> Answer<String, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_practice_create(
+        &state,
+        title,
+        lessons,
+        notes,
+        description,
+        language,
+        now,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn ai_lesson_open(
     state: State<'_, Vault>,
     path: String,

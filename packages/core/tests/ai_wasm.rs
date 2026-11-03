@@ -377,3 +377,85 @@ async fn unknown_reference_is_clipped_in_the_rejection() {
 async fn hostile_plan_and_probe_blocks_are_bounded_and_marked() {
     lesson::hostile_plan_and_probe_blocks_are_bounded_and_marked().await;
 }
+
+// ── Фича 053: практика ──
+
+#[wasm_bindgen_test]
+async fn practice_is_a_lesson_file_with_a_kind_and_old_lessons_stay_lessons() {
+    lesson::practice_is_a_lesson_file_with_a_kind_and_old_lessons_stay_lessons().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_hides_the_solution_until_the_verdict_and_needs_next_problem() {
+    lesson::practice_hides_the_solution_until_the_verdict_and_needs_next_problem().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_actions_are_refused_when_they_do_not_apply() {
+    lesson::practice_actions_are_refused_when_they_do_not_apply().await;
+}
+
+#[wasm_bindgen_test]
+async fn problem_without_a_solution_is_refused_then_accepted_without_it() {
+    lesson::problem_without_a_solution_is_refused_then_accepted_without_it().await;
+}
+
+#[wasm_bindgen_test]
+async fn hints_keep_the_solution_hidden_and_give_up_reveals_it() {
+    lesson::hints_keep_the_solution_hidden_and_give_up_reveals_it().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_material_is_collected_once_from_chosen_sources() {
+    lesson::practice_material_is_collected_once_from_chosen_sources().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_material_is_limited() {
+    lesson::practice_material_is_limited().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_in_english_uses_english_instructions() {
+    lesson::practice_in_english_uses_english_instructions().await;
+}
+
+#[wasm_bindgen_test]
+async fn hostile_practice_file_never_leaks_the_solution_and_is_bounded() {
+    lesson::hostile_practice_file_never_leaks_the_solution_and_is_bounded().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_tool_arguments_are_limited() {
+    lesson::practice_tool_arguments_are_limited().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_drops_a_lesson_from_the_request_when_its_folder_is_denied_later() {
+    lesson::practice_drops_a_lesson_from_the_request_when_its_folder_is_denied_later().await;
+}
+
+#[wasm_bindgen_test]
+async fn practice_counts_lesson_attempts_and_records_every_refusal() {
+    lesson::practice_counts_lesson_attempts_and_records_every_refusal().await;
+}
+
+#[wasm_bindgen_test]
+async fn problem_overridden_by_a_later_one_with_the_same_number_is_closed() {
+    lesson::problem_overridden_by_a_later_one_with_the_same_number_is_closed().await;
+}
+
+#[wasm_bindgen_test]
+async fn hint_with_the_solution_is_refused_with_a_reason() {
+    lesson::hint_with_the_solution_is_refused_with_a_reason().await;
+}
+
+#[wasm_bindgen_test]
+async fn lesson_text_is_bounded_in_linear_time() {
+    lesson::lesson_text_is_bounded_in_linear_time().await;
+}
+
+#[wasm_bindgen_test]
+async fn lesson_goal_is_clipped_when_building_instructions() {
+    lesson::lesson_goal_is_clipped_when_building_instructions().await;
+}

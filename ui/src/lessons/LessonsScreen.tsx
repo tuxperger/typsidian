@@ -16,6 +16,7 @@ export interface LessonsScreenProps {
   revision: unknown;
   onOpen: (path: string) => void;
   onNew: () => void;
+  onNewPractice: () => void;
   onClose: () => void;
 }
 
@@ -33,7 +34,7 @@ function statusOf(lesson: LessonSummary): { label: MessageKey; tone: string } {
   return { label: STATUS[lesson.state], tone: lesson.state };
 }
 
-export function LessonsScreen({ client, revision, onOpen, onNew, onClose }: LessonsScreenProps): React.JSX.Element {
+export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, onClose }: LessonsScreenProps): React.JSX.Element {
   const { t, formatDate } = useI18n();
   useDismissOnEscape(onClose);
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
@@ -79,6 +80,9 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onClose }: Less
         <div className="ts-search__query">
           <span className="ts-history__title">{t("lessons.list.title")}</span>
           <span className="ts-spacer" />
+          <button type="button" className="ts-btn" onClick={onNewPractice}>
+            {t("practice.list.new")}
+          </button>
           <button type="button" className="ts-btn ts-btn--accent" onClick={onNew}>
             {t("lessons.list.new")}
           </button>
@@ -113,7 +117,10 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onClose }: Less
                 onClick={() => onOpen(lesson.path)}
               >
                 <span className="ts-lessons__text">
-                  <span className="ts-lessons__name">{lesson.goal}</span>
+                  <span className="ts-lessons__name">
+                    {lesson.goal}
+                    {lesson.kind === "Practice" && <span className="ts-lessons__kind">{t("practice.tag")}</span>}
+                  </span>
                   <span className="ts-lessons__sub">
                     {t("lessons.list.meta", {
                       when: formatDate(new Date(lesson.last_at)),

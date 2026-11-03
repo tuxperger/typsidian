@@ -833,6 +833,11 @@ export interface AiClient {
   cancel(vaultId: string, requestId: string): void;
   journal(): Promise<JournalEntry[]>;
   clearJournal(): Promise<number>;
+  /**
+   * Открыта ли заметка или урок агенту: проверка доступа 050 (запрещённые папки, ссылки).
+   * Диалоги выбора материала помечают закрытое и не дают его выбрать.
+   */
+  checkAccess(path: string): Promise<boolean>;
 }
 
 /**
@@ -848,6 +853,17 @@ export interface LessonClient {
    * (замер или обучение); по умолчанию обучение.
    */
   create(goal: string, notes: string[], language: Language, start?: LessonPhase): Promise<string>;
+  /**
+   * Новая практика (053): тот же файл урока с `kind: Practice`. Материал — уроки, заметки и
+   * описание темы; закрытое для агента ядро пропускает. Отдаёт путь файла.
+   */
+  createPractice(
+    title: string,
+    lessons: string[],
+    notes: string[],
+    description: string | undefined,
+    language: Language,
+  ): Promise<string>;
   open(path: string): Promise<LessonView>;
   /**
    * Ответ пользователя и весь ход учителя с автопродолжениями. `answer` не задан —

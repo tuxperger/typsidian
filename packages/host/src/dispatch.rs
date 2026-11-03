@@ -253,6 +253,7 @@ pub const COMMANDS: &[&str] = &[
     "ai_check_access",
     "ai_lesson_list",
     "ai_lesson_create",
+    "ai_practice_create",
     "ai_lesson_open",
     "ai_lesson_answer",
     "ai_lesson_progress",
@@ -3052,6 +3053,33 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                         a.notes,
                         a.language,
                         a.start,
+                        a.now,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_practice_create" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                title: String,
+                lessons: Vec<String>,
+                notes: Vec<String>,
+                description: Option<String>,
+                language: ai::lesson::Language,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_practice_create(
+                        &host.vault,
+                        a.title,
+                        a.lessons,
+                        a.notes,
+                        a.description,
+                        a.language,
                         a.now,
                     )
                     .await,

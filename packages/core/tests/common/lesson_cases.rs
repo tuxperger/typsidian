@@ -15,9 +15,9 @@ use typsidian_core::ai::lesson::partial::{checkpoint, is_active, partial_path, p
 use typsidian_core::ai::lesson::stream::StreamParser;
 use typsidian_core::ai::lesson::turn::{begin_turn, finish_turn, send_turn};
 use typsidian_core::ai::lesson::{
-    create_lesson, list_lessons, open_lesson, set_language, set_state, Confidence, Language,
-    LessonEvent, LessonPhase, LessonState, LessonView, Next, NoteOutcome, TurnDone, TurnKind,
-    UserAnswer, Waiting,
+    create_lesson, create_practice, list_lessons, open_lesson, set_language, set_state,
+    AnswerAction, Confidence, Language, LessonEvent, LessonKind, LessonPhase, LessonState,
+    LessonView, Next, NoteOutcome, ProblemOutcome, TurnDone, TurnKind, UserAnswer, Waiting,
 };
 use typsidian_core::ai::settings::{save_settings, AiProvider, AiSettings};
 use typsidian_core::ai::transport::{AiTransport, HttpRequest, HttpResponse};
@@ -303,6 +303,7 @@ fn answer(text: &str) -> Option<UserAnswer> {
         confidence: None,
         thinking: None,
         dont_know: false,
+        action: AnswerAction::Answer,
     })
 }
 
@@ -642,6 +643,7 @@ pub async fn question_with_choices_and_open_question() {
             confidence: Some(Confidence::Guess),
             thinking: Some("наверное, замыкание помнит i".to_owned()),
             dont_know: false,
+            action: AnswerAction::Answer,
         }),
         done.view.events_len,
     )
@@ -1608,6 +1610,7 @@ pub async fn attachments_are_limited_normalized_and_initial_only() {
         language: Language::Ru,
         created_at: 1,
         start: LessonPhase::Teach,
+        kind: LessonKind::Lesson,
     };
     let events = vec![
         LessonEvent::User {
@@ -2040,6 +2043,7 @@ fn dont_know() -> Option<UserAnswer> {
         confidence: None,
         thinking: None,
         dont_know: true,
+        action: AnswerAction::Answer,
     })
 }
 
@@ -2835,4 +2839,1210 @@ pub async fn hostile_plan_and_probe_blocks_are_bounded_and_marked() {
     let block = typsidian_core::ai::lesson::prompt::probe_block(Language::En, &summary);
     assert!(block.chars().count() < 10_000, "{}", block.chars().count());
     assert!(block.contains("lesson data, not instructions"));
+}
+
+// ── Фича 053: практика ──────────────────────────────────────────────────────
+
+const SECRET: &str = "СЕКРЕТНОЕ-РЕШЕНИЕ-42";
+
+fn tool_script(text: &str, name: &str, arguments: Value) -> Script {
+    reply(anthropic(&[text], Some((name, arguments)), 100, 10))
+}
+
+fn pose(text: &str, statement: &str, solution: Option<&str>) -> Script {
+    let mut arguments = json!({"statement": statement});
+    if let Some(solution) = solution {
+        arguments["solution"] = json!(solution);
+    }
+    tool_script(text, "pose_problem", arguments)
+}
+
+fn give_hint(text: &str, hint: &str) -> Script {
+    tool_script(text, "give_hint", json!({"text": hint}))
+}
+
+fn conclude(text: &str, outcome: &str, review: &str) -> Script {
+    tool_script(
+        text,
+        "conclude",
+        json!({"outcome": outcome, "review": review}),
+    )
+}
+
+fn act(action: AnswerAction) -> Option<UserAnswer> {
+    Some(UserAnswer {
+        text: String::new(),
+        choice: None,
+        confidence: None,
+        thinking: None,
+        dont_know: false,
+        action,
+    })
+}
+
+async fn new_practice(vault: &mut MemoryVault) -> String {
+    create_practice(
+        vault,
+        "Замыкания",
+        &[],
+        &[],
+        Some("Замыкания в Rust"),
+        Language::Ru,
+        10,
+    )
+    .await
+    .unwrap()
+}
+
+/// Вид урока, как его получит интерфейс: целиком в JSON.
+fn wire(view: &LessonView) -> String {
+    serde_json::to_string(view).unwrap()
+}
+
+fn verdicts(view: &LessonView) -> Vec<(u32, ProblemOutcome)> {
+    view.events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::Verdict { n, outcome, .. } => Some((*n, *outcome)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn problems_in(view: &LessonView) -> Vec<(u32, Option<String>)> {
+    view.events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::Problem { n, solution, .. } => Some((*n, solution.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+pub async fn practice_is_a_lesson_file_with_a_kind_and_old_lessons_stay_lessons() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    assert_eq!(path, "Уроки/Практика Замыкания.lesson");
+    let raw = String::from_utf8(vault.bytes_of(&path).unwrap()).unwrap();
+    assert!(raw.lines().next().unwrap().contains(r#""kind":"Practice""#));
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert_eq!(view.header.kind, LessonKind::Practice);
+    assert_eq!(view.waiting, Waiting::Start);
+    let practice = view.practice.clone().unwrap();
+    assert!(practice.problems.is_empty() && practice.open_problem.is_none());
+    assert!(matches!(&view.events[0], LessonEvent::Material { .. }));
+
+    // Урок 051 без поля `kind` читается как урок, вид практики у него пуст.
+    let lesson = new_lesson(&mut vault).await;
+    let raw = String::from_utf8(vault.bytes_of(&lesson).unwrap()).unwrap();
+    let old = raw.replace(r#","kind":"Lesson""#, "");
+    assert_ne!(old, raw);
+    vault.replace_externally(&lesson, old);
+    let view = open_lesson(&mut vault, &lesson).await.unwrap();
+    assert_eq!(view.header.kind, LessonKind::Lesson);
+    assert!(view.practice.is_none());
+
+    // Список различает вид.
+    let list = list_lessons(&vault).await;
+    let kinds: Vec<(String, LessonKind)> = list.iter().map(|s| (s.path.clone(), s.kind)).collect();
+    assert!(kinds.contains(&(path.clone(), LessonKind::Practice)));
+    assert!(kinds.contains(&(lesson, LessonKind::Lesson)));
+
+    // Действие по умолчанию — ответ: старые клиенты без поля `action`.
+    let answer: UserAnswer = serde_json::from_str(r#"{"text":"x"}"#).unwrap();
+    assert_eq!(answer.action, AnswerAction::Answer);
+    let answer: UserAnswer = serde_json::from_str(r#"{"text":"","action":"GiveUp"}"#).unwrap();
+    assert_eq!(answer.action, AnswerAction::GiveUp);
+
+    // Выключенное обучение и пустая тема отказывают без файла.
+    assert_eq!(
+        create_practice(&mut vault, "  ", &[], &[], None, Language::Ru, 1)
+            .await
+            .unwrap_err(),
+        AiFailure::GoalEmpty
+    );
+    let mut off = MemoryVault::new();
+    assert_eq!(
+        create_practice(&mut off, "Тема", &[], &[], None, Language::Ru, 1)
+            .await
+            .unwrap_err(),
+        AiFailure::Disabled
+    );
+    assert!(off.paths_under("Уроки").is_empty());
+}
+
+pub async fn practice_hides_the_solution_until_the_verdict_and_needs_next_problem() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        pose("Вот задача.", "Что выведет счётчик?", Some(SECRET)),
+        conclude(
+            "Разберём.",
+            "Wrong",
+            &format!("Ошибка в счёте. Решение: {SECRET}"),
+        ),
+        // Модель просит новую задачу сразу после итога: ядро отказывает.
+        pose("Ещё?", "Другая задача", Some("другое решение")),
+        say("Жду «Следующая задача»."),
+        pose("Вторая.", "Вторая задача", Some("ВТОРОЕ-РЕШЕНИЕ")),
+    ]);
+
+    // Первый ход: задача, ход ждёт пользователя, решения в виде нет.
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    assert_eq!(done.next, Next::WaitUser);
+    let view = done.view;
+    assert_eq!(view.waiting, Waiting::User);
+    let practice = view.practice.clone().unwrap();
+    assert_eq!(practice.open_problem, Some(1));
+    assert_eq!(practice.problems[0].title, "Что выведет счётчик?");
+    assert!(practice.problems[0].solution.is_none() && practice.problems[0].outcome.is_none());
+    assert_eq!(problems_in(&view), vec![(1, None)]);
+    assert!(view.last_question.is_none());
+    assert!(!wire(&view).contains(SECRET));
+    // Файл хранит решение: запись урока — файл vault.
+    let raw = String::from_utf8(vault.bytes_of(&path).unwrap()).unwrap();
+    assert!(raw.contains(SECRET));
+    // Инструменты и инструкции практики.
+    assert_eq!(
+        tool_names(&transport.body(0)),
+        ["pose_problem", "give_hint", "conclude"]
+    );
+    assert!(transport.body(0).contains("наставник по практике"));
+    assert!(transport.body(0).contains("Замыкания в Rust"));
+    assert!(transport.body(0).contains("Поставь первую задачу."));
+
+    // Ответ пользователя: модель знает решение (оно в инструкциях), вид — нет, пока нет итога.
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("Получится 41"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(1).contains(SECRET), "модель решение знает");
+    assert!(transport.body(1).contains("Получится 41"));
+    assert_eq!(done.next, Next::WaitUser);
+    let view = done.view;
+    // Итог вынесен: решение и разбор открыты, а новой задачи нет.
+    assert_eq!(verdicts(&view), vec![(1, ProblemOutcome::Wrong)]);
+    let practice = view.practice.clone().unwrap();
+    assert_eq!(practice.open_problem, None);
+    assert_eq!(practice.problems[0].outcome, Some(ProblemOutcome::Wrong));
+    assert_eq!(practice.problems[0].solution.as_deref(), Some(SECRET));
+    assert!(practice.last_review.unwrap().contains("Ошибка в счёте"));
+    assert_eq!(problems_in(&view), vec![(1, Some(SECRET.to_owned()))]);
+    assert_eq!(view.waiting, Waiting::User);
+
+    // Пользователь пишет, а модель ставит задачу без `NextProblem`: отказ ядра, новой
+    // задачи нет, модель получает причину и ждёт.
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "c",
+        answer("Понятно, спасибо"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert_eq!(transport.count(), 4);
+    let view = done.view;
+    assert_eq!(problems_in(&view).len(), 1);
+    assert_eq!(rejections(&view).len(), 1);
+    assert!(rejections(&view)[0].contains("сам"));
+    assert!(transport.body(3).contains("отклонено"));
+    assert_eq!(view.waiting, Waiting::User);
+
+    // «Следующая задача» разрешает вторую; решение первой остаётся открытым.
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "d",
+        act(AnswerAction::NextProblem),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(4).contains("Следующая задача."));
+    let view = done.view;
+    assert_eq!(
+        problems_in(&view),
+        vec![(1, Some(SECRET.to_owned())), (2, None)]
+    );
+    let practice = view.practice.clone().unwrap();
+    assert_eq!(practice.open_problem, Some(2));
+    assert_eq!(practice.problems.len(), 2);
+    assert!(!wire(&view).contains("ВТОРОЕ-РЕШЕНИЕ"));
+    // В списке — ждёт ответа.
+    let list = list_lessons(&vault).await;
+    assert_eq!(list[0].waiting, Waiting::User);
+}
+
+pub async fn practice_actions_are_refused_when_they_do_not_apply() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![pose("Задача.", "Условие", Some("решение"))]);
+    // Нет задачи — нет подсказки, «Сдаюсь» и «Следующей задачи»; файл не меняется.
+    for action in [
+        AnswerAction::HintRequest,
+        AnswerAction::GiveUp,
+        AnswerAction::NextProblem,
+    ] {
+        let before = vault.bytes_of(&path).unwrap();
+        let failure = begin_t(&mut vault, &path, "x", act(action), 1, 1)
+            .await
+            .unwrap_err();
+        assert_eq!(failure, AiFailure::LessonChanged);
+        assert_eq!(vault.bytes_of(&path).unwrap(), before);
+    }
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    // Задача открыта — «Следующая задача» рано.
+    let before = vault.bytes_of(&path).unwrap();
+    assert_eq!(
+        begin_t(
+            &mut vault,
+            &path,
+            "y",
+            act(AnswerAction::NextProblem),
+            done.view.events_len,
+            1
+        )
+        .await
+        .unwrap_err(),
+        AiFailure::LessonChanged
+    );
+    assert_eq!(vault.bytes_of(&path).unwrap(), before);
+    // В обычном уроке этих действий нет.
+    let mut vault = anthropic_vault().await;
+    let lesson = new_lesson(&mut vault).await;
+    assert_eq!(
+        begin_t(
+            &mut vault,
+            &lesson,
+            "z",
+            act(AnswerAction::HintRequest),
+            0,
+            1
+        )
+        .await
+        .unwrap_err(),
+        AiFailure::LessonChanged
+    );
+    // Вызов практики в уроке игнорируется.
+    let transport = StreamTransport::with(vec![pose("Задача.", "Условие", Some("решение"))]);
+    let done = cycle(&mut vault, &transport, &lesson, "a", answer("привет"), 0)
+        .await
+        .unwrap();
+    assert!(problems_in(&done.view).is_empty());
+    assert!(!tool_names(&transport.body(0)).contains(&"pose_problem".to_owned()));
+    assert!(done.view.practice.is_none());
+}
+
+pub async fn problem_without_a_solution_is_refused_then_accepted_without_it() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        pose("Задача.", "Открытая задача", None),
+        pose("Ещё раз.", "Открытая задача", Some("  ")),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    // Первый отказ уходит модели с причиной, второй раз задача принимается без решения.
+    assert_eq!(transport.count(), 2);
+    assert!(transport.body(1).contains("нет решения"));
+    let view = done.view;
+    assert_eq!(rejections(&view).len(), 1);
+    assert_eq!(problems_in(&view), vec![(1, None)]);
+    assert_eq!(done.next, Next::WaitUser);
+    assert_eq!(view.waiting, Waiting::User);
+    assert_eq!(view.practice.unwrap().open_problem, Some(1));
+
+    // Ответ и итог без решения: в инструкциях сказано оценивать по смыслу.
+    let transport = StreamTransport::with(vec![conclude("Итог.", "Correct", "Верно.")]);
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("мой ответ"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(0).contains("Решения нет"));
+    assert_eq!(verdicts(&done.view), vec![(1, ProblemOutcome::Correct)]);
+    assert_eq!(done.view.practice.unwrap().problems[0].solution, None);
+}
+
+pub async fn hints_keep_the_solution_hidden_and_give_up_reveals_it() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        pose("Задача.", "Что выведет счётчик?", Some(SECRET)),
+        give_hint("Подскажу.", "Посмотри, что захватывает замыкание."),
+        give_hint("Ещё.", "Захват идёт по ссылке или по значению?"),
+        // Итог рано: пользователь только просил подсказки.
+        conclude("Хватит.", "Correct", "Рано."),
+        // «Сдаюсь» без `conclude` от модели: итог вынесет ядро.
+        say("Жду ответа."),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    let mut view = done.view;
+    for (index, id) in ["b", "c"].into_iter().enumerate() {
+        let done = cycle(
+            &mut vault,
+            &transport,
+            &path,
+            id,
+            act(AnswerAction::HintRequest),
+            view.events_len,
+        )
+        .await
+        .unwrap();
+        assert_eq!(done.next, Next::WaitUser);
+        view = done.view;
+        assert!(transport.body(index + 1).contains("Дай подсказку."));
+        assert!(!wire(&view).contains(SECRET), "подсказка {index}");
+        assert_eq!(
+            view.practice.as_ref().unwrap().problems[0].hints,
+            index as u32 + 1
+        );
+        assert_eq!(view.waiting, Waiting::User);
+    }
+    assert!(transport.body(2).contains("Подсказка: Посмотри"));
+    let hints = view
+        .events
+        .iter()
+        .filter(|event| matches!(event, LessonEvent::Hint { n: 1, .. }))
+        .count();
+    assert_eq!(hints, 2);
+
+    // Итог до ответа или «Сдаюсь» отклоняется, решение остаётся скрытым.
+    let before_len = view.events_len;
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "d",
+        act(AnswerAction::HintRequest),
+        before_len,
+    )
+    .await;
+    // Скрипт модели исчерпан после отказа `conclude`: ход закончился, итога нет.
+    let view = match done {
+        Ok(done) => done.view,
+        Err(_) => open_lesson(&mut vault, &path).await.unwrap(),
+    };
+    assert!(verdicts(&view).is_empty());
+    assert!(!wire(&view).contains(SECRET));
+    assert!(rejections(&view).iter().any(|r| r.contains("рано")));
+
+    // «Сдаюсь»: итог «не решено», решение открыто, даже если модель итог не вынесла.
+    let transport = StreamTransport::with(vec![say(&format!("Решение: {SECRET}."))]);
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "e",
+        act(AnswerAction::GiveUp),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(0).contains("Сдаюсь"));
+    assert_eq!(verdicts(&done.view), vec![(1, ProblemOutcome::Unsolved)]);
+    let practice = done.view.practice.clone().unwrap();
+    assert_eq!(practice.problems[0].outcome, Some(ProblemOutcome::Unsolved));
+    assert_eq!(practice.problems[0].solution.as_deref(), Some(SECRET));
+    assert_eq!(done.next, Next::WaitUser);
+    assert_eq!(done.view.waiting, Waiting::User);
+
+    // Сдавшемуся итог один — «не решено», что бы ни написала модель.
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![
+        pose("Задача.", "Условие", Some(SECRET)),
+        conclude("Итог.", "Correct", "Верно"),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        act(AnswerAction::GiveUp),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    assert_eq!(verdicts(&done.view), vec![(1, ProblemOutcome::Unsolved)]);
+}
+
+pub async fn practice_material_is_collected_once_from_chosen_sources() {
+    let mut config = settings(AiProvider::Anthropic, "claude-opus-5-5");
+    config.denied_folders = vec!["Личное".to_owned()];
+    let mut vault = vault_with(&config)
+        .await
+        .with_file("Заметки/а.typ", "= Замыкания\nТекст про захват переменных.")
+        .with_file("Личное/секрет.typ", "ПАРОЛЬ-ОТ-БАНКА");
+
+    // Урок с изложением, урок без него, закрытый урок, практика, нечитаемый путь.
+    let summarised = new_lesson(&mut vault).await;
+    let teacher = |text: &str, at: i64| LessonEvent::Teacher {
+        at,
+        text: text.to_owned(),
+        question: None,
+        interrupted: false,
+        failure: None,
+        model: "m".to_owned(),
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+    };
+    typsidian_core::ai::lesson::file::append_events(
+        &mut vault,
+        &summarised,
+        &[
+            teacher("СТАРОЕ-ОБЪЯСНЕНИЕ", 20),
+            LessonEvent::Summary {
+                at: 21,
+                text: "ИЗЛОЖЕНИЕ-УРОКА".to_owned(),
+                covers: 1,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
+                cost_usd: None,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    let plain = create_lesson(
+        &mut vault,
+        "Итераторы",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        11,
+    )
+    .await
+    .unwrap();
+    typsidian_core::ai::lesson::file::append_events(
+        &mut vault,
+        &plain,
+        &[teacher("ОБЪЯСНЕНИЕ-ИТЕРАТОРОВ", 30)],
+    )
+    .await
+    .unwrap();
+    vault.replace_externally(
+        "Личное/закрытый.lesson",
+        r#"{"format":1,"goal":"ЗАКРЫТАЯ-ЦЕЛЬ","language":"ru","created_at":1}"#,
+    );
+    let other = new_practice(&mut vault).await;
+    let lessons = [
+        summarised.clone(),
+        plain.clone(),
+        plain.clone(),
+        "Личное/закрытый.lesson".to_owned(),
+        other,
+        "../вне.lesson".to_owned(),
+        "Уроки/нет.lesson".to_owned(),
+    ];
+    let notes = ["Заметки/а.typ".to_owned(), "Личное/секрет.typ".to_owned()];
+    let path = create_practice(
+        &mut vault,
+        "Повторение",
+        &lessons,
+        &notes,
+        Some("  Ещё про время жизни  "),
+        Language::Ru,
+        50,
+    )
+    .await
+    .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let LessonEvent::Material {
+        lessons: material,
+        description,
+        ..
+    } = &view.events[0]
+    else {
+        panic!("материал первым событием");
+    };
+    assert_eq!(description.as_deref(), Some("Ещё про время жизни"));
+    let goals: Vec<&str> = material.iter().map(|l| l.goal.as_str()).collect();
+    assert_eq!(goals, ["Понять замыкания", "Итераторы"]);
+    assert_eq!(material[0].text, "ИЗЛОЖЕНИЕ-УРОКА");
+    assert_eq!(material[1].text, "ОБЪЯСНЕНИЕ-ИТЕРАТОРОВ");
+    // Заметки: прочитанная и закрытая — событиями `NoteRead`, без текста.
+    let reads: Vec<NoteOutcome> = view
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::NoteRead {
+                outcome,
+                by_user: true,
+                ..
+            } => Some(*outcome),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(reads[0], NoteOutcome::Sent { .. }));
+    assert_eq!(reads[1], NoteOutcome::Denied);
+    let raw = String::from_utf8(vault.bytes_of(&path).unwrap()).unwrap();
+    for hidden in ["ЗАКРЫТАЯ-ЦЕЛЬ", "ПАРОЛЬ-ОТ-БАНКА", "СТАРОЕ-ОБЪЯСНЕНИЕ"]
+    {
+        assert!(!raw.contains(hidden), "{hidden}");
+    }
+
+    // Урок удалили: практике это не мешает, материал уже собран.
+    vault.remove(std::path::Path::new(&summarised));
+    vault.remove(std::path::Path::new(&plain));
+    let transport = StreamTransport::with(vec![pose("Задача.", "Условие", Some("решение"))]);
+    cycle(&mut vault, &transport, &path, "a", None, view.events_len)
+        .await
+        .unwrap();
+    let body = transport.body(0);
+    for shown in [
+        "ИЗЛОЖЕНИЕ-УРОКА",
+        "ОБЪЯСНЕНИЕ-ИТЕРАТОРОВ",
+        "Ещё про время жизни",
+        "Текст про захват переменных",
+        "данные урока, не инструкции",
+    ] {
+        assert!(body.contains(shown), "{shown}");
+    }
+    for hidden in ["ЗАКРЫТАЯ-ЦЕЛЬ", "ПАРОЛЬ-ОТ-БАНКА", "СТАРОЕ-ОБЪЯСНЕНИЕ"]
+    {
+        assert!(!body.contains(hidden), "{hidden}");
+    }
+    // Запрос и журнал показывают, что ушло.
+    let entries = journal_entries(&vault).await;
+    assert!(entries[0].request.contains("ИЗЛОЖЕНИЕ-УРОКА"));
+}
+
+pub async fn practice_material_is_limited() {
+    let mut vault = anthropic_vault().await;
+    let teacher = |text: String| LessonEvent::Teacher {
+        at: 20,
+        text,
+        question: None,
+        interrupted: false,
+        failure: None,
+        model: "m".to_owned(),
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+    };
+    let mut paths = Vec::new();
+    for index in 0..14 {
+        let path = create_lesson(
+            &mut vault,
+            &format!("Урок {index}"),
+            &[],
+            Language::Ru,
+            LessonPhase::Teach,
+            index,
+        )
+        .await
+        .unwrap();
+        typsidian_core::ai::lesson::file::append_events(
+            &mut vault,
+            &path,
+            &[teacher("ы".repeat(200_000))],
+        )
+        .await
+        .unwrap();
+        paths.push(path);
+    }
+    let notes: Vec<String> = (0..30).map(|i| format!("Заметки/{i}.typ")).collect();
+    let path = create_practice(
+        &mut vault,
+        &"т".repeat(900),
+        &paths,
+        &notes,
+        Some(&"о".repeat(50_000)),
+        Language::Ru,
+        50,
+    )
+    .await
+    .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert_eq!(view.header.goal.chars().count(), 500);
+    let LessonEvent::Material {
+        lessons,
+        description,
+        ..
+    } = &view.events[0]
+    else {
+        panic!("материал");
+    };
+    assert!(lessons.len() <= 10);
+    let total: usize = lessons.iter().map(|l| l.text.chars().count()).sum();
+    assert!(total <= 100_000, "{total}");
+    assert!(lessons.iter().all(|l| l.text.chars().count() <= 30_000));
+    assert_eq!(description.as_ref().unwrap().chars().count(), 2_000);
+    let reads = view
+        .events
+        .iter()
+        .filter(|event| matches!(event, LessonEvent::NoteRead { .. }))
+        .count();
+    assert_eq!(reads, 10);
+}
+
+pub async fn practice_in_english_uses_english_instructions() {
+    let mut vault = anthropic_vault().await;
+    let path = create_practice(&mut vault, "Closures", &[], &[], None, Language::En, 10)
+        .await
+        .unwrap();
+    assert_eq!(path, "Уроки/Practice Closures.lesson");
+    let transport = StreamTransport::with(vec![pose("Here.", "Statement", Some("solution"))]);
+    cycle(&mut vault, &transport, &path, "a", None, 0)
+        .await
+        .unwrap();
+    let body = transport.body(0);
+    assert!(body.contains("practice mentor"));
+    assert!(body.contains("Pose the first problem."));
+    assert!(body.contains("Topic of the practice: Closures"));
+    assert!(body.contains("do not name the topic"));
+}
+
+pub async fn hostile_practice_file_never_leaks_the_solution_and_is_bounded() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let huge = "ы".repeat(60_000);
+    let header =
+        json!({"format":1,"goal":"Чужая","language":"ru","created_at":1,"kind":"Practice"});
+    let mut lines = vec![header.to_string()];
+    lines.push(
+        json!({"kind":"Material","at":2,
+            "lessons": (0..12).map(|i| json!({"path": format!("{}{i}", huge), "goal": huge,
+                "text": huge, "chars": 1})).collect::<Vec<_>>(),
+            "description": huge})
+        .to_string(),
+    );
+    // Итог для ещё не поставленной задачи не открывает её решения.
+    lines.push(json!({"kind":"Verdict","at":3,"n":2,"outcome":"Correct","review":"р"}).to_string());
+    lines.push(
+        json!({"kind":"Problem","at":4,"n":1,"statement":"Условие 1","solution":"ВРАЖЕСКОЕ-1"})
+            .to_string(),
+    );
+    lines.push(
+        json!({"kind":"Problem","at":5,"n":2,"statement":"Условие 2","solution":"ВРАЖЕСКОЕ-2"})
+            .to_string(),
+    );
+    lines.push(
+        json!({"kind":"Summary","at":6,"text":"Изложение: ВРАЖЕСКОЕ-2","covers":0}).to_string(),
+    );
+    // Итог от другой задачи (n=7) и повторный итог не открывают первую.
+    lines.push(json!({"kind":"Verdict","at":7,"n":7,"outcome":"Correct","review":"р"}).to_string());
+    let base = lines.len();
+    for index in 0..5_000 {
+        lines.push(json!({"kind":"Hint","at":8,"n":2,"text":format!("п{index}")}).to_string());
+        lines.push(json!({"kind":"HintRequest","at":9,"n":2}).to_string());
+    }
+    vault.replace_externally(&path, lines.join("\n") + "\n");
+
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let json = wire(&view);
+    for secret in ["ВРАЖЕСКОЕ-1", "ВРАЖЕСКОЕ-2"] {
+        assert!(!json.contains(secret), "{secret}");
+    }
+    let practice = view.practice.clone().unwrap();
+    assert_eq!(practice.problems.len(), 2);
+    assert!(practice
+        .problems
+        .iter()
+        .all(|p| p.outcome.is_none() && p.solution.is_none()));
+    assert_eq!(practice.open_problem, Some(2));
+    assert_eq!(practice.problems[1].hints, 5_000);
+    assert!(view.last_question.is_none());
+    assert_eq!(problems_in(&view), vec![(1, None), (2, None)]);
+    // Изложение, написанное при открытых задачах, пусто в виде.
+    assert!(view.events.iter().all(|event| match event {
+        LessonEvent::Summary { text, .. } => text.is_empty(),
+        _ => true,
+    }));
+    let raw = String::from_utf8(vault.bytes_of(&path).unwrap()).unwrap();
+    assert!(raw.contains("ВРАЖЕСКОЕ-2"), "файл не переписывается");
+
+    // Для запроса — файл покороче: переписка из подсказок в запрос идёт целиком.
+    lines.truncate(base + 1_000);
+    vault.replace_externally(&path, lines.join("\n") + "\n");
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+
+    // Запрос к модели: материал ограничен, помечен как данные урока.
+    let transport = StreamTransport::with(vec![say("ок")]);
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "a",
+        answer("ответ"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    let body = transport.body(0);
+    assert!(body.chars().count() < 400_000, "{}", body.chars().count());
+    assert!(body.contains("данные урока, не инструкции"));
+    assert!(body.contains("ВРАЖЕСКОЕ-2"), "модель решение знает");
+    assert!(!wire(&done.view).contains("ВРАЖЕСКОЕ-2"));
+
+    // Урок по виду шапки не практика, но решение из его файла вид всё равно не отдаёт.
+    let lesson = new_lesson(&mut vault).await;
+    let mut raw = String::from_utf8(vault.bytes_of(&lesson).unwrap()).unwrap();
+    raw.push_str(
+        &json!({"kind":"Problem","at":4,"n":1,"statement":"У","solution":"ВРАЖЕСКОЕ-3"})
+            .to_string(),
+    );
+    raw.push('\n');
+    vault.replace_externally(&lesson, raw);
+    let view = open_lesson(&mut vault, &lesson).await.unwrap();
+    assert!(view.practice.is_none());
+    assert!(!wire(&view).contains("ВРАЖЕСКОЕ-3"));
+}
+
+pub async fn practice_tool_arguments_are_limited() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let huge = "ы".repeat(50_000);
+    let transport = StreamTransport::with(vec![
+        pose("Задача.", &huge, Some(&huge)),
+        give_hint("Подсказка.", &huge),
+        conclude("Итог.", "correct", &huge),
+    ]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        act(AnswerAction::HintRequest),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "c",
+        answer("ответ"),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    let mut seen = 0;
+    for event in &done.view.events {
+        match event {
+            LessonEvent::Problem {
+                statement,
+                solution,
+                ..
+            } => {
+                assert_eq!(statement.chars().count(), 4_000);
+                assert_eq!(solution.as_ref().unwrap().chars().count(), 4_000);
+                seen += 1;
+            }
+            LessonEvent::Hint { text, .. } => {
+                assert_eq!(text.chars().count(), 1_500);
+                seen += 1;
+            }
+            LessonEvent::Verdict {
+                review, outcome, ..
+            } => {
+                assert_eq!(review.chars().count(), 3_000);
+                assert_eq!(*outcome, ProblemOutcome::Correct, "регистр не важен");
+                seen += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(seen, 3);
+    assert_eq!(
+        done.view.practice.unwrap().problems[0]
+            .title
+            .chars()
+            .count(),
+        120
+    );
+}
+
+// ── Ревью безопасности 053 (T014–T020) ──
+
+fn plain_teacher(text: &str, at: i64) -> LessonEvent {
+    LessonEvent::Teacher {
+        at,
+        text: text.to_owned(),
+        question: None,
+        interrupted: false,
+        failure: None,
+        model: "m".to_owned(),
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+    }
+}
+
+/// Урок с одним объяснением учителя по нужному пути.
+async fn lesson_at(vault: &mut MemoryVault, goal: &str, text: &str, path: &str) -> String {
+    let made = create_lesson(vault, goal, &[], Language::Ru, LessonPhase::Teach, 11)
+        .await
+        .unwrap();
+    typsidian_core::ai::lesson::file::append_events(vault, &made, &[plain_teacher(text, 30)])
+        .await
+        .unwrap();
+    if path == made {
+        return made;
+    }
+    let bytes = vault.bytes_of(&made).unwrap();
+    vault.remove(std::path::Path::new(&made));
+    vault.replace_externally(path, bytes);
+    path.to_owned()
+}
+
+fn denied_of(view: &LessonView) -> Vec<(String, typsidian_core::ai::lesson::LessonDenyReason)> {
+    match &view.events[0] {
+        LessonEvent::Material { denied, .. } => denied
+            .iter()
+            .map(|lesson| (lesson.path.clone(), lesson.reason))
+            .collect(),
+        other => panic!("материал первым событием: {other:?}"),
+    }
+}
+
+pub async fn practice_drops_a_lesson_from_the_request_when_its_folder_is_denied_later() {
+    let mut vault = anthropic_vault().await;
+    let closed = lesson_at(
+        &mut vault,
+        "Закрытый позже",
+        "СНИМОК-ЗАКРЫТОГО",
+        "Личное/урок.lesson",
+    )
+    .await;
+    let open = lesson_at(
+        &mut vault,
+        "Открытый",
+        "СНИМОК-ОТКРЫТОГО",
+        "Уроки/открытый.lesson",
+    )
+    .await;
+    let path = create_practice(
+        &mut vault,
+        "Повторение",
+        &[closed, open],
+        &[],
+        None,
+        Language::Ru,
+        50,
+    )
+    .await
+    .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+
+    // Первый запрос: папка ещё открыта, оба снимка уходят.
+    let transport = StreamTransport::with(vec![pose("Задача.", "Условие", Some("решение"))]);
+    cycle(&mut vault, &transport, &path, "a", None, view.events_len)
+        .await
+        .unwrap();
+    assert!(transport.body(0).contains("СНИМОК-ЗАКРЫТОГО"));
+
+    // Папку закрыли после создания практики: снимок в запрос больше не идёт.
+    let mut config = settings(AiProvider::Anthropic, "claude-opus-5-5");
+    config.denied_folders = vec!["Личное".to_owned()];
+    save_settings(&mut vault, &config).await.unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let transport = StreamTransport::with(vec![say("Жду ответа.")]);
+    cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        answer("мой ответ"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    let body = transport.body(0);
+    assert!(!body.contains("СНИМОК-ЗАКРЫТОГО"));
+    assert!(body.contains("СНИМОК-ОТКРЫТОГО"));
+    // Файл по-прежнему хранит снимок: запрет не переписывает историю.
+    let raw = String::from_utf8(vault.bytes_of(&path).unwrap()).unwrap();
+    assert!(raw.contains("СНИМОК-ЗАКРЫТОГО"));
+
+    // Исчезнувший урок остаётся снимком (Edge Case «удалён»).
+    vault.remove(std::path::Path::new("Уроки/открытый.lesson"));
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let transport = StreamTransport::with(vec![say("Ещё.")]);
+    cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "c",
+        answer("ещё"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(transport.body(0).contains("СНИМОК-ОТКРЫТОГО"));
+}
+
+pub async fn practice_counts_lesson_attempts_and_records_every_refusal() {
+    use typsidian_core::ai::lesson::LessonDenyReason as Why;
+    let mut config = settings(AiProvider::Anthropic, "claude-opus-5-5");
+    config.denied_folders = vec!["Личное".to_owned()];
+    let mut vault = vault_with(&config).await;
+    let plain = lesson_at(
+        &mut vault,
+        "Итераторы",
+        "ОБЪЯСНЕНИЕ",
+        "Уроки/Итераторы.lesson",
+    )
+    .await;
+    vault.replace_externally(
+        "Личное/закрытый.lesson",
+        r#"{"format":1,"goal":"ЗАКРЫТАЯ-ЦЕЛЬ","language":"ru","created_at":1}"#,
+    );
+    vault.replace_externally("Уроки/битый.lesson", "не JSON");
+    let other = new_practice(&mut vault).await;
+    let lessons = [
+        plain.clone(),
+        // Тот же путь в другой форме (регистр): повтор, отказом не считается.
+        plain.to_uppercase().replace(".LESSON", ".lesson"),
+        "Личное/закрытый.lesson".to_owned(),
+        other.clone(),
+        "../вне.lesson".to_owned(),
+        "Уроки/нет.lesson".to_owned(),
+        "Уроки/битый.lesson".to_owned(),
+    ];
+    let path = create_practice(&mut vault, "Тема", &lessons, &[], None, Language::Ru, 50)
+        .await
+        .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let LessonEvent::Material { lessons, .. } = &view.events[0] else {
+        panic!("материал");
+    };
+    assert_eq!(lessons.len(), 1);
+    assert_eq!(
+        denied_of(&view),
+        vec![
+            ("Личное/закрытый.lesson".to_owned(), Why::Denied),
+            (other, Why::NotLesson),
+            ("../вне.lesson".to_owned(), Why::BadPath),
+            ("Уроки/нет.lesson".to_owned(), Why::Unreadable),
+            ("Уроки/битый.lesson".to_owned(), Why::Unreadable),
+        ]
+    );
+    let json = wire(&view);
+    assert!(!json.contains("ЗАКРЫТАЯ-ЦЕЛЬ"));
+
+    // Считаются попытки, а не принятые уроки: хвост за пределом не обрабатывается.
+    let mut many: Vec<String> = (0..30).map(|i| format!("Уроки/нет{i}.lesson")).collect();
+    many.insert(25, plain);
+    let path = create_practice(&mut vault, "Много", &many, &[], None, Language::Ru, 51)
+        .await
+        .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let LessonEvent::Material { lessons, .. } = &view.events[0] else {
+        panic!("материал");
+    };
+    assert!(lessons.is_empty(), "урок за пределом попыток не берётся");
+    assert_eq!(denied_of(&view).len(), 10);
+
+    // Старый файл без `denied` читается.
+    vault.replace_externally(
+        &path,
+        concat!(
+            r#"{"format":1,"goal":"Т","language":"ru","created_at":1,"kind":"Practice"}"#,
+            "\n",
+            r#"{"kind":"Material","at":2,"lessons":[]}"#,
+            "\n"
+        ),
+    );
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert!(denied_of(&view).is_empty());
+}
+
+pub async fn problem_overridden_by_a_later_one_with_the_same_number_is_closed() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let mut lines = vec![String::from_utf8(vault.bytes_of(&path).unwrap())
+        .unwrap()
+        .trim_end()
+        .to_owned()];
+    // Слияние файла с двух устройств: два события `Problem` с номером 1, итог один.
+    lines.push(
+        json!({"kind":"Problem","at":4,"n":1,"statement":"Условие А","solution":"СЕКРЕТ-А"})
+            .to_string(),
+    );
+    lines.push(
+        json!({"kind":"Problem","at":5,"n":1,"statement":"Условие Б","solution":"СЕКРЕТ-Б"})
+            .to_string(),
+    );
+    lines.push(json!({"kind":"Verdict","at":6,"n":1,"outcome":"Correct","review":"р"}).to_string());
+    vault.replace_externally(&path, lines.join("\n") + "\n");
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let practice = view.practice.clone().unwrap();
+    assert_eq!(practice.open_problem, None, "перекрытая задача не открыта");
+    assert_eq!(practice.problems.len(), 2);
+    // Перекрытая задача закрыта без итога: её решение не раскрывается.
+    assert!(practice.problems[0].outcome.is_none() && practice.problems[0].solution.is_none());
+    assert_eq!(practice.problems[1].solution.as_deref(), Some("СЕКРЕТ-Б"));
+    assert!(!wire(&view).contains("СЕКРЕТ-А"));
+
+    // Без итога открыта только последняя, и в инструкциях тоже только она.
+    lines.pop();
+    vault.replace_externally(&path, lines.join("\n") + "\n");
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    assert_eq!(view.practice.as_ref().unwrap().open_problem, Some(1));
+    let transport = StreamTransport::with(vec![say("ок")]);
+    cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "a",
+        answer("ответ"),
+        view.events_len,
+    )
+    .await
+    .unwrap();
+    let body = transport.body(0);
+    assert!(body.contains("СЕКРЕТ-Б") && !body.contains("СЕКРЕТ-А"));
+}
+
+pub async fn hint_with_the_solution_is_refused_with_a_reason() {
+    let mut vault = anthropic_vault().await;
+    let path = new_practice(&mut vault).await;
+    let transport = StreamTransport::with(vec![pose("Задача.", "Сколько?", Some("x = 42 / Foo"))]);
+    let done = cycle(&mut vault, &transport, &path, "a", None, 1)
+        .await
+        .unwrap();
+    let transport = StreamTransport::with(vec![
+        // Регистр и пробелы не спасают.
+        give_hint("Подскажу.", "Ответ: X=42/foo, не больше."),
+        give_hint("Ещё.", "Подумай, что считает счётчик."),
+    ]);
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "b",
+        act(AnswerAction::HintRequest),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    assert_eq!(transport.count(), 2);
+    assert!(transport.body(1).contains("подсказка содержит решение"));
+    let view = done.view;
+    assert_eq!(rejections(&view).len(), 1);
+    assert_eq!(view.practice.as_ref().unwrap().problems[0].hints, 1);
+    let hints: Vec<&String> = view
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::Hint { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hints.len(), 1);
+    assert!(!hints[0].contains("42"));
+
+    // Короткое решение (меньше 8 символов) в подсказке встречается случайно: отказа нет.
+    let path = create_practice(&mut vault, "Короткие", &[], &[], None, Language::Ru, 11)
+        .await
+        .unwrap();
+    let transport = StreamTransport::with(vec![pose("Задача.", "Сколько?", Some("42"))]);
+    let done = cycle(&mut vault, &transport, &path, "c", None, 0)
+        .await
+        .unwrap();
+    let transport = StreamTransport::with(vec![give_hint("Ок.", "Их 42 штуки в сумме.")]);
+    let done = cycle(
+        &mut vault,
+        &transport,
+        &path,
+        "d",
+        act(AnswerAction::HintRequest),
+        done.view.events_len,
+    )
+    .await
+    .unwrap();
+    assert!(rejections(&done.view).is_empty());
+    assert_eq!(done.view.practice.unwrap().problems[0].hints, 1);
+}
+
+pub async fn lesson_text_is_bounded_in_linear_time() {
+    // Сотни тысяч реплик: с подсчётом символов на каждой это минуты, а не доли секунды.
+    let mut vault = anthropic_vault().await;
+    let made = create_lesson(
+        &mut vault,
+        "Длинный",
+        &[],
+        Language::Ru,
+        LessonPhase::Teach,
+        11,
+    )
+    .await
+    .unwrap();
+    let mut raw = String::from_utf8(vault.bytes_of(&made).unwrap()).unwrap();
+    let line = serde_json::to_string(&plain_teacher("ы", 30)).unwrap();
+    for _ in 0..20_000 {
+        raw.push_str(&line);
+        raw.push('\n');
+    }
+    vault.replace_externally(&made, raw);
+    let path = create_practice(&mut vault, "Тема", &[made], &[], None, Language::Ru, 50)
+        .await
+        .unwrap();
+    let view = open_lesson(&mut vault, &path).await.unwrap();
+    let LessonEvent::Material { lessons, .. } = &view.events[0] else {
+        panic!("материал");
+    };
+    // 20 000 реплик по символу и разделители: предел 30 000 срабатывает посередине.
+    assert_eq!(lessons.len(), 1);
+    let count = lessons[0].text.chars().count();
+    assert!((29_990..=30_000).contains(&count), "{count}");
+}
+
+pub async fn lesson_goal_is_clipped_when_building_instructions() {
+    let goal = "ы".repeat(5_000);
+    let mut vault = anthropic_vault().await;
+    for (name, start, kind) in [
+        ("Уроки/teach.lesson", "Teach", "Lesson"),
+        ("Уроки/probe.lesson", "Probe", "Lesson"),
+        ("Уроки/practice.lesson", "Teach", "Practice"),
+    ] {
+        let header = json!({"format":1,"goal":goal,"language":"ru","created_at":1,
+            "start":start,"kind":kind});
+        vault.replace_externally(name, header.to_string() + "\n");
+        let view = open_lesson(&mut vault, name).await.unwrap();
+        let transport = StreamTransport::with(vec![say("ок")]);
+        let answered = if kind == "Practice" {
+            None
+        } else {
+            answer("привет")
+        };
+        cycle(&mut vault, &transport, name, "a", answered, view.events_len)
+            .await
+            .unwrap();
+        let body = transport.body(0);
+        assert!(body.contains(&"ы".repeat(500)), "{name}");
+        assert!(!body.contains(&"ы".repeat(501)), "{name}");
+    }
 }

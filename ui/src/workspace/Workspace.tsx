@@ -33,6 +33,7 @@ import { BookmarksPanel } from "../bookmarks/BookmarksPanel.js";
 import { TasksScreen } from "../tasks/TasksScreen.js";
 import { LessonsScreen } from "../lessons/LessonsScreen.js";
 import { NewLessonDialog } from "../lessons/NewLessonDialog.js";
+import { NewPracticeDialog } from "../lessons/NewPracticeDialog.js";
 import { LessonEnvProvider } from "../lessons/lessonEnv.js";
 import { useVaultId } from "../lessons/useVaultId.js";
 import { SlidesExportDialog } from "../slides/SlidesExportDialog.js";
@@ -370,6 +371,7 @@ function WorkspaceView({
   // Уроки с ИИ-учителем (фича 051): список и диалог «Новый урок».
   const [lessonsOpen, setLessonsOpen] = useState(false);
   const [newLessonOpen, setNewLessonOpen] = useState(false);
+  const [newPracticeOpen, setNewPracticeOpen] = useState(false);
   // Окно «Экспорт презентации» (фича 035).
   const [slidesExportOpen, setSlidesExportOpen] = useState(false);
   // Окно экспорта открытой заметки из шапки (фича 044, артборд 10).
@@ -2341,6 +2343,12 @@ function WorkspaceView({
           run: () => setNewLessonOpen(true),
         },
         {
+          id: "practice-new",
+          ...titled("practice.command.new"),
+          icon: "plus",
+          run: () => setNewPracticeOpen(true),
+        },
+        {
           id: "lessons",
           ...titled("lessons.command.list"),
           icon: "list",
@@ -3446,6 +3454,10 @@ function WorkspaceView({
             setLessonsOpen(false);
             setNewLessonOpen(true);
           }}
+          onNewPractice={() => {
+            setLessonsOpen(false);
+            setNewPracticeOpen(true);
+          }}
           onClose={() => setLessonsOpen(false)}
         />
       )}
@@ -3465,6 +3477,24 @@ function WorkspaceView({
             setShowSettings(true);
           }}
           onCancel={() => setNewLessonOpen(false)}
+        />
+      )}
+
+      {newPracticeOpen && state.client !== null && (
+        <NewPracticeDialog
+          client={state.client}
+          vaultId={lessonVaultId}
+          notes={state.notes}
+          language={lang.startsWith("ru") ? "ru" : "en"}
+          onCreated={(path) => {
+            setNewPracticeOpen(false);
+            void openTab(path);
+          }}
+          onOpenSettings={() => {
+            setNewPracticeOpen(false);
+            setShowSettings(true);
+          }}
+          onCancel={() => setNewPracticeOpen(false)}
         />
       )}
 

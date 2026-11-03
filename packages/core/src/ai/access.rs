@@ -37,7 +37,7 @@ pub(super) fn normalize_folder(folder: &Path) -> Option<String> {
 }
 
 /// Компоненты пути в форме для сравнения.
-fn folded(path: &Path) -> Option<Vec<String>> {
+pub(super) fn folded(path: &Path) -> Option<Vec<String>> {
     let path = clean(path)?;
     let parts: Vec<String> = path
         .components()

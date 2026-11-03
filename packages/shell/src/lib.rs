@@ -805,6 +805,7 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::ai_check_access,
             commands::ai_lesson_list,
             commands::ai_lesson_create,
+            commands::ai_practice_create,
             commands::ai_lesson_open,
             commands::ai_lesson_answer,
             commands::ai_lesson_progress,

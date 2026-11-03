@@ -6,6 +6,7 @@
 pub mod file;
 pub mod partial;
 pub mod plan;
+pub mod practice;
 pub mod prompt;
 pub mod stream;
 pub mod turn;
@@ -15,16 +16,20 @@ pub mod web;
 use std::path::Path;
 
 pub use file::{
-    Confidence, Language, LessonEvent, LessonHeader, LessonPhase, LessonQuestion, LessonState,
-    LessonSummary, LessonView, NoteOutcome, ProbePart, ProbeState, ProbeSummary, Waiting,
+    Confidence, Language, LessonEvent, LessonHeader, LessonKind, LessonPhase, LessonQuestion,
+    LessonState, LessonSummary, LessonView, NoteOutcome, ProbePart, ProbeState, ProbeSummary,
+    Waiting,
 };
 pub use partial::LessonProgress;
 pub use plan::{PlanEdge, PlanStep, PlanStepState, PlanStepView, PlanVersionInfo, PlanView};
+pub use practice::{
+    DeniedLesson, LessonDenyReason, LessonMaterial, PracticeView, ProblemOutcome, ProblemView,
+};
 pub use stream::{ToolCall, TurnReply};
-pub use turn::{Next, PreparedTurn, TurnDone, TurnKind, UserAnswer};
+pub use turn::{AnswerAction, Next, PreparedTurn, TurnDone, TurnKind, UserAnswer};
 
 use super::access::normalize_folder;
-use super::settings::load_settings;
+use super::settings::{load_settings, AiSettings};
 use super::AiFailure;
 use crate::vault::backend::{ReadError, VaultBackend};
 use crate::vault::{classify, FileKind, LESSON_EXTENSION};
@@ -86,28 +91,15 @@ fn file_stem(goal: &str) -> String {
 /// Сколько заметок можно прикрепить к уроку при создании.
 pub const MAX_ATTACHED_NOTES: usize = 10;
 
-/// Создаёт урок: файл в папке уроков, прикреплённые заметки — событиями `NoteRead`
-/// (FR-011). Заметка из запрещённой папки или вне vault прикрепляется отказом, а не
-/// содержимым. Выключенное обучение отказывает, не создавая файла (FR-001). Прикрепляется
-/// не больше [`MAX_ATTACHED_NOTES`] заметок; пути сравниваются после нормализации.
-pub async fn create_lesson<B: VaultBackend>(
-    backend: &mut B,
-    goal: &str,
+/// Прикрепляемые заметки событиями `NoteRead` (FR-011). Заметка из запрещённой папки или
+/// вне vault прикрепляется отказом, а не содержимым. Прикрепляется не больше
+/// [`MAX_ATTACHED_NOTES`] заметок; пути сравниваются после нормализации.
+async fn attach_notes<B: VaultBackend>(
+    backend: &B,
+    settings: &AiSettings,
     notes: &[String],
-    language: Language,
-    start: LessonPhase,
     now: i64,
-) -> Result<String, AiFailure> {
-    let settings = load_settings(backend).await;
-    if !settings.enabled {
-        return Err(AiFailure::Disabled);
-    }
-    let goal = goal.trim();
-    if goal.is_empty() {
-        return Err(AiFailure::GoalEmpty);
-    }
-    let goal: String = goal.chars().take(GOAL_MAX_CHARS).collect();
-
+) -> Vec<LessonEvent> {
     let mut events: Vec<LessonEvent> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     for path in notes {
@@ -120,7 +112,7 @@ pub async fn create_lesson<B: VaultBackend>(
             break;
         }
         seen.push(path.clone());
-        let (outcome, _) = turn::read_attached(backend, &settings, &path).await;
+        let (outcome, _) = turn::read_attached(backend, settings, &path).await;
         events.push(LessonEvent::NoteRead {
             at: now,
             path,
@@ -128,15 +120,18 @@ pub async fn create_lesson<B: VaultBackend>(
             outcome,
         });
     }
-    let header = LessonHeader {
-        format: FORMAT,
-        goal: goal.clone(),
-        language,
-        created_at: now,
-        start,
-    };
-    let text = initial_text(&header, &events)?;
+    events
+}
 
+/// Пишет новый файл сессии в папку уроков под свободным именем.
+async fn write_new_session<B: VaultBackend>(
+    backend: &mut B,
+    settings: &AiSettings,
+    name_from: &str,
+    header: &LessonHeader,
+    events: &[LessonEvent],
+) -> Result<String, AiFailure> {
+    let text = initial_text(header, events)?;
     let folder = Path::new(&settings.lessons_folder);
     // Ссылка на полпути увела бы папку и файл за пределы vault: проверка до создания.
     if backend.crosses_symlink(&folder.join("_")).await || backend.is_symlink(folder).await {
@@ -146,7 +141,7 @@ pub async fn create_lesson<B: VaultBackend>(
         .ensure_folder(folder)
         .await
         .map_err(|_| AiFailure::JournalFailed)?;
-    let stem = file_stem(&goal);
+    let stem = file_stem(name_from);
     let mut number = 1u32;
     let path = loop {
         let name = if number == 1 {
@@ -177,6 +172,99 @@ pub async fn create_lesson<B: VaultBackend>(
     Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
+/// Создаёт урок: файл в папке уроков, прикреплённые заметки — событиями `NoteRead`
+/// (FR-011). Выключенное обучение отказывает, не создавая файла (FR-001).
+pub async fn create_lesson<B: VaultBackend>(
+    backend: &mut B,
+    goal: &str,
+    notes: &[String],
+    language: Language,
+    start: LessonPhase,
+    now: i64,
+) -> Result<String, AiFailure> {
+    let settings = load_settings(backend).await;
+    if !settings.enabled {
+        return Err(AiFailure::Disabled);
+    }
+    let goal = goal.trim();
+    if goal.is_empty() {
+        return Err(AiFailure::GoalEmpty);
+    }
+    let goal: String = goal.chars().take(GOAL_MAX_CHARS).collect();
+    let events = attach_notes(backend, &settings, notes, now).await;
+    let header = LessonHeader {
+        format: FORMAT,
+        goal: goal.clone(),
+        language,
+        created_at: now,
+        start,
+        kind: LessonKind::Lesson,
+    };
+    write_new_session(backend, &settings, &goal, &header, &events).await
+}
+
+/// Создаёт практику (фича 053): тот же файл с `kind: Practice`. Материал собирается один
+/// раз: уроки (цель и изложение, пределы объёма в `practice`), заметки через проверку
+/// доступа 050 событиями `NoteRead` и описание темы; потом исчезнувший урок практике не
+/// мешает. `title` — тема сессии, она же имя файла. Закрытый урок и закрытая заметка
+/// текста не дают.
+pub async fn create_practice<B: VaultBackend>(
+    backend: &mut B,
+    title: &str,
+    lessons: &[String],
+    notes: &[String],
+    description: Option<&str>,
+    language: Language,
+    now: i64,
+) -> Result<String, AiFailure> {
+    let settings = load_settings(backend).await;
+    if !settings.enabled {
+        return Err(AiFailure::Disabled);
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(AiFailure::GoalEmpty);
+    }
+    let title: String = title.chars().take(GOAL_MAX_CHARS).collect();
+    let (lessons, denied) = practice::collect_lessons(backend, &settings, lessons).await;
+    let description = description
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| {
+            text.chars()
+                .take(practice::DESCRIPTION_MAX_CHARS)
+                .collect::<String>()
+        });
+    let mut events: Vec<LessonEvent> = Vec::new();
+    if !lessons.is_empty() || description.is_some() || !denied.is_empty() {
+        events.push(LessonEvent::Material {
+            at: now,
+            lessons,
+            description,
+            denied,
+        });
+    }
+    events.extend(attach_notes(backend, &settings, notes, now).await);
+    let header = LessonHeader {
+        format: FORMAT,
+        goal: title.clone(),
+        language,
+        created_at: now,
+        start: LessonPhase::Teach,
+        kind: LessonKind::Practice,
+    };
+    let name = format!("{}{title}", practice_prefix(language));
+    write_new_session(backend, &settings, &name, &header, &events).await
+}
+
+/// Имя файла практики отличается от урока с той же целью.
+fn practice_prefix(language: Language) -> &'static str {
+    match language {
+        Language::Ru => "Практика ",
+        Language::En => "Practice ",
+    }
+}
+
 /// Открывает урок. Если в прошлый раз приложение закрыли посреди ответа, полученное из
 /// промежуточного файла дописывается оборванной репликой (research.md §5, SC-002).
 pub async fn open_lesson<B: VaultBackend>(
@@ -188,7 +276,13 @@ pub async fn open_lesson<B: VaultBackend>(
         if let Some(text) = partial::read_partial(backend, path).await {
             if matches!(
                 parsed.events.last(),
-                Some(LessonEvent::User { .. } | LessonEvent::NoteRead { .. })
+                Some(
+                    LessonEvent::User { .. }
+                        | LessonEvent::NoteRead { .. }
+                        | LessonEvent::HintRequest { .. }
+                        | LessonEvent::GiveUp { .. }
+                        | LessonEvent::NextProblem { .. }
+                )
             ) {
                 let at = parsed.events.last().map_or(0, LessonEvent::at);
                 let model = load_settings(backend).await.model.unwrap_or_default();
