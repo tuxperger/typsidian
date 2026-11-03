@@ -7,6 +7,8 @@ import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { BlockedNotice, PROVIDER_LABEL, useAiReadiness, useClosedPaths } from "./aiReadiness.js";
 import { failureKind, requestLessonStart } from "./lessonEnv.js";
+import { KnowledgePicker, type PickedStatement } from "../knowledge/KnowledgePicker.js";
+import { failureKeyOfKind } from "../knowledge/knowledgeText.js";
 
 // Диалог «Новая практика» (фича 053, макет A): материал — уроки и заметки либо описание
 // темы. Какие заметки пустить к модели, решает ядро (проверка доступа 050); здесь только
@@ -57,6 +59,8 @@ export function NewPracticeDialog({
   const [chosenNotes, setChosenNotes] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
+  // Утверждения графа знаний как опора (фича 054): их текст уходит в материал практики.
+  const [knowledge, setKnowledge] = useState<PickedStatement[]>([]);
   const [name, setName] = useState("");
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
@@ -90,26 +94,34 @@ export function NewPracticeDialog({
   ]);
 
   const firstLesson =lessons?.find((lesson) => chosenLessons.includes(lesson.path));
-  const fallbackName = firstLesson?.goal ?? (chosenNotes[0] !== undefined ? baseName(chosenNotes[0]) : "");
+  const fallbackName =
+    firstLesson?.goal ??
+    (chosenNotes[0] !== undefined
+      ? baseName(chosenNotes[0])
+      : Array.from(knowledge[0]?.text ?? "").slice(0, TITLE_FROM_TOPIC).join(""));
   const topicName = Array.from(topic.trim().split("\n")[0] ?? "").slice(0, TITLE_FROM_TOPIC).join("");
   const title = name.trim() !== "" ? name.trim() : mode === "sources" ? fallbackName : topicName;
   const ready =
-    mode === "sources" ? chosenLessons.length + chosenNotes.length > 0 && title !== "" : topic.trim() !== "" && title !== "";
+    mode === "sources"
+      ? chosenLessons.length + chosenNotes.length + knowledge.length > 0 && title !== ""
+      : topic.trim() !== "" && title !== "";
 
   const create = async (): Promise<void> => {
     if (busy || !ready || readiness.state !== "ready") return;
     setBusy(true);
     setError(null);
     try {
+      const ids = knowledge.length > 0 ? knowledge.map((item) => item.id) : undefined;
       const path =
         mode === "sources"
-          ? await client.lessons.createPractice(title, chosenLessons, chosenNotes, undefined, language)
-          : await client.lessons.createPractice(title, [], [], topic.trim(), language);
+          ? await client.lessons.createPractice(title, chosenLessons, chosenNotes, undefined, language, ids)
+          : await client.lessons.createPractice(title, [], [], topic.trim(), language, ids);
       requestLessonStart(path);
       onCreated(path);
     } catch (failure) {
       const kind = failureKind(failure);
-      setError(kind === null ? t("ai.failure.Unknown") : t(`ai.failure.${kind}`));
+      // Отказ при выбранном графе читается в его контексте: «закрыт для агента», а не «ключ без доступа».
+      setError(t(knowledge.length > 0 ? failureKeyOfKind(kind) : kind === null ? "ai.failure.Unknown" : `ai.failure.${kind}`));
       setBusy(false);
     }
   };
@@ -253,6 +265,13 @@ export function NewPracticeDialog({
                 />
               </>
             )}
+
+            <KnowledgePicker
+              client={client}
+              lessonsFolder={settings.lessons_folder ?? ""}
+              chosen={knowledge}
+              onChange={setKnowledge}
+            />
 
             <label className="ts-lesson__lbl" htmlFor={`${id}-name`}>
               {t("practice.new.nameLabel")}

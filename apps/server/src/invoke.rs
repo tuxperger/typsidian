@@ -37,6 +37,9 @@ const SYNC_CONNECT_COMMAND: &str = "sync_connect_remote";
 const AI_COMMAND_PREFIX: &str = "ai_";
 /// Команды обучения с ИИ, которые ходят в сеть к провайдеру.
 const AI_NETWORK_COMMANDS: &[&str] = &["ai_models", "ai_probe", "ai_lesson_answer"];
+/// Фоновые команды с моделью: общий предел запросов они берут на каждую пачку сами
+/// (`RequestGate` в окружении аккаунта), а на команду — отдельное место аккаунта.
+const AI_BACKGROUND_COMMANDS: &[&str] = &["ai_knowledge_extract"];
 /// Команды, которые ходят в сеть к удалённому репозиторию.
 const EXCHANGE_COMMANDS: &[&str] = &[
     "sync_connect_remote",
@@ -206,6 +209,21 @@ pub async fn invoke(
                 Some(slot) => Some(slot),
                 None => {
                     tracing::warn!("отказ: предел одновременных запросов к моделям на аккаунт");
+                    return Ok((
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "kind": "RateLimited" })),
+                    )
+                        .into_response());
+                }
+            }
+        } else {
+            None
+        };
+        let _ai_background = if AI_BACKGROUND_COMMANDS.contains(&command.as_str()) {
+            match crate::BackgroundAiSlot::acquire(&state, &authed.account.id) {
+                Some(slot) => Some(slot),
+                None => {
+                    tracing::warn!("отказ: предел фоновых заданий с моделью на аккаунт");
                     return Ok((
                         StatusCode::BAD_REQUEST,
                         Json(serde_json::json!({ "kind": "RateLimited" })),

@@ -366,7 +366,7 @@ export default async (page) => {
   check(page, f.includes("Не вошёл в материал: Уроки/Чужая практика.lesson") && f.includes("это не урок"), "L1: отказ «это не урок» виден в ленте");
   check(page, (await page.evaluate(`document.querySelectorAll(".ts-practice__denied").length`)) === 2, "L1: строка отказа на каждый отказанный урок");
   await page.shot(`${shots}/practice-denied.png`);
-  const started = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".ts-lesson button")].find((x) => ["Повторить", "Начать урок"].includes(x.textContent.trim())); if (b) b.click(); return Boolean(b); })()`);
+  const started = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".ts-lesson button")].find((x) => ["Повторить", "Начать урок", "Начать практику"].includes(x.textContent.trim())); if (b) b.click(); return Boolean(b); })()`);
   page.log(`кнопка запуска хода: ${started ? "нажата" : "ход пошёл сам"}`);
   await page.waitFor(`window.__modelCalls.length > ${callsBefore}`, { timeout: 30000, label: "запрос по старой практике" });
   const lastBody = await page.evaluate("window.__modelCalls[window.__modelCalls.length - 1].body");

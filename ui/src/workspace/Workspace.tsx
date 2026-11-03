@@ -34,7 +34,8 @@ import { TasksScreen } from "../tasks/TasksScreen.js";
 import { LessonsScreen } from "../lessons/LessonsScreen.js";
 import { NewLessonDialog } from "../lessons/NewLessonDialog.js";
 import { NewPracticeDialog } from "../lessons/NewPracticeDialog.js";
-import { LessonEnvProvider } from "../lessons/lessonEnv.js";
+import { LessonEnvProvider, requestLessonJump } from "../lessons/lessonEnv.js";
+import { KnowledgeView } from "../knowledge/KnowledgeView.js";
 import { useVaultId } from "../lessons/useVaultId.js";
 import { SlidesExportDialog } from "../slides/SlidesExportDialog.js";
 import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
@@ -346,7 +347,8 @@ function WorkspaceView({
   const [operationError, setOperationError] = useState<VaultOperationError | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   // Экран 2 макета — отдельный вид, а не панель: граф занимает всё окно.
-  const [view, setView] = useState<"workspace" | "graph">("workspace");
+  // «Граф знаний» (фича 054) — такой же вид на месте текста, как граф связей.
+  const [view, setView] = useState<"workspace" | "graph" | "knowledge">("workspace");
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Расширенный поиск (макет «Утилиты» § Поиск): ⌘⇧F и команда палитры.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -793,6 +795,7 @@ function WorkspaceView({
       vaultId: lessonVaultId,
       openNote: (path: string) => void openTab(path),
       openSettings: () => setShowSettings(true),
+      openKnowledge: () => setView("knowledge"),
     }),
     [lessonVaultId, openTab],
   );
@@ -1188,6 +1191,16 @@ function WorkspaceView({
   // Щелчок по узлу графа (фича 025): открыть заметку или доску и вернуться к рабочей области.
   const openPathFromGraph = useCallback(
     (path: string) => {
+      void openTab(path);
+      setView("workspace");
+    },
+    [openTab],
+  );
+
+  // Источник утверждения графа знаний (фича 054): открыть урок и прокрутить к событию.
+  const openKnowledgeSource = useCallback(
+    (path: string, event?: number) => {
+      if (event !== undefined) requestLessonJump(path, event);
       void openTab(path);
       setView("workspace");
     },
@@ -2148,7 +2161,7 @@ function WorkspaceView({
     const items: PaletteCommand[] = [
       {
         id: "graph",
-        ...titled(view === "graph" ? "workspace.backToWorkspace" : "workspace.openGraph"),
+        ...titled(view !== "workspace" ? "workspace.backToWorkspace" : "workspace.openGraph"),
         icon: "network",
         // Подпись берётся у ядра, а не пишется здесь: после переназначения
         // литерал в палитре начал бы врать про клавиши.
@@ -2353,6 +2366,12 @@ function WorkspaceView({
           ...titled("lessons.command.list"),
           icon: "list",
           run: () => setLessonsOpen(true),
+        },
+        {
+          id: "knowledge",
+          ...titled("knowledge.command"),
+          icon: "network",
+          run: () => setView("knowledge"),
         },
       );
     }
@@ -2825,7 +2844,7 @@ function WorkspaceView({
               run: panes.toggleSidebar,
             },
             {
-              label: view === "graph" ? t("workspace.backToWorkspace") : t("workspace.openGraph"),
+              label: view !== "workspace" ? t("workspace.backToWorkspace") : t("workspace.openGraph"),
               shortcut: shortcuts.displayOf("toggle-graph"),
               run: toggleView,
             },
@@ -2880,6 +2899,8 @@ function WorkspaceView({
             <ScreenCrumb title={t("workspace.settings")} />
           ) : view === "graph" ? (
             <ScreenCrumb title={t("graph.title")} />
+          ) : view === "knowledge" ? (
+            <ScreenCrumb title={t("knowledge.title")} />
           ) : (
             <Breadcrumb path={activePath} />
           )}
@@ -3077,7 +3098,14 @@ function WorkspaceView({
         )}
       </div>
 
-      {view === "graph" && phone ? (
+      {view === "knowledge" && phone ? (
+        <KnowledgeView
+          client={state.client}
+          vaultId={lessonVaultId}
+          onOpenSource={openKnowledgeSource}
+          onBack={toggleView}
+        />
+      ) : view === "graph" && phone ? (
         <GraphView
           client={state.client}
           currentPath={activePath}
@@ -3219,7 +3247,9 @@ function WorkspaceView({
 
         {/* Граф (фича 025) — на месте текста и листа, дерево остаётся слева
             (фича 044, артборд 7). */}
-        {view === "graph" ? (
+        {view === "knowledge" ? (
+          <KnowledgeView client={state.client} vaultId={lessonVaultId} onOpenSource={openKnowledgeSource} />
+        ) : view === "graph" ? (
           <GraphView
             client={state.client}
             currentPath={activePath}
@@ -3457,6 +3487,10 @@ function WorkspaceView({
           onNewPractice={() => {
             setLessonsOpen(false);
             setNewPracticeOpen(true);
+          }}
+          onOpenKnowledge={() => {
+            setLessonsOpen(false);
+            setView("knowledge");
           }}
           onClose={() => setLessonsOpen(false)}
         />

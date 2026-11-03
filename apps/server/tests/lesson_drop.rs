@@ -135,28 +135,7 @@ fn encode(text: &str) -> String {
 /// отмены, место аккаунта и цикл освобождаются, и тот же `requestId` годится снова.
 #[tokio::test]
 async fn dropped_lesson_request_releases_everything() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    // Модель, которая начинает ответ и замолкает.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut socket, _)) = listener.accept().await else {
-                return;
-            };
-            tokio::spawn(async move {
-                let mut buffer = [0u8; 65536];
-                let _ = socket.read(&mut buffer).await;
-                let part = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Идёт\"}}\n\n";
-                let _ = socket
-                    .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
-                    .await;
-                let _ = socket.write_all(part.as_bytes()).await;
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            });
-        }
-    });
+    let port = hanging_model().await;
 
     let server = Server::with_config(|config| {
         config.ai_custom_endpoint = true;
@@ -248,4 +227,177 @@ async fn dropped_lesson_request_releases_everything() {
         .await;
         assert!(again.is_err(), "повтор завершился: {again:?}");
     }
+}
+
+/// Модель, которая начинает ответ и замолкает. Возвращает порт на loopback.
+async fn hanging_model() -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buffer = [0u8; 65536];
+                let _ = socket.read(&mut buffer).await;
+                let part = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Идёт\"}}\n\n";
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                    .await;
+                let _ = socket.write_all(part.as_bytes()).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            });
+        }
+    });
+    port
+}
+
+/// 054, ревью безопасности L3 и L6: пополнение графа держит общий предел запросов только на
+/// время пачки, фоновое место аккаунта — на время вызова; клиент, оборвавший вызов посреди
+/// пачки, не оставляет ни задания «идёт», ни занятых мест.
+#[tokio::test]
+async fn dropped_knowledge_extraction_releases_everything() {
+    use typsidian_core::ai::lesson::file::{initial_text, FORMAT};
+    use typsidian_core::ai::lesson::{
+        Language, LessonEvent, LessonHeader, LessonKind, LessonPhase,
+    };
+    use typsidian_server::MAX_AI_REQUESTS;
+
+    let port = hanging_model().await;
+    let server = Server::with_config(|config| {
+        config.ai_custom_endpoint = true;
+        config.sync_private_remotes = true;
+    })
+    .await;
+    let anna = server.enter("anna").await;
+    let (status, _, _) = server
+        .call(
+            Method::POST,
+            "/api/vaults",
+            Some(&anna),
+            Some(json!({ "name": "Общее имя" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let settings = json!({ "settings": {
+        "enabled": true,
+        "provider": "Custom",
+        "custom_endpoint": format!("http://127.0.0.1:{port}/v1"),
+        "model": "m",
+    }});
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_settings_set", settings)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_approve_endpoint",
+            json!({ "insecureOk": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Урок с объяснением учителя кладётся обычной записью файла vault.
+    let header = LessonHeader {
+        format: FORMAT,
+        goal: "Понять замыкания".to_owned(),
+        language: Language::Ru,
+        created_at: 1,
+        start: LessonPhase::Teach,
+        kind: LessonKind::Lesson,
+    };
+    let teacher = LessonEvent::Teacher {
+        at: 1,
+        text: "Замыкание хранит окружение функции.".to_owned(),
+        question: None,
+        interrupted: false,
+        failure: None,
+        model: "m".to_owned(),
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+    };
+    let (_, created) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_create",
+            json!({ "goal": "Замыкания", "notes": [], "language": "ru", "start": "Teach", "now": 1 }),
+        )
+        .await;
+    let path = created.as_str().expect("путь урока").to_owned();
+    let path = path.as_str();
+    let (status, body) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "write",
+            json!({ "path": path, "content": initial_text(&header, &[teacher]).unwrap(), "expected": null }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let anna_id = server
+        .state
+        .store
+        .account_by_login("anna")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let extract = |request: &'static str| {
+        server.invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_extract",
+            json!({ "source": path, "requestId": request, "now": 5 }),
+        )
+    };
+    {
+        // Вызов идёт и не заканчивается; посреди пачки заняты общее и фоновое места.
+        let watcher = async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            assert_eq!(
+                server.state.ai_requests.available_permits(),
+                MAX_AI_REQUESTS - 1,
+                "пачка не заняла общий предел"
+            );
+            assert!(server
+                .state
+                .ai_background
+                .lock()
+                .unwrap()
+                .contains_key(&anna_id));
+            let (_, jobs) = server
+                .invoke(&anna, "Общее имя", "ai_knowledge_jobs", json!({}))
+                .await;
+            assert_eq!(jobs[0]["state"], "Running", "{jobs}");
+        };
+        let (waiting, ()) = tokio::join!(
+            tokio::time::timeout(std::time::Duration::from_millis(900), extract("k1")),
+            watcher
+        );
+        assert!(waiting.is_err(), "пополнение завершилось: {waiting:?}");
+    }
+    // Вызов оборван: все места возвращены, задание не «идёт».
+    assert_eq!(
+        server.state.ai_requests.available_permits(),
+        MAX_AI_REQUESTS
+    );
+    assert!(server.state.ai_background.lock().unwrap().is_empty());
+    assert!(server.state.ai_by_account.lock().unwrap().is_empty());
+    let (_, jobs) = server
+        .invoke(&anna, "Общее имя", "ai_knowledge_jobs", json!({}))
+        .await;
+    assert_eq!(jobs[0]["id"], "k1", "{jobs}");
+    assert_eq!(jobs[0]["state"], "Cancelled", "{jobs}");
+
+    // Новое пополнение берёт места снова и не получает отказа (повисает в ожидании модели).
+    let again = tokio::time::timeout(std::time::Duration::from_millis(700), extract("k2")).await;
+    assert!(again.is_err(), "повтор завершился: {again:?}");
 }

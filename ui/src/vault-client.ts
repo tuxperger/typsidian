@@ -129,6 +129,10 @@ import type {
   VaultOverrides,
   AiProvider,
   AiSettings,
+  Chain,
+  KnowledgeGraph,
+  KnowledgeJob,
+  Proposition,
   Language,
   LessonPhase,
   PlanView,
@@ -598,6 +602,8 @@ export interface VaultClient {
   readonly ai: AiClient;
   /** Урок с ИИ-учителем (фича 051). */
   readonly lessons: LessonClient;
+  /** Граф знаний из уроков (фича 054). */
+  readonly knowledge: KnowledgeClient;
 
   // ── Показ слайдов (фича 019) ────────────────────────────────────────
 
@@ -852,7 +858,14 @@ export interface LessonClient {
    * Создаёт файл урока и отдаёт его путь. `start` — стадия, с которой начинается урок
    * (замер или обучение); по умолчанию обучение.
    */
-  create(goal: string, notes: string[], language: Language, start?: LessonPhase): Promise<string>;
+  create(
+    goal: string,
+    notes: string[],
+    language: Language,
+    start?: LessonPhase,
+    /** Id утверждений графа знаний, выбранных как опора (054, до 50). */
+    knowledge?: string[],
+  ): Promise<string>;
   /**
    * Новая практика (053): тот же файл урока с `kind: Practice`. Материал — уроки, заметки и
    * описание темы; закрытое для агента ядро пропускает. Отдаёт путь файла.
@@ -863,8 +876,14 @@ export interface LessonClient {
     notes: string[],
     description: string | undefined,
     language: Language,
+    knowledge?: string[],
   ): Promise<string>;
   open(path: string): Promise<LessonView>;
+  /**
+   * Удаляет урок (054). `keepKnowledge` — оставить его вклад в графе знаний (источник
+   * помечается удалённым) либо удалить вклад вместе с уроком.
+   */
+  delete(path: string, keepKnowledge: boolean): Promise<void>;
   /**
    * Ответ пользователя и весь ход учителя с автопродолжениями. `answer` не задан —
    * «Запросить ответ снова». `expected` — число событий, которое видит интерфейс.
@@ -886,6 +905,28 @@ export interface LessonClient {
   skipProbe(path: string): Promise<LessonView>;
   /** План версии `version` с раскладкой; `undefined` — такой версии нет (052). */
   planVersion(path: string, version: number): Promise<PlanView | undefined>;
+}
+
+/**
+ * Граф знаний из уроков (фича 054). Форму графа, поиск, объединение и удаление решает ядро
+ * (`ai::knowledge`). Пополнение идёт отдельным вызовом, который не ждут: прогресс —
+ * `jobs`, отмена — `ai.cancel` по `requestId`. Отказ — исключение `AiFailure`.
+ */
+export interface KnowledgeClient {
+  /** Карта: форма `VaultGraph` 025 плюс группы и счётчики; `query` — подстрока и соседи. */
+  graph(query?: string): Promise<KnowledgeGraph>;
+  /** Цепочки для таблицы; `query` — по формулировкам. */
+  chains(query?: string): Promise<Chain[]>;
+  /** Утверждение с формулировками, источниками и цепочками; `undefined` — такого нет. */
+  proposition(id: string): Promise<Proposition | undefined>;
+  /**
+   * Пополняет граф из урока `source` и отдаёт итоговое задание, когда цикл кончился.
+   * Вызывающий его не ждёт; отказ посреди цикла лежит в `job.failure`.
+   */
+  extract(vaultId: string, source: string, requestId: string): Promise<KnowledgeJob>;
+  jobs(vaultId: string): Promise<KnowledgeJob[]>;
+  /** Удаляет утверждение (`id`) либо вклад источника (`source`; `keep` — оставить вклад). */
+  remove(target: { id: string } | { source: string; keep: boolean }): Promise<void>;
 }
 
 /**

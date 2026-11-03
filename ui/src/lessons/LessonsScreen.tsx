@@ -6,6 +6,7 @@ import type { VaultClient } from "../vault-client.js";
 import { Icon } from "../icons/Icons.js";
 import { useI18n, type MessageKey } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
+import { DeleteLessonDialog } from "./DeleteLessonDialog.js";
 
 // Список уроков (фича 051, макет G, H). Список строит ядро по всем файлам `.lesson`
 // vault; здесь — порядок «свежие сверху», показ и клавиатура.
@@ -17,6 +18,10 @@ export interface LessonsScreenProps {
   onOpen: (path: string) => void;
   onNew: () => void;
   onNewPractice: () => void;
+  /** Вид «Граф знаний» (фича 054). */
+  onOpenKnowledge: () => void;
+  /** Удаление идёт через ядро, оно же сообщает о нём событием vault: обход не нужен (T030). */
+  onDeleted?: (path: string) => void;
   onClose: () => void;
 }
 
@@ -34,9 +39,20 @@ function statusOf(lesson: LessonSummary): { label: MessageKey; tone: string } {
   return { label: STATUS[lesson.state], tone: lesson.state };
 }
 
-export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, onClose }: LessonsScreenProps): React.JSX.Element {
+export function LessonsScreen({
+  client,
+  revision,
+  onOpen,
+  onNew,
+  onNewPractice,
+  onOpenKnowledge,
+  onDeleted,
+  onClose,
+}: LessonsScreenProps): React.JSX.Element {
   const { t, formatDate } = useI18n();
+  // Пока открыто окно удаления, Escape закрывает его, а не список: оно выше в стеке.
   useDismissOnEscape(onClose);
+  const [deleting, setDeleting] = useState<LessonSummary | null>(null);
   const [lessons, setLessons] = useState<LessonSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -80,6 +96,9 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, 
         <div className="ts-search__query">
           <span className="ts-history__title">{t("lessons.list.title")}</span>
           <span className="ts-spacer" />
+          <button type="button" className="ts-btn" onClick={onOpenKnowledge}>
+            {t("knowledge.open")}
+          </button>
           <button type="button" className="ts-btn" onClick={onNewPractice}>
             {t("practice.list.new")}
           </button>
@@ -107,7 +126,7 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, 
             </div>
           )}
           {(lessons ?? []).map((lesson, index) => (
-            <div key={lesson.path} role="listitem">
+            <div key={lesson.path} role="listitem" className="ts-lessons__item">
               <button
                 type="button"
                 data-lesson-index={index}
@@ -132,6 +151,14 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, 
                   {t(statusOf(lesson).label)}
                 </span>
               </button>
+              <button
+                type="button"
+                className="ts-btn ts-btn--quiet ts-btn--sm ts-lessons__del"
+                aria-label={t("knowledge.delete.aria", { goal: lesson.goal })}
+                onClick={() => setDeleting(lesson)}
+              >
+                {t("knowledge.delete.action")}
+              </button>
             </div>
           ))}
         </div>
@@ -139,6 +166,19 @@ export function LessonsScreen({ client, revision, onOpen, onNew, onNewPractice, 
           <span>{t("lessons.list.hints")}</span>
         </div>
       </section>
+      {deleting !== null && (
+        <DeleteLessonDialog
+          client={client}
+          lesson={deleting}
+          onCancel={() => setDeleting(null)}
+          onDeleted={() => {
+            const gone = deleting.path;
+            setDeleting(null);
+            onDeleted?.(gone);
+            setLessons((list) => (list === null ? list : list.filter((item) => item.path !== gone)));
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1549,6 +1549,10 @@ impl VaultBackend for WebBackend {
         self.events.drain(..).collect()
     }
 
+    fn publish_event(&mut self, event: VaultEvent) {
+        self.events.push_back(event);
+    }
+
     async fn begin_edit(&mut self, path: &Path, buffer: String) {
         self.conflicts.set_buffer(path, buffer);
         if let Some(note) = self.index.get_mut(path) {

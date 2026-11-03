@@ -7,6 +7,8 @@ import { useI18n } from "../i18n/index.js";
 import { useDismissOnEscape } from "../workspace/useDismissOnEscape.js";
 import { BlockedNotice, PROVIDER_LABEL, useAiReadiness, useClosedPaths } from "./aiReadiness.js";
 import { failureKind, requestLessonStart } from "./lessonEnv.js";
+import { KnowledgePicker, type PickedStatement } from "../knowledge/KnowledgePicker.js";
+import { failureKeyOfKind } from "../knowledge/knowledgeText.js";
 
 // Диалог «Новый урок» (фича 051, макет D, E): цель, заметки для опоры и условия, при
 // которых начать нельзя. «Начать урок» создаёт файл и открывает вкладку, которая сама
@@ -43,6 +45,8 @@ export function NewLessonDialog({
   const [chosen, setChosen] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
+  // Утверждения графа знаний как опора (фича 054): их текст уходит в замер.
+  const [knowledge, setKnowledge] = useState<PickedStatement[]>([]);
   // Замер понимания перед уроком — по умолчанию (052, макет A); его можно пропустить.
   const [start, setStart] = useState<LessonPhase>("Probe");
   const [busy, setBusy] = useState(false);
@@ -63,12 +67,19 @@ export function NewLessonDialog({
     setBusy(true);
     setError(null);
     try {
-      const path = await client.lessons.create(goal.trim(), chosen, language, start);
+      const path = await client.lessons.create(
+        goal.trim(),
+        chosen,
+        language,
+        start,
+        knowledge.length > 0 ? knowledge.map((item) => item.id) : undefined,
+      );
       requestLessonStart(path);
       onCreated(path);
     } catch (failure) {
       const kind = failureKind(failure);
-      setError(kind === null ? t("ai.failure.Unknown") : t(`ai.failure.${kind}`));
+      // Отказ при выбранном графе читается в его контексте: «закрыт для агента», а не «ключ без доступа».
+      setError(t(knowledge.length > 0 ? failureKeyOfKind(kind) : kind === null ? "ai.failure.Unknown" : `ai.failure.${kind}`));
       setBusy(false);
     }
   };
@@ -167,6 +178,13 @@ export function NewLessonDialog({
                 </ul>
               </div>
             )}
+
+            <KnowledgePicker
+              client={client}
+              lessonsFolder={settings.lessons_folder ?? ""}
+              chosen={knowledge}
+              onChange={setKnowledge}
+            />
 
             <div className="ts-lesson__lbl" id={`${id}-start`}>
               {t("lessons.new.startLabel")}

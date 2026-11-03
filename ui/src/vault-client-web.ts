@@ -77,9 +77,18 @@ import {
   aiSendProbe,
   aiSetSettings,
   aiSettings,
+  knowledgeBegin,
+  knowledgeChains,
+  knowledgeFinish,
+  knowledgeGraph,
+  knowledgeJobs,
+  knowledgeProposition,
+  knowledgeRemove,
+  knowledgeSend,
   lessonBegin,
   lessonCheckpoint,
   lessonCreate,
+  lessonDelete,
   practiceCreate,
   lessonFinish,
   lessonList,
@@ -91,6 +100,7 @@ import {
   lessonSetState,
   lessonSkipProbe,
   type AiFailure,
+  type KnowledgeJob,
   type ProbeReply,
   type TurnReply,
   linksMentionsAvailability,
@@ -565,11 +575,14 @@ export function webVaultClient(
     // пользователя, решает ядро (`Next`).
     lessons: {
       list: () => call(() => lessonList(backend)),
-      create: (goal, notes, language, start = "Teach") =>
-        call(() => lessonCreate(backend, goal, notes, language, start, Date.now())),
-      createPractice: (title, lessons, notes, description, language) =>
-        call(() => practiceCreate(backend, title, lessons, notes, description ?? null, language, Date.now())),
+      create: (goal, notes, language, start = "Teach", knowledge) =>
+        call(() => lessonCreate(backend, goal, notes, language, start, Date.now(), knowledge)),
+      createPractice: (title, lessons, notes, description, language, knowledge) =>
+        call(() =>
+          practiceCreate(backend, title, lessons, notes, description ?? null, language, Date.now(), knowledge),
+        ),
       open: (path) => call(() => lessonOpen(backend, path)),
+      delete: (path, keepKnowledge) => call(() => lessonDelete(backend, path, keepKnowledge, Date.now())),
       answer: async (vaultId, path, requestId, answer, expected) => {
         let next = answer;
         let seen = expected;
@@ -597,6 +610,43 @@ export function webVaultClient(
       setLanguage: (path, language) => call(() => lessonSetLanguage(backend, path, language, Date.now())),
       skipProbe: (path) => call(() => lessonSkipProbe(backend, path, Date.now())),
       planVersion: (path, version) => call(() => lessonPlanVersion(backend, path, version)),
+    },
+
+    // ── Граф знаний (фича 054) ────────────────────────────────────────
+    // Пополнение крутим здесь тем же циклом, что ход урока: сеть вне очереди, `backend`
+    // на время запроса свободен. `Continue` — следующая пачка, `WaitUser` — конец задания.
+    knowledge: {
+      graph: (query) => call(() => knowledgeGraph(backend, query)),
+      chains: (query) => call(() => knowledgeChains(backend, query)),
+      proposition: (id) => call(() => knowledgeProposition(backend, id)),
+      extract: async (vaultId, source, requestId) => {
+        let last: KnowledgeJob | undefined;
+        for (;;) {
+          const prepared = await call(() => knowledgeBegin(backend, vaultId, source, requestId, Date.now()));
+          if (prepared === undefined) break;
+          let reply: TurnReply | undefined;
+          let failure: AiFailure | undefined;
+          try {
+            reply = await knowledgeSend(vaultId, prepared);
+          } catch (error) {
+            failure = error as AiFailure;
+          }
+          // Отказ тоже завершается: ядро запишет его в задание, готовое остаётся в графе.
+          const done = await call(() => knowledgeFinish(backend, vaultId, prepared, Date.now(), reply, failure));
+          last = done.job;
+          if (done.next === "WaitUser") break;
+        }
+        const job = last ?? knowledgeJobs(vaultId).find((item) => item.id === requestId);
+        if (job === undefined) throw { kind: "Cancelled" } satisfies AiFailure;
+        return job;
+      },
+      jobs: async (vaultId) => knowledgeJobs(vaultId),
+      remove: (target) =>
+        call(() =>
+          "id" in target
+            ? knowledgeRemove(backend, target.id, undefined, false, Date.now())
+            : knowledgeRemove(backend, undefined, target.source, target.keep, Date.now()),
+        ),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

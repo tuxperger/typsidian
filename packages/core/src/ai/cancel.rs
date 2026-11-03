@@ -89,6 +89,41 @@ pub fn cancel(vault_id: &str, request_id: &str) {
     }
 }
 
+/// Отметка отмены без владельца-значения: её держит реестр заданий (фича 054), потому что
+/// цикл идёт по вызовам клиента (wasm) и держать `Cycle` между ними нечем. `false`, если
+/// отметка с этим id уже есть.
+pub fn flag_open(vault_id: &str, request_id: &str) -> bool {
+    let key = key(vault_id, request_id);
+    let Ok(mut cycles) = CYCLES.lock() else {
+        return false;
+    };
+    if cycles.contains_key(&key) {
+        return false;
+    }
+    cycles.insert(key, false);
+    true
+}
+
+/// Отменён ли цикл. Нет отметки — считается отменённым: цикл, которого никто не держит,
+/// продолжаться не должен.
+pub fn flag_cancelled(vault_id: &str, request_id: &str) -> bool {
+    CYCLES
+        .lock()
+        .map(|cycles| {
+            cycles
+                .get(&key(vault_id, request_id))
+                .copied()
+                .unwrap_or(true)
+        })
+        .unwrap_or(true)
+}
+
+pub fn flag_close(vault_id: &str, request_id: &str) {
+    if let Ok(mut cycles) = CYCLES.lock() {
+        cycles.remove(&key(vault_id, request_id));
+    }
+}
+
 /// Цикл ходов урока под одним `request_id`: пока он открыт, отмена запоминается и
 /// действует на следующие ходы, даже если пришла между ними, когда сетевого запроса нет.
 /// Закрывается при сбросе, в том числе когда соединение оборвалось.

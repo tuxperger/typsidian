@@ -2148,6 +2148,11 @@ impl VaultBackend for NativeBackend {
         queue.drain(..).collect()
     }
 
+    fn publish_event(&mut self, event: VaultEvent) {
+        self.events.lock().unwrap().push_back(event);
+        self.events_ready.notify_one();
+    }
+
     async fn begin_edit(&mut self, path: &Path, buffer: String) {
         self.conflicts.lock().unwrap().set_buffer(path, buffer);
         if let Some(note) = self.index.lock().await.get_mut(path) {

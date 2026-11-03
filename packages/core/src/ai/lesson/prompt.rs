@@ -329,7 +329,14 @@ fn plan_progress_tool() -> ToolDef {
 
 /// Описания инструментов стадии в форме протокола подключения.
 pub fn tools(provider: AiProvider, set: ToolSet) -> Value {
-    let list = match set {
+    tools_with(provider, set, false)
+}
+
+/// То же с инструментом чтения графа знаний (фича 054) там, где он действует: в обучении,
+/// замере и практике. `knowledge: false` — настройка `knowledge_agent_reads` выключена, и
+/// инструмента в запросе нет.
+pub fn tools_with(provider: AiProvider, set: ToolSet, knowledge: bool) -> Value {
+    let mut list = match set {
         ToolSet::Teach => vec![
             ask_tool(),
             read_tool(),
@@ -340,6 +347,9 @@ pub fn tools(provider: AiProvider, set: ToolSet) -> Value {
         ToolSet::ProbeEnd => vec![probe_done_tool()],
         ToolSet::Practice => vec![pose_problem_tool(), give_hint_tool(), conclude_tool()],
     };
+    if knowledge && set != ToolSet::ProbeEnd {
+        list.push(read_knowledge_tool());
+    }
     match provider {
         AiProvider::Anthropic => Value::Array(
             list.into_iter()
@@ -1029,4 +1039,119 @@ fn conclude_tool() -> ToolDef {
             "required": ["outcome", "review"]
         }),
     )
+}
+
+// ── Граф знаний (фича 054) ──────────────────────────────────────────────────
+
+pub const READ_KNOWLEDGE: &str = "read_knowledge";
+
+fn read_knowledge_tool() -> ToolDef {
+    (
+        READ_KNOWLEDGE,
+        "Search the user's knowledge graph (statements and reasoning chains collected from \
+         their lessons) by words and read up to 30 matching statements. Access may be refused.",
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Words to search for."}
+            },
+            "required": ["query"]
+        }),
+    )
+}
+
+/// Пределы данных графа в инструкциях и ответе инструмента: событие `Material` и граф
+/// приходят и с синхронизацией, поэтому длина и число держатся и при чтении.
+const KNOWLEDGE_TEXT_CHARS: usize = 300;
+const KNOWLEDGE_ITEMS: usize = 50;
+const KNOWLEDGE_PREMISES: usize = 6;
+
+fn chain_line(premises: &[String], conclusion: &str) -> String {
+    let premises: Vec<String> = premises
+        .iter()
+        .take(KNOWLEDGE_PREMISES)
+        .map(|premise| clip(premise, KNOWLEDGE_TEXT_CHARS))
+        .collect();
+    format!(
+        "- {} ⇒ {}",
+        premises.join("; "),
+        clip(conclusion, KNOWLEDGE_TEXT_CHARS)
+    )
+}
+
+fn knowledge_lines(
+    language: Language,
+    statements: &[crate::ai::knowledge::MaterialStatement],
+    chains: &[crate::ai::knowledge::MaterialChain],
+) -> String {
+    let chains_heading = match language {
+        Language::Ru => "Цепочки рассуждений",
+        Language::En => "Reasoning chains",
+    };
+    let mut out = String::new();
+    for statement in statements.iter().take(KNOWLEDGE_ITEMS) {
+        out.push_str(&format!(
+            "\n- {}",
+            clip(&statement.text, KNOWLEDGE_TEXT_CHARS)
+        ));
+    }
+    if !chains.is_empty() {
+        out.push_str(&format!("\n\n{chains_heading}:"));
+        for chain in chains.iter().take(KNOWLEDGE_ITEMS) {
+            out.push('\n');
+            out.push_str(&chain_line(&chain.premises, &chain.conclusion));
+        }
+    }
+    out
+}
+
+/// Знания из графа, выбранные пользователем, в инструкциях сессии.
+pub fn knowledge_block(
+    language: Language,
+    material: &crate::ai::knowledge::KnowledgeMaterial,
+) -> String {
+    let heading = match language {
+        Language::Ru => "Что пользователь уже знает (утверждения из его графа знаний, выбраны им)",
+        Language::En => {
+            "What the user already knows (statements from their knowledge graph, chosen by them)"
+        }
+    };
+    format!(
+        "## {heading} {}{}",
+        data_note(language),
+        knowledge_lines(language, &material.statements, &material.chains)
+    )
+}
+
+/// Результат `read_knowledge`, который уходит модели следующим ходом.
+pub fn knowledge_result(
+    language: Language,
+    query: &str,
+    found: Option<&crate::ai::knowledge::AgentResult>,
+) -> String {
+    let query = clip(query, crate::ai::knowledge::QUERY_MAX_CHARS);
+    match (language, found) {
+        (Language::Ru, None) => format!(
+            "Результат read_knowledge({query}): доступ к графу знаний закрыт пользователем."
+        ),
+        (Language::En, None) => format!(
+            "Result of read_knowledge({query}): access to the knowledge graph is closed by the user."
+        ),
+        (Language::Ru, Some(result)) if result.statements.is_empty() => {
+            format!("Результат read_knowledge({query}): ничего не найдено.")
+        }
+        (Language::En, Some(result)) if result.statements.is_empty() => {
+            format!("Result of read_knowledge({query}): nothing found.")
+        }
+        (Language::Ru, Some(result)) => format!(
+            "Результат read_knowledge({query}) {}:{}",
+            data_note(language),
+            knowledge_lines(language, &result.statements, &result.chains)
+        ),
+        (Language::En, Some(result)) => format!(
+            "Result of read_knowledge({query}) {}:{}",
+            data_note(language),
+            knowledge_lines(language, &result.statements, &result.chains)
+        ),
+    }
 }

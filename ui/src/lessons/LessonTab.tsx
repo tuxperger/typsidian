@@ -11,9 +11,15 @@ import type {
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { useI18n } from "../i18n/index.js";
+import { KnowledgeJobs } from "../knowledge/KnowledgeJobs.js";
+import { KnowledgeLessonBlock } from "../knowledge/KnowledgeLessonBlock.js";
+import { useKnowledgeExtract } from "../knowledge/useKnowledgeExtract.js";
+import { useKnowledgeJobs } from "../knowledge/useKnowledgeJobs.js";
 import {
   failureKind,
   newRequestId,
+  onLessonJump,
+  takeLessonJump,
   takeLessonStart,
   useLessonEnv,
 } from "./lessonEnv.js";
@@ -111,6 +117,14 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     }
   }, [client, path]);
 
+  // Граф знаний (фича 054): ядро говорит «пора» в ответе на ход, запрос делает вкладка и
+  // урока не ждёт. Закончив, перечитывает вид, если в этот момент не идёт ход.
+  const { jobs: knowledgeJobs } = useKnowledgeJobs(client, env.vaultId);
+  const extract = useKnowledgeExtract(client, env.vaultId, path, async () => {
+    if (!running.current) await reload();
+  });
+  const startExtract = extract.start;
+
   const run = useCallback(
     async (answer: UserAnswer | undefined, base: LessonView | null = view): Promise<void> => {
       if (base === null || running.current) return;
@@ -121,7 +135,10 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       setChanged(false);
       let keepDraft = false;
       try {
-        setView(await client.lessons.answer(env.vaultId, path, requestId, answer, base.events_len));
+        const next = await client.lessons.answer(env.vaultId, path, requestId, answer, base.events_len);
+        setView(next);
+        // Один раз на ответ хода, а не на каждое открытие вида (research 054 §8).
+        if (next.knowledge_auto_due) startExtract();
       } catch (error) {
         const kind = failureKind(error);
         if (kind === "LessonChanged") {
@@ -139,7 +156,7 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
         if (!keepDraft && answer !== undefined && (answer.action ?? "Answer") === "Answer") setDraft(EMPTY_DRAFT);
       }
     },
-    [client, env.vaultId, path, reload, view],
+    [client, env.vaultId, path, reload, view, startExtract],
   );
 
   // Первый ход урока, заказанный кнопкой «Начать урок» в диалоге: один раз.
@@ -286,6 +303,17 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
     setPlanOpen((open) => (narrow ? false : open));
     if (narrow) setSummaryOpen(false);
   }, [narrow]);
+
+  // Переход из графа знаний к событию урока (054, FR-008): сразу или когда вид загрузится.
+  useEffect(() => {
+    if (view === null) return;
+    const go = (): void => {
+      const event = takeLessonJump(path);
+      if (event !== undefined) jumpTo(event);
+    };
+    go();
+    return onLessonJump(path, go);
+  }, [view, path, jumpTo]);
 
   const hintNumberOf = useMemo(() => hintNumbers(view?.events ?? []), [view]);
 
@@ -609,8 +637,19 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
               : t(isPractice ? "practice.closed.stopped" : "lessons.closed.stopped")}
           </p>
         )}
+        {!isPractice && (
+          <KnowledgeLessonBlock
+            path={path}
+            pendingChars={view.knowledge_pending_chars}
+            jobs={knowledgeJobs}
+            extract={extract}
+            onOpenKnowledge={env.openKnowledge}
+          />
+        )}
         <div ref={feedEnd} />
       </div>
+
+      <KnowledgeJobs client={client} vaultId={env.vaultId} jobs={knowledgeJobs} source={path} />
 
       {turn !== null && (
         <div className="ts-lesson__status" role="status">
@@ -823,6 +862,17 @@ function EventRow({
       );
     case "PlanProgress":
       return null;
+    // Чтение графа знаний агентом (фича 054, FR-009): видно в уроке так же, как чтение заметки.
+    case "KnowledgeRead":
+      return (
+        <div className={event.outcome.kind === "Denied" ? "ts-lesson__read ts-lesson__read--deny" : "ts-lesson__read"}>
+          <span>
+            {event.outcome.kind === "Denied"
+              ? t("knowledge.read.denied", { query: event.query })
+              : t("knowledge.read.sent", { query: event.query, count: event.outcome.count })}
+          </span>
+        </div>
+      );
     // События фичи 053 (практика): задачи, подсказки и итоги рисует лента практики.
     case "Material":
     case "Problem":

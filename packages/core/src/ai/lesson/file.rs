@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::plan::{self, PlanStep, PlanVersionInfo, PlanView};
 use super::practice::{self, DeniedLesson, LessonMaterial, PracticeView, ProblemOutcome};
 use crate::ai::access::normalize_folder;
+use crate::ai::knowledge::{KnowledgeMaterial, KnowledgeOutcome};
 use crate::ai::AiFailure;
 use crate::vault::backend::VaultBackend;
 use crate::vault::{classify, FileKind};
@@ -256,6 +257,16 @@ pub enum LessonEvent {
         /// Уроки, которые в материал не вошли, и причина (ревью 053 L1).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         denied: Vec<DeniedLesson>,
+        /// Утверждения графа знаний, выбранные пользователем (фича 054).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        knowledge: Option<KnowledgeMaterial>,
+    },
+    /// Агент прочитал граф знаний инструментом `read_knowledge` (фича 054). Текст в урок
+    /// не пишется: он в графе и в журнале 050.
+    KnowledgeRead {
+        at: i64,
+        query: String,
+        outcome: KnowledgeOutcome,
     },
     /// Задача практики. Решение лежит в файле, но вид его не отдаёт до итога (research.md §3).
     Problem {
@@ -305,6 +316,7 @@ impl LessonEvent {
             | LessonEvent::PlanProgress { at, .. }
             | LessonEvent::PlanRejected { at, .. }
             | LessonEvent::Material { at, .. }
+            | LessonEvent::KnowledgeRead { at, .. }
             | LessonEvent::Problem { at, .. }
             | LessonEvent::Hint { at, .. }
             | LessonEvent::HintRequest { at, .. }
@@ -370,6 +382,13 @@ pub struct LessonView {
     pub plan_history: Vec<PlanVersionInfo>,
     /// Задачи практики; у урока — `None`. Решение задачи без итога сюда не попадает.
     pub practice: Option<PracticeView>,
+    /// Сколько символов объяснений учителя ещё не в графе знаний (фича 054); у практики и
+    /// урока, который не читается, — 0.
+    pub knowledge_pending_chars: u32,
+    /// Пора пополнять граф сам: включено, урок открыт агенту, непокрытого текста больше
+    /// 2 тыс. символов. Запрос запускает клиент (`ai_knowledge_extract`) один раз после хода
+    /// учителя, ядро vault на время сети не держит.
+    pub knowledge_auto_due: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -553,9 +572,12 @@ fn practice_waiting(events: &[LessonEvent]) -> Waiting {
         LessonEvent::Teacher {
             interrupted: false, ..
         } => {
-            let rejected = events[last + 1..]
-                .iter()
-                .any(|event| matches!(event, LessonEvent::PlanRejected { .. }));
+            let rejected = events[last + 1..].iter().any(|event| {
+                matches!(
+                    event,
+                    LessonEvent::PlanRejected { .. } | LessonEvent::KnowledgeRead { .. }
+                )
+            });
             if rejected && teacher_run(events) <= MAX_AUTO_CONTINUES {
                 Waiting::Retry
             } else {
@@ -592,7 +614,9 @@ fn waiting_of(kind: LessonKind, events: &[LessonEvent], state: LessonState) -> W
             let pending_tool = events[last + 1..].iter().any(|event| {
                 matches!(
                     event,
-                    LessonEvent::NoteRead { by_user: false, .. } | LessonEvent::PlanRejected { .. }
+                    LessonEvent::NoteRead { by_user: false, .. }
+                        | LessonEvent::KnowledgeRead { .. }
+                        | LessonEvent::PlanRejected { .. }
                 )
             });
             // Пропуск замера требует продолжения учителя; итог замера — пауза: урок ждёт
@@ -689,6 +713,8 @@ pub fn view_of(path: &str, parsed: ParsedLesson) -> LessonView {
         plan_history: plan::plan_history(&parsed.events),
         practice: (parsed.header.kind == LessonKind::Practice)
             .then(|| practice::practice_view(&parsed.events)),
+        knowledge_pending_chars: 0,
+        knowledge_auto_due: false,
         header: parsed.header,
         events: practice::redact(parsed.events),
     }

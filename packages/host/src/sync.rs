@@ -272,6 +272,15 @@ pub struct SyncHome {
     mirrors: Option<PathBuf>,
     secrets: DynSecrets,
     capabilities: ShellCapabilities,
+    request_gate: Option<Arc<dyn RequestGate>>,
+}
+
+/// Место под один сетевой запрос к модели. Сервер ограничивает число одновременных запросов
+/// на весь процесс и на аккаунт; фоновое задание из многих пачек берёт место на каждую пачку,
+/// а не на всё задание, чтобы не занимать его у хода урока (ревью 054, L6).
+pub trait RequestGate: Send + Sync {
+    /// `None` — свободного места нет. Место возвращается, когда значение сброшено.
+    fn enter(&self) -> Option<Box<dyn Send>>;
 }
 
 impl Default for SyncHome {
@@ -282,6 +291,7 @@ impl Default for SyncHome {
             mirrors: None,
             secrets: DynSecrets(Arc::new(Memory(MemorySecretStore::new()))),
             capabilities: ShellCapabilities::current(cfg!(target_os = "android")),
+            request_gate: None,
         }
     }
 }
@@ -300,6 +310,24 @@ impl SyncHome {
             mirrors,
             secrets: DynSecrets(secrets),
             capabilities,
+            request_gate: None,
+        }
+    }
+
+    /// Ограничитель сетевых запросов к моделям (сервер). Без него предела нет.
+    pub fn with_request_gate(mut self, gate: Arc<dyn RequestGate>) -> Self {
+        self.request_gate = Some(gate);
+        self
+    }
+
+    /// Место под один запрос к модели: `Ok(None)` — предела нет, `Err` — мест нет.
+    pub fn enter_request(&self) -> Result<Option<Box<dyn Send>>, typsidian_core::ai::AiFailure> {
+        match &self.request_gate {
+            None => Ok(None),
+            Some(gate) => gate
+                .enter()
+                .map(Some)
+                .ok_or(typsidian_core::ai::AiFailure::RateLimited),
         }
     }
 

@@ -50,6 +50,8 @@ pub struct MemoryVault {
     /// Пути, по которым тест объявил несохранённые правки (`begin_edit` двойник
     /// не помнит; нужен только ответ `has_unsaved_edits`).
     unsaved: std::collections::HashSet<PathBuf>,
+    /// События, поставленные ядром через `publish_event` (фича 054, T030).
+    events: Vec<VaultEvent>,
     /// Сколько раз файл успешно записан через `write` — по счётчику видно, что
     /// отказ не тронул vault.
     pub writes: std::cell::RefCell<HashMap<PathBuf, u32>>,
@@ -79,6 +81,7 @@ impl MemoryVault {
             folder_problems: HashMap::new(),
             check_expected: false,
             unsaved: Default::default(),
+            events: Vec::new(),
             writes: std::cell::RefCell::new(HashMap::new()),
             lagging: HashMap::new(),
             conflict_once: HashMap::new(),
@@ -639,7 +642,11 @@ impl VaultBackend for MemoryVault {
     }
 
     fn poll_events(&mut self) -> Vec<VaultEvent> {
-        Vec::new()
+        std::mem::take(&mut self.events)
+    }
+
+    fn publish_event(&mut self, event: VaultEvent) {
+        self.events.push(event);
     }
 
     async fn begin_edit(&mut self, _path: &Path, _buffer: String) {}
@@ -695,6 +702,7 @@ pub mod highlight_cases;
 pub mod html_export_cases;
 pub mod import_cases;
 pub mod install_cases;
+pub mod knowledge_cases;
 pub mod language_cases;
 pub mod lesson_cases;
 pub mod links_cases;

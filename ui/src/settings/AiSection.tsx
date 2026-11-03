@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiFailure, AiProvider, AiSettings, ProbeResult } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
-import { useI18n } from "../i18n/index.js";
+import { useI18n, type MessageKey } from "../i18n/index.js";
 import { AiJournal } from "./AiJournal.js";
 
 /**
@@ -22,6 +22,33 @@ const PROVIDERS: { id: AiProvider; label: "ai.provider.anthropic" | "ai.provider
   { id: "OpenAi", label: "ai.provider.openai" },
   { id: "Custom", label: "ai.provider.custom" },
 ];
+
+/** Переключатели графа знаний (фича 054); `fallback` — значение, пока ядро поля не прислало. */
+const KNOWLEDGE_SWITCHES = [
+  {
+    field: "knowledge_auto",
+    label: "knowledge.settings.auto",
+    hint: "knowledge.settings.autoHint",
+    fallback: true,
+  },
+  {
+    field: "knowledge_agent_reads",
+    label: "knowledge.settings.agentReads",
+    hint: "knowledge.settings.agentReadsHint",
+    fallback: false,
+  },
+  {
+    field: "knowledge_map",
+    label: "knowledge.settings.map",
+    hint: "knowledge.settings.mapHint",
+    fallback: true,
+  },
+] as const satisfies readonly {
+  field: "knowledge_auto" | "knowledge_agent_reads" | "knowledge_map";
+  label: MessageKey;
+  hint: MessageKey;
+  fallback: boolean;
+}[];
 
 type Check =
   | { state: "idle" }
@@ -529,6 +556,24 @@ export function AiSection({ client, vaultId }: AiSectionProps): React.JSX.Elemen
           </button>
         ))}
       </div>
+
+      {/* Граф знаний (фича 054, макет D): три переключателя; значения по умолчанию задаёт ядро. */}
+      <div className="ts-eyebrow">{t("knowledge.settings.title")}</div>
+      {KNOWLEDGE_SWITCHES.map((item) => (
+        <label key={item.field} className="ts-srow">
+          <span className="ts-srow__text">
+            <span className="ts-srow__label">{t(item.label)}</span>
+            <span className="ts-srow__hint">{t(item.hint)}</span>
+          </span>
+          <input
+            type="checkbox"
+            className="ts-switch"
+            role="switch"
+            checked={settings[item.field] ?? item.fallback}
+            onChange={(event) => void save({ [item.field]: event.target.checked })}
+          />
+        </label>
+      ))}
 
       {journalOpen && <AiJournal client={client} />}
     </div>

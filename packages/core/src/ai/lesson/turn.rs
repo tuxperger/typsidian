@@ -26,6 +26,7 @@ use crate::ai::cancel::cancellable;
 use crate::ai::client::Connection;
 use crate::ai::endpoint::base_url;
 use crate::ai::journal::{record_done, record_sent};
+use crate::ai::knowledge::{agent_results, graph_readable, visible_material, KnowledgeMaterial};
 use crate::ai::price::estimate_usd;
 use crate::ai::protocol::{authorize, check_status};
 use crate::ai::settings::{load_settings, AiProvider, AiSettings};
@@ -38,6 +39,8 @@ use crate::vault::{classify, FileKind};
 pub const NOTE_LIMIT_CHARS: usize = 100_000;
 /// Сколько вызовов `read_note` за один ход исполняется.
 const MAX_NOTE_READS_PER_TURN: usize = 3;
+/// Сколько вызовов `read_knowledge` за один ход исполняется (фича 054).
+const MAX_KNOWLEDGE_READS_PER_TURN: usize = 2;
 /// Суммарный объём прикреплённых заметок в запросе, символов.
 pub const ATTACHED_TOTAL_CHARS: usize = 300_000;
 /// Вопрос учителя: число вариантов и пределы длины (L8).
@@ -284,6 +287,35 @@ fn tool_set_of(parsed: &ParsedLesson) -> ToolSet {
     }
 }
 
+/// Знания графа, выбранные пользователем при создании сессии (событие `Material`, фича 054).
+/// Это снимок, но запрет папки графа действует и на него: закрытая сейчас папка — блока нет.
+async fn push_knowledge<B: VaultBackend>(
+    backend: &B,
+    settings: &AiSettings,
+    language: Language,
+    parsed: &ParsedLesson,
+    system: &mut String,
+) {
+    let material: Option<&KnowledgeMaterial> =
+        parsed
+            .events
+            .iter()
+            .take(MATERIAL_SCAN)
+            .find_map(|event| match event {
+                LessonEvent::Material { knowledge, .. } => knowledge.as_ref(),
+                _ => None,
+            });
+    if let Some(material) = material {
+        if graph_readable(backend, settings).await {
+            // Утверждения, у которых источник закрыли после выбора, снимком не уходят (M1).
+            if let Some(visible) = visible_material(backend, settings, material).await {
+                system.push_str("\n\n");
+                system.push_str(&prompt::knowledge_block(language, &visible));
+            }
+        }
+    }
+}
+
 /// Инструкции стадии: замер (с требованием завершить после предела вопросов) или обучение
 /// с правилами плана, итогом замера (или пометкой о пропуске) и текущим планом. Всё это
 /// берётся из событий файла, поэтому переживает перезапуск и сжатие переписки.
@@ -302,10 +334,12 @@ async fn stage_system<B: VaultBackend>(
         );
     }
     if tools != ToolSet::Teach {
-        let system = prompt::system_probe(language, &goal, tools == ToolSet::ProbeEnd);
+        let mut system = prompt::system_probe(language, &goal, tools == ToolSet::ProbeEnd);
+        push_knowledge(backend, settings, language, parsed, &mut system).await;
         return (system, tools);
     }
     let mut system = prompt::system(language, &goal);
+    push_knowledge(backend, settings, language, parsed, &mut system).await;
     system.push_str("\n\n");
     system.push_str(prompt::plan_rules(language));
     if let Some(summary) = probe_result(&parsed.events) {
@@ -363,6 +397,7 @@ async fn practice_system<B: VaultBackend>(
             break;
         }
     }
+    push_knowledge(backend, settings, language, parsed, &mut system).await;
     if let Some(open) = practice::open_problem(&parsed.events) {
         system.push_str("\n\n");
         system.push_str(&prompt::open_problem_block(
@@ -541,6 +576,17 @@ async fn build_context<B: VaultBackend>(
                 };
                 push(&mut messages, Role::User, text);
             }
+            // Чтение графа знаний: результат собирается заново по запросу (фича 054).
+            LessonEvent::KnowledgeRead { query, .. }
+                if last_teacher.is_none_or(|teacher| index > teacher) =>
+            {
+                let (_, found) = agent_results(backend, settings, query).await;
+                push(
+                    &mut messages,
+                    Role::User,
+                    prompt::knowledge_result(language, query, found.as_ref()),
+                );
+            }
             // Отказ инструменту плана и принятый итог замера уходят модели так же, как
             // результат чтения заметки: один раз, следующим запросом.
             LessonEvent::PlanRejected { tool, reason, .. }
@@ -642,6 +688,7 @@ fn estimated_size(context: &Context) -> usize {
     chars / 4
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_request(
     provider: AiProvider,
     base: &str,
@@ -649,6 +696,7 @@ fn build_request(
     system: &str,
     messages: &[Message],
     tools: Option<ToolSet>,
+    knowledge: bool,
     max_tokens: u32,
 ) -> HttpRequest {
     let role = |role: Role| match role {
@@ -669,7 +717,7 @@ fn build_request(
                 "messages": list,
             });
             if let Some(set) = tools {
-                body["tools"] = prompt::tools(provider, set);
+                body["tools"] = prompt::tools_with(provider, set, knowledge);
             }
             ("messages", body)
         }
@@ -683,7 +731,7 @@ fn build_request(
                 "messages": all,
             });
             if let Some(set) = tools {
-                body["tools"] = prompt::tools(provider, set);
+                body["tools"] = prompt::tools_with(provider, set, knowledge);
             }
             ("chat/completions", body)
         }
@@ -791,6 +839,7 @@ pub async fn begin_turn<B: VaultBackend>(
             &context.system,
             &context.messages,
             Some(context.tools),
+            settings.knowledge_agent_reads,
             MAX_TOKENS_TEACH,
         ),
         TurnKind::Compact => {
@@ -811,6 +860,7 @@ pub async fn begin_turn<B: VaultBackend>(
                 &context.system,
                 &messages,
                 None,
+                false,
                 MAX_TOKENS_COMPACT,
             )
         }
@@ -893,6 +943,7 @@ struct Calls {
     plan_set: Option<Result<PlanSet, PlanError>>,
     plan_progress: Option<PlanProgressArgs>,
     practice: Option<PracticeCall>,
+    knowledge_reads: Vec<String>,
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -972,6 +1023,7 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
         plan_set: None,
         plan_progress: None,
         practice: None,
+        knowledge_reads: Vec::new(),
     };
     for call in calls {
         let input: Value = if call.arguments.trim().is_empty() {
@@ -1012,6 +1064,18 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
                     if !path.is_empty() && !parsed.reads.contains(&path) {
                         parsed.reads.push(path);
                     }
+                }
+            }
+            prompt::READ_KNOWLEDGE
+                if matches!(set, ToolSet::Teach | ToolSet::Probe | ToolSet::Practice)
+                    && parsed.knowledge_reads.len() < MAX_KNOWLEDGE_READS_PER_TURN =>
+            {
+                let query = clip(
+                    input["query"].as_str().map(str::trim).unwrap_or_default(),
+                    crate::ai::knowledge::QUERY_MAX_CHARS,
+                );
+                if !query.is_empty() && !parsed.knowledge_reads.contains(&query) {
+                    parsed.knowledge_reads.push(query);
                 }
             }
             prompt::PLAN_SET if set == ToolSet::Teach && parsed.plan_set.is_none() => {
@@ -1118,6 +1182,19 @@ pub async fn finish_turn<B: VaultBackend>(
                             by_user: false,
                             outcome,
                         });
+                    }
+                    // Чтение графа знаний исполняется, только если оно разрешено: модель могла
+                    // вызвать инструмент, которого в запросе не было.
+                    if settings.knowledge_agent_reads {
+                        for query in calls.knowledge_reads {
+                            let (outcome, _) = agent_results(backend, &settings, &query).await;
+                            did_tool = true;
+                            events.push(LessonEvent::KnowledgeRead {
+                                at: now,
+                                query,
+                                outcome,
+                            });
+                        }
                     }
                     // Итог замера и план: проверяются ядром против файла урока.
                     let mut seen: Vec<LessonEvent> = Vec::new();
@@ -1237,7 +1314,8 @@ pub async fn finish_turn<B: VaultBackend>(
                 TurnKind::Teach => Next::WaitUser,
             };
             Ok(TurnDone {
-                view: view_of(&prepared.path, parsed),
+                view: crate::ai::knowledge::annotate(backend, view_of(&prepared.path, parsed))
+                    .await,
                 next,
             })
         }

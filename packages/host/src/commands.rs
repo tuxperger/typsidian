@@ -2516,9 +2516,12 @@ pub async fn ai_lesson_create(
     language: ai::lesson::Language,
     start: ai::lesson::LessonPhase,
     now: i64,
+    knowledge: Option<Vec<String>>,
 ) -> Answer<String, Failure<ai::AiFailure>> {
-    with_vault!(state, |backend| ai::lesson::create_lesson(
-        backend, &goal, &notes, language, start, now
+    // `knowledge` — id утверждений графа знаний, выбранных пользователем (фича 054).
+    let knowledge = knowledge.unwrap_or_default();
+    with_vault!(state, |backend| ai::lesson::create_lesson_with_knowledge(
+        backend, &goal, &notes, &knowledge, language, start, now
     )
     .await
     .map_err(Failure::Core))
@@ -2533,12 +2536,15 @@ pub async fn ai_practice_create(
     description: Option<String>,
     language: ai::lesson::Language,
     now: i64,
+    knowledge: Option<Vec<String>>,
 ) -> Answer<String, Failure<ai::AiFailure>> {
-    with_vault!(state, |backend| ai::lesson::create_practice(
+    let knowledge = knowledge.unwrap_or_default();
+    with_vault!(state, |backend| ai::lesson::create_practice_with_knowledge(
         backend,
         &title,
         &lessons,
         &notes,
+        &knowledge,
         description.as_deref(),
         language,
         now
@@ -2714,6 +2720,201 @@ pub async fn ai_lesson_plan_version(
 ) -> Answer<Option<ai::lesson::PlanView>, Failure<ai::AiFailure>> {
     with_vault!(state, |backend| ai::lesson::plan_version(
         backend, &path, version
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+// ── Граф знаний из уроков (фича 054) ────────────────────────────────────────
+//
+// Чтение, поиск и удаление — файлы vault, без сети. Пополнение графа ходит к модели по
+// тем же правилам, что `ai_lesson_answer`: снимок подключения, ключ до журнала, журнал до
+// сети, vault не держится на время запроса. Автозапуск после хода учителя — за клиентом:
+// `LessonView::knowledge_auto_due` говорит, что пора, и клиент зовёт `ai_knowledge_extract`
+// отдельным вызовом, урок его не ждёт.
+
+pub async fn ai_knowledge_graph(
+    state: &Vault,
+    query: Option<String>,
+) -> Answer<ai::knowledge::KnowledgeGraph, Failure<()>> {
+    with_vault!(state, |backend| Ok(ai::knowledge::graph_view(
+        backend,
+        query.as_deref().unwrap_or_default()
+    )
+    .await))
+}
+
+pub async fn ai_knowledge_chains(
+    state: &Vault,
+    query: Option<String>,
+) -> Answer<Vec<ai::knowledge::Chain>, Failure<()>> {
+    with_vault!(state, |backend| Ok(ai::knowledge::chains_view(
+        backend,
+        query.as_deref().unwrap_or_default()
+    )
+    .await))
+}
+
+/// Утверждение с формулировками, источниками и цепочками; `None` — такого нет.
+pub async fn ai_knowledge_proposition(
+    state: &Vault,
+    id: String,
+) -> Answer<Option<ai::knowledge::Proposition>, Failure<()>> {
+    with_vault!(state, |backend| Ok(ai::knowledge::proposition_view(
+        backend, &id
+    )
+    .await))
+}
+
+/// Пополняет граф из урока `source`: весь цикл пачек, пока ядро говорит `Continue`.
+/// Отказ посреди пачек остаётся в задании (`failure`), готовое от прежних пачек сохранено.
+/// Отменяется `ai_cancel` по `request_id`; прогресс — `ai_knowledge_jobs`.
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_knowledge_extract(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    source: String,
+    request_id: String,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::knowledge::KnowledgeJob, Failure<ai::AiFailure>> {
+    // Ключа нет или адрес не одобрен здесь — ничего не записывается и не отправляется.
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    if !settings.enabled {
+        return Err(Failure::Core(ai::AiFailure::Disabled));
+    }
+    let verified =
+        ai::client::Connection::verify(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+
+    // Задание с этим id уже есть (идёт или закончено): новое не заводится, а чужое охрана
+    // не должна трогать.
+    if ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .is_some()
+    {
+        return Err(Failure::Core(ai::AiFailure::Cancelled));
+    }
+    // Охрана заводится до первого `begin_extract`: вызов, оборванный посреди него (закрыто
+    // соединение), отменяет заведённое задание, а не оставляет его идущим (ревью 054, L3).
+    let mut guard = ai::knowledge::JobGuard::new(&vault_id, &request_id);
+    // Пачек не больше предела; сам предел держит ядро (`Done` после `MAX_BATCHES`), цикл —
+    // страховка от ошибки клиента или ядра.
+    for round in 0..=ai::knowledge::extract::MAX_BATCHES {
+        let begun = with_vault!(state, |backend| ai::knowledge::begin_extract(
+            backend,
+            &vault_id,
+            &source,
+            &request_id,
+            now,
+            allow_custom,
+            &verified
+        )
+        .await);
+        let prepared = match begun {
+            Ok(Some(prepared)) => prepared,
+            Ok(None) => break,
+            Err(failure) if round == 0 => {
+                // Задание ядро закончило само, если успело завести.
+                guard.disarm();
+                return Err(Failure::Core(failure));
+            }
+            // Задание уже заведено и закончено ядром отказом: он виден в нём.
+            Err(_) => break,
+        };
+        // Место под запрос берётся на одну пачку: на сервере долгое извлечение не занимает
+        // общий предел дольше одного запроса (L6).
+        let outcome = match home.enter_request() {
+            Ok(held) => {
+                let outcome = ai::knowledge::send_extract(
+                    &ai::transport::DefaultTransport,
+                    &vault_id,
+                    &prepared,
+                    key.as_deref(),
+                    &verified,
+                )
+                .await;
+                drop(held);
+                outcome
+            }
+            Err(failure) => Err(failure),
+        };
+        let done = with_vault!(state, |backend| ai::knowledge::finish_extract(
+            backend, &vault_id, &prepared, now, outcome
+        )
+        .await
+        .map_err(Failure::Core))?;
+        if done.next == ai::lesson::Next::WaitUser {
+            guard.disarm();
+            return Ok(done.job);
+        }
+    }
+    // Вышли из цикла: задание не должно остаться идущим в снимке (L3).
+    if ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .is_some_and(|job| job.state == ai::knowledge::JobState::Running)
+    {
+        ai::knowledge::jobs::KNOWLEDGE_JOBS.end(
+            &vault_id,
+            &request_id,
+            ai::knowledge::JobState::Cancelled,
+            Some(ai::AiFailure::Cancelled),
+            now,
+        );
+    }
+    guard.disarm();
+    ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .ok_or(Failure::Core(ai::AiFailure::Cancelled))
+}
+
+/// Задания пополнения графа этого vault: идущие первыми. Интерфейс опрашивает.
+pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
+    ai::knowledge::jobs(&vault_id)
+}
+
+/// Удаляет утверждение (`id`) либо вклад источника (`source`); ровно одно из двух.
+/// `keep` — только для источника: `true` помечает его удалённым, оставив вклад.
+pub async fn ai_knowledge_remove(
+    state: &Vault,
+    id: Option<String>,
+    source: Option<String>,
+    keep: bool,
+    now: i64,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| match (id, source) {
+        (Some(id), None) => ai::knowledge::remove_proposition(backend, &id, now)
+            .await
+            .map_err(Failure::Core),
+        (None, Some(source)) => ai::knowledge::remove_source(backend, &source, keep, now)
+            .await
+            .map_err(Failure::Core),
+        _ => Err(Failure::Core(ai::AiFailure::LessonUnreadable)),
+    })
+}
+
+/// Удаляет файл урока (корзина vault) и решает судьбу вклада в граф знаний. `vault_id` —
+/// идентификатор vault для проверки идущего хода урока (на сервере подставляет сервер);
+/// без него проверяются ходы всех vault процесса, как на рабочем столе.
+pub async fn ai_lesson_delete(
+    state: &Vault,
+    vault_id: Option<String>,
+    path: String,
+    keep_knowledge: bool,
+    now: i64,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::knowledge::delete_lesson(
+        backend,
+        vault_id.as_deref(),
+        &path,
+        keep_knowledge,
+        now
     )
     .await
     .map_err(Failure::Core))

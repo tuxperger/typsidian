@@ -809,6 +809,108 @@ async fn ai_lessons_are_per_user_and_answer_obeys_the_server_limits() {
     assert_eq!(idle, Value::Null);
 }
 
+/// 054: команды графа знаний доступны по HTTP, привязаны к аккаунту; пополнение графа
+/// закрыто теми же правилами, что и ход урока (свой адрес закрыт, подмена `vaultId` не
+/// действует), а пустой граф и пустой список заданий читаются.
+#[tokio::test]
+async fn ai_knowledge_commands_are_per_user_and_extract_obeys_the_server_rules() {
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let (status, _, _) = server
+        .call(
+            Method::POST,
+            "/api/vaults",
+            Some(&anna),
+            Some(json!({ "name": "Общее имя" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let settings = json!({ "settings": {
+        "enabled": true,
+        "provider": "Custom",
+        "custom_endpoint": "http://127.0.0.1:9/v1",
+        "model": "m",
+    }});
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_settings_set", settings)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, graph) = server
+        .invoke(&anna, "Общее имя", "ai_knowledge_graph", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{graph}");
+    assert_eq!(graph["graph"]["nodes"], json!([]));
+    let (_, chains) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_chains",
+            json!({ "query": "а" }),
+        )
+        .await;
+    assert_eq!(chains, json!([]));
+    let (_, none) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_proposition",
+            json!({ "id": "p_0123456789abcdef" }),
+        )
+        .await;
+    assert_eq!(none, Value::Null);
+    let (_, jobs) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_jobs",
+            json!({ "vaultId": "чужой" }),
+        )
+        .await;
+    assert_eq!(jobs, json!([]));
+
+    // Пополнение: адрес чужой, `allowCustom` и `vaultId` клиента сервер подменяет.
+    let (_, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_extract",
+            json!({ "vaultId": "поддельный", "source": "Уроки/а.lesson", "requestId": "1",
+                "now": 1, "allowCustom": true }),
+        )
+        .await;
+    assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
+
+    // Удаление: ровно одно из `id`/`source`; урока нет — отказ, ничего не создано.
+    let (_, bad) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_remove",
+            json!({ "id": "p_0123456789abcdef", "source": "а", "keep": false, "now": 1 }),
+        )
+        .await;
+    assert_eq!(bad["kind"], "LessonUnreadable", "{bad}");
+    let (status, ok) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_remove",
+            json!({ "id": "p_0123456789abcdef", "keep": false, "now": 1 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{ok}");
+    let (_, missing) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_delete",
+            json!({ "path": "Уроки/нет.lesson", "keepKnowledge": true, "now": 1 }),
+        )
+        .await;
+    assert_eq!(missing["kind"], "LessonUnreadable", "{missing}");
+}
+
 /// 051, ревью безопасности M5: у одного аккаунта не больше двух одновременных запросов к
 /// моделям; чужие запросы его предел не занимают, а брошенный запрос место освобождает.
 #[tokio::test]
@@ -863,4 +965,108 @@ async fn ai_requests_are_limited_per_account() {
     drop(busy);
     let (_, freed) = server.invoke(&anna, "Общее имя", "ai_probe", probe).await;
     assert_eq!(freed["kind"], "Disabled", "{freed}");
+}
+
+/// 054, ревью безопасности L6: пополнение графа знаний не держит общий предел запросов к
+/// моделям на всё задание. На команду занято одно фоновое место аккаунта (второго задания
+/// нет, автопополнение не множится), а место под запрос аккаунт и сервер дают на одну пачку
+/// и возвращают сразу после неё; пока идёт пачка, у аккаунта остаётся место под ход урока.
+#[tokio::test]
+async fn knowledge_extraction_takes_a_background_slot_and_a_request_slot_per_batch() {
+    use typsidian_host::sync::RequestGate;
+    use typsidian_server::{
+        AccountAiSlot, AiBatchGate, BackgroundAiSlot, MAX_AI_BACKGROUND_PER_ACCOUNT,
+        MAX_AI_REQUESTS, MAX_AI_REQUESTS_PER_ACCOUNT,
+    };
+
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let bob = server.enter("bob").await;
+    for client in [&anna, &bob] {
+        let (status, _, _) = server
+            .call(
+                Method::POST,
+                "/api/vaults",
+                Some(client),
+                Some(json!({ "name": "Общее имя" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let id_of = |login: &'static str| {
+        let state = server.state.clone();
+        async move {
+            state
+                .store
+                .account_by_login(login)
+                .await
+                .unwrap()
+                .unwrap()
+                .id
+        }
+    };
+    let anna_id = id_of("anna").await;
+    let bob_id = id_of("bob").await;
+
+    // Фоновое место: одно на аккаунт, чужой аккаунт его не касается, брошенное освобождается.
+    assert_eq!(MAX_AI_BACKGROUND_PER_ACCOUNT, 1);
+    let args = json!({ "source": "Уроки/а.lesson", "requestId": "1", "now": 0 });
+    let background = BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место");
+    assert!(BackgroundAiSlot::acquire(&server.state, &anna_id).is_none());
+    let (status, refused) = server
+        .invoke(&anna, "Общее имя", "ai_knowledge_extract", args.clone())
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(refused["kind"], "RateLimited", "{refused}");
+    let (_, other) = server
+        .invoke(&bob, "Общее имя", "ai_knowledge_extract", args.clone())
+        .await;
+    assert_eq!(other["kind"], "Disabled", "{other}");
+    drop(background);
+    let (_, freed) = server
+        .invoke(&anna, "Общее имя", "ai_knowledge_extract", args)
+        .await;
+    assert_eq!(freed["kind"], "Disabled", "{freed}");
+    // Команда не оставила за собой занятого места.
+    drop(BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место свободно"));
+
+    // Место под пачку: слот аккаунта и общий слот, оба возвращаются при сбросе.
+    let gate = AiBatchGate {
+        state: std::sync::Arc::downgrade(&server.state),
+        account: anna_id.clone(),
+    };
+    let batch = gate.enter().expect("пачка");
+    assert_eq!(
+        server.state.ai_requests.available_permits(),
+        MAX_AI_REQUESTS - 1
+    );
+    // Пока идёт одна пачка, ход урока того же аккаунта ещё помещается; третьего запроса нет.
+    let lesson_turn = AccountAiSlot::acquire(&server.state, &anna_id).expect("место для хода");
+    assert!(MAX_AI_REQUESTS_PER_ACCOUNT >= 2);
+    assert!(gate.enter().is_none());
+    drop(lesson_turn);
+    drop(batch);
+    assert_eq!(
+        server.state.ai_requests.available_permits(),
+        MAX_AI_REQUESTS
+    );
+    assert!(gate.enter().is_some());
+
+    // Общий предел исчерпан чужими запросами: пачка не берёт место, а ждать не заставляет.
+    let held = server
+        .state
+        .ai_requests
+        .clone()
+        .try_acquire_many_owned(MAX_AI_REQUESTS as u32)
+        .unwrap();
+    assert!(gate.enter().is_none());
+    // Отказ не оставил занятым место аккаунта.
+    drop(held);
+    assert!(gate.enter().is_some());
+    let bob_gate = AiBatchGate {
+        state: std::sync::Arc::downgrade(&server.state),
+        account: bob_id,
+    };
+    let bobs = bob_gate.enter().expect("у Боба своё место");
+    drop(bobs);
 }

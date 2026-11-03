@@ -182,6 +182,21 @@ pub async fn create_lesson<B: VaultBackend>(
     start: LessonPhase,
     now: i64,
 ) -> Result<String, AiFailure> {
+    create_lesson_with_knowledge(backend, goal, notes, &[], language, start, now).await
+}
+
+/// Урок с утверждениями графа знаний, выбранными пользователем (фича 054): их текст
+/// записывается событием `Material` и уходит учителю с замером и обучением. Папка графа
+/// закрыта для агента — отказ `Forbidden`, урок не создаётся.
+pub async fn create_lesson_with_knowledge<B: VaultBackend>(
+    backend: &mut B,
+    goal: &str,
+    notes: &[String],
+    knowledge: &[String],
+    language: Language,
+    start: LessonPhase,
+    now: i64,
+) -> Result<String, AiFailure> {
     let settings = load_settings(backend).await;
     if !settings.enabled {
         return Err(AiFailure::Disabled);
@@ -191,7 +206,18 @@ pub async fn create_lesson<B: VaultBackend>(
         return Err(AiFailure::GoalEmpty);
     }
     let goal: String = goal.chars().take(GOAL_MAX_CHARS).collect();
-    let events = attach_notes(backend, &settings, notes, now).await;
+    let material = crate::ai::knowledge::select_material(backend, &settings, knowledge).await?;
+    let mut events: Vec<LessonEvent> = Vec::new();
+    if let Some(knowledge) = material {
+        events.push(LessonEvent::Material {
+            at: now,
+            lessons: Vec::new(),
+            description: None,
+            denied: Vec::new(),
+            knowledge: Some(knowledge),
+        });
+    }
+    events.extend(attach_notes(backend, &settings, notes, now).await);
     let header = LessonHeader {
         format: FORMAT,
         goal: goal.clone(),
@@ -217,6 +243,32 @@ pub async fn create_practice<B: VaultBackend>(
     language: Language,
     now: i64,
 ) -> Result<String, AiFailure> {
+    create_practice_with_knowledge(
+        backend,
+        title,
+        lessons,
+        notes,
+        &[],
+        description,
+        language,
+        now,
+    )
+    .await
+}
+
+/// Практика с утверждениями графа знаний, выбранными пользователем (фича 054): они входят
+/// в событие `Material` вместе с уроками. Папка графа закрыта — отказ `Forbidden`.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_practice_with_knowledge<B: VaultBackend>(
+    backend: &mut B,
+    title: &str,
+    lessons: &[String],
+    notes: &[String],
+    knowledge: &[String],
+    description: Option<&str>,
+    language: Language,
+    now: i64,
+) -> Result<String, AiFailure> {
     let settings = load_settings(backend).await;
     if !settings.enabled {
         return Err(AiFailure::Disabled);
@@ -226,6 +278,7 @@ pub async fn create_practice<B: VaultBackend>(
         return Err(AiFailure::GoalEmpty);
     }
     let title: String = title.chars().take(GOAL_MAX_CHARS).collect();
+    let material = crate::ai::knowledge::select_material(backend, &settings, knowledge).await?;
     let (lessons, denied) = practice::collect_lessons(backend, &settings, lessons).await;
     let description = description
         .map(str::trim)
@@ -236,12 +289,13 @@ pub async fn create_practice<B: VaultBackend>(
                 .collect::<String>()
         });
     let mut events: Vec<LessonEvent> = Vec::new();
-    if !lessons.is_empty() || description.is_some() || !denied.is_empty() {
+    if !lessons.is_empty() || description.is_some() || !denied.is_empty() || material.is_some() {
         events.push(LessonEvent::Material {
             at: now,
             lessons,
             description,
             denied,
+            knowledge: material,
         });
     }
     events.extend(attach_notes(backend, &settings, notes, now).await);
@@ -303,7 +357,7 @@ pub async fn open_lesson<B: VaultBackend>(
             partial::clear_partial(backend, path).await;
         }
     }
-    Ok(view_of(path, parsed))
+    Ok(crate::ai::knowledge::annotate(backend, view_of(path, parsed)).await)
 }
 
 /// Все уроки vault, не только из папки уроков (research.md §9); свежие первыми.

@@ -1866,8 +1866,10 @@ pub async fn ai_lesson_create(
     language: ai::lesson::Language,
     start: ai::lesson::LessonPhase,
     now: i64,
+    knowledge: Option<Vec<String>>,
 ) -> Answer<String, Failure<ai::AiFailure>> {
-    typsidian_host::commands::ai_lesson_create(&state, goal, notes, language, start, now).await
+    typsidian_host::commands::ai_lesson_create(&state, goal, notes, language, start, now, knowledge)
+        .await
 }
 
 #[tauri::command]
@@ -1879,6 +1881,7 @@ pub async fn ai_practice_create(
     description: Option<String>,
     language: ai::lesson::Language,
     now: i64,
+    knowledge: Option<Vec<String>>,
 ) -> Answer<String, Failure<ai::AiFailure>> {
     typsidian_host::commands::ai_practice_create(
         &state,
@@ -1888,6 +1891,7 @@ pub async fn ai_practice_create(
         description,
         language,
         now,
+        knowledge,
     )
     .await
 }
@@ -1980,4 +1984,77 @@ pub async fn ai_lesson_plan_version(
     version: u32,
 ) -> Answer<Option<ai::lesson::PlanView>, Failure<ai::AiFailure>> {
     typsidian_host::commands::ai_lesson_plan_version(&state, path, version).await
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_graph(
+    state: State<'_, Vault>,
+    query: Option<String>,
+) -> Answer<ai::knowledge::KnowledgeGraph, Failure<()>> {
+    typsidian_host::commands::ai_knowledge_graph(&state, query).await
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_chains(
+    state: State<'_, Vault>,
+    query: Option<String>,
+) -> Answer<Vec<ai::knowledge::Chain>, Failure<()>> {
+    typsidian_host::commands::ai_knowledge_chains(&state, query).await
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_proposition(
+    state: State<'_, Vault>,
+    id: String,
+) -> Answer<Option<ai::knowledge::Proposition>, Failure<()>> {
+    typsidian_host::commands::ai_knowledge_proposition(&state, id).await
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_extract(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    source: String,
+    request_id: String,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::knowledge::KnowledgeJob, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_knowledge_extract(
+        &state,
+        &home,
+        vault_id,
+        source,
+        request_id,
+        now,
+        allow_custom,
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
+    typsidian_host::commands::ai_knowledge_jobs(vault_id)
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_remove(
+    state: State<'_, Vault>,
+    id: Option<String>,
+    source: Option<String>,
+    keep: bool,
+    now: i64,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_knowledge_remove(&state, id, source, keep, now).await
+}
+
+#[tauri::command]
+pub async fn ai_lesson_delete(
+    state: State<'_, Vault>,
+    vault_id: Option<String>,
+    path: String,
+    keep_knowledge: bool,
+    now: i64,
+) -> Answer<(), Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_lesson_delete(&state, vault_id, path, keep_knowledge, now).await
 }

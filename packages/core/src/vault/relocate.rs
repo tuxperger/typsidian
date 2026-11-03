@@ -652,6 +652,9 @@ pub async fn move_section_marks<B: VaultBackend>(
         let _ = move_sections(backend, from, new_path).await;
         crate::ai::access::move_denied_folders(backend, from, new_path).await;
     }
+    // Вклад в граф знаний (фича 054) едет за уроком, заметкой и папкой.
+    crate::ai::knowledge::store::move_source(backend, from, new_path, crate::properties::now_ms())
+        .await;
     let _ = super::vault_settings::move_intentional_orphans(backend, from, new_path).await;
     let _ = crate::snapshots::move_snapshots(backend, from, new_path).await;
     let _ = crate::bookmarks::move_bookmarks(backend, from, new_path).await;

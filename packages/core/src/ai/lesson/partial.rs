@@ -33,6 +33,7 @@ pub struct LessonProgress {
 }
 
 struct Entry {
+    vault_id: String,
     path: String,
     progress: LessonProgress,
     touched_ms: u64,
@@ -80,6 +81,7 @@ pub fn start(vault_id: &str, request_id: &str, path: &str) {
         buffers.insert(
             key(vault_id, request_id),
             Entry {
+                vault_id: vault_id.to_owned(),
                 path: canonical(path),
                 progress: LessonProgress {
                     text: String::new(),
@@ -152,6 +154,21 @@ pub fn is_active(path: &str) -> bool {
     BUFFERS
         .lock()
         .map(|buffers| buffers.values().any(|entry| entry.path == path))
+        .unwrap_or(false)
+}
+
+/// То же в пределах одного vault: ход чужого vault на том же пути (на сервере — чужой
+/// аккаунт) не виден и удалению урока не мешает (ревью безопасности 054, L2). `None` — любой
+/// vault: оболочка без идентификатора vault (рабочий стол, web) однопользовательская.
+pub fn is_active_in(vault_id: Option<&str>, path: &str) -> bool {
+    let path = canonical(path);
+    BUFFERS
+        .lock()
+        .map(|buffers| {
+            buffers.values().any(|entry| {
+                entry.path == path && vault_id.is_none_or(|vault| entry.vault_id == vault)
+            })
+        })
         .unwrap_or(false)
 }
 

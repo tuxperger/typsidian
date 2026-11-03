@@ -40,6 +40,11 @@ pub const MAX_AI_REQUESTS: usize = 16;
 /// предел сервера.
 pub const MAX_AI_REQUESTS_PER_ACCOUNT: u32 = 2;
 
+/// Фоновых заданий с моделью (пополнение графа знаний, 054) у одного аккаунта: автопополнение
+/// идёт без ведома пользователя и не должно занимать место хода урока (ревью безопасности
+/// 054, L6). Само задание общий предел запросов держит только на время одной пачки.
+pub const MAX_AI_BACKGROUND_PER_ACCOUNT: u32 = 1;
+
 /// Состояние сервера, общее для всех запросов.
 pub struct AppState {
     pub config: Config,
@@ -52,9 +57,11 @@ pub struct AppState {
     /// блокирующий поток, а пул потоков общий для всех аккаунтов.
     pub exchanges: tokio::sync::Semaphore,
     /// Одновременных запросов к моделям на весь сервер (050).
-    pub ai_requests: tokio::sync::Semaphore,
+    pub ai_requests: Arc<tokio::sync::Semaphore>,
     /// Идущих запросов к моделям по аккаунтам (051).
     pub ai_by_account: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    /// Идущих фоновых заданий с моделью по аккаунтам (054).
+    pub ai_background: std::sync::Mutex<std::collections::HashMap<String, u32>>,
     /// Старты гостей по одному: проверка предела по адресу и запись гостя
     /// (фича 039).
     pub demo_starts: tokio::sync::Mutex<()>,
@@ -100,6 +107,57 @@ impl Drop for AccountAiSlot {
     }
 }
 
+/// Место аккаунта среди фоновых заданий с моделью (054, L6).
+pub struct BackgroundAiSlot {
+    state: Shared,
+    account: String,
+}
+
+impl BackgroundAiSlot {
+    pub fn acquire(state: &Shared, account: &str) -> Option<BackgroundAiSlot> {
+        let mut running = state.ai_background.lock().ok()?;
+        let count = running.entry(account.to_owned()).or_insert(0);
+        if *count >= MAX_AI_BACKGROUND_PER_ACCOUNT {
+            return None;
+        }
+        *count += 1;
+        Some(BackgroundAiSlot {
+            state: state.clone(),
+            account: account.to_owned(),
+        })
+    }
+}
+
+impl Drop for BackgroundAiSlot {
+    fn drop(&mut self) {
+        if let Ok(mut running) = self.state.ai_background.lock() {
+            if let Some(count) = running.get_mut(&self.account) {
+                *count -= 1;
+                if *count == 0 {
+                    running.remove(&self.account);
+                }
+            }
+        }
+    }
+}
+
+/// Место под одну пачку фонового задания: место аккаунта и место общего предела запросов к
+/// моделям, оба на время одного сетевого запроса. Состояние сервера не держится: окружение
+/// аккаунта живёт в нём самом.
+pub struct AiBatchGate {
+    pub state: std::sync::Weak<AppState>,
+    pub account: String,
+}
+
+impl typsidian_host::sync::RequestGate for AiBatchGate {
+    fn enter(&self) -> Option<Box<dyn Send>> {
+        let state = self.state.upgrade()?;
+        let account = AccountAiSlot::acquire(&state, &self.account)?;
+        let permit = state.ai_requests.clone().try_acquire_owned().ok()?;
+        Some(Box::new((account, permit)))
+    }
+}
+
 impl AppState {
     pub fn new(config: Config, store: Store) -> Shared {
         // Обмены с удалёнными — только по внешнему HTTPS, без ssh и конфигурации git
@@ -115,8 +173,9 @@ impl AppState {
             oidc: oidc::OidcState::default(),
             sync: sync::SyncHomes::default(),
             exchanges: tokio::sync::Semaphore::new(MAX_EXCHANGES),
-            ai_requests: tokio::sync::Semaphore::new(MAX_AI_REQUESTS),
+            ai_requests: Arc::new(tokio::sync::Semaphore::new(MAX_AI_REQUESTS)),
             ai_by_account: std::sync::Mutex::default(),
+            ai_background: std::sync::Mutex::default(),
             demo_starts: tokio::sync::Mutex::new(()),
             demo_secret: std::sync::OnceLock::new(),
         })

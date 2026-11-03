@@ -12,8 +12,8 @@ use super::plan::PlanView;
 use super::stream::TurnReply;
 use super::turn::{begin_turn, finish_turn, send_turn, PreparedTurn, TurnDone, UserAnswer};
 use super::{
-    create_lesson, create_practice, list_lessons, open_lesson, plan_version, set_language,
-    set_state, skip_probe,
+    create_lesson_with_knowledge, create_practice_with_knowledge, list_lessons, open_lesson,
+    plan_version, set_language, set_state, skip_probe,
 };
 use crate::ai::client::{provider_key, require_approved, Connection};
 use crate::ai::settings::load_settings;
@@ -35,8 +35,18 @@ pub async fn lesson_create_js(
     language: Language,
     start: LessonPhase,
     now: f64,
+    knowledge: Option<Vec<String>>,
 ) -> Result<String, AiFailure> {
-    create_lesson(backend, &goal, &notes, language, start, now as i64).await
+    create_lesson_with_knowledge(
+        backend,
+        &goal,
+        &notes,
+        &knowledge.unwrap_or_default(),
+        language,
+        start,
+        now as i64,
+    )
+    .await
 }
 
 #[wasm_bindgen(js_name = lessonOpen)]
@@ -179,12 +189,14 @@ pub async fn practice_create_js(
     description: Option<String>,
     language: Language,
     now: f64,
+    knowledge: Option<Vec<String>>,
 ) -> Result<String, AiFailure> {
-    create_practice(
+    create_practice_with_knowledge(
         backend,
         &title,
         &lessons,
         &notes,
+        &knowledge.unwrap_or_default(),
         description.as_deref(),
         language,
         now as i64,

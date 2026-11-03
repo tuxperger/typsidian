@@ -179,6 +179,10 @@ export default async (page) => {
   await page.click("text=Добавить папку");
   await page.waitFor(`document.body.innerText.includes("Секрет/ ✕")`, { label: "тег папки" });
   check(page, true, "закрытая для агента папка «Секрет» добавлена в настройках");
+  // Фича 054: после длинного объяснения клиент сам запрашивает пополнение графа знаний — лишний
+  // запрос к модели. Сценарий считает запросы и очередь ответов, поэтому автопополнение выключено.
+  await page.click("text=Пополнять граф после шагов урока");
+  await page.waitFor(`![...document.querySelectorAll(".ts-srow")].find((r) => r.textContent.includes("Пополнять граф после шагов урока")).querySelector("input").checked`, { label: "автопополнение графа выключено" });
   await page.press("Escape");
   await page.sleep(300);
 

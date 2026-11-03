@@ -69,6 +69,14 @@ pub struct AiSettings {
     pub lessons_folder: String,
     /// Порог сжатия переписки (фича 051).
     pub context_budget: u32,
+    /// Пополнять граф знаний после хода учителя сам (фича 054, FR-003). Ядро только
+    /// сообщает, что пора (`LessonView::knowledge_auto_due`); запрос запускает клиент.
+    pub knowledge_auto: bool,
+    /// Агент читает граф знаний инструментом `read_knowledge` (фича 054, FR-009).
+    /// Выключено: инструмента нет в запросе, содержимое графа модели не уходит.
+    pub knowledge_agent_reads: bool,
+    /// Показывать вид «Граф знаний» (фича 054): настройка интерфейса, едет с vault.
+    pub knowledge_map: bool,
 }
 
 impl Default for AiSettings {
@@ -82,6 +90,9 @@ impl Default for AiSettings {
             denied_folders: Vec::new(),
             lessons_folder: DEFAULT_LESSONS_FOLDER.to_owned(),
             context_budget: DEFAULT_CONTEXT_BUDGET,
+            knowledge_auto: true,
+            knowledge_agent_reads: false,
+            knowledge_map: true,
         }
     }
 }

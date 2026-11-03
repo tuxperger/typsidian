@@ -12,9 +12,16 @@ export interface LessonEnv {
   vaultId: string;
   openNote(path: string): void;
   openSettings(): void;
+  /** Вид «Граф знаний» (фича 054). */
+  openKnowledge(): void;
 }
 
-const NO_ENV: LessonEnv = { vaultId: "", openNote: () => undefined, openSettings: () => undefined };
+const NO_ENV: LessonEnv = {
+  vaultId: "",
+  openNote: () => undefined,
+  openSettings: () => undefined,
+  openKnowledge: () => undefined,
+};
 
 const LessonEnvContext = createContext<LessonEnv>(NO_ENV);
 
@@ -56,4 +63,32 @@ export function newRequestId(): string {
 export function modEnterLabel(): string {
   const apple = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
   return apple ? "⌘+Enter" : "Ctrl+Enter";
+}
+
+/**
+ * Переход к событию урока из графа знаний (фича 054, FR-008): вкладка, открывшись или уже
+ * будучи открытой, прокручивает ленту к событию и подсвечивает его. Запрос хранится, пока его
+ * не заберёт вкладка именно этого урока.
+ */
+const jumpRequests = new Map<string, number>();
+const JUMP_EVENT = "typsidian:lesson-jump";
+
+export function requestLessonJump(path: string, event: number): void {
+  jumpRequests.set(path, event);
+  window.dispatchEvent(new CustomEvent<string>(JUMP_EVENT, { detail: path }));
+}
+
+export function takeLessonJump(path: string): number | undefined {
+  const event = jumpRequests.get(path);
+  jumpRequests.delete(path);
+  return event;
+}
+
+/** Подписка вкладки урока на новые запросы перехода; возвращает отписку. */
+export function onLessonJump(path: string, listener: () => void): () => void {
+  const handler = (event: Event): void => {
+    if (event instanceof CustomEvent && event.detail === path) listener();
+  };
+  window.addEventListener(JUMP_EVENT, handler);
+  return () => window.removeEventListener(JUMP_EVENT, handler);
 }

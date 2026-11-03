@@ -56,17 +56,23 @@ impl SyncHomes {
         let dir = account_sync_dir(state, account_id);
         crate::private_dir(&dir)?;
         let secrets = Arc::new(FileSecrets::new(dir.join("secrets.json")));
-        let home = Arc::new(SyncHome::new(
-            Arc::default(),
-            DevicePlace::In(dir.join("device")),
-            Some(dir.join("mirrors")),
-            secrets.clone(),
-            // Гостю демо-сервера удалённый репозиторий не подключается (039).
-            ShellCapabilities {
-                remote: !state.config.demo_mode,
-                ..ShellCapabilities::server()
-            },
-        ));
+        let home = Arc::new(
+            SyncHome::new(
+                Arc::default(),
+                DevicePlace::In(dir.join("device")),
+                Some(dir.join("mirrors")),
+                secrets.clone(),
+                // Гостю демо-сервера удалённый репозиторий не подключается (039).
+                ShellCapabilities {
+                    remote: !state.config.demo_mode,
+                    ..ShellCapabilities::server()
+                },
+            )
+            .with_request_gate(Arc::new(crate::AiBatchGate {
+                state: Arc::downgrade(state),
+                account: account_id.to_owned(),
+            })),
+        );
         map.insert(
             account_id.to_owned(),
             AccountSync {

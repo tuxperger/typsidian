@@ -56,7 +56,15 @@ export interface PracticeRowProps {
 export function PracticeRow({ event, view, hintNumber, onNext }: PracticeRowProps): React.JSX.Element | null {
   switch (event.kind) {
     case "Material":
-      return <MaterialRow lessons={event.lessons.length} description={event.description} denied={event.denied ?? []} />;
+      return (
+        <MaterialRow
+          practice={view.header.kind === "Practice"}
+          lessons={event.lessons.length}
+          description={event.description}
+          denied={event.denied ?? []}
+          knowledge={event.knowledge?.statements.length ?? 0}
+        />
+      );
     case "Problem": {
       const info = view.practice?.problems.find((problem) => problem.n === event.n);
       return <ProblemCard n={event.n} statement={event.statement} locked={info === undefined || info.outcome == null} />;
@@ -82,20 +90,32 @@ export function PracticeRow({ event, view, hintNumber, onNext }: PracticeRowProp
 }
 
 function MaterialRow({
+  practice,
   lessons,
   description,
   denied,
+  knowledge,
 }: {
+  /** Материал практики; у урока (054) событие `Material` несёт только выбранные утверждения графа. */
+  practice: boolean;
   lessons: number;
   description: string | undefined;
   denied: readonly DeniedLesson[];
+  /** Утверждений графа знаний, выбранных пользователем (054). */
+  knowledge: number;
 }): React.JSX.Element {
   const { t } = useI18n();
+  const hasText = description !== undefined && description !== "";
+  // Практика только с опорой на граф не «по описанию темы»: заголовок материала не нужен.
+  const header = practice && (lessons > 0 || hasText || knowledge === 0);
   return (
     <>
-      <div className="ts-lesson__sep">
-        {lessons > 0 ? t("practice.sep.material", { count: lessons }) : t("practice.sep.materialTopic")}
-      </div>
+      {header && (
+        <div className="ts-lesson__sep">
+          {lessons > 0 ? t("practice.sep.material", { count: lessons }) : t("practice.sep.materialTopic")}
+        </div>
+      )}
+      {knowledge > 0 && <div className="ts-lesson__sep">{t("knowledge.material", { count: knowledge })}</div>}
       {description !== undefined && description !== "" && (
         <div className="ts-lesson__body ts-lesson__body--soft">{description}</div>
       )}

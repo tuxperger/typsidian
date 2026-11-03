@@ -14537,3 +14537,489 @@ button.ts-plan__row:focus-visible,
   display: block;
   color: var(--ts-error);
 }
+
+/* ── Граф знаний из уроков (фича 054, макет A–F) ─────────────────────────── */
+
+.ts-kg {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--steel-950);
+  color: var(--steel-200);
+}
+
+.ts-kg__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--steel-800);
+}
+
+.ts-kg__name {
+  font-size: var(--text-sm);
+}
+
+.ts-kg__search {
+  flex: 0 1 220px;
+  min-width: 120px;
+  height: 26px;
+}
+
+.ts-kg__count {
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-kg__split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.ts-kg__main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--steel-900);
+  border-right: var(--border-width) solid var(--steel-800);
+}
+
+.ts-kg__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.ts-kg__side {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3) 14px;
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+  background: var(--steel-950);
+}
+
+.ts-kg__side-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.ts-kg__side-title {
+  flex: 1;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-100);
+  overflow-wrap: anywhere;
+}
+
+.ts-kg__hint {
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.ts-kg__alt {
+  margin-bottom: var(--space-1);
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--steel-400);
+  overflow-wrap: anywhere;
+}
+
+.ts-kg__lbl {
+  margin: var(--space-3) 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  color: var(--steel-500);
+}
+
+.ts-kg__chain {
+  margin-bottom: 6px;
+  padding: 6px var(--space-2);
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--steel-300);
+}
+
+.ts-kg__op {
+  color: var(--orange-400);
+}
+
+.ts-kg__self {
+  color: var(--steel-100);
+  font-style: italic;
+}
+
+.ts-kg__stmt {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.ts-kg__stmt:hover,
+.ts-kg__stmt[aria-pressed="true"] {
+  color: var(--orange-400);
+}
+
+.ts-kg__stmt:focus-visible,
+.ts-kg__link:focus-visible {
+  outline: var(--border-width-thick) solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ts-kg__badge {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--warning);
+  border-radius: 10px;
+  font-size: 10.5px;
+  color: var(--warning);
+}
+
+.ts-kg__src {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
+.ts-kg__src-icon {
+  color: var(--steel-500);
+}
+
+.ts-kg__srcrow {
+  padding: 3px 0;
+  font-size: 11.5px;
+}
+
+.ts-kg__gone {
+  color: var(--steel-500);
+  text-decoration: line-through;
+}
+
+.ts-kg__acts {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+.ts-kg__confirm {
+  margin-top: var(--space-3);
+}
+
+.ts-kg__confirm p {
+  margin: 0 0 var(--space-2);
+}
+
+.ts-kg__empty {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 28px var(--space-4);
+  height: 100%;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--steel-500);
+}
+
+.ts-kg__tablewrap {
+  padding: var(--space-3) var(--space-4);
+}
+
+.ts-kg__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.ts-kg__table th {
+  padding: 6px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  text-align: left;
+  color: var(--steel-500);
+}
+
+.ts-kg__table td {
+  padding: 7px 6px;
+  border-bottom: var(--border-width) solid var(--steel-800);
+  vertical-align: top;
+  color: var(--steel-300);
+}
+
+.ts-kg__arrow {
+  color: var(--orange-400);
+}
+
+.ts-kg__srccell {
+  font-size: 11px;
+}
+
+/* Легенда карты: группы по урокам и развилка цепочки. */
+.ts-kg__legend {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  display: grid;
+  gap: 2px;
+  max-width: min(60%, 320px);
+  margin: 0;
+  padding: 6px var(--space-2);
+  list-style: none;
+  border: var(--border-width) solid var(--steel-800);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--steel-950) 85%, transparent);
+  font-size: 11px;
+  color: var(--steel-300);
+  pointer-events: none;
+}
+
+.ts-kg__legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ts-kg__legend-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-kg__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--steel-300);
+}
+
+.ts-kg__dot[data-color="orange"] {
+  background: var(--orange-500);
+}
+
+.ts-kg__dot[data-color="blue"] {
+  background: var(--blue-600);
+}
+
+.ts-kg__dot[data-color="green"] {
+  background: var(--green-600);
+}
+
+.ts-kg__dot[data-color="amber"] {
+  background: var(--amber-600);
+}
+
+.ts-kg__dot[data-color="red"] {
+  background: var(--red-600);
+}
+
+.ts-kg__dot[data-color="hivis"] {
+  background: var(--hivis-500);
+}
+
+.ts-kg__dot--fork {
+  border-radius: 2px;
+  background: var(--steel-500);
+}
+
+/* Полоса задания пополнения (макет A) и её отказ. */
+.ts-kg__jobs {
+  display: grid;
+}
+
+.ts-kg__job {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  border-top: var(--border-width) solid var(--steel-800);
+  font-size: 11.5px;
+  color: var(--steel-400);
+}
+
+.ts-kg__job-text {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ts-kg__job--err {
+  border-top-color: var(--ts-error);
+  color: var(--ts-error);
+}
+
+.ts-kg__prog {
+  flex: 0 0 120px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--steel-800);
+}
+
+.ts-kg__prog i {
+  display: block;
+  height: 100%;
+  background: var(--orange-500);
+  transition: width 200ms ease;
+}
+
+/* В уроке (макет C): итог пополнения и кнопка «Пополнить граф». */
+.ts-kg__lesson {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.ts-kg__lesson-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Выбор утверждений в диалогах «Новый урок» и «Новая практика» (T013). */
+.ts-kg__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ts-kg__chip {
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* Удаление урока из списка (макет E). */
+.ts-lessons__item {
+  display: flex;
+  align-items: stretch;
+}
+
+.ts-lessons__item > .ts-lessons__row {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-lessons__del {
+  align-self: center;
+  flex: none;
+}
+
+.ts-lessons__delbox {
+  margin: var(--space-2) 0;
+}
+
+.ts-lessons__delbox label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 4px 0;
+}
+
+.ts-lessons__delbox input[type="radio"] {
+  accent-color: var(--orange-500);
+}
+
+/* Пустой граф (макет F): колонки утверждения нет, пояснение занимает всю ширину. */
+.ts-kg__split[data-empty="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ts-kg__split[data-empty="true"] .ts-kg__main {
+  border-right: 0;
+}
+
+/* Карта и колонка не помещаются рядом: колонка уходит под карту (узкое окно и телефон). */
+@media (max-width: 900px) {
+  .ts-kg__split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .ts-kg__main {
+    border-right: 0;
+  }
+
+  .ts-kg__side {
+    max-height: 48%;
+    border-top: var(--border-width) solid var(--steel-800);
+  }
+
+  .ts-kg__side--idle {
+    display: none;
+  }
+
+  .ts-kg__split[data-side="false"] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+/* Таблица цепочек на телефоне — карточки: ячейка с подписью столбца. */
+@media (max-width: 560px) {
+  .ts-kg__table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .ts-kg__table,
+  .ts-kg__table tbody,
+  .ts-kg__table tr,
+  .ts-kg__table td {
+    display: block;
+  }
+
+  .ts-kg__table tr {
+    margin-bottom: var(--space-3);
+    border: var(--border-width) solid var(--steel-800);
+    border-radius: 6px;
+  }
+
+  .ts-kg__table td {
+    border-bottom: 0;
+  }
+
+  .ts-kg__table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    color: var(--steel-500);
+  }
+
+  .ts-kg__table td.ts-kg__arrow {
+    display: none;
+  }
+
+  .ts-kg__bar {
+    padding-inline: var(--space-3);
+  }
+
+  .ts-kg__search {
+    flex: 1 1 100%;
+  }
+}

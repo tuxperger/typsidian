@@ -262,6 +262,13 @@ pub const COMMANDS: &[&str] = &[
     "ai_lesson_set_language",
     "ai_lesson_skip_probe",
     "ai_lesson_plan_version",
+    "ai_knowledge_graph",
+    "ai_knowledge_chains",
+    "ai_knowledge_proposition",
+    "ai_knowledge_extract",
+    "ai_knowledge_jobs",
+    "ai_knowledge_remove",
+    "ai_lesson_delete",
 ];
 
 fn args<A: DeserializeOwned>(value: Value) -> Result<A, Value> {
@@ -3044,6 +3051,7 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 language: ai::lesson::Language,
                 start: ai::lesson::LessonPhase,
                 now: i64,
+                knowledge: Option<Vec<String>>,
             }
             match args::<A>(arguments) {
                 Ok(a) => answer(
@@ -3054,6 +3062,7 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                         a.language,
                         a.start,
                         a.now,
+                        a.knowledge,
                     )
                     .await,
                 ),
@@ -3070,6 +3079,7 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 description: Option<String>,
                 language: ai::lesson::Language,
                 now: i64,
+                knowledge: Option<Vec<String>>,
             }
             match args::<A>(arguments) {
                 Ok(a) => answer(
@@ -3081,6 +3091,7 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                         a.description,
                         a.language,
                         a.now,
+                        a.knowledge,
                     )
                     .await,
                 ),
@@ -3209,6 +3220,115 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                 Ok(a) => {
                     answer(commands::ai_lesson_plan_version(&host.vault, a.path, a.version).await)
                 }
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_graph" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                query: Option<String>,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_knowledge_graph(&host.vault, a.query).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_chains" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                query: Option<String>,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_knowledge_chains(&host.vault, a.query).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_proposition" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_knowledge_proposition(&host.vault, a.id).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_extract" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                source: String,
+                request_id: String,
+                now: i64,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_knowledge_extract(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.source,
+                        a.request_id,
+                        a.now,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_jobs" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::ai_knowledge_jobs(a.vault_id)),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_remove" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                id: Option<String>,
+                source: Option<String>,
+                keep: bool,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_knowledge_remove(&host.vault, a.id, a.source, a.keep, a.now).await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_lesson_delete" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: Option<String>,
+                path: String,
+                keep_knowledge: bool,
+                now: i64,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_lesson_delete(
+                        &host.vault,
+                        a.vault_id,
+                        a.path,
+                        a.keep_knowledge,
+                        a.now,
+                    )
+                    .await,
+                ),
                 Err(error) => Err(error),
             }
         }

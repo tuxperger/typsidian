@@ -28,7 +28,7 @@ use super::MemoryVault;
 
 /// Тесты native идут параллельно, а отмена и буфер прогресса общие на процесс:
 /// каждому циклу — свой vault_id.
-fn unique(prefix: &str) -> String {
+pub fn unique(prefix: &str) -> String {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     format!(
         "{prefix}{}",
@@ -36,10 +36,10 @@ fn unique(prefix: &str) -> String {
     )
 }
 
-const KEY: &str = "sk-ключ-урока";
-const JOURNAL: &str = ".typsidian/ai-journal.jsonl";
+pub const KEY: &str = "sk-ключ-урока";
+pub const JOURNAL: &str = ".typsidian/ai-journal.jsonl";
 
-enum Script {
+pub enum Script {
     Reply {
         status: u16,
         chunks: Vec<Vec<u8>>,
@@ -55,24 +55,24 @@ enum Script {
     },
 }
 
-struct StreamTransport {
+pub struct StreamTransport {
     sent: RefCell<Vec<HttpRequest>>,
     scripts: RefCell<VecDeque<Script>>,
 }
 
 impl StreamTransport {
-    fn with(scripts: Vec<Script>) -> Self {
+    pub fn with(scripts: Vec<Script>) -> Self {
         StreamTransport {
             sent: RefCell::default(),
             scripts: RefCell::new(scripts.into()),
         }
     }
 
-    fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.sent.borrow().len()
     }
 
-    fn body(&self, index: usize) -> String {
+    pub fn body(&self, index: usize) -> String {
         self.sent.borrow()[index].body.clone().unwrap_or_default()
     }
 }
@@ -118,12 +118,17 @@ impl AiTransport for StreamTransport {
 
 // ── Заготовки потоков ───────────────────────────────────────────────────────
 
-fn event(name: &str, data: Value) -> Vec<u8> {
+pub fn event(name: &str, data: Value) -> Vec<u8> {
     format!("event: {name}\ndata: {data}\n\n").into_bytes()
 }
 
 /// Поток Anthropic: текст частями и, если нужно, вызов инструмента с аргументами частями.
-fn anthropic(parts: &[&str], tool: Option<(&str, Value)>, input: u64, output: u64) -> Vec<Vec<u8>> {
+pub fn anthropic(
+    parts: &[&str],
+    tool: Option<(&str, Value)>,
+    input: u64,
+    output: u64,
+) -> Vec<Vec<u8>> {
     let mut chunks = vec![
         event(
             "message_start",
@@ -177,18 +182,18 @@ fn anthropic(parts: &[&str], tool: Option<(&str, Value)>, input: u64, output: u6
     chunks
 }
 
-fn reply(chunks: Vec<Vec<u8>>) -> Script {
+pub fn reply(chunks: Vec<Vec<u8>>) -> Script {
     Script::Reply {
         status: 200,
         chunks,
     }
 }
 
-fn say(text: &str) -> Script {
+pub fn say(text: &str) -> Script {
     reply(anthropic(&[text], None, 100, 10))
 }
 
-fn ask(text: &str, question: &str, choices: Option<Vec<&str>>) -> Script {
+pub fn ask(text: &str, question: &str, choices: Option<Vec<&str>>) -> Script {
     let mut arguments = json!({"question": question});
     if let Some(choices) = choices {
         arguments["choices"] = json!(choices);
@@ -201,7 +206,7 @@ fn ask(text: &str, question: &str, choices: Option<Vec<&str>>) -> Script {
     ))
 }
 
-fn read_note(text: &str, path: &str) -> Script {
+pub fn read_note(text: &str, path: &str) -> Script {
     reply(anthropic(
         &[text],
         Some(("read_note", json!({"path": path}))),
@@ -211,7 +216,7 @@ fn read_note(text: &str, path: &str) -> Script {
 }
 
 /// Поток совместимого протокола с вызовом инструмента и объёмом в последнем куске.
-fn compatible(parts: &[&str], tool: Option<(&str, &str)>, usage: (u64, u64)) -> Vec<Vec<u8>> {
+pub fn compatible(parts: &[&str], tool: Option<(&str, &str)>, usage: (u64, u64)) -> Vec<Vec<u8>> {
     let data = |value: Value| format!("data: {value}\n\n").into_bytes();
     let mut chunks = Vec::new();
     for part in parts {
@@ -241,7 +246,7 @@ fn compatible(parts: &[&str], tool: Option<(&str, &str)>, usage: (u64, u64)) -> 
 
 // ── Окружение ───────────────────────────────────────────────────────────────
 
-fn settings(provider: AiProvider, model: &str) -> AiSettings {
+pub fn settings(provider: AiProvider, model: &str) -> AiSettings {
     AiSettings {
         enabled: true,
         provider,
@@ -250,18 +255,18 @@ fn settings(provider: AiProvider, model: &str) -> AiSettings {
     }
 }
 
-async fn vault_with(settings: &AiSettings) -> MemoryVault {
+pub async fn vault_with(settings: &AiSettings) -> MemoryVault {
     let mut vault = MemoryVault::new();
     save_settings(&mut vault, settings).await.unwrap();
     vault
 }
 
-async fn anthropic_vault() -> MemoryVault {
+pub async fn anthropic_vault() -> MemoryVault {
     vault_with(&settings(AiProvider::Anthropic, "claude-opus-5-5")).await
 }
 
 /// Снимок подключения по текущим настройкам vault, как его берёт оболочка.
-async fn connection(vault: &MemoryVault) -> Connection {
+pub async fn connection(vault: &MemoryVault) -> Connection {
     Connection::verify(
         &typsidian_core::ai::settings::load_settings(vault).await,
         true,
@@ -270,7 +275,7 @@ async fn connection(vault: &MemoryVault) -> Connection {
 }
 
 /// Начало хода со свежим снимком подключения.
-async fn begin_t(
+pub async fn begin_t(
     vault: &mut MemoryVault,
     path: &str,
     request_id: &str,
@@ -296,7 +301,7 @@ async fn send_t(
     send_turn(transport, vault_id, prepared, key, &verified).await
 }
 
-fn answer(text: &str) -> Option<UserAnswer> {
+pub fn answer(text: &str) -> Option<UserAnswer> {
     Some(UserAnswer {
         text: text.to_owned(),
         choice: None,
@@ -307,7 +312,7 @@ fn answer(text: &str) -> Option<UserAnswer> {
     })
 }
 
-async fn new_lesson(vault: &mut MemoryVault) -> String {
+pub async fn new_lesson(vault: &mut MemoryVault) -> String {
     create_lesson(
         vault,
         "Понять замыкания",
@@ -321,7 +326,7 @@ async fn new_lesson(vault: &mut MemoryVault) -> String {
 }
 
 /// Цикл хода так, как его ведут host и клиент wasm: ядро решает, продолжать ли.
-async fn cycle(
+pub async fn cycle(
     vault: &mut MemoryVault,
     transport: &StreamTransport,
     path: &str,
@@ -342,21 +347,21 @@ async fn cycle(
     panic!("цикл не остановился");
 }
 
-fn teachers(view: &LessonView) -> Vec<&LessonEvent> {
+pub fn teachers(view: &LessonView) -> Vec<&LessonEvent> {
     view.events
         .iter()
         .filter(|event| matches!(event, LessonEvent::Teacher { .. }))
         .collect()
 }
 
-fn users(view: &LessonView) -> usize {
+pub fn users(view: &LessonView) -> usize {
     view.events
         .iter()
         .filter(|event| matches!(event, LessonEvent::User { .. }))
         .count()
 }
 
-fn text_of(view: &LessonView, index: usize) -> String {
+pub fn text_of(view: &LessonView, index: usize) -> String {
     match &teachers(view)[index] {
         LessonEvent::Teacher { text, .. } => text.clone(),
         _ => unreachable!(),

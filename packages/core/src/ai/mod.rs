@@ -12,6 +12,7 @@ pub mod cancel;
 pub mod client;
 pub mod endpoint;
 pub mod journal;
+pub mod knowledge;
 pub mod lesson;
 pub mod price;
 pub mod protocol;

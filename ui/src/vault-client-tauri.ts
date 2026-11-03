@@ -84,6 +84,10 @@ import type {
   SnapshotReason,
   SnapshotUsage,
   AiSettings,
+  Chain,
+  KnowledgeGraph,
+  KnowledgeJob,
+  Proposition,
   LessonProgress,
   LessonSummary,
   LessonView,
@@ -686,9 +690,16 @@ export function tauriVaultClient(
     // Весь цикл хода (с автопродолжениями) идёт в `ai_lesson_answer`; `answer: null` — повтор.
     lessons: {
       list: () => invoke<LessonSummary[]>("ai_lesson_list"),
-      create: (goal, notes, language, start = "Teach") =>
-        invoke<string>("ai_lesson_create", { goal, notes, language, start, now: Date.now() }),
-      createPractice: (title, lessons, notes, description, language) =>
+      create: (goal, notes, language, start = "Teach", knowledge) =>
+        invoke<string>("ai_lesson_create", {
+          goal,
+          notes,
+          language,
+          start,
+          now: Date.now(),
+          knowledge: knowledge ?? null,
+        }),
+      createPractice: (title, lessons, notes, description, language, knowledge) =>
         invoke<string>("ai_practice_create", {
           title,
           lessons,
@@ -696,8 +707,10 @@ export function tauriVaultClient(
           description: description ?? null,
           language,
           now: Date.now(),
+          knowledge: knowledge ?? null,
         }),
       open: (path) => invoke<LessonView>("ai_lesson_open", { path }),
+      delete: (path, keepKnowledge) => invoke<void>("ai_lesson_delete", { path, keepKnowledge, now: Date.now() }),
       answer: (vaultId, path, requestId, answer, expected) =>
         invoke<LessonView>("ai_lesson_answer", {
           vaultId,
@@ -719,6 +732,31 @@ export function tauriVaultClient(
       skipProbe: (path) => invoke<LessonView>("ai_lesson_skip_probe", { path, now: Date.now() }),
       planVersion: (path, version) =>
         invoke<PlanView | null>("ai_lesson_plan_version", { path, version }).then((plan) => plan ?? undefined),
+    },
+
+    // ── Граф знаний (фича 054) ────────────────────────────────────────
+    // Весь цикл пополнения идёт в `ai_knowledge_extract`; отказ посреди — в `job.failure`.
+    knowledge: {
+      graph: (query) => invoke<KnowledgeGraph>("ai_knowledge_graph", { query: query ?? null }),
+      chains: (query) => invoke<Chain[]>("ai_knowledge_chains", { query: query ?? null }),
+      proposition: (id) =>
+        invoke<Proposition | null>("ai_knowledge_proposition", { id }).then((found) => found ?? undefined),
+      extract: (vaultId, source, requestId) =>
+        invoke<KnowledgeJob>("ai_knowledge_extract", {
+          vaultId,
+          source,
+          requestId,
+          now: Date.now(),
+          allowCustom: true,
+        }),
+      jobs: (vaultId) => invoke<KnowledgeJob[]>("ai_knowledge_jobs", { vaultId }),
+      remove: (target) =>
+        invoke<void>(
+          "ai_knowledge_remove",
+          "id" in target
+            ? { id: target.id, source: null, keep: false, now: Date.now() }
+            : { id: null, source: target.source, keep: target.keep, now: Date.now() },
+        ),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────
