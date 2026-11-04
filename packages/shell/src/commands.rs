@@ -2033,6 +2033,36 @@ pub async fn ai_knowledge_extract(
 }
 
 #[tauri::command]
+pub async fn ai_knowledge_import_estimate(
+    state: State<'_, Vault>,
+    paths: Vec<String>,
+) -> Answer<ai::knowledge::ImportEstimate, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_knowledge_import_estimate(&state, paths).await
+}
+
+#[tauri::command]
+pub async fn ai_knowledge_import(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    request_id: String,
+    estimate: ai::knowledge::ImportEstimate,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::knowledge::KnowledgeJob, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_knowledge_import(
+        &state,
+        &home,
+        vault_id,
+        request_id,
+        estimate,
+        now,
+        allow_custom,
+    )
+    .await
+}
+
+#[tauri::command]
 pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
     typsidian_host::commands::ai_knowledge_jobs(vault_id)
 }

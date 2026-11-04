@@ -11,8 +11,10 @@
 //! ([`agent_results`]). Папка графа в запрещённых закрывает оба пути.
 
 pub mod extract;
+pub mod import;
 pub mod jobs;
 pub mod merge;
+pub mod pdf_text;
 pub mod search;
 pub mod store;
 pub mod view;
@@ -26,6 +28,10 @@ use serde::{Deserialize, Serialize};
 
 pub use extract::{
     begin_extract, finish_extract, send_extract, ExtractDone, PreparedExtract, AUTO_MIN_CHARS,
+};
+pub use import::{
+    begin_import, finish_import, import_estimate, ImportEstimate, ImportFileEstimate,
+    ImportFileJob, ImportFileState, ImportKind, ImportSkipReason, SkippedFile,
 };
 pub use jobs::{jobs, JobGuard, JobState, KnowledgeJob, KNOWLEDGE_JOBS};
 pub use view::{Chain, KnowledgeGraph, KnowledgeGroup, Proposition, SourceRef, StatementRef};

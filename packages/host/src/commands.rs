@@ -2874,6 +2874,120 @@ pub async fn ai_knowledge_extract(
         .ok_or(Failure::Core(ai::AiFailure::Cancelled))
 }
 
+// ── Заметки в граф знаний (фича 055) ────────────────────────────────────────
+
+/// Оценка импорта выбранных файлов и папок: что уйдёт модели и сколько это стоит. Только
+/// чтение vault, без сети; корень vault и пути вне его — отказ `Forbidden`.
+pub async fn ai_knowledge_import_estimate(
+    state: &Vault,
+    paths: Vec<String>,
+) -> Answer<ai::knowledge::ImportEstimate, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::knowledge::import_estimate(
+        backend, &paths
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+/// Импортирует заметки по подтверждённой оценке: весь цикл частей, пока ядро говорит
+/// `Continue`. Оценку ядро пересчитывает: изменились список, файлы, покрытие, доступ или
+/// модель — `LessonChanged` до любой записи. Отказ посреди частей остаётся в файлах и
+/// задании, готовое сохранено. Отменяется `ai_cancel` по `request_id`; прогресс по файлам —
+/// `ai_knowledge_jobs`. Место под запрос берётся на одну часть, как у пополнения из урока.
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_knowledge_import(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    request_id: String,
+    estimate: ai::knowledge::ImportEstimate,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::knowledge::KnowledgeJob, Failure<ai::AiFailure>> {
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    if !settings.enabled {
+        return Err(Failure::Core(ai::AiFailure::Disabled));
+    }
+    let verified =
+        ai::client::Connection::verify(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+    if ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .is_some()
+    {
+        return Err(Failure::Core(ai::AiFailure::Cancelled));
+    }
+    let mut guard = ai::knowledge::JobGuard::new(&vault_id, &request_id);
+    // Частей не больше предела; сам предел держит ядро (`Done` после `MAX_IMPORT_PARTS`),
+    // цикл — страховка от ошибки клиента или ядра.
+    for round in 0..=ai::knowledge::import::MAX_IMPORT_PARTS as usize + 1 {
+        let begun = with_vault!(state, |backend| ai::knowledge::begin_import(
+            backend,
+            &vault_id,
+            &request_id,
+            &estimate,
+            now,
+            allow_custom,
+            &verified
+        )
+        .await);
+        let prepared = match begun {
+            Ok(Some(prepared)) => prepared,
+            Ok(None) => break,
+            Err(failure) if round == 0 => {
+                guard.disarm();
+                return Err(Failure::Core(failure));
+            }
+            Err(_) => break,
+        };
+        let outcome = match home.enter_request() {
+            Ok(held) => {
+                let outcome = ai::knowledge::send_extract(
+                    &ai::transport::DefaultTransport,
+                    &vault_id,
+                    &prepared,
+                    key.as_deref(),
+                    &verified,
+                )
+                .await;
+                drop(held);
+                outcome
+            }
+            Err(failure) => Err(failure),
+        };
+        let done = with_vault!(state, |backend| ai::knowledge::finish_import(
+            backend, &vault_id, &prepared, now, outcome
+        )
+        .await
+        .map_err(Failure::Core))?;
+        if done.next == ai::lesson::Next::WaitUser {
+            guard.disarm();
+            return Ok(done.job);
+        }
+    }
+    if ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .is_some_and(|job| job.state == ai::knowledge::JobState::Running)
+    {
+        ai::knowledge::jobs::KNOWLEDGE_JOBS.end(
+            &vault_id,
+            &request_id,
+            ai::knowledge::JobState::Cancelled,
+            Some(ai::AiFailure::Cancelled),
+            now,
+        );
+    }
+    guard.disarm();
+    ai::knowledge::jobs::KNOWLEDGE_JOBS
+        .get(&vault_id, &request_id)
+        .ok_or(Failure::Core(ai::AiFailure::Cancelled))
+}
+
 /// Задания пополнения графа этого vault: идущие первыми. Интерфейс опрашивает.
 pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
     ai::knowledge::jobs(&vault_id)

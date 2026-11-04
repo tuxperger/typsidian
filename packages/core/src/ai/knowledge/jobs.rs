@@ -70,9 +70,11 @@ impl<T: Job> Registry<T> {
         }
     }
 
-    /// Бросившие задания убираются из «идущих»: они никогда не закончатся сами.
-    fn sweep(vault: &mut [Entry<T>], vault_id: &str, at: i64) {
+    /// Бросившие задания убираются из «идущих»: они никогда не закончатся сами. Возвращает id
+    /// закончившихся: тексты их частей убирает вызывающий, уже без замка реестра.
+    fn sweep(vault: &mut [Entry<T>], vault_id: &str, at: i64) -> Vec<String> {
         let now = now_ms();
+        let mut stale = Vec::new();
         for entry in vault.iter_mut() {
             if entry.job.state() == JobState::Running
                 && now.saturating_sub(entry.touched_ms) > STALE_RUNNING_MS
@@ -81,7 +83,17 @@ impl<T: Job> Registry<T> {
                     .job
                     .finish(JobState::Failed, Some(AiFailure::Timeout), at);
                 flag_close(vault_id, entry.job.id());
+                stale.push(entry.job.id().to_owned());
             }
+        }
+        stale
+    }
+
+    /// Забывает тексты частей импорта законченных заданий (ревью 055, L1). Замок реестра
+    /// при этом не держится: порядок замков везде «тексты, потом реестр».
+    fn forget_runs(vault_id: &str, ids: &[String]) {
+        for id in ids {
+            super::import::drop_run(vault_id, id);
         }
     }
 
@@ -96,7 +108,18 @@ impl<T: Job> Registry<T> {
     ) -> Result<(), AiFailure> {
         let mut all = self.inner.lock().map_err(|_| AiFailure::Cancelled)?;
         let list = all.entry(vault_id.to_owned()).or_default();
-        Self::sweep(list, vault_id, at);
+        let stale = Self::sweep(list, vault_id, at);
+        let started = Self::push(list, job, conflict);
+        drop(all);
+        Self::forget_runs(vault_id, &stale);
+        started
+    }
+
+    fn push(
+        list: &mut Vec<Entry<T>>,
+        job: T,
+        conflict: impl Fn(&T) -> bool,
+    ) -> Result<(), AiFailure> {
         if list.iter().any(|entry| entry.job.id() == job.id())
             || list
                 .iter()
@@ -152,8 +175,10 @@ impl<T: Job> Registry<T> {
         let Some(list) = all.get_mut(vault_id) else {
             return Vec::new();
         };
-        Self::sweep(list, vault_id, at);
+        let stale = Self::sweep(list, vault_id, at);
         let mut jobs: Vec<T> = list.iter().rev().map(|entry| entry.job.clone()).collect();
+        drop(all);
+        Self::forget_runs(vault_id, &stale);
         jobs.sort_by_key(|job| job.state() != JobState::Running);
         jobs
     }
@@ -175,6 +200,7 @@ impl<T: Job> Registry<T> {
         let job = self.update(vault_id, id, |job| job.finish(state, failure, at));
         if was_running {
             flag_close(vault_id, id);
+            Self::forget_runs(vault_id, &[id.to_owned()]);
         }
         job
     }
@@ -236,6 +262,9 @@ pub struct KnowledgeJob {
     /// Цепочки, отклонённые из-за ссылок на несуществующее.
     pub chains_rejected: u32,
     pub failure: Option<AiFailure>,
+    /// Файлы импорта заметок (фича 055); у пополнения из урока пусто.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<super::import::ImportFileJob>,
     pub started_at: i64,
     pub finished_at: Option<i64>,
 }
@@ -253,6 +282,7 @@ impl KnowledgeJob {
             chains_added: 0,
             chains_rejected: 0,
             failure: None,
+            files: Vec::new(),
             started_at: now,
             finished_at: None,
         }

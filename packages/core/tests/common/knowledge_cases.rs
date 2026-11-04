@@ -259,6 +259,8 @@ pub async fn moved_lines_make_the_source_follow_a_rename() {
             source: text("Уроки/А.lesson"),
             kind: SourceKind::Lesson,
             upto: 3,
+            part: None,
+            hash: None,
             at: 5,
         }],
     )
@@ -394,6 +396,8 @@ pub async fn append_is_atomic_and_never_goes_through_a_symlink() {
         source: text(LESSON),
         kind: SourceKind::Lesson,
         upto: 1,
+        part: None,
+        hash: None,
         at: 1,
     };
     // Оборванная последняя строка отделяется, прежнее не меняется.
@@ -2346,6 +2350,8 @@ pub async fn removing_a_source_contribution_keeps_shared_statements() {
             source: text("Уроки/А.lesson"),
             kind: SourceKind::Lesson,
             upto: 6,
+            part: None,
+            hash: None,
             at: 5,
         }],
     )
@@ -2883,7 +2889,15 @@ pub async fn resolving_moves_is_not_quadratic_on_a_hostile_sources_file() -> (i6
             json!({"line":"Moved","from":format!("Папка/Глубже{i}"),"to":format!("Новая/Глубже{i}"),"at":1_000_000})
         ));
     }
-    for i in 0..150_000 {
+    // В браузере отладочный wasm медленнее в разы, а тест не отдаёт управление странице:
+    // объём меньше, чтобы уложиться в предел ожидания chromedriver; квадратичность и на нём
+    // видна по отношению времён.
+    let lines: usize = if cfg!(target_arch = "wasm32") {
+        30_000
+    } else {
+        150_000
+    };
+    for i in 0..lines {
         sources.push_str(&format!(
             "{}\n",
             json!({"line":"Covered","source":format!("Папка/Глубже{}/урок{i}.lesson", i % 500),
@@ -2901,7 +2915,7 @@ pub async fn resolving_moves_is_not_quadratic_on_a_hostile_sources_file() -> (i6
     let s2 = typsidian_core::properties::now_ms();
     let _ = project(b"", b"", plain.as_bytes());
     let plain_elapsed = typsidian_core::properties::now_ms() - s2;
-    assert!(projection.covered.len() > 100_000);
+    assert!(projection.covered.len() > lines * 2 / 3);
     assert!(projection
         .covered
         .contains_key("Новая/Глубже7/урок7.lesson"));
@@ -3285,4 +3299,1020 @@ pub async fn coverage_and_job_conflict_use_the_folded_path() {
         AiFailure::Cancelled
     );
     assert_eq!(jobs(&vault_id).len(), 1);
+}
+
+// ── 055: заметки в граф знаний ──────────────────────────────────────────────
+
+use typsidian_core::ai::knowledge::pdf_text::{pdf_text, PdfError, MAX_PDF_BYTES, MAX_PDF_PAGES};
+
+async fn pdf_of(note: &str) -> Vec<u8> {
+    use typsidian_core::export;
+    use typsidian_core::preview::{FontSet, PackageCache};
+    use typsidian_core::vault::vault_settings::VaultOverrides;
+    let mut vault = MemoryVault::new().with_file("Н.typ", note);
+    let overrides = VaultOverrides {
+        auto_download_templates: Some(false),
+        ..VaultOverrides::default()
+    };
+    let report = export::export_note_pdf(
+        &mut vault,
+        &PackageCache::new(),
+        "Н.typ",
+        None,
+        FontSet::builtin(),
+        &overrides,
+    )
+    .await;
+    vault
+        .bytes_of(&report.pdf_path)
+        .unwrap_or_else(|| panic!("PDF не записан: {:?}", report.diagnostics))
+}
+
+const TEXT_PDF: &[u8] = include_bytes!("../fixtures/pdf/text.pdf");
+const SCAN_PDF: &[u8] = include_bytes!("../fixtures/pdf/no-text.pdf");
+
+/// T001: текст PDF по страницам; сканы без текста; враждебные PDF не разбираются.
+pub async fn pdf_text_comes_by_pages_and_hostile_files_are_refused() {
+    let text = pdf_text(TEXT_PDF).unwrap();
+    assert_eq!(text.pages.len(), 2);
+    assert!(text.has_text());
+    assert!(
+        text.pages[0].contains("Замыкание хранит окружение, в котором создано."),
+        "{:?}",
+        text.pages[0]
+    );
+    assert!(
+        text.pages[0].starts_with("Замыкания\n"),
+        "{:?}",
+        text.pages[0]
+    );
+    assert!(text.pages[1].contains("счётчик прячет состояние переменной"));
+
+    // Скан: страницы есть, текста нет.
+    let scan = pdf_text(SCAN_PDF).unwrap();
+    assert_eq!(scan.pages.len(), 2);
+    assert!(!scan.has_text());
+
+    // Не PDF и оборванный PDF: отказ или пустой результат, но не паника.
+    assert_eq!(pdf_text(b"not a pdf").unwrap_err(), PdfError::Unreadable);
+    assert_eq!(pdf_text(b"").unwrap_err(), PdfError::Unreadable);
+    if let Ok(cut) = pdf_text(&TEXT_PDF[..TEXT_PDF.len() / 2]) {
+        assert!(cut.pages.len() <= 2);
+    }
+    let mut broken = TEXT_PDF.to_vec();
+    for byte in broken.iter_mut().skip(400).step_by(7) {
+        *byte = 0x20;
+    }
+    let _ = pdf_text(&broken);
+
+    // Огромный файл отклоняется по размеру до разбора; PDF-бомба — по числу страниц.
+    let huge = vec![0u8; MAX_PDF_BYTES as usize + 1];
+    assert_eq!(pdf_text(&huge).unwrap_err(), PdfError::TooLarge);
+    let many = pdf_of(&format!(
+        "#for i in range({}) {{ [Страница #i]; pagebreak() }}",
+        MAX_PDF_PAGES + 1
+    ))
+    .await;
+    assert_eq!(pdf_text(&many).unwrap_err(), PdfError::TooLarge);
+}
+
+use typsidian_core::ai::knowledge::import::{
+    text_parts, MAX_FILES, MAX_PATHS, MAX_SKIPPED, PART_CHARS,
+};
+use typsidian_core::ai::knowledge::{
+    begin_import, finish_import, import_estimate, ImportEstimate, ImportFileState, ImportKind,
+    ImportSkipReason,
+};
+
+use super::lesson_cases::settings as ai_settings;
+
+const NOTES: &str = "Заметки";
+
+async fn notes_vault_with(denied: &[&str]) -> MemoryVault {
+    let mut settings = ai_settings(AiProvider::Anthropic, "claude-opus-5-5");
+    settings.denied_folders = denied.iter().map(|folder| (*folder).to_owned()).collect();
+    vault_with(&settings).await
+}
+
+fn paths(list: &[&str]) -> Vec<String> {
+    list.iter().map(|path| (*path).to_owned()).collect()
+}
+
+/// Строки по 1000 символов: границы частей (19 строк в части) не сдвигаются от правки
+/// внутри строки.
+fn lines_text(count: usize, salt: &str) -> String {
+    (0..count)
+        .map(|index| {
+            let head = format!("{salt}{index:04} ");
+            let filler = "а".repeat(1000 - head.chars().count());
+            format!("{head}{filler}\n")
+        })
+        .collect()
+}
+
+fn skipped_reason(estimate: &ImportEstimate, path: &str) -> Option<ImportSkipReason> {
+    estimate
+        .skipped
+        .iter()
+        .find(|skipped| skipped.path == path)
+        .map(|skipped| skipped.reason)
+}
+
+/// Цикл частей так, как его ведут host и клиент wasm: ядро решает, продолжать ли.
+async fn run_import(
+    vault: &mut MemoryVault,
+    transport: &StreamTransport,
+    vault_id: &str,
+    request_id: &str,
+    estimate: &ImportEstimate,
+    now: i64,
+) -> Result<KnowledgeJob, AiFailure> {
+    let verified = connection(vault).await;
+    for _ in 0..1_100 {
+        let Some(prepared) =
+            begin_import(vault, vault_id, request_id, estimate, now, true, &verified).await?
+        else {
+            break;
+        };
+        let outcome = send_extract(transport, vault_id, &prepared, Some(KEY), &verified).await;
+        let done = finish_import(vault, vault_id, &prepared, now + 1, outcome).await?;
+        if done.next == Next::WaitUser {
+            return Ok(done.job);
+        }
+    }
+    Ok(jobs(vault_id)
+        .into_iter()
+        .find(|job| job.id == request_id)
+        .expect("задание в реестре"))
+}
+
+/// Ответы модели: по одному разному утверждению на часть.
+fn replies(prefix: &str, count: usize) -> Vec<Script> {
+    (0..count)
+        .map(|index| one("k", &format!("{prefix} утверждение номер {index}"), 1))
+        .collect()
+}
+
+fn file_state(job: &KnowledgeJob, path: &str) -> ImportFileState {
+    job.files
+        .iter()
+        .find(|file| file.path == path)
+        .unwrap_or_else(|| panic!("нет файла {path}: {:?}", job.files))
+        .state
+}
+
+/// T002: оценка раскрывает папки, проверяет доступ и виды, считает части, объём и цену.
+pub async fn an_estimate_lists_files_skips_with_reasons_and_cost() {
+    let mut vault = notes_vault_with(&["Личное"]).await;
+    vault = vault
+        .with_file(
+            "Заметки/А.typ",
+            "= Замыкания\n\nЗамыкание хранит окружение.\n",
+        )
+        .with_file("Заметки/Б.txt", "Функция — значение первого класса.\n")
+        .with_file(
+            "Заметки/В.md",
+            "# Область видимости\n\nПеременная живёт в области.\n",
+        )
+        .with_file("Заметки/Текст.pdf", TEXT_PDF)
+        .with_file("Заметки/Скан.pdf", SCAN_PDF)
+        .with_file("Заметки/Битая.pdf", "это не PDF")
+        .with_file("Заметки/схема.png", vec![0x89, b'P', b'N', b'G'])
+        .with_file("Заметки/Пустая.typ", "  \n\n")
+        .with_file("Заметки/Большая.txt", vec![b'a'; 2 * 1024 * 1024])
+        .with_file("Заметки/Вложенная/Г.typ", "Вложенная заметка.\n")
+        .with_file("Личное/Секрет.typ", "СЕКРЕТНОЕ-СОДЕРЖИМОЕ\n");
+    let estimate = import_estimate(
+        &vault,
+        &paths(&[NOTES, "Личное/Секрет.typ", "Нет/Такого.typ"]),
+    )
+    .await
+    .unwrap();
+
+    let imported: Vec<(&str, ImportKind)> = estimate
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.kind))
+        .collect();
+    assert_eq!(
+        imported,
+        vec![
+            ("Заметки/А.typ", ImportKind::Note),
+            ("Заметки/Б.txt", ImportKind::Text),
+            ("Заметки/В.md", ImportKind::Text),
+            ("Заметки/Вложенная/Г.typ", ImportKind::Note),
+            ("Заметки/Текст.pdf", ImportKind::Pdf),
+        ]
+    );
+    for file in &estimate.files {
+        assert_eq!((file.parts, file.parts_new), (1, 1), "{file:?}");
+        assert!(file.chars > 0 && file.chars_new == file.chars);
+    }
+    let pdf = &estimate.files[4];
+    assert!(pdf.chars as usize >= "Замыкания".len() / 2, "{pdf:?}");
+    assert_eq!(
+        skipped_reason(&estimate, "Личное/Секрет.typ"),
+        Some(ImportSkipReason::Denied)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Нет/Такого.typ"),
+        Some(ImportSkipReason::Missing)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/Скан.pdf"),
+        Some(ImportSkipReason::NoText)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/Пустая.typ"),
+        Some(ImportSkipReason::NoText)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/Битая.pdf"),
+        Some(ImportSkipReason::Unsupported)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/схема.png"),
+        Some(ImportSkipReason::Unsupported)
+    );
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/Большая.txt"),
+        Some(ImportSkipReason::TooLarge)
+    );
+    // Размер проверен по метаданным: большой и запрещённый файлы не читались.
+    assert_eq!(vault.read_count("Заметки/Большая.txt"), 0);
+    assert_eq!(vault.read_count("Личное/Секрет.typ"), 0);
+    assert_eq!(estimate.skipped_more, 0);
+
+    // Объём — символы / 4 и служебная часть каждого запроса; цена — по справочнику 050.
+    let chars_new: u32 = estimate.files.iter().map(|file| file.chars_new).sum();
+    assert_eq!(estimate.parts_new, 5);
+    assert_eq!(estimate.chars_new, chars_new);
+    assert_eq!(estimate.units, chars_new / 4 + 5 * 1_500);
+    assert_eq!(estimate.model.as_deref(), Some("claude-opus-5-5"));
+    assert!(estimate.cost_usd.is_some_and(|cost| cost > 0.0));
+    let encoded = serde_json::to_string(&estimate).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ImportEstimate>(&encoded).unwrap(),
+        estimate
+    );
+
+    // Модель без цены в справочнике: стоимость неизвестна, а не ноль.
+    let mut unpriced = load_settings(&vault).await;
+    unpriced.model = Some("неизвестная-модель".to_owned());
+    save_settings(&mut vault, &unpriced).await.unwrap();
+    let estimate = import_estimate(&vault, &paths(&["Заметки/А.typ"]))
+        .await
+        .unwrap();
+    assert_eq!(estimate.cost_usd, None);
+
+    // Выключенная функция ничего не оценивает.
+    unpriced.enabled = false;
+    save_settings(&mut vault, &unpriced).await.unwrap();
+    assert_eq!(
+        import_estimate(&vault, &paths(&["Заметки/А.typ"]))
+            .await
+            .unwrap_err(),
+        AiFailure::Disabled
+    );
+}
+
+/// FR-001: корень vault и пути вне vault не принимаются; части — до 20 тыс. символов по
+/// строкам.
+pub async fn the_vault_root_is_refused_and_big_files_split_into_parts() {
+    let vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "текст\n");
+    for root in ["", ".", "./", "Заметки/..", "../x", "/abs", "a/../.."] {
+        assert_eq!(
+            import_estimate(&vault, &paths(&[root])).await.unwrap_err(),
+            AiFailure::Forbidden,
+            "{root:?}"
+        );
+    }
+    // Пустой выбор — пустая оценка, не весь vault.
+    let empty = import_estimate(&vault, &[]).await.unwrap();
+    assert!(empty.files.is_empty() && empty.parts_new == 0);
+
+    let big = lines_text(45, "");
+    let parts = text_parts(&big);
+    assert_eq!(parts.len(), 3);
+    assert!(parts
+        .iter()
+        .all(|part| part.text.chars().count() <= PART_CHARS));
+    // Строка длиннее предела режется по символам, ничего не теряется.
+    let one_line = "ж".repeat(PART_CHARS * 2 + 5);
+    let cut = text_parts(&one_line);
+    assert_eq!(cut.len(), 3);
+    assert_eq!(
+        cut.iter()
+            .map(|part| part.text.chars().count())
+            .sum::<usize>(),
+        one_line.chars().count()
+    );
+
+    let vault = vault.with_file("Заметки/Длинная.txt", big);
+    let estimate = import_estimate(&vault, &paths(&["Заметки/Длинная.txt"]))
+        .await
+        .unwrap();
+    assert_eq!((estimate.files[0].parts, estimate.parts_new), (3, 3));
+}
+
+/// Враждебный выбор: миллион путей отклоняется до любой работы; огромная папка режется
+/// пределами.
+pub async fn a_million_paths_and_huge_folders_are_bounded() {
+    let vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "текст\n");
+    let million = vec!["Заметки/А.typ".to_owned(); 1_000_000];
+    assert_eq!(
+        import_estimate(&vault, &million).await.unwrap_err(),
+        AiFailure::Forbidden
+    );
+    assert_eq!(vault.read_count("Заметки/А.typ"), 0);
+    let over: Vec<String> = (0..=MAX_PATHS)
+        .map(|index| format!("Заметки/{index}.typ"))
+        .collect();
+    assert_eq!(
+        import_estimate(&vault, &over).await.unwrap_err(),
+        AiFailure::Forbidden
+    );
+    // Повторы одного пути схлопываются.
+    let same = vec!["Заметки/А.typ".to_owned(); MAX_PATHS];
+    assert_eq!(import_estimate(&vault, &same).await.unwrap().files.len(), 1);
+
+    let mut vault = notes_vault_with(&[]).await;
+    for index in 0..6_000 {
+        vault = vault.with_file(
+            &format!("Папка/{index:05}.txt"),
+            format!("Заметка {index}\n"),
+        );
+    }
+    let estimate = import_estimate(&vault, &paths(&["Папка"])).await.unwrap();
+    assert_eq!(estimate.files.len(), MAX_FILES);
+    assert_eq!(estimate.skipped.len(), MAX_SKIPPED);
+    assert!(estimate
+        .skipped
+        .iter()
+        .all(|skipped| skipped.reason == ImportSkipReason::TooLarge));
+    assert_eq!(
+        estimate.skipped.len() + estimate.skipped_more as usize,
+        6_000 - MAX_FILES
+    );
+    assert_eq!(estimate.parts_new as usize, MAX_FILES);
+}
+
+/// T003, T004, SC-001: импорт папки идёт через конвейер 054; запрещённое не уходит модели;
+/// итог по файлам с причинами.
+pub async fn an_import_sends_allowed_notes_and_reports_by_file() {
+    let mut vault = notes_vault_with(&["Заметки/Личное"])
+        .await
+        .with_file(
+            "Заметки/А.typ",
+            "= Замыкания\n\nЗамыкание хранит окружение.\n",
+        )
+        .with_file("Заметки/Б.txt", "Функция — значение первого класса.\n")
+        .with_file("Заметки/Скан.pdf", SCAN_PDF)
+        .with_file(
+            "Заметки/Личное/Секрет.typ",
+            "СЕКРЕТНОЕ-СОДЕРЖИМОЕ про замыкания\n",
+        );
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    assert_eq!(
+        skipped_reason(&estimate, "Заметки/Личное/Секрет.typ"),
+        Some(ImportSkipReason::Denied)
+    );
+    let vault_id = unique("iv");
+    let transport = StreamTransport::with(replies("Заметка", 2));
+    let job = run_import(&mut vault, &transport, &vault_id, "imp-1", &estimate, 100)
+        .await
+        .unwrap();
+
+    assert_eq!(job.state, JobState::Done);
+    assert_eq!(transport.count(), 2);
+    for index in 0..transport.count() {
+        let body = transport.body(index);
+        assert!(!body.contains("СЕКРЕТНОЕ"), "запрещённое ушло модели");
+        assert!(!body.contains("Секрет.typ"));
+        // Путь заметки в запрос не идёт.
+        assert!(!body.contains("А.typ") && !body.contains("Б.txt"));
+        assert!(!body.contains(KEY));
+    }
+    assert!(transport.body(0).contains("Замыкание хранит окружение."));
+    assert!(transport.body(0).contains("submit_findings"));
+    assert!(transport
+        .body(1)
+        .contains("Функция — значение первого класса."));
+    assert_eq!(file_state(&job, "Заметки/А.typ"), ImportFileState::Done);
+    assert_eq!(file_state(&job, "Заметки/Б.txt"), ImportFileState::Done);
+    assert_eq!(
+        file_state(&job, "Заметки/Скан.pdf"),
+        ImportFileState::Skipped
+    );
+    assert_eq!(
+        file_state(&job, "Заметки/Личное/Секрет.typ"),
+        ImportFileState::Skipped
+    );
+    let denied = job
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("Секрет.typ"))
+        .unwrap();
+    assert_eq!(denied.reason, Some(ImportSkipReason::Denied));
+    let first = job
+        .files
+        .iter()
+        .find(|file| file.path == "Заметки/А.typ")
+        .unwrap();
+    assert_eq!(
+        (first.parts_done, first.parts, first.added_propositions),
+        (1, 1, 1)
+    );
+    assert_eq!(
+        (job.batches_total, job.batches_done, job.propositions_added),
+        (2, 2, 2)
+    );
+    assert_eq!(job.source, "");
+
+    // Утверждения в графе с источниками-заметками, покрытие — строки `Covered` с хэшем.
+    let graph = graph_of(&vault).await;
+    assert_eq!(
+        graph.source_paths(),
+        vec![text("Заметки/А.typ"), text("Заметки/Б.txt")]
+    );
+    let sources =
+        String::from_utf8(vault.bytes_of(&format!("{GRAPH}/{SOURCES_FILE}")).unwrap()).unwrap();
+    assert_eq!(sources.lines().count(), 2);
+    for line in sources.lines() {
+        let value: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(value["kind"], "Note");
+        assert_eq!(value["hash"].as_str().unwrap().len(), 32);
+        assert_eq!(value["part"], 1);
+    }
+    // Каждый запрос в журнале 050 до сети, ключа там нет.
+    let entries = journal_entries(&vault).await;
+    assert_eq!(entries.len(), 2);
+    assert!(entries
+        .iter()
+        .all(|entry| entry.state == JournalState::Done));
+    let journal = String::from_utf8(vault.bytes_of(JOURNAL).unwrap()).unwrap();
+    assert!(!journal.contains(KEY));
+}
+
+/// FR-002: импорт стартует только с оценкой, которую ядро пересчитало и нашло прежней.
+pub async fn an_import_refuses_an_estimate_that_no_longer_matches() {
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "Первая версия заметки.\n")
+        .with_file("Заметки/Б.typ", "Вторая заметка.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let verified = connection(&vault).await;
+    let vault_id = unique("iv");
+    let transport = StreamTransport::with(Vec::new());
+    let refuse = async |vault: &mut MemoryVault, id: &str| {
+        let outcome = begin_import(vault, &vault_id, id, &estimate, 100, true, &verified).await;
+        assert_eq!(outcome.unwrap_err(), AiFailure::LessonChanged);
+        assert!(jobs(&vault_id).is_empty(), "задание не заведено");
+        assert!(journal_entries(vault).await.is_empty(), "журнал не тронут");
+    };
+
+    // Файл изменили после оценки.
+    vault.replace_externally("Заметки/А.typ", "Вторая версия заметки.\n");
+    refuse(&mut vault, "r1").await;
+    vault.replace_externally("Заметки/А.typ", "Первая версия заметки.\n");
+    // Добавили файл в папку.
+    vault.replace_externally("Заметки/В.typ", "Новая.\n");
+    refuse(&mut vault, "r2").await;
+    vault.remove(std::path::Path::new("Заметки/В.typ"));
+    // Закрыли папку для ИИ.
+    let mut closed = load_settings(&vault).await;
+    closed.denied_folders = vec![text(NOTES)];
+    save_settings(&mut vault, &closed).await.unwrap();
+    refuse(&mut vault, "r3").await;
+    closed.denied_folders.clear();
+    // Сменили модель: показанная цена уже не та.
+    closed.model = Some("claude-sonnet-5".to_owned());
+    save_settings(&mut vault, &closed).await.unwrap();
+    let verified = connection(&vault).await;
+    assert_eq!(
+        begin_import(&mut vault, &vault_id, "r4", &estimate, 100, true, &verified)
+            .await
+            .unwrap_err(),
+        AiFailure::LessonChanged
+    );
+    assert_eq!(transport.count(), 0);
+
+    // Подделка части: чужая оценка с другими числами тоже не проходит.
+    closed.model = Some("claude-opus-5-5".to_owned());
+    save_settings(&mut vault, &closed).await.unwrap();
+    let verified = connection(&vault).await;
+    let mut forged = estimate.clone();
+    forged.files[0].parts_new = 0;
+    assert_eq!(
+        begin_import(&mut vault, &vault_id, "r5", &forged, 100, true, &verified)
+            .await
+            .unwrap_err(),
+        AiFailure::LessonChanged
+    );
+    // А прежняя оценка при прежнем состоянии проходит.
+    let prepared = begin_import(&mut vault, &vault_id, "r6", &estimate, 100, true, &verified)
+        .await
+        .unwrap();
+    assert!(prepared.is_some());
+}
+
+/// FR-005: отмена — оставшиеся файлы не отправляются, готовое остаётся (принцип X).
+pub async fn cancelling_an_import_keeps_done_files_and_sends_no_more() {
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "Первая заметка.\n")
+        .with_file("Заметки/Б.typ", "Вторая заметка.\n")
+        .with_file("Заметки/В.typ", "Третья заметка.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let verified = connection(&vault).await;
+    let vault_id = unique("iv");
+    let transport = StreamTransport::with(replies("Отмена", 3));
+    let prepared = begin_import(&mut vault, &vault_id, "c1", &estimate, 100, true, &verified)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = send_extract(&transport, &vault_id, &prepared, Some(KEY), &verified).await;
+    let done = finish_import(&mut vault, &vault_id, &prepared, 101, outcome)
+        .await
+        .unwrap();
+    assert_eq!(done.next, Next::Continue);
+    cancel(&vault_id, "c1");
+    assert!(
+        begin_import(&mut vault, &vault_id, "c1", &estimate, 102, true, &verified)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    assert_eq!(transport.count(), 1, "оставшиеся файлы не отправлены");
+    let job = jobs(&vault_id)
+        .into_iter()
+        .find(|job| job.id == "c1")
+        .unwrap();
+    assert_eq!(job.state, JobState::Cancelled);
+    assert_eq!(job.failure, Some(AiFailure::Cancelled));
+    assert_eq!(file_state(&job, "Заметки/А.typ"), ImportFileState::Done);
+    assert_eq!(file_state(&job, "Заметки/Б.typ"), ImportFileState::Pending);
+    assert_eq!(file_state(&job, "Заметки/В.typ"), ImportFileState::Pending);
+    // Уже добавленное остаётся.
+    assert_eq!(graph_of(&vault).await.propositions.len(), 1);
+    // Повтор с новой оценкой берёт только оставшиеся файлы.
+    let again = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    assert_eq!(again.parts_new, 2);
+    let transport = StreamTransport::with(replies("Повтор", 2));
+    let job = run_import(&mut vault, &transport, &vault_id, "c2", &again, 200)
+        .await
+        .unwrap();
+    assert_eq!(job.state, JobState::Done);
+    assert_eq!(transport.count(), 2);
+    assert_eq!(graph_of(&vault).await.propositions.len(), 3);
+}
+
+/// Сбой части: файл `Partial`, остальные идут; повтор берёт только незавершённые части (T007).
+pub async fn a_failed_part_makes_the_file_partial_and_a_retry_sends_only_unfinished_parts() {
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/1-длинная.txt", lines_text(45, ""))
+        .with_file("Заметки/2-б.txt", "Короткая заметка Б.\n")
+        .with_file("Заметки/3-в.txt", "Короткая заметка В.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    assert_eq!(estimate.parts_new, 5);
+    let vault_id = unique("iv");
+    // Первая часть длинного файла хорошая, вторая — ответ без вызова инструмента.
+    let mut scripts = vec![one("k", "Длинная первая часть", 1), say("не то")];
+    scripts.extend(replies("Остальные", 2));
+    let transport = StreamTransport::with(scripts);
+    let job = run_import(&mut vault, &transport, &vault_id, "p1", &estimate, 100)
+        .await
+        .unwrap();
+
+    assert_eq!(job.state, JobState::Done);
+    assert_eq!(transport.count(), 4, "хвост сбойного файла не отправляется");
+    let long = job
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("длинная.txt"))
+        .unwrap();
+    assert_eq!(long.state, ImportFileState::Partial);
+    assert_eq!((long.parts_done, long.parts), (1, 3));
+    assert_eq!(long.failure, Some(AiFailure::BadResponse));
+    assert_eq!(file_state(&job, "Заметки/2-б.txt"), ImportFileState::Done);
+    assert_eq!(file_state(&job, "Заметки/3-в.txt"), ImportFileState::Done);
+
+    // Повтор: первая часть и остальные файлы покрыты, отправляются две незавершённые.
+    let again = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    assert_eq!(again.parts_new, 2);
+    assert_eq!(again.files[0].parts_new, 2);
+    assert_eq!(again.files[1].parts_new + again.files[2].parts_new, 0);
+    let transport = StreamTransport::with(replies("Хвост", 2));
+    let job = run_import(&mut vault, &transport, &vault_id, "p2", &again, 200)
+        .await
+        .unwrap();
+    assert_eq!(transport.count(), 2);
+    assert_eq!(
+        file_state(&job, "Заметки/1-длинная.txt"),
+        ImportFileState::Done
+    );
+    let last = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    assert_eq!(last.parts_new, 0);
+
+    // Сбой сети останавливает задание: остальные файлы не отправляются и остаются `Pending`.
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/1.txt", "Один.\n")
+        .with_file("Заметки/2.txt", "Два.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let transport = StreamTransport::with(vec![Script::Reply {
+        status: 503,
+        chunks: Vec::new(),
+    }]);
+    let vault_id = unique("iv");
+    let job = run_import(&mut vault, &transport, &vault_id, "n1", &estimate, 100)
+        .await
+        .unwrap();
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(job.failure, Some(AiFailure::ProviderDown));
+    assert_eq!(transport.count(), 1);
+    assert_eq!(file_state(&job, "Заметки/1.txt"), ImportFileState::Failed);
+    assert_eq!(file_state(&job, "Заметки/2.txt"), ImportFileState::Pending);
+
+    // Три непонятых ответа подряд останавливают задание: платный цикл по кругу не идёт.
+    let mut vault = notes_vault_with(&[]).await;
+    for index in 0..5 {
+        vault = vault.with_file(
+            &format!("Заметки/{index}.txt"),
+            format!("Заметка {index}.\n"),
+        );
+    }
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let transport = StreamTransport::with(vec![say("а"), say("б"), say("в"), say("г")]);
+    let job = run_import(&mut vault, &transport, &unique("iv"), "b1", &estimate, 100)
+        .await
+        .unwrap();
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(transport.count(), 3);
+    assert_eq!(
+        job.files
+            .iter()
+            .filter(|file| file.state == ImportFileState::Failed)
+            .count(),
+        3
+    );
+    assert_eq!(
+        job.files
+            .iter()
+            .filter(|file| file.state == ImportFileState::Pending)
+            .count(),
+        2
+    );
+}
+
+/// T007, SC-002: повтор неизменённого — 0 запросов и 0 дублей; изменённого — только
+/// изменённые части; переименование узнаётся; убранный вклад импортируется заново.
+pub async fn a_repeat_import_is_free_and_sends_only_changed_parts() {
+    let path = "Заметки/Длинная.txt";
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file(path, lines_text(45, ""));
+    let vault_id = unique("iv");
+    let estimate = import_estimate(&vault, &paths(&[path])).await.unwrap();
+    assert_eq!((estimate.files[0].parts, estimate.parts_new), (3, 3));
+    let transport = StreamTransport::with(replies("Первый", 3));
+    let job = run_import(&mut vault, &transport, &vault_id, "r1", &estimate, 100)
+        .await
+        .unwrap();
+    assert_eq!((job.state, transport.count()), (JobState::Done, 3));
+    let props_file = format!("{GRAPH}/{PROPOSITIONS_FILE}");
+    let sources_file = format!("{GRAPH}/{SOURCES_FILE}");
+    let (props_before, sources_before) = (
+        vault.bytes_of(&props_file).unwrap(),
+        vault.bytes_of(&sources_file).unwrap(),
+    );
+
+    // Неизменённая: оценка пустая, импорт — 0 запросов, граф не изменился ни на байт.
+    let same = import_estimate(&vault, &paths(&[path])).await.unwrap();
+    assert_eq!((same.parts_new, same.chars_new, same.units), (0, 0, 0));
+    assert_eq!(same.cost_usd, Some(0.0));
+    let transport = StreamTransport::with(Vec::new());
+    let job = run_import(&mut vault, &transport, &vault_id, "r2", &same, 200)
+        .await
+        .unwrap();
+    assert_eq!((job.state, transport.count()), (JobState::Done, 0));
+    assert_eq!(file_state(&job, path), ImportFileState::Done);
+    assert_eq!(job.files[0].parts_done, 3);
+    assert_eq!(vault.bytes_of(&props_file).unwrap(), props_before);
+    assert_eq!(vault.bytes_of(&sources_file).unwrap(), sources_before);
+
+    // Изменена одна строка последней части (та же длина): уходит одна часть, и только она.
+    let edited = lines_text(45, "").replace("0044 ", "ПРАВКА");
+    assert_ne!(edited, lines_text(45, ""));
+    vault.replace_externally(path, edited.clone());
+    let changed = import_estimate(&vault, &paths(&[path])).await.unwrap();
+    assert_eq!((changed.files[0].parts, changed.parts_new), (3, 1));
+    // Модель отвечает прежней формулировкой: дубля формулировки нет, а новая — добавляется.
+    let transport = StreamTransport::with(vec![findings(
+        json!([
+            {"key": "a", "text": "Первый утверждение номер 2", "event": 3},
+            {"key": "b", "text": "Добавленное правкой утверждение", "event": 3}
+        ]),
+        json!([]),
+    )]);
+    let job = run_import(&mut vault, &transport, &vault_id, "r3", &changed, 300)
+        .await
+        .unwrap();
+    assert_eq!(transport.count(), 1);
+    assert!(transport.body(0).contains("ПРАВКА"));
+    assert!(
+        !transport.body(0).contains("0001 "),
+        "неизменённые части не уходят"
+    );
+    assert_eq!(file_state(&job, path), ImportFileState::Done);
+    let graph = graph_of(&vault).await;
+    assert_eq!(graph.propositions.len(), 4);
+    let repeated = &graph.propositions[&proposition_id("Первый утверждение номер 2")];
+    assert_eq!(
+        repeated.phrasings.len(),
+        1,
+        "формулировка не продублирована"
+    );
+    assert_eq!(
+        import_estimate(&vault, &paths(&[path]))
+            .await
+            .unwrap()
+            .parts_new,
+        0
+    );
+
+    // Переименование в приложении: `Moved` — и граф узнаёт источник по новому пути.
+    vault.remove(std::path::Path::new(path));
+    vault.replace_externally("Архив/Длинная.txt", edited.clone());
+    typsidian_core::ai::knowledge::store::move_source(
+        &mut vault,
+        std::path::Path::new(path),
+        std::path::Path::new("Архив/Длинная.txt"),
+        400,
+    )
+    .await;
+    let moved = import_estimate(&vault, &paths(&["Архив"])).await.unwrap();
+    assert_eq!((moved.files.len(), moved.parts_new), (1, 0));
+    // Копия без переноса — другой источник, импортируется целиком.
+    vault.replace_externally("Копия/Длинная.txt", edited);
+    assert_eq!(
+        import_estimate(&vault, &paths(&["Копия"]))
+            .await
+            .unwrap()
+            .parts_new,
+        3
+    );
+
+    // Вклад убран пользователем: файл можно импортировать заново.
+    remove_source(&mut vault, "Архив/Длинная.txt", false, 500)
+        .await
+        .unwrap();
+    assert!(graph_of(&vault).await.propositions.is_empty());
+    let after = import_estimate(&vault, &paths(&["Архив"])).await.unwrap();
+    assert_eq!(after.parts_new, 3);
+
+    // Одинаковые части внутри файла отправляются один раз.
+    let block = lines_text(19, "");
+    vault.replace_externally("Двойной.txt", format!("{block}{block}"));
+    let twice = import_estimate(&vault, &paths(&["Двойной.txt"]))
+        .await
+        .unwrap();
+    assert_eq!((twice.files[0].parts, twice.parts_new), (2, 1));
+}
+
+/// Покрытие частей: строки читаются и со старыми полями, идут за переносами и
+/// сбрасываются удалением вклада; негодный хэш игнорируется.
+pub async fn note_coverage_lines_follow_moves_and_removals() {
+    let hash = "0123456789abcdef0123456789abcdef";
+    let other = "fedcba9876543210fedcba9876543210";
+    let line = |value: Value| format!("{value}\n");
+    let covered = |source: &str, hash: &str, at: i64| {
+        line(json!({"line":"Covered","source":source,"kind":"Note","part":1,"hash":hash,"at":at}))
+    };
+    let sources = [
+        // Старая строка урока без новых полей читается по-прежнему.
+        line(json!({"line":"Covered","source":"Уроки/А.lesson","kind":"Lesson","upto":4,"at":1})),
+        covered("Заметки/А.typ", hash, 10),
+        covered("Заметки/А.typ", "не-хэш", 11),
+        line(json!({"line":"Moved","from":"Заметки","to":"Архив","at":20})),
+        covered("Архив/Б.typ", other, 30),
+        line(json!({"line":"SourceRemoved","source":"Архив/Б.typ","keep":false,"at":40})),
+    ]
+    .concat();
+    let projection = project(b"", b"", sources.as_bytes());
+    assert_eq!(projection.covered_of("Уроки/А.lesson"), 4);
+    // Перенос папки: покрытие едет за файлом; регистр пути не важен.
+    assert!(projection.part_covered("Архив/А.typ", hash));
+    assert!(projection.part_covered("архив/а.TYP", hash));
+    assert!(!projection.part_covered("Заметки/А.typ", hash));
+    assert!(!projection.part_covered("Архив/А.typ", other));
+    assert!(!projection.part_covered("Архив/А.typ", "не-хэш"));
+    // Покрытие заметки не подменяет число покрытых событий урока.
+    assert_eq!(projection.covered_of("Архив/А.typ"), 0);
+    assert!(projection.has_coverage("Архив/А.typ"));
+    // Вклад убран позже покрытия — части снова не покрыты.
+    assert!(!projection.part_covered("Архив/Б.typ", other));
+    let later = format!("{sources}{}", covered("Архив/Б.typ", other, 50));
+    assert!(project(b"", b"", later.as_bytes()).part_covered("Архив/Б.typ", other));
+}
+
+/// Одновременно в vault идёт один импорт; поддельная часть не принимается; закрытая посреди
+/// импорта папка больше не уходит.
+pub async fn import_guards_hold_one_job_forged_parts_and_late_denials() {
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/1.typ", "Первая.\n")
+        .with_file("Заметки/2.typ", "Вторая секретная.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let verified = connection(&vault).await;
+    let vault_id = unique("iv");
+    let prepared = begin_import(&mut vault, &vault_id, "g1", &estimate, 100, true, &verified)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(prepared.part.as_ref().map(|part| part.index), Some(1));
+    assert_eq!(prepared.events, vec![1]);
+    assert_eq!(prepared.remaining, 1);
+    // Второй импорт, пока первый идёт, не заводится и ничего не пишет в журнал.
+    let entries = journal_entries(&vault).await.len();
+    assert_eq!(
+        begin_import(&mut vault, &vault_id, "g2", &estimate, 100, true, &verified)
+            .await
+            .unwrap_err(),
+        AiFailure::Cancelled
+    );
+    assert_eq!(journal_entries(&vault).await.len(), entries);
+
+    // Поддельная часть (другой хэш) и часть без задания не принимаются, граф не пишется.
+    let mut forged = prepared.clone();
+    forged.part.as_mut().unwrap().hash = "0".repeat(32);
+    let reply_ok = StreamTransport::with(replies("Подделка", 1));
+    let outcome = send_extract(&reply_ok, &vault_id, &prepared, Some(KEY), &verified).await;
+    assert_eq!(
+        finish_import(&mut vault, &vault_id, &forged, 101, outcome.clone())
+            .await
+            .unwrap_err(),
+        AiFailure::Cancelled
+    );
+    let mut stranger = prepared.clone();
+    stranger.request_id = "нет-такого".to_owned();
+    assert_eq!(
+        finish_import(&mut vault, &vault_id, &stranger, 101, outcome.clone())
+            .await
+            .unwrap_err(),
+        AiFailure::Cancelled
+    );
+    assert!(graph_of(&vault).await.propositions.is_empty());
+
+    // Настоящая часть принимается; перед второй файлом папку закрывают — он пропущен.
+    let done = finish_import(&mut vault, &vault_id, &prepared, 101, outcome)
+        .await
+        .unwrap();
+    assert_eq!(done.next, Next::Continue);
+    let mut closed = load_settings(&vault).await;
+    closed.denied_folders = vec![text("Заметки/2.typ")];
+    save_settings(&mut vault, &closed).await.unwrap();
+    let verified = connection(&vault).await;
+    assert!(
+        begin_import(&mut vault, &vault_id, "g1", &estimate, 102, true, &verified)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let job = jobs(&vault_id)
+        .into_iter()
+        .find(|job| job.id == "g1")
+        .unwrap();
+    assert_eq!(job.state, JobState::Done);
+    assert_eq!(file_state(&job, "Заметки/1.typ"), ImportFileState::Done);
+    assert_eq!(file_state(&job, "Заметки/2.typ"), ImportFileState::Skipped);
+    assert_eq!(
+        job.files
+            .iter()
+            .find(|file| file.path.ends_with("2.typ"))
+            .unwrap()
+            .reason,
+        Some(ImportSkipReason::Denied)
+    );
+    assert_eq!(reply_ok.count(), 1);
+}
+
+/// Ревью 055, L1: тексты частей уходят из памяти при любом завершении задания, а не только
+/// когда его заканчивает сам импорт.
+pub async fn ending_a_job_by_any_way_drops_its_texts() {
+    use typsidian_core::ai::knowledge::import::runs_held;
+    use typsidian_core::ai::knowledge::jobs::{JobGuard, KNOWLEDGE_JOBS};
+
+    let mut vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "Первая заметка.\n");
+    let estimate = import_estimate(&vault, &paths(&[NOTES])).await.unwrap();
+    let verified = connection(&vault).await;
+
+    // Обрыв вызова: охрана задания бросает идущее задание.
+    let vault_id = unique("iv");
+    begin_import(&mut vault, &vault_id, "r1", &estimate, 100, true, &verified)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(runs_held(&vault_id), 1);
+    drop(JobGuard::new(&vault_id, "r1"));
+    assert_eq!(runs_held(&vault_id), 0, "обрыв задания оставил тексты");
+    assert_eq!(
+        jobs(&vault_id)
+            .into_iter()
+            .find(|job| job.id == "r1")
+            .map(|job| job.state),
+        Some(JobState::Cancelled)
+    );
+
+    // Конец через реестр напрямую (удаление урока, отмена снаружи).
+    let vault_id = unique("iv");
+    begin_import(&mut vault, &vault_id, "r2", &estimate, 100, true, &verified)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(runs_held(&vault_id), 1);
+    KNOWLEDGE_JOBS.end(
+        &vault_id,
+        "r2",
+        JobState::Cancelled,
+        Some(AiFailure::Cancelled),
+        101,
+    );
+    assert_eq!(runs_held(&vault_id), 0);
+
+    // Нормальный конец по-прежнему убирает тексты.
+    let vault_id = unique("iv");
+    let transport = StreamTransport::with(replies("Конец", 1));
+    run_import(&mut vault, &transport, &vault_id, "r3", &estimate, 200)
+        .await
+        .unwrap();
+    assert_eq!(runs_held(&vault_id), 0);
+}
+
+/// Ревью 055, L4: выбор, названный по всем записям корня, — это корень.
+pub async fn a_selection_naming_every_root_entry_is_the_root() {
+    let vault = notes_vault_with(&[])
+        .await
+        .with_file("Заметки/А.typ", "Первая.\n")
+        .with_file("Личное/Б.typ", "Вторая.\n")
+        .with_file("Корневая.typ", "Третья.\n");
+    for all in [
+        &["Заметки", "Личное", "Корневая.typ"][..],
+        &["Корневая.typ", "Личное", "Заметки", "Заметки/А.typ"][..],
+    ] {
+        assert_eq!(
+            import_estimate(&vault, &paths(all)).await.unwrap_err(),
+            AiFailure::Forbidden,
+            "{all:?}"
+        );
+    }
+    // Не все записи или вложенные пути вместо верхних — обычный выбор.
+    for part in [
+        &["Заметки", "Личное"][..],
+        &["Заметки", "Корневая.typ"][..],
+        &["Заметки/А.typ", "Личное/Б.typ", "Корневая.typ"][..],
+        &["Заметки"][..],
+    ] {
+        let estimate = import_estimate(&vault, &paths(part)).await.unwrap();
+        assert!(!estimate.files.is_empty(), "{part:?}");
+    }
+}
+
+/// Ревью 055, L3: чтение файла импорта не идёт дальше предела, даже если метаданные
+/// обещали меньше.
+pub async fn a_limited_read_never_returns_more_than_the_limit() {
+    use typsidian_core::vault::backend::{ReadError, VaultBackend};
+    let vault = MemoryVault::new()
+        .with_file("а.txt", vec![b'x'; 10])
+        .with_file("б.txt", vec![b'x'; 11]);
+    assert_eq!(
+        vault
+            .read_bytes_limited(std::path::Path::new("а.txt"), 10)
+            .await
+            .unwrap()
+            .len(),
+        10
+    );
+    assert_eq!(
+        vault
+            .read_bytes_limited(std::path::Path::new("б.txt"), 10)
+            .await
+            .unwrap_err(),
+        ReadError::TooLarge
+    );
+    assert_eq!(
+        vault
+            .read_bytes_limited(std::path::Path::new("нет.txt"), 10)
+            .await
+            .unwrap_err(),
+        ReadError::NotFound
+    );
 }

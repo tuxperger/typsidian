@@ -130,6 +130,7 @@ import type {
   AiProvider,
   AiSettings,
   Chain,
+  ImportEstimate,
   KnowledgeGraph,
   KnowledgeJob,
   Proposition,
@@ -925,6 +926,18 @@ export interface KnowledgeClient {
    */
   extract(vaultId: string, source: string, requestId: string): Promise<KnowledgeJob>;
   jobs(vaultId: string): Promise<KnowledgeJob[]>;
+  /**
+   * Оценка импорта заметок, папок и PDF (фича 055): что уйдёт модели и сколько это стоит.
+   * Сети нет; запрещённые и неподдерживаемые файлы попадают в `skipped`. Корень vault, путь
+   * вне vault и больше 200 путей — отказ `Forbidden`.
+   */
+  importEstimate(paths: string[]): Promise<ImportEstimate>;
+  /**
+   * Импорт по подтверждённой оценке (её передают как есть: ядро пересчитывает и при
+   * расхождении отвечает `LessonChanged`). Вызывающий его не ждёт: прогресс по файлам —
+   * `jobs` (`KnowledgeJob.files`), отмена — `ai.cancel`. Второй импорт в vault — `Cancelled`.
+   */
+  import(vaultId: string, requestId: string, estimate: ImportEstimate): Promise<KnowledgeJob>;
   /** Удаляет утверждение (`id`) либо вклад источника (`source`; `keep` — оставить вклад). */
   remove(target: { id: string } | { source: string; keep: boolean }): Promise<void>;
 }

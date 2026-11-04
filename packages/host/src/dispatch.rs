@@ -266,6 +266,8 @@ pub const COMMANDS: &[&str] = &[
     "ai_knowledge_chains",
     "ai_knowledge_proposition",
     "ai_knowledge_extract",
+    "ai_knowledge_import_estimate",
+    "ai_knowledge_import",
     "ai_knowledge_jobs",
     "ai_knowledge_remove",
     "ai_lesson_delete",
@@ -3274,6 +3276,43 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
                         a.vault_id,
                         a.source,
                         a.request_id,
+                        a.now,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_import_estimate" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                paths: Vec<String>,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_knowledge_import_estimate(&host.vault, a.paths).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_knowledge_import" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                request_id: String,
+                estimate: ai::knowledge::ImportEstimate,
+                now: i64,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_knowledge_import(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.request_id,
+                        a.estimate,
                         a.now,
                         a.allow_custom,
                     )

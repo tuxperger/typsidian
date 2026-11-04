@@ -45,6 +45,10 @@ pub const MAX_AI_REQUESTS_PER_ACCOUNT: u32 = 2;
 /// 054, L6). Само задание общий предел запросов держит только на время одной пачки.
 pub const MAX_AI_BACKGROUND_PER_ACCOUNT: u32 = 1;
 
+/// Оценок импорта заметок (055) на весь сервер: оценка читает и разбирает чужие файлы, а не
+/// ходит в сеть, но так же занимает блокирующие потоки и память (ревью безопасности 055, M2).
+pub const MAX_IMPORT_ESTIMATES: usize = 2;
+
 /// Состояние сервера, общее для всех запросов.
 pub struct AppState {
     pub config: Config,
@@ -62,6 +66,10 @@ pub struct AppState {
     pub ai_by_account: std::sync::Mutex<std::collections::HashMap<String, u32>>,
     /// Идущих фоновых заданий с моделью по аккаунтам (054).
     pub ai_background: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    /// Аккаунты с идущей оценкой импорта (055): одна оценка на аккаунт.
+    pub import_estimating: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Оценок импорта на весь сервер (055).
+    pub import_estimates: Arc<tokio::sync::Semaphore>,
     /// Старты гостей по одному: проверка предела по адресу и запись гостя
     /// (фича 039).
     pub demo_starts: tokio::sync::Mutex<()>,
@@ -141,6 +149,38 @@ impl Drop for BackgroundAiSlot {
     }
 }
 
+/// Место оценки импорта заметок (055, ревью безопасности M2): одно на аккаунт и общий предел на
+/// сервер. Возвращается при сбросе, в том числе когда вызов оборван.
+pub struct ImportEstimateSlot {
+    state: Shared,
+    account: String,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl ImportEstimateSlot {
+    pub fn acquire(state: &Shared, account: &str) -> Option<ImportEstimateSlot> {
+        let mut running = state.import_estimating.lock().ok()?;
+        if running.contains(account) {
+            return None;
+        }
+        let permit = state.import_estimates.clone().try_acquire_owned().ok()?;
+        running.insert(account.to_owned());
+        Some(ImportEstimateSlot {
+            state: state.clone(),
+            account: account.to_owned(),
+            _permit: permit,
+        })
+    }
+}
+
+impl Drop for ImportEstimateSlot {
+    fn drop(&mut self) {
+        if let Ok(mut running) = self.state.import_estimating.lock() {
+            running.remove(&self.account);
+        }
+    }
+}
+
 /// Место под одну пачку фонового задания: место аккаунта и место общего предела запросов к
 /// моделям, оба на время одного сетевого запроса. Состояние сервера не держится: окружение
 /// аккаунта живёт в нём самом.
@@ -176,6 +216,8 @@ impl AppState {
             ai_requests: Arc::new(tokio::sync::Semaphore::new(MAX_AI_REQUESTS)),
             ai_by_account: std::sync::Mutex::default(),
             ai_background: std::sync::Mutex::default(),
+            import_estimating: std::sync::Mutex::default(),
+            import_estimates: Arc::new(tokio::sync::Semaphore::new(MAX_IMPORT_ESTIMATES)),
             demo_starts: tokio::sync::Mutex::new(()),
             demo_secret: std::sync::OnceLock::new(),
         })

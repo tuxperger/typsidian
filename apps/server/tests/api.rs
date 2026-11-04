@@ -661,6 +661,27 @@ async fn ai_keys_are_per_user_and_custom_endpoint_is_closed() {
         .await;
     assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
 
+    // Импорт заметок (055): те же подмены, оценка — чтение vault без сети, корень отклоняется.
+    let (_, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_import",
+            json!({ "vaultId": "поддельный", "requestId": "1", "estimate": json!({ "requested": [], "files": [], "skipped": [], "skipped_more": 0, "parts_new": 0, "chars_new": 0, "units": 0, "cost_usd": null, "model": null }),
+                "now": 1, "allowCustom": true }),
+        )
+        .await;
+    assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
+    let (_, root) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_import_estimate",
+            json!({ "paths": ["."] }),
+        )
+        .await;
+    assert_eq!(root["kind"], "Forbidden", "{root}");
+
     // Аргументы массивом по порядку полей не обходят подстановку сервера.
     let (status, body) = server
         .invoke(&anna, "Общее имя", "ai_probe", json!(["", "1", 0, true]))
@@ -1011,10 +1032,22 @@ async fn knowledge_extraction_takes_a_background_slot_and_a_request_slot_per_bat
     // Фоновое место: одно на аккаунт, чужой аккаунт его не касается, брошенное освобождается.
     assert_eq!(MAX_AI_BACKGROUND_PER_ACCOUNT, 1);
     let args = json!({ "source": "Уроки/а.lesson", "requestId": "1", "now": 0 });
+    let import_args = json!({ "requestId": "1", "estimate": json!({ "requested": [], "files": [], "skipped": [], "skipped_more": 0, "parts_new": 0, "chars_new": 0, "units": 0, "cost_usd": null, "model": null }), "now": 0 });
     let background = BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место");
     assert!(BackgroundAiSlot::acquire(&server.state, &anna_id).is_none());
     let (status, refused) = server
         .invoke(&anna, "Общее имя", "ai_knowledge_extract", args.clone())
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(refused["kind"], "RateLimited", "{refused}");
+    // Импорт заметок занимает то же фоновое место аккаунта.
+    let (status, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_import",
+            import_args.clone(),
+        )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(refused["kind"], "RateLimited", "{refused}");
@@ -1069,4 +1102,97 @@ async fn knowledge_extraction_takes_a_background_slot_and_a_request_slot_per_bat
     };
     let bobs = bob_gate.enter().expect("у Боба своё место");
     drop(bobs);
+}
+
+/// 055, ревью безопасности M2: оценка импорта занимает одно место аккаунта и место на весь
+/// сервер; чужой аккаунт не страдает, место возвращается при сбросе.
+#[tokio::test]
+async fn import_estimate_takes_one_slot_per_account_and_a_server_limit() {
+    use typsidian_server::{ImportEstimateSlot, MAX_IMPORT_ESTIMATES};
+
+    let server = Server::new().await;
+    let anna = server.enter("anna").await;
+    let bob = server.enter("bob").await;
+    for client in [&anna, &bob] {
+        let (status, _, _) = server
+            .call(
+                Method::POST,
+                "/api/vaults",
+                Some(client),
+                Some(json!({ "name": "Общее имя" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let id_of = |login: &'static str| {
+        let state = server.state.clone();
+        async move {
+            state
+                .store
+                .account_by_login(login)
+                .await
+                .unwrap()
+                .unwrap()
+                .id
+        }
+    };
+    let anna_id = id_of("anna").await;
+    let bob_id = id_of("bob").await;
+    let args = json!({ "paths": ["."] });
+
+    // Пока у аккаунта идёт оценка, вторая отклоняется; у другого аккаунта — идёт.
+    let first = ImportEstimateSlot::acquire(&server.state, &anna_id).expect("место");
+    assert!(ImportEstimateSlot::acquire(&server.state, &anna_id).is_none());
+    let (status, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_import_estimate",
+            args.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(refused["kind"], "RateLimited", "{refused}");
+    let (_, other) = server
+        .invoke(
+            &bob,
+            "Общее имя",
+            "ai_knowledge_import_estimate",
+            args.clone(),
+        )
+        .await;
+    assert_eq!(other["kind"], "Disabled", "{other}");
+    drop(first);
+    let (_, freed) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_knowledge_import_estimate",
+            args.clone(),
+        )
+        .await;
+    assert_eq!(freed["kind"], "Disabled", "{freed}");
+
+    // Общий предел сервера: заняты все места — отказ даже свободному аккаунту.
+    let mut held = Vec::new();
+    for index in 0..MAX_IMPORT_ESTIMATES {
+        held.push(ImportEstimateSlot::acquire(&server.state, &format!("чужой-{index}")).unwrap());
+    }
+    assert!(ImportEstimateSlot::acquire(&server.state, &bob_id).is_none());
+    let (_, refused) = server
+        .invoke(
+            &bob,
+            "Общее имя",
+            "ai_knowledge_import_estimate",
+            args.clone(),
+        )
+        .await;
+    assert_eq!(refused["kind"], "RateLimited", "{refused}");
+    drop(held);
+    let (_, freed) = server
+        .invoke(&bob, "Общее имя", "ai_knowledge_import_estimate", args)
+        .await;
+    assert_eq!(freed["kind"], "Disabled", "{freed}");
+    // Команда не оставила за собой занятых мест.
+    drop(ImportEstimateSlot::acquire(&server.state, &bob_id).expect("место свободно"));
 }

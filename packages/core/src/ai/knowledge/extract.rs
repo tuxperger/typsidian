@@ -271,7 +271,7 @@ fn user_message(language: Language, known: &[(String, String)], batch: &Batch) -
     out
 }
 
-fn build_request(
+pub(super) fn build_request(
     provider: AiProvider,
     base: &str,
     model: &str,
@@ -344,7 +344,19 @@ pub struct PreparedExtract {
     /// Известные утверждения, отправленные в запросе: только на них модель может ссылаться
     /// (`same_as`, цепочки; ревью 054, L7).
     pub known: Vec<String>,
+    /// Часть заметки при импорте (фича 055); у пачки урока `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<PartRef>,
     pub request: HttpRequest,
+}
+
+/// Какая часть заметки в запросе: номер с 1 и хэш содержимого.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
+#[cfg_attr(target_arch = "wasm32", tsify(into_wasm_abi, from_wasm_abi))]
+pub struct PartRef {
+    pub index: u32,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -503,30 +515,13 @@ async fn begin_inner<B: VaultBackend>(
         return Ok(None);
     };
 
-    // Известные утверждения — из графа; закрытая для агента папка графа их не отдаёт.
-    let graph_open = check_access_in(backend, &graph_folder_string(&settings), &settings).await;
     let batch_text: String = batch
         .items
         .iter()
         .map(|item| item.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    // Утверждение из закрытой папки урока тоже не уходит (M1): ищем с запасом и оставляем
-    // те, у которых есть открытый источник, с его формулировкой.
-    let known: Vec<(String, String)> = if graph_open {
-        let candidates = related(&projection, &batch_text, RELATED_MAX * 4, |_, _| true);
-        let open = super::open_sources(backend, &settings, &projection, &candidates).await;
-        candidates
-            .into_iter()
-            .filter_map(|id| {
-                let text = super::visible_text(&projection, &id, &open)?;
-                Some((id, text))
-            })
-            .take(RELATED_MAX)
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let known = known_for(backend, &settings, &projection, &batch_text).await;
     let language = current_language(&lesson);
     let request = build_request(
         settings.provider,
@@ -563,6 +558,7 @@ async fn begin_inner<B: VaultBackend>(
         events: batch.items.iter().map(|item| item.index).collect(),
         remaining: (batches.len() - 1) as u32,
         known: known_ids,
+        part: None,
         request,
     }))
 }
@@ -680,7 +676,7 @@ pub async fn finish_extract<B: VaultBackend>(
 
 /// Дописывает найденное: утверждения, потом цепочки, покрытие — последним, чтобы сбой
 /// посреди записи не пометил покрытым то, что не записано.
-async fn apply<B: VaultBackend>(
+pub(super) async fn apply<B: VaultBackend>(
     backend: &mut B,
     prepared: &PreparedExtract,
     now: i64,
@@ -732,21 +728,59 @@ async fn apply<B: VaultBackend>(
     );
     append_propositions(backend, &settings, &plan.propositions).await?;
     append_chains(backend, &settings, &plan.chains).await?;
-    append_sources(
-        backend,
-        &settings,
-        &[SourceLine::Covered {
+    let line = match &prepared.part {
+        // Часть заметки (055): покрытие — хэш содержимого части.
+        Some(part) => SourceLine::Covered {
+            source: prepared.source.clone(),
+            kind: SourceKind::Note,
+            upto: 0,
+            part: Some(part.index),
+            hash: Some(part.hash.clone()),
+            at: covered_at,
+        },
+        None => SourceLine::Covered {
             source: prepared.source.clone(),
             kind: SourceKind::Lesson,
             upto: prepared.upto,
+            part: None,
+            hash: None,
             at: covered_at,
-        }],
-    )
-    .await?;
+        },
+    };
+    append_sources(backend, &settings, &[line]).await?;
     // Пачка без роста покрытия заканчивает задание: иначе платное извлечение шло бы по кругу (H1).
     let after = store::load_sources(backend, &settings).await;
-    if after.covered_of(&prepared.source) != prepared.upto {
+    let grew = match &prepared.part {
+        Some(part) => after.part_covered(&prepared.source, &part.hash),
+        None => after.covered_of(&prepared.source) == prepared.upto,
+    };
+    if !grew {
         return Err(AiFailure::JournalFailed);
     }
     Ok(plan)
+}
+
+/// Известные утверждения для запроса (id, текст): до [`RELATED_MAX`] найденных локально по
+/// тексту пачки. Закрытая для агента папка графа их не отдаёт. Утверждение из закрытой
+/// папки источника тоже не уходит (054 M1): ищем с запасом и оставляем те, у которых есть
+/// открытый источник, с его формулировкой. Общий для уроков и заметок (055).
+pub(super) async fn known_for<B: VaultBackend>(
+    backend: &B,
+    settings: &crate::ai::settings::AiSettings,
+    projection: &Projection,
+    text: &str,
+) -> Vec<(String, String)> {
+    if !check_access_in(backend, &graph_folder_string(settings), settings).await {
+        return Vec::new();
+    }
+    let candidates = related(projection, text, RELATED_MAX * 4, |_, _| true);
+    let open = super::open_sources(backend, settings, projection, &candidates).await;
+    candidates
+        .into_iter()
+        .filter_map(|id| {
+            let text = super::visible_text(projection, &id, &open)?;
+            Some((id, text))
+        })
+        .take(RELATED_MAX)
+        .collect()
 }

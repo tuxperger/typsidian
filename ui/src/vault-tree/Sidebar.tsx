@@ -43,6 +43,8 @@ export interface SidebarProps {
    * граф, задачи, источники, настройки. Не переданы — значка нет.
    */
   onOpenTasks?: (() => void) | undefined;
+  /** «Добавить в граф знаний…» из меню заметки и папки (фича 055). */
+  onAddToGraph?: ((paths: string[]) => void) | undefined;
   /** Открыт граф — его значок отмечен как текущий экран (044, артборд 7). */
   graphOpen?: boolean;
   onToggleSources?: (() => void) | undefined;
@@ -130,6 +132,7 @@ export function Sidebar({
   onMoveToRequestHandled,
   bookmarksPanel,
   onBookmark,
+  onAddToGraph,
   revealFolder = null,
 }: SidebarProps): React.JSX.Element {
   const { t } = useI18n();
@@ -291,6 +294,7 @@ export function Sidebar({
           conflictPaths={conflictPaths}
           onMoveTo={setMoveTo}
           onBookmark={onBookmark}
+          onAddToGraph={onAddToGraph}
         />
       </nav>
 

@@ -985,10 +985,133 @@ async fn related_search_is_local_stable_and_capped() {
     knowledge::related_search_is_local_stable_and_capped().await;
 }
 
+#[tokio::test]
+async fn pdf_text_comes_by_pages_and_hostile_files_are_refused() {
+    knowledge::pdf_text_comes_by_pages_and_hostile_files_are_refused().await;
+}
+
+#[tokio::test]
+async fn an_estimate_lists_files_skips_with_reasons_and_cost() {
+    knowledge::an_estimate_lists_files_skips_with_reasons_and_cost().await;
+}
+
+#[tokio::test]
+async fn the_vault_root_is_refused_and_big_files_split_into_parts() {
+    knowledge::the_vault_root_is_refused_and_big_files_split_into_parts().await;
+}
+
+#[tokio::test]
+async fn a_million_paths_and_huge_folders_are_bounded() {
+    knowledge::a_million_paths_and_huge_folders_are_bounded().await;
+}
+
+#[tokio::test]
+async fn an_import_sends_allowed_notes_and_reports_by_file() {
+    knowledge::an_import_sends_allowed_notes_and_reports_by_file().await;
+}
+
+#[tokio::test]
+async fn an_import_refuses_an_estimate_that_no_longer_matches() {
+    knowledge::an_import_refuses_an_estimate_that_no_longer_matches().await;
+}
+
+#[tokio::test]
+async fn cancelling_an_import_keeps_done_files_and_sends_no_more() {
+    knowledge::cancelling_an_import_keeps_done_files_and_sends_no_more().await;
+}
+
+#[tokio::test]
+async fn a_failed_part_makes_the_file_partial_and_a_retry_sends_only_unfinished_parts() {
+    knowledge::a_failed_part_makes_the_file_partial_and_a_retry_sends_only_unfinished_parts().await;
+}
+
+#[tokio::test]
+async fn a_repeat_import_is_free_and_sends_only_changed_parts() {
+    knowledge::a_repeat_import_is_free_and_sends_only_changed_parts().await;
+}
+
+#[tokio::test]
+async fn note_coverage_lines_follow_moves_and_removals() {
+    knowledge::note_coverage_lines_follow_moves_and_removals().await;
+}
+
+#[tokio::test]
+async fn import_guards_hold_one_job_forged_parts_and_late_denials() {
+    knowledge::import_guards_hold_one_job_forged_parts_and_late_denials().await;
+}
+
 /// SC-003: граф из 2000 утверждений открывается и ищется быстрее секунды.
 #[tokio::test]
 async fn graph_of_2000_propositions_opens_and_searches_in_under_a_second() {
     let elapsed =
         knowledge::graph_of_2000_propositions_opens_and_searches_in_under_a_second().await;
     assert!(elapsed < 1_000, "{elapsed} мс");
+}
+
+#[tokio::test]
+async fn ending_a_job_by_any_way_drops_its_texts() {
+    knowledge::ending_a_job_by_any_way_drops_its_texts().await;
+}
+
+#[tokio::test]
+async fn a_selection_naming_every_root_entry_is_the_root() {
+    knowledge::a_selection_naming_every_root_entry_is_the_root().await;
+}
+
+#[tokio::test]
+async fn a_limited_read_never_returns_more_than_the_limit() {
+    knowledge::a_limited_read_never_returns_more_than_the_limit().await;
+}
+
+/// Ревью 055, L3, native: файл импорта открывается без перехода по ссылке, это обязан быть
+/// обычный файл, и читается он не дальше предела.
+#[tokio::test]
+async fn import_reads_regular_files_only_and_never_past_the_limit() {
+    use std::os::unix::fs::symlink;
+    use typsidian_core::vault::backend::{ReadError, VaultBackend};
+    use typsidian_core::vault::native::NativeBackend;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(root.join("Заметки")).unwrap();
+    std::fs::write(outside.path().join("чужое.txt"), "ЧУЖОЙ-ФАЙЛ").unwrap();
+    std::fs::write(root.join("Заметки/ровно.txt"), vec![b'x'; 10]).unwrap();
+    std::fs::write(root.join("Заметки/больше.txt"), vec![b'x'; 11]).unwrap();
+    symlink(
+        outside.path().join("чужое.txt"),
+        root.join("Заметки/ссылка.txt"),
+    )
+    .unwrap();
+    symlink(outside.path(), root.join("Заметки/папка")).unwrap();
+    std::fs::write(outside.path().join("в-папке.txt"), "ЧУЖОЙ").unwrap();
+    let fifo = std::ffi::CString::new(root.join("Заметки/канал.txt").to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+
+    let backend = NativeBackend::open(root).await.unwrap();
+    let read = |path: &'static str| {
+        let backend = &backend;
+        async move {
+            backend
+                .read_bytes_limited(std::path::Path::new(path), 10)
+                .await
+        }
+    };
+    assert_eq!(read("Заметки/ровно.txt").await.unwrap().len(), 10);
+    assert_eq!(
+        read("Заметки/больше.txt").await.unwrap_err(),
+        ReadError::TooLarge
+    );
+    // Ссылка на файл, ссылка на папку, канал: не читаются, и не зависают.
+    assert_eq!(read("Заметки/ссылка.txt").await.unwrap_err(), ReadError::Io);
+    assert_eq!(
+        read("Заметки/папка/в-папке.txt").await.unwrap_err(),
+        ReadError::Io
+    );
+    assert_eq!(read("Заметки/канал.txt").await.unwrap_err(), ReadError::Io);
+    assert_eq!(
+        read("Заметки/нет.txt").await.unwrap_err(),
+        ReadError::NotFound
+    );
+    assert_eq!(read("../x").await.unwrap_err(), ReadError::NotFound);
 }

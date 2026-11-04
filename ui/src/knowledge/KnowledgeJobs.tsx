@@ -26,7 +26,8 @@ export interface KnowledgeJobsProps {
 export function KnowledgeJobs({ client, vaultId, jobs, source }: KnowledgeJobsProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
-  const mine = jobs.filter((job) => source === undefined || job.source === source);
+  // Импорт заметок (`files`) показывает своя карточка (фича 055, макеты C и D).
+  const mine = jobs.filter((job) => job.files === undefined && (source === undefined || job.source === source));
   const running = mine.filter((job) => job.state === "Running");
   const failed = mine.filter(
     (job) =>

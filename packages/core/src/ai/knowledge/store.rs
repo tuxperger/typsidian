@@ -89,11 +89,18 @@ pub enum ChainLine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "line")]
 pub enum SourceLine {
-    /// События урока с номерами меньше `upto` разобраны.
+    /// События урока с номерами меньше `upto` разобраны. У заметки (фича 055) строка
+    /// покрывает одну часть: `part` — её номер, `hash` — хэш содержимого части; `upto` у
+    /// такой строки 0 и не читается.
     Covered {
         source: String,
         kind: SourceKind,
+        #[serde(default)]
         upto: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hash: Option<String>,
         at: i64,
     },
     /// Вклад источника убран (`keep: false`) или источник удалён, а вклад оставлен.
@@ -153,12 +160,19 @@ pub struct Projection {
     /// Покрытие по пути в свёрнутой форме `check_access` (ревью 054, L9): `Урок.lesson` и
     /// `урок.lesson` — один файл на файловой системе без учёта регистра.
     covered_folded: HashMap<String, u32>,
+    /// Покрытые части заметок: путь в свёрнутой форме -> хэши содержимого частей (фича 055).
+    note_parts: HashMap<String, HashSet<String>>,
     /// Самое позднее время строки по id утверждения (в том числе скрытой надгробием).
     pub latest_by_id: HashMap<String, i64>,
     /// То же по источнику (путь после переносов).
     pub latest_by_source: HashMap<String, i64>,
     /// Самое позднее время среди учтённых переносов.
     pub last_move_at: i64,
+}
+
+/// Хэш содержимого части заметки: 32 шестнадцатеричных знака (фича 055).
+pub fn is_part_hash(hash: &str) -> bool {
+    hash.len() == 32 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// Время новой строки: не раньше `now` и строго позже всего, что уже записано (`floor`).
@@ -348,13 +362,30 @@ pub fn project(propositions: &[u8], chains: &[u8], sources: &[u8]) -> Projection
     // а не максимум `upto`: урок, пересозданный по тому же пути короче прежнего, иначе
     // никогда не стал бы покрытым (H1).
     let mut covered_at: HashMap<String, (i64, u32)> = HashMap::new();
+    // Покрытие частей заметок: (путь, хэш, время); недействительно, если вклад убран позже.
+    let mut note_cover: Vec<(String, String, i64)> = Vec::new();
     for line in &source_lines {
         match line {
             SourceLine::Covered {
-                source, upto, at, ..
+                source,
+                upto,
+                hash,
+                at,
+                ..
             } => {
                 let source = resolver.resolve(&clip(source, SOURCE_MAX_CHARS), *at);
                 raise(&mut out.latest_by_source, &source, *at);
+                if let Some(hash) = hash {
+                    // Часть заметки: хэш запоминается, а число покрытых событий урока не трогается.
+                    if is_part_hash(hash) {
+                        note_cover.push((source.clone(), hash.clone(), *at));
+                    }
+                    covered_at
+                        .entry(folded_key(&source))
+                        .or_insert((i64::MIN, 0));
+                    out.covered.entry(source).or_insert(0);
+                    continue;
+                }
                 let entry = covered_at
                     .entry(folded_key(&source))
                     .or_insert((i64::MIN, 0));
@@ -375,6 +406,15 @@ pub fn project(propositions: &[u8], chains: &[u8], sources: &[u8]) -> Projection
             }
             SourceLine::Moved { .. } => {}
         }
+    }
+    for (source, hash, at) in note_cover {
+        if dropped.get(&source).is_some_and(|removed| *removed >= at) {
+            continue;
+        }
+        out.note_parts
+            .entry(folded_key(&source))
+            .or_default()
+            .insert(hash);
     }
     out.covered_folded = covered_at
         .into_iter()
@@ -483,6 +523,14 @@ impl Projection {
             .get(&folded_key(path))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Покрыта ли часть заметки с таким хэшем содержимого (фича 055): строка покрытия есть и
+    /// вклад источника после неё не убирали. Путь сравнивается в свёрнутой форме.
+    pub fn part_covered(&self, path: &str, hash: &str) -> bool {
+        self.note_parts
+            .get(&folded_key(path))
+            .is_some_and(|hashes| hashes.contains(hash))
     }
 
     /// Есть ли покрытие у пути (в любой записи регистра).

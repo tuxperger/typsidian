@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Chain, KnowledgeGraph } from "../wasm-core/typsidian_core.js";
+import type { Chain, KnowledgeGraph, Note } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
 import { Icon } from "../icons/Icons.js";
 import { useI18n } from "../i18n/index.js";
 import { usePhoneViewport } from "../workspace/usePhoneViewport.js";
 import { KnowledgeChains } from "./KnowledgeChains.js";
 import { KnowledgeJobs } from "./KnowledgeJobs.js";
+import { ImportPicker } from "./ImportPicker.js";
 import { KnowledgeMap } from "./KnowledgeMap.js";
 import type { OpenSource } from "./knowledgeText.js";
 import { PropositionPanel } from "./PropositionPanel.js";
@@ -29,9 +30,20 @@ export interface KnowledgeViewProps {
   onOpenSource: OpenSource;
   /** «Назад» — только на телефоне: на рабочем столе выход через шапку. */
   onBack?: (() => void) | undefined;
+  /** Файлы vault для выбора при импорте (фича 055); без них кнопки «Добавить заметки…» нет. */
+  notes?: readonly Note[] | undefined;
+  /** Выбранные пути ушли в импорт: оценка и подтверждение — выше, в рабочей области. */
+  onImport?: ((paths: string[]) => void) | undefined;
 }
 
-export function KnowledgeView({ client, vaultId, onOpenSource, onBack }: KnowledgeViewProps): React.JSX.Element {
+export function KnowledgeView({
+  client,
+  vaultId,
+  onOpenSource,
+  onBack,
+  notes,
+  onImport,
+}: KnowledgeViewProps): React.JSX.Element {
   const { t } = useI18n();
   const phone = usePhoneViewport();
   const [mapEnabled, setMapEnabled] = useState(true);
@@ -43,6 +55,7 @@ export function KnowledgeView({ client, vaultId, onOpenSource, onBack }: Knowled
   const [failed, setFailed] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [picking, setPicking] = useState(false);
   const { jobs } = useKnowledgeJobs(client, vaultId);
 
   // «Показывать картой» выключено — остаётся только таблица цепочек (FR-007).
@@ -147,6 +160,11 @@ export function KnowledgeView({ client, vaultId, onOpenSource, onBack }: Knowled
           onChange={(event) => setInput(event.target.value)}
         />
         <span className="ts-spacer" />
+        {notes !== undefined && onImport !== undefined && (
+          <button type="button" className="ts-btn" aria-haspopup="dialog" onClick={() => setPicking(true)}>
+            {t("knowledge.import.add")}
+          </button>
+        )}
         {!nothing && (
           <span className="ts-kg__count" aria-live="polite">
             {counts}
@@ -210,6 +228,17 @@ export function KnowledgeView({ client, vaultId, onOpenSource, onBack }: Knowled
       </div>
 
       <KnowledgeJobs client={client} vaultId={vaultId} jobs={jobs} />
+
+      {picking && notes !== undefined && onImport !== undefined && (
+        <ImportPicker
+          notes={notes}
+          onCancel={() => setPicking(false)}
+          onPick={(paths) => {
+            setPicking(false);
+            onImport(paths);
+          }}
+        />
+      )}
     </section>
   );
 }

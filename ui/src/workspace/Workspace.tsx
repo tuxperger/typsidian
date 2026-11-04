@@ -36,6 +36,8 @@ import { NewLessonDialog } from "../lessons/NewLessonDialog.js";
 import { NewPracticeDialog } from "../lessons/NewPracticeDialog.js";
 import { LessonEnvProvider, requestLessonJump } from "../lessons/lessonEnv.js";
 import { KnowledgeView } from "../knowledge/KnowledgeView.js";
+import { ImportHost } from "../knowledge/ImportHost.js";
+import { useKnowledgeImport } from "../knowledge/useKnowledgeImport.js";
 import { useVaultId } from "../lessons/useVaultId.js";
 import { SlidesExportDialog } from "../slides/SlidesExportDialog.js";
 import { BookmarkActionsContext, type BookmarkActions } from "../bookmarks/BookmarkActions.js";
@@ -799,6 +801,8 @@ function WorkspaceView({
     }),
     [lessonVaultId, openTab],
   );
+  // Импорт заметок в граф знаний (фича 055): оценка, подтверждение, ход и итог.
+  const knowledgeImport = useKnowledgeImport(state.client, lessonVaultId);
   // Колонка предпросмотра: доска при одной группе её не имеет (research.md §9).
   const showPreview = !(isBoardOpen && (layout?.groups.length ?? 1) < 2);
 
@@ -3104,6 +3108,8 @@ function WorkspaceView({
           vaultId={lessonVaultId}
           onOpenSource={openKnowledgeSource}
           onBack={toggleView}
+          notes={state.notes}
+          onImport={knowledgeImport.begin}
         />
       ) : view === "graph" && phone ? (
         <GraphView
@@ -3207,6 +3213,7 @@ function WorkspaceView({
               }
               conflictPaths={conflictPaths}
               onBookmark={(target, name) => void addBookmark(target, name)}
+              onAddToGraph={state.client === null ? undefined : knowledgeImport.begin}
               revealFolder={revealFolder}
               bookmarksPanel={
                 <BookmarksPanel
@@ -3248,7 +3255,13 @@ function WorkspaceView({
         {/* Граф (фича 025) — на месте текста и листа, дерево остаётся слева
             (фича 044, артборд 7). */}
         {view === "knowledge" ? (
-          <KnowledgeView client={state.client} vaultId={lessonVaultId} onOpenSource={openKnowledgeSource} />
+          <KnowledgeView
+            client={state.client}
+            vaultId={lessonVaultId}
+            onOpenSource={openKnowledgeSource}
+            notes={state.notes}
+            onImport={knowledgeImport.begin}
+          />
         ) : view === "graph" ? (
           <GraphView
             client={state.client}
@@ -3495,6 +3508,8 @@ function WorkspaceView({
           onClose={() => setLessonsOpen(false)}
         />
       )}
+
+      <ImportHost flow={knowledgeImport} onOpenGraph={() => setView("knowledge")} />
 
       {newLessonOpen && state.client !== null && (
         <NewLessonDialog

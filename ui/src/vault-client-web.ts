@@ -81,6 +81,9 @@ import {
   knowledgeChains,
   knowledgeFinish,
   knowledgeGraph,
+  knowledgeImportBegin,
+  knowledgeImportEstimate,
+  knowledgeImportFinish,
   knowledgeJobs,
   knowledgeProposition,
   knowledgeRemove,
@@ -100,6 +103,7 @@ import {
   lessonSetState,
   lessonSkipProbe,
   type AiFailure,
+  type ImportEstimate,
   type KnowledgeJob,
   type ProbeReply,
   type TurnReply,
@@ -641,6 +645,33 @@ export function webVaultClient(
         return job;
       },
       jobs: async (vaultId) => knowledgeJobs(vaultId),
+      importEstimate: (paths) => call(() => knowledgeImportEstimate(backend, paths)),
+      // Тот же цикл, что у `extract`, но части берёт `knowledgeImportBegin` по оценке; сеть —
+      // вне очереди (`backend` на время запроса свободен). Конец и отмена — `undefined`.
+      import: async (vaultId, requestId, estimate: ImportEstimate) => {
+        let last: KnowledgeJob | undefined;
+        for (;;) {
+          const prepared = await call(() =>
+            knowledgeImportBegin(backend, vaultId, requestId, estimate, Date.now()),
+          );
+          if (prepared === undefined) break;
+          let reply: TurnReply | undefined;
+          let failure: AiFailure | undefined;
+          try {
+            reply = await knowledgeSend(vaultId, prepared);
+          } catch (error) {
+            failure = error as AiFailure;
+          }
+          const done = await call(() =>
+            knowledgeImportFinish(backend, vaultId, prepared, Date.now(), reply, failure),
+          );
+          last = done.job;
+          if (done.next === "WaitUser") break;
+        }
+        const job = last ?? knowledgeJobs(vaultId).find((item) => item.id === requestId);
+        if (job === undefined) throw { kind: "Cancelled" } satisfies AiFailure;
+        return job;
+      },
       remove: (target) =>
         call(() =>
           "id" in target

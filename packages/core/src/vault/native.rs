@@ -1417,6 +1417,45 @@ impl Drop for NativeBackend {
     }
 }
 
+/// Читает обычный файл не дальше `limit` байт, не переходя по ссылке (ревью 055, L3).
+///
+/// Проверки и чтение идут по одному открытому дескриптору: подмена файла ссылкой или
+/// каналом после проверки пути ничего не меняет. `O_NONBLOCK` не даёт открытию канала
+/// без писателя повиснуть, обычному файлу он не мешает.
+fn read_regular_limited(full: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(full).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(ReadError::Io);
+    }
+    let file = options.open(full).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => ReadError::NotFound,
+        _ => ReadError::Io,
+    })?;
+    let meta = file.metadata().map_err(|_| ReadError::Io)?;
+    if !meta.is_file() {
+        return Err(ReadError::Io);
+    }
+    if meta.len() > limit {
+        return Err(ReadError::TooLarge);
+    }
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| ReadError::Io)?;
+    if bytes.len() as u64 > limit {
+        return Err(ReadError::TooLarge);
+    }
+    Ok(bytes)
+}
+
 impl VaultBackend for NativeBackend {
     async fn open(root_path: &Path) -> Result<Self, OpenError> {
         if !root_path.exists() {
@@ -1693,6 +1732,18 @@ impl VaultBackend for NativeBackend {
             std::io::ErrorKind::NotFound => ReadError::NotFound,
             _ => ReadError::Io,
         })
+    }
+
+    async fn read_bytes_limited(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+        if !super::is_inside(path) {
+            return Err(ReadError::NotFound);
+        }
+        // Ссылка в середине пути: между этой проверкой и открытием её могли подложить,
+        // поэтому последнее звено закрывает `O_NOFOLLOW` при самом открытии.
+        if self.crosses_symlink(path).await {
+            return Err(ReadError::Io);
+        }
+        read_regular_limited(&self.root_path.join(path), limit)
     }
 
     async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {

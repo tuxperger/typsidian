@@ -819,6 +819,8 @@ pub fn builder() -> tauri::Builder<tauri::Wry> {
             commands::ai_knowledge_chains,
             commands::ai_knowledge_proposition,
             commands::ai_knowledge_extract,
+            commands::ai_knowledge_import_estimate,
+            commands::ai_knowledge_import,
             commands::ai_knowledge_jobs,
             commands::ai_knowledge_remove,
             commands::file_kind,

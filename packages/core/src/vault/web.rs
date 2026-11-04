@@ -303,6 +303,23 @@ async fn read_file_handle_bytes(file_handle: &JsValue) -> Result<Vec<u8>, JsValu
     Ok(js_sys::Uint8Array::new(&buffer).to_vec())
 }
 
+/// Не больше `cap` первых байт файла: `File.slice` режет до чтения в память.
+async fn read_file_handle_bytes_limited(
+    file_handle: &JsValue,
+    cap: u64,
+) -> Result<Vec<u8>, JsValue> {
+    let file = js_call0(file_handle, "getFile").await?;
+    let slice = Reflect::get(&file, &JsValue::from_str("slice"))?;
+    let slice: js_sys::Function = slice.dyn_into()?;
+    let part = slice.call2(
+        &file,
+        &JsValue::from_f64(0.0),
+        &JsValue::from_f64(cap as f64),
+    )?;
+    let buffer = js_call0(&part, "arrayBuffer").await?;
+    Ok(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
 fn stamp_from_content(content: &str) -> FileStamp {
     FileStamp::from_content(0, content.as_bytes())
 }
@@ -1088,6 +1105,18 @@ impl VaultBackend for WebBackend {
         read_file_handle_bytes(&handle)
             .await
             .map_err(|_| ReadError::Io)
+    }
+
+    async fn read_bytes_limited(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+        let handle = self.find_handle(path).await.ok_or(ReadError::NotFound)?;
+        // В браузере ссылок нет; предел держит и чтение: берётся не больше `limit + 1` байт.
+        let bytes = read_file_handle_bytes_limited(&handle, limit.saturating_add(1))
+            .await
+            .map_err(|_| ReadError::Io)?;
+        if bytes.len() as u64 > limit {
+            return Err(ReadError::TooLarge);
+        }
+        Ok(bytes)
     }
 
     async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {

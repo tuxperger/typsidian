@@ -319,6 +319,20 @@ pub trait VaultBackend: Sized {
         self.read_bytes(path).await
     }
 
+    /// Содержимое файла, которое никогда не читается сверх `limit` байт (ревью 055, L3).
+    ///
+    /// Для чтения чужих файлов по выбору пользователя (импорт заметок): предел по
+    /// метаданным проверяется заранее, но файл мог вырасти или быть подменён ссылкой
+    /// между проверкой и чтением. Файл больше `limit` — `TooLarge`; не обычный файл
+    /// (ссылка, канал, устройство) — `Io`. Умолчание — для хранилищ без диска.
+    async fn read_bytes_limited(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+        let bytes = self.read_bytes_any_size(path).await?;
+        if bytes.len() as u64 > limit {
+            return Err(ReadError::TooLarge);
+        }
+        Ok(bytes)
+    }
+
     /// `expected` — снимок диска, от которого отталкивался редактор. Если снимок
     /// на диске разошёлся — `WriteError::Conflict`, а не молчаливая перезапись
     /// (FR-021).
@@ -599,6 +613,10 @@ impl<B: VaultBackend> VaultBackend for ReadOnly<B> {
 
     async fn read_bytes_any_size(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
         self.inner.read_bytes_any_size(path).await
+    }
+
+    async fn read_bytes_limited(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+        self.inner.read_bytes_limited(path, limit).await
     }
 
     async fn write(

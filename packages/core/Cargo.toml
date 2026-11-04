@@ -109,6 +109,13 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 futures-channel = "0.3"
 # Сравнение путей в проверке доступа ИИ без учёта Unicode-формы (050, ревью безопасности M4); уже в дереве зависимостей.
 unicode-normalization = "0.1"
+# Текст PDF для импорта заметок в граф знаний (фича 055, research.md §3): интерпретатор
+# содержимого страниц, из которого берётся Unicode глифов. Чистый Rust, уже собирается под
+# оба таргета: приезжает транзитивно с `typst-render`/`typst-svg` (картинки-PDF в Typst)
+# в той же версии, поэтому прямое объявление нативных библиотек не добавляет. Признаки
+# объединяются с теми, что включает Typst. `kurbo` нужен для типов `Device`.
+hayro-interpret = { version = "0.7.0", default-features = false }
+kurbo = "0.13"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Рабочий стол и Android: шрифты внутри приложения, грузить их неоткуда и
@@ -141,6 +148,11 @@ jwalk = "0.8"
 # без корзины держит `native::move_to_trash`.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 trash = "3"
+
+# Открытие файлов импорта без перехода по ссылке: `O_NOFOLLOW` (ревью 055, L3). Уже в дереве
+# зависимостей.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

@@ -145,6 +145,8 @@ const TreeExtrasContext = createContext<{
   onMoveTo?: (entry: { path: string; name: string }) => void;
   /** «В закладки» (фича 032). */
   onBookmark?: (target: BookmarkTarget, name: string) => void;
+  /** «Добавить в граф знаний…» (фича 055): пути, которые уйдут в оценку импорта. */
+  onAddToGraph?: (paths: string[]) => void;
 }>({});
 
 /** Путь в буфер обмена с отчётом — одинаково для заметки и папки. */
@@ -228,6 +230,8 @@ export interface VaultTreeActionsProps {
   onMoveTo?: ((entry: { path: string; name: string }) => void) | undefined;
   /** «В закладки» для заметки и папки (фича 032). Не передан — пункта нет. */
   onBookmark?: ((target: BookmarkTarget, name: string) => void) | undefined;
+  /** «Добавить в граф знаний…» для заметки и папки (фича 055). Не передан — пункта нет. */
+  onAddToGraph?: ((paths: string[]) => void) | undefined;
 }
 
 type MenuTarget =
@@ -673,7 +677,7 @@ function NoteRow({
   const isBusy = actions.state.pendingPath !== null;
   const isOpen = useContext(OpenPathContext) === note.path.toString();
   const contextMenu = useContextMenu();
-  const { onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark } =
+  const { onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark, onAddToGraph } =
     useContext(TreeExtrasContext);
   const { t } = useI18n();
   const moveEntry = { path: note.path.toString(), name: note.name };
@@ -724,6 +728,9 @@ function NoteRow({
               ]
             : []),
           { kind: "separator" },
+          ...(onAddToGraph && !isBoard(note)
+            ? [{ label: t("knowledge.import.menu"), run: () => onAddToGraph([note.path.toString()]) }]
+            : []),
           copyPathItem(t, note.path.toString(), contextMenu.notify),
           { label: t("common.rename"), run: () => actions.beginRename(note) },
           ...(onMoveTo ? [{ label: t("tree.move.menu"), run: () => onMoveTo(moveEntry) }] : []),
@@ -782,6 +789,20 @@ function NoteRow({
               {t("common.rename")}
             </button>
           </li>
+          {onAddToGraph && !isBoard(note) && (
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  actions.closeMenu();
+                  onAddToGraph([note.path.toString()]);
+                }}
+              >
+                {t("knowledge.import.menu")}
+              </button>
+            </li>
+          )}
           {onMoveTo && (
             <li role="none">
               <button
@@ -835,7 +856,7 @@ function FolderRow({
   const isBusy = actions.state.pendingPath !== null;
   const contextMenu = useContextMenu();
   const { t } = useI18n();
-  const { onMoveTo, onBookmark } = useContext(TreeExtrasContext);
+  const { onMoveTo, onBookmark, onAddToGraph } = useContext(TreeExtrasContext);
   const moveEntry = { path: folder.path, name: folder.name };
   const hasSubfolders = folder.children.some((child) => child.kind === "folder");
 
@@ -891,6 +912,9 @@ function FolderRow({
                   run: () => onBookmark({ kind: "Folder", path: folder.path }, folder.name),
                 },
               ]
+            : []),
+          ...(onAddToGraph
+            ? [{ label: t("knowledge.import.menu"), run: () => onAddToGraph([folder.path]) }]
             : []),
           copyPathItem(t, folder.path, contextMenu.notify),
           ...(onMoveTo ? [{ label: t("tree.move.menu"), run: () => onMoveTo(moveEntry) }] : []),
@@ -985,6 +1009,20 @@ function FolderRow({
               </button>
             </li>
           )}
+          {onAddToGraph && (
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  actions.closeMenu();
+                  onAddToGraph([folder.path]);
+                }}
+              >
+                {t("knowledge.import.menu")}
+              </button>
+            </li>
+          )}
           {onMoveTo && (
             <li role="none">
               <button
@@ -1066,6 +1104,7 @@ export function VaultTreeActions({
   conflictPaths,
   onMoveTo,
   onBookmark,
+  onAddToGraph,
 }: VaultTreeActionsProps): React.JSX.Element {
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(notes), [notes]);
@@ -1079,8 +1118,9 @@ export function VaultTreeActions({
       ...(conflictPaths ? { conflictPaths } : {}),
       ...(onMoveTo ? { onMoveTo } : {}),
       ...(onBookmark ? { onBookmark } : {}),
+      ...(onAddToGraph ? { onAddToGraph } : {}),
     }),
-    [onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark],
+    [onInsertLink, onFileHistory, conflictPaths, onMoveTo, onBookmark, onAddToGraph],
   );
 
   return (

@@ -62,6 +62,8 @@ pub const ALLOWED: &[&str] = &[
     "ai_knowledge_chains",
     "ai_knowledge_proposition",
     "ai_knowledge_extract",
+    "ai_knowledge_import_estimate",
+    "ai_knowledge_import",
     "ai_knowledge_jobs",
     "ai_knowledge_remove",
     "snapshots_clear",

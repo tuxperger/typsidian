@@ -85,6 +85,7 @@ import type {
   SnapshotUsage,
   AiSettings,
   Chain,
+  ImportEstimate,
   KnowledgeGraph,
   KnowledgeJob,
   Proposition,
@@ -750,6 +751,15 @@ export function tauriVaultClient(
           allowCustom: true,
         }),
       jobs: (vaultId) => invoke<KnowledgeJob[]>("ai_knowledge_jobs", { vaultId }),
+      importEstimate: (paths) => invoke<ImportEstimate>("ai_knowledge_import_estimate", { paths }),
+      import: (vaultId, requestId, estimate) =>
+        invoke<KnowledgeJob>("ai_knowledge_import", {
+          vaultId,
+          requestId,
+          estimate,
+          now: Date.now(),
+          allowCustom: true,
+        }),
       remove: (target) =>
         invoke<void>(
           "ai_knowledge_remove",

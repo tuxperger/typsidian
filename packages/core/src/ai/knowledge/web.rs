@@ -8,6 +8,7 @@
 use wasm_bindgen::prelude::*;
 
 use super::extract::{begin_extract, finish_extract, send_extract, ExtractDone, PreparedExtract};
+use super::import::{begin_import, finish_import, import_estimate, ImportEstimate};
 use super::jobs::{jobs, KnowledgeJob};
 use super::view::{Chain, KnowledgeGraph, Proposition};
 use super::{
@@ -127,4 +128,57 @@ pub async fn lesson_delete_js(
     now: f64,
 ) -> Result<(), AiFailure> {
     delete_lesson(backend, None, &path, keep_knowledge, now as i64).await
+}
+
+/// Оценка импорта (фича 055): только чтение vault, без сети.
+#[wasm_bindgen(js_name = knowledgeImportEstimate)]
+pub async fn knowledge_import_estimate_js(
+    backend: &WebBackend,
+    paths: Vec<String>,
+) -> Result<ImportEstimate, AiFailure> {
+    import_estimate(backend, &paths).await
+}
+
+/// Начало части импорта: те же проверки, что у `knowledgeBegin`. Первый вызов с
+/// `request_id` пересчитывает оценку и заводит задание (`LessonChanged`, если она изменилась);
+/// дальше цикл тот же: `knowledgeSend`, потом `knowledgeImportFinish`. `undefined` —
+/// отправлять больше нечего или задание отменено.
+#[wasm_bindgen(js_name = knowledgeImportBegin)]
+pub async fn knowledge_import_begin_js(
+    backend: &mut WebBackend,
+    vault_id: String,
+    request_id: String,
+    estimate: ImportEstimate,
+    now: f64,
+) -> Result<Option<PreparedExtract>, AiFailure> {
+    let settings = load_settings(backend).await;
+    if !settings.enabled {
+        return Err(AiFailure::Disabled);
+    }
+    let verified = Connection::verify(&settings, true)?;
+    require_approved(&IdbSecretStore, &vault_id, &settings).await?;
+    provider_key(&IdbSecretStore, &vault_id, settings.provider).await?;
+    begin_import(
+        backend,
+        &vault_id,
+        &request_id,
+        &estimate,
+        now as i64,
+        true,
+        &verified,
+    )
+    .await
+}
+
+#[wasm_bindgen(js_name = knowledgeImportFinish)]
+pub async fn knowledge_import_finish_js(
+    backend: &mut WebBackend,
+    vault_id: String,
+    prepared: PreparedExtract,
+    now: f64,
+    reply: Option<TurnReply>,
+    failure: Option<AiFailure>,
+) -> Result<ExtractDone, AiFailure> {
+    let outcome = reply.ok_or(failure.unwrap_or(AiFailure::BadResponse));
+    finish_import(backend, &vault_id, &prepared, now as i64, outcome).await
 }

@@ -50,3 +50,24 @@ export type OpenSource = (path: string, event?: number) => void;
 
 /** Предел утверждений, выбираемых как опора урока или практики (ядро отклоняет больше). */
 export const PICK_MAX = 50;
+
+/** Предел путей в одном выборе импорта (фича 055): больше ядро отклоняет как `Forbidden`. */
+export const IMPORT_MAX_PATHS = 200;
+
+/**
+ * Ключ текста отказа импорта. Три прежних вида в импорте значат другое, чем в уроке (research
+ * 055 §6): `Forbidden` — корень, путь вне vault или слишком длинный выбор, `Cancelled` — в vault
+ * уже идёт импорт, `LessonChanged` — оценка устарела. Остальные читаются как везде.
+ */
+export function importFailureKey(error: unknown): FailureKey {
+  switch (failureKind(error)) {
+    case "Forbidden":
+      return "knowledge.failure.ImportForbidden";
+    case "Cancelled":
+      return "knowledge.failure.ImportBusy";
+    case "LessonChanged":
+      return "knowledge.failure.ImportChanged";
+    default:
+      return failureKeyOf(error);
+  }
+}

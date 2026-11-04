@@ -15023,3 +15023,159 @@ button.ts-plan__row:focus-visible,
     flex: 1 1 100%;
   }
 }
+
+/* ── Импорт заметок в граф знаний (фича 055, макеты B, C, D) ─────────────── */
+
+/* Строки «название — значение» подтверждения (макет B). */
+.ts-import__kv {
+  margin: 0 0 var(--space-2);
+}
+
+.ts-import__kv > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 5px 0;
+  border-bottom: var(--border-width) solid var(--steel-800);
+}
+
+.ts-import__kv dt {
+  color: var(--steel-400);
+}
+
+.ts-import__kv dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--steel-200);
+  text-align: right;
+}
+
+.ts-import__skipped {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  max-height: 160px;
+  overflow-y: auto;
+  border: var(--border-width) solid var(--steel-800);
+  border-radius: 6px;
+}
+
+.ts-import__skipped li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 4px 10px;
+}
+
+.ts-import__name {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--steel-300);
+  overflow-wrap: anywhere;
+}
+
+/* Карточка хода и итога: не модальная, стоит над строкой состояния и не закрывает ввод. */
+.ts-import-card {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 44px);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 440px;
+  max-width: calc(100vw - 2 * var(--space-4));
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px var(--space-4);
+  background: var(--steel-950);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--ts-overlay-shadow);
+  color: var(--steel-200);
+  font-size: var(--text-xs);
+}
+
+.ts-import-card__prog {
+  display: block;
+  flex: none;
+  margin: 0 0 var(--space-2);
+}
+
+.ts-import__files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ts-import__file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 0;
+  border-bottom: var(--border-width) solid var(--steel-800);
+}
+
+.ts-import__file:last-child {
+  border-bottom: 0;
+}
+
+.ts-import__icon {
+  flex: 0 0 16px;
+  text-align: center;
+  color: var(--steel-500);
+}
+
+.ts-import__file[data-state="Done"] .ts-import__icon {
+  color: var(--ts-ok);
+}
+
+.ts-import__file[data-state="Partial"] .ts-import__icon {
+  color: var(--hivis-500);
+}
+
+.ts-import__file[data-state="Failed"] .ts-import__icon {
+  color: var(--ts-error);
+}
+
+/* Выбор файлов и папок для импорта. */
+.ts-import__picklist {
+  max-height: 260px;
+  margin-top: var(--space-2);
+}
+
+.ts-import__pickrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.ts-import__pickrow:hover {
+  background: var(--steel-800);
+}
+
+.ts-import__pickrow:focus-within {
+  outline: 2px solid var(--orange-500);
+  outline-offset: -2px;
+}
+
+.ts-import__pickrow input[type="checkbox"] {
+  accent-color: var(--orange-500);
+}
+
+@media (max-width: 640px) {
+  .ts-import-card {
+    right: var(--space-2);
+    left: var(--space-2);
+    width: auto;
+    max-width: none;
+  }
+}
