@@ -15179,3 +15179,139 @@ button.ts-plan__row:focus-visible,
     max-width: none;
   }
 }
+
+/* Фоновое исследование в уроке (фича 056, макет A–E). */
+.ts-research {
+  padding: 10px var(--space-3);
+  border: var(--border-width) solid var(--steel-700);
+  border-radius: var(--radius-lg);
+  background: var(--steel-900);
+}
+
+.ts-research__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.ts-research__kind {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  color: var(--steel-500);
+}
+
+.ts-research__q {
+  flex: 1 1 14ch;
+  min-width: 0;
+  color: var(--steel-200);
+  overflow-wrap: anywhere;
+}
+
+.ts-research__st--ok {
+  color: var(--success);
+}
+
+.ts-research__st--bad {
+  color: var(--ts-error);
+}
+
+.ts-research__st--warn {
+  color: var(--warning);
+}
+
+.ts-research__st--mute {
+  color: var(--steel-500);
+}
+
+.ts-research__st--run {
+  color: var(--orange-400);
+}
+
+.ts-research__body {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--steel-300);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ts-research__hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--steel-500);
+}
+
+.ts-research__src {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--steel-400);
+  overflow-wrap: anywhere;
+}
+
+ul.ts-research__src {
+  padding-left: 0;
+  list-style: none;
+}
+
+.ts-research__src a {
+  color: var(--orange-400);
+  text-decoration: none;
+}
+
+.ts-research__src a:hover {
+  text-decoration: underline;
+}
+
+.ts-research__src a:focus-visible,
+.ts-research .ts-lesson__link:focus-visible {
+  outline: 2px solid var(--orange-500);
+  outline-offset: 2px;
+}
+
+.ts-research__mark {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: 0 7px;
+  border: var(--border-width) solid var(--warning);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--warning);
+}
+
+.ts-research__path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.ts-research__ask {
+  margin-top: var(--space-2);
+}
+
+.ts-research__bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--border-width) solid var(--border-default);
+}
+
+.ts-research__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ts-research__input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.ts-ai__number {
+  flex: 0 0 4.5rem;
+  width: 4.5rem;
+}

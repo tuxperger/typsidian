@@ -10,6 +10,7 @@ use super::plan::{self, PlanStep, PlanVersionInfo, PlanView};
 use super::practice::{self, DeniedLesson, LessonMaterial, PracticeView, ProblemOutcome};
 use crate::ai::access::normalize_folder;
 use crate::ai::knowledge::{KnowledgeMaterial, KnowledgeOutcome};
+use crate::ai::research::{ResearchKind, ResearchSource, ResearchView};
 use crate::ai::AiFailure;
 use crate::vault::backend::VaultBackend;
 use crate::vault::{classify, FileKind};
@@ -299,6 +300,43 @@ pub enum LessonEvent {
     NextProblem {
         at: i64,
     },
+    /// Исследование началось (фича 056): запущено пользователем или запрошено учителем.
+    /// Поле вида называется `research`: имя `kind` занято тегом события.
+    ResearchStarted {
+        at: i64,
+        id: String,
+        #[serde(rename = "research")]
+        research: ResearchKind,
+        question: String,
+        /// Путь PDF у исследования документа.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default)]
+        by_user: bool,
+    },
+    /// Исследование готово: заметка с результатом и изложение для учителя.
+    ResearchDone {
+        at: i64,
+        id: String,
+        /// Путь заметки с результатом.
+        note: String,
+        summary: String,
+        sources: Vec<ResearchSource>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost_usd: Option<f64>,
+    },
+    /// Исследование не удалось или отменено.
+    ResearchFailed {
+        at: i64,
+        id: String,
+        failure: AiFailure,
+        #[serde(default)]
+        cancelled: bool,
+    },
 }
 
 impl LessonEvent {
@@ -322,6 +360,9 @@ impl LessonEvent {
             | LessonEvent::HintRequest { at, .. }
             | LessonEvent::GiveUp { at, .. }
             | LessonEvent::Verdict { at, .. }
+            | LessonEvent::ResearchStarted { at, .. }
+            | LessonEvent::ResearchDone { at, .. }
+            | LessonEvent::ResearchFailed { at, .. }
             | LessonEvent::NextProblem { at } => *at,
         }
     }
@@ -389,6 +430,8 @@ pub struct LessonView {
     /// 2 тыс. символов. Запрос запускает клиент (`ai_knowledge_extract`) один раз после хода
     /// учителя, ядро vault на время сети не держит.
     pub knowledge_auto_due: bool,
+    /// Исследования урока (фича 056): производное от событий и реестра заданий процесса.
+    pub research: Vec<ResearchView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -617,6 +660,7 @@ fn waiting_of(kind: LessonKind, events: &[LessonEvent], state: LessonState) -> W
                     LessonEvent::NoteRead { by_user: false, .. }
                         | LessonEvent::KnowledgeRead { .. }
                         | LessonEvent::PlanRejected { .. }
+                        | LessonEvent::ResearchStarted { by_user: false, .. }
                 )
             });
             // Пропуск замера требует продолжения учителя; итог замера — пауза: урок ждёт
@@ -677,6 +721,12 @@ fn totals(events: &[LessonEvent]) -> (u64, u64, Option<f64>) {
                 output_tokens,
                 cost_usd,
                 ..
+            }
+            | LessonEvent::ResearchDone {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
             } => (input_tokens, output_tokens, cost_usd),
             _ => continue,
         };
@@ -715,6 +765,7 @@ pub fn view_of(path: &str, parsed: ParsedLesson) -> LessonView {
             .then(|| practice::practice_view(&parsed.events)),
         knowledge_pending_chars: 0,
         knowledge_auto_due: false,
+        research: crate::ai::research::views_of(&parsed.events),
         header: parsed.header,
         events: practice::redact(parsed.events),
     }

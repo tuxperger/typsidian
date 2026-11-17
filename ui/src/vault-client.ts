@@ -130,10 +130,14 @@ import type {
   AiProvider,
   AiSettings,
   Chain,
+  AnyJob,
   ImportEstimate,
   KnowledgeGraph,
   KnowledgeJob,
   Proposition,
+  ResearchEstimate,
+  ResearchKind,
+  ResearchView,
   Language,
   LessonPhase,
   PlanView,
@@ -605,6 +609,8 @@ export interface VaultClient {
   readonly lessons: LessonClient;
   /** Граф знаний из уроков (фича 054). */
   readonly knowledge: KnowledgeClient;
+  /** Фоновое исследование в уроке (фича 056). */
+  readonly research: ResearchClient;
 
   // ── Показ слайдов (фича 019) ────────────────────────────────────────
 
@@ -940,6 +946,33 @@ export interface KnowledgeClient {
   import(vaultId: string, requestId: string, estimate: ImportEstimate): Promise<KnowledgeJob>;
   /** Удаляет утверждение (`id`) либо вклад источника (`source`; `keep` — оставить вклад). */
   remove(target: { id: string } | { source: string; keep: boolean }): Promise<void>;
+}
+
+/**
+ * Фоновое исследование в уроке (фича 056). Весь цикл — запросы к модели с поиском
+ * провайдера либо с текстом PDF, продолжения, заметка Typst — ведёт ядро; `start` отдаёт
+ * итог, когда цикл кончился, и вызывающий его не ждёт: ход видно в `LessonView.research`
+ * и `jobs`, отмена — `ai.cancel` по `requestId`. Отказ до заведения задания
+ * (`SearchDisabled`, `SearchUnavailable`, `Forbidden`, `RateLimited`) — исключение
+ * `AiFailure`; отказ посреди цикла лежит в `ResearchView.failure`.
+ */
+export interface ResearchClient {
+  /** Оценка чтения PDF до отправки; сети нет. Закрытый или не-PDF файл — `Forbidden`. */
+  estimate(pdf: string): Promise<ResearchEstimate>;
+  /**
+   * Запускает исследование урока `path`. `requestId` — id карточки: у запрошенного
+   * учителем это `ResearchView.id`, у пользовательского — новый. `pdf` задан у `Pdf`.
+   */
+  start(
+    vaultId: string,
+    path: string,
+    requestId: string,
+    kind: ResearchKind,
+    question: string,
+    pdf?: string,
+  ): Promise<ResearchView>;
+  /** Фоновые задания vault всех видов. */
+  jobs(vaultId: string): Promise<AnyJob[]>;
 }
 
 /**

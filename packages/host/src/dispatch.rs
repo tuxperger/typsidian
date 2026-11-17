@@ -269,6 +269,9 @@ pub const COMMANDS: &[&str] = &[
     "ai_knowledge_import_estimate",
     "ai_knowledge_import",
     "ai_knowledge_jobs",
+    "ai_research_estimate",
+    "ai_jobs",
+    "ai_research_start",
     "ai_knowledge_remove",
     "ai_lesson_delete",
 ];
@@ -3329,6 +3332,60 @@ pub async fn dispatch(host: &Host, name: &str, arguments: Value) -> Option<Reply
             }
             match args::<A>(arguments) {
                 Ok(a) => value(commands::ai_knowledge_jobs(a.vault_id)),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_research_estimate" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                pdf: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(commands::ai_research_estimate(&host.vault, a.pdf).await),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_jobs" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => value(commands::ai_jobs(a.vault_id)),
+                Err(error) => Err(error),
+            }
+        }
+        "ai_research_start" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct A {
+                vault_id: String,
+                path: String,
+                request_id: String,
+                kind: ai::research::ResearchKind,
+                question: String,
+                pdf: Option<String>,
+                now: i64,
+                allow_custom: bool,
+            }
+            match args::<A>(arguments) {
+                Ok(a) => answer(
+                    commands::ai_research_start(
+                        &host.vault,
+                        &host.sync_home,
+                        a.vault_id,
+                        a.path,
+                        a.request_id,
+                        a.kind,
+                        a.question,
+                        a.pdf,
+                        a.now,
+                        a.allow_custom,
+                    )
+                    .await,
+                ),
                 Err(error) => Err(error),
             }
         }

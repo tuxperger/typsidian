@@ -459,3 +459,8 @@ async fn lesson_text_is_bounded_in_linear_time() {
 async fn lesson_goal_is_clipped_when_building_instructions() {
     lesson::lesson_goal_is_clipped_when_building_instructions().await;
 }
+
+#[wasm_bindgen_test]
+async fn journal_is_bounded_in_bytes() {
+    cases::journal_is_bounded_in_bytes().await;
+}

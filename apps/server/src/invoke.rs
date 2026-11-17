@@ -39,9 +39,15 @@ const AI_COMMAND_PREFIX: &str = "ai_";
 const AI_NETWORK_COMMANDS: &[&str] = &["ai_models", "ai_probe", "ai_lesson_answer"];
 /// Фоновые команды с моделью: общий предел запросов они берут на каждую пачку сами
 /// (`RequestGate` в окружении аккаунта), а на команду — отдельное место аккаунта.
-const AI_BACKGROUND_COMMANDS: &[&str] = &["ai_knowledge_extract", "ai_knowledge_import"];
+const AI_BACKGROUND_COMMANDS: &[&str] = &[
+    "ai_knowledge_extract",
+    "ai_knowledge_import",
+    "ai_research_start",
+];
 /// Оценка импорта заметок: читает и разбирает файлы, место берёт на время вызова.
 const IMPORT_ESTIMATE_COMMAND: &str = "ai_knowledge_import_estimate";
+/// Оценка чтения PDF (фича 056) разбирает такой же чужой файл и делит с оценкой импорта место.
+const RESEARCH_ESTIMATE_COMMAND: &str = "ai_research_estimate";
 /// Команды, которые ходят в сеть к удалённому репозиторию.
 const EXCHANGE_COMMANDS: &[&str] = &[
     "sync_connect_remote",
@@ -236,21 +242,22 @@ pub async fn invoke(
         } else {
             None
         };
-        let _import_estimate = if command == IMPORT_ESTIMATE_COMMAND {
-            match crate::ImportEstimateSlot::acquire(&state, &authed.account.id) {
-                Some(slot) => Some(slot),
-                None => {
-                    tracing::warn!("отказ: предел одновременных оценок импорта");
-                    return Ok((
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "kind": "RateLimited" })),
-                    )
-                        .into_response());
+        let _import_estimate =
+            if command == IMPORT_ESTIMATE_COMMAND || command == RESEARCH_ESTIMATE_COMMAND {
+                match crate::ImportEstimateSlot::acquire(&state, &authed.account.id) {
+                    Some(slot) => Some(slot),
+                    None => {
+                        tracing::warn!("отказ: предел одновременных оценок импорта");
+                        return Ok((
+                            StatusCode::BAD_REQUEST,
+                            Json(serde_json::json!({ "kind": "RateLimited" })),
+                        )
+                            .into_response());
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
         let _ai_request = if AI_NETWORK_COMMANDS.contains(&command.as_str()) {
             match state.ai_requests.try_acquire() {
                 Ok(permit) => Some(permit),

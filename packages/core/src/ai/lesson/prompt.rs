@@ -336,6 +336,30 @@ pub fn tools(provider: AiProvider, set: ToolSet) -> Value {
 /// замере и практике. `knowledge: false` — настройка `knowledge_agent_reads` выключена, и
 /// инструмента в запросе нет.
 pub fn tools_with(provider: AiProvider, set: ToolSet, knowledge: bool) -> Value {
+    tools_for(
+        provider,
+        set,
+        Extras {
+            knowledge,
+            ..Extras::default()
+        },
+    )
+}
+
+/// Необязательные инструменты запроса: каждый появляется только при включённой настройке.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Extras {
+    /// Чтение графа знаний (`knowledge_agent_reads`, фича 054).
+    pub knowledge: bool,
+    /// Веб-исследование (`web_research` и подключение с поиском, фича 056).
+    pub research: bool,
+    /// Чтение PDF по просьбе учителя (`research_agent_pdf`, фича 056).
+    pub study_pdf: bool,
+}
+
+/// То же с инструментами исследования (фича 056). Они действуют только в обучении.
+pub fn tools_for(provider: AiProvider, set: ToolSet, extras: Extras) -> Value {
+    let knowledge = extras.knowledge;
     let mut list = match set {
         ToolSet::Teach => vec![
             ask_tool(),
@@ -349,6 +373,14 @@ pub fn tools_with(provider: AiProvider, set: ToolSet, knowledge: bool) -> Value 
     };
     if knowledge && set != ToolSet::ProbeEnd {
         list.push(read_knowledge_tool());
+    }
+    if set == ToolSet::Teach {
+        if extras.research {
+            list.push(research_tool());
+        }
+        if extras.study_pdf {
+            list.push(study_pdf_tool());
+        }
     }
     match provider {
         AiProvider::Anthropic => Value::Array(
@@ -1152,6 +1184,73 @@ pub fn knowledge_result(
             "Result of read_knowledge({query}) {}:{}",
             data_note(language),
             knowledge_lines(language, &result.statements, &result.chains)
+        ),
+    }
+}
+
+// ── Исследование (фича 056) ─────────────────────────────────────────────────
+
+pub const RESEARCH: &str = "research";
+pub const STUDY_PDF: &str = "study_pdf";
+
+fn research_tool() -> ToolDef {
+    (
+        RESEARCH,
+        "Send a question to background research on the internet. The lesson does not wait: \
+         the tool answers at once that the research started, and the findings with their \
+         sources come later as a separate message. Use it for facts you cannot give \
+         reliably yourself.",
+        json!({
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "A self-contained question."}
+            },
+            "required": ["question"]
+        }),
+    )
+}
+
+fn study_pdf_tool() -> ToolDef {
+    (
+        STUDY_PDF,
+        "Send a PDF from the user's vault to background reading with a question about it. \
+         The lesson does not wait: the findings with page numbers come later as a separate \
+         message. Access to the file may be refused.",
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path of the PDF in the vault."},
+                "question": {"type": "string", "description": "What to find out from it."}
+            },
+            "required": ["path", "question"]
+        }),
+    )
+}
+
+/// Исследование, которое учитель просил слишком много раз за урок или ход.
+pub fn research_refused(language: Language, tool: &str) -> String {
+    match language {
+        Language::Ru => format!(
+            "Результат {tool}: отказ, исследований в этом уроке уже слишком много. Продолжай \
+             без него."
+        ),
+        Language::En => format!(
+            "Result of {tool}: refused, there are already too many researches in this \
+             lesson. Go on without it."
+        ),
+    }
+}
+
+/// Доступ к PDF закрыт или файл не годится.
+pub fn study_pdf_denied(language: Language, path: &str) -> String {
+    let path = clip(path, 200);
+    match language {
+        Language::Ru => format!(
+            "Результат study_pdf({path}): доступ к файлу закрыт пользователем или это не PDF."
+        ),
+        Language::En => format!(
+            "Result of study_pdf({path}): access to the file is closed by the user or it is \
+             not a PDF."
         ),
     }
 }

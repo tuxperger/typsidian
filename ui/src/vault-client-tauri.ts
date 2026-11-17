@@ -85,9 +85,12 @@ import type {
   SnapshotUsage,
   AiSettings,
   Chain,
+  AnyJob,
   ImportEstimate,
   KnowledgeGraph,
   KnowledgeJob,
+  ResearchEstimate,
+  ResearchView,
   Proposition,
   LessonProgress,
   LessonSummary,
@@ -767,6 +770,24 @@ export function tauriVaultClient(
             ? { id: target.id, source: null, keep: false, now: Date.now() }
             : { id: null, source: target.source, keep: target.keep, now: Date.now() },
         ),
+    },
+
+    // ── Фоновое исследование (фича 056) ───────────────────────────────
+    // Весь цикл — в `ai_research_start`; отмена — `ai_cancel`.
+    research: {
+      estimate: (pdf) => invoke<ResearchEstimate>("ai_research_estimate", { pdf }),
+      start: (vaultId, path, requestId, kind, question, pdf) =>
+        invoke<ResearchView>("ai_research_start", {
+          vaultId,
+          path,
+          requestId,
+          kind,
+          question,
+          pdf: pdf ?? null,
+          now: Date.now(),
+          allowCustom: true,
+        }),
+      jobs: (vaultId) => invoke<AnyJob[]>("ai_jobs", { vaultId }),
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────

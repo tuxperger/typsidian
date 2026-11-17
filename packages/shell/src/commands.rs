@@ -2068,6 +2068,47 @@ pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
 }
 
 #[tauri::command]
+pub async fn ai_research_estimate(
+    state: State<'_, Vault>,
+    pdf: String,
+) -> Answer<ai::research::ResearchEstimate, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_research_estimate(&state, pdf).await
+}
+
+#[tauri::command]
+pub fn ai_jobs(vault_id: String) -> Vec<ai::jobs::AnyJob> {
+    typsidian_host::commands::ai_jobs(vault_id)
+}
+
+#[tauri::command]
+pub async fn ai_research_start(
+    state: State<'_, Vault>,
+    home: State<'_, SyncHome>,
+    vault_id: String,
+    path: String,
+    request_id: String,
+    kind: ai::research::ResearchKind,
+    question: String,
+    pdf: Option<String>,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::research::ResearchView, Failure<ai::AiFailure>> {
+    typsidian_host::commands::ai_research_start(
+        &state,
+        &home,
+        vault_id,
+        path,
+        request_id,
+        kind,
+        question,
+        pdf,
+        now,
+        allow_custom,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn ai_knowledge_remove(
     state: State<'_, Vault>,
     id: Option<String>,

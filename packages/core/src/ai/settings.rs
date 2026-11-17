@@ -50,6 +50,9 @@ impl AiProvider {
 pub const DEFAULT_LESSONS_FOLDER: &str = "Уроки";
 /// Объём переписки (символы / 4), после которого она сжимается (фича 051, research §6).
 pub const DEFAULT_CONTEXT_BUDGET: u32 = 100_000;
+/// Исследований одновременно по умолчанию и границы настройки (фича 056).
+pub const DEFAULT_RESEARCH_PARALLEL: u32 = 2;
+pub const RESEARCH_PARALLEL_MAX: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(target_arch = "wasm32", derive(tsify_next::Tsify))]
@@ -77,6 +80,15 @@ pub struct AiSettings {
     pub knowledge_agent_reads: bool,
     /// Показывать вид «Граф знаний» (фича 054): настройка интерфейса, едет с vault.
     pub knowledge_map: bool,
+    /// Веб-исследование в уроке (фича 056, FR-002): встроенный поиск подключённого провайдера.
+    /// Выключено по умолчанию; пока выключено, инструмента поиска нет ни в одном запросе, а
+    /// учитель не видит инструмента `research` (SC-003).
+    pub web_research: bool,
+    /// Сколько исследований идут одновременно; остальные ждут в очереди (по умолчанию 2).
+    pub research_parallel: u32,
+    /// Учитель сам просит изучить PDF из vault инструментом `study_pdf` (фича 056). Выключено:
+    /// инструмента нет в запросе; PDF по просьбе пользователя изучается и так.
+    pub research_agent_pdf: bool,
 }
 
 impl Default for AiSettings {
@@ -93,6 +105,9 @@ impl Default for AiSettings {
             knowledge_auto: true,
             knowledge_agent_reads: false,
             knowledge_map: true,
+            web_research: false,
+            research_parallel: DEFAULT_RESEARCH_PARALLEL,
+            research_agent_pdf: false,
         }
     }
 }
@@ -112,6 +127,10 @@ fn sanitize_lessons(settings: &mut AiSettings) {
     settings.context_budget = match settings.context_budget {
         0 => DEFAULT_CONTEXT_BUDGET,
         budget => budget.clamp(CONTEXT_BUDGET_MIN, CONTEXT_BUDGET_MAX),
+    };
+    settings.research_parallel = match settings.research_parallel {
+        0 => DEFAULT_RESEARCH_PARALLEL,
+        parallel => parallel.min(RESEARCH_PARALLEL_MAX),
     };
 }
 

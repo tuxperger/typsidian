@@ -13,6 +13,9 @@ use crate::vault::service_dir;
 
 /// Сколько последних запросов хранится.
 pub const MAX_ENTRIES: usize = 500;
+/// Предел журнала в байтах (ревью 056, M2): тела исследований с текстом PDF и продолжениями
+/// весят мегабайты. Старые записи вытесняются целиком, тела остаются дословными (050 FR-011).
+pub const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "line")]
@@ -91,28 +94,49 @@ async fn write_lines<B: VaultBackend>(
         .map_err(|_| AiFailure::JournalFailed)
 }
 
-/// Оставляет строки последних [`MAX_ENTRIES`] запросов.
+/// Оставляет строки последних [`MAX_ENTRIES`] запросов и не больше [`MAX_BYTES`] байт: старые
+/// запросы уходят целиком (строка `Sent` и её `Done`), последний остаётся всегда.
 fn trimmed(lines: Vec<JournalLine>) -> Vec<JournalLine> {
-    let sent: Vec<&str> = lines
+    let id_of = |line: &JournalLine| match line {
+        JournalLine::Sent { id, .. } | JournalLine::Done { id, .. } => id.clone(),
+    };
+    let sent: Vec<String> = lines
         .iter()
-        .filter_map(|line| match line {
-            JournalLine::Sent { id, .. } => Some(id.as_str()),
-            JournalLine::Done { .. } => None,
-        })
+        .filter(|line| matches!(line, JournalLine::Sent { .. }))
+        .map(id_of)
         .collect();
-    if sent.len() <= MAX_ENTRIES {
+    let mut dropped: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if sent.len() > MAX_ENTRIES {
+        dropped.extend(sent[..sent.len() - MAX_ENTRIES].iter().cloned());
+    }
+    // Размер считается по сериализации, как строки и пишутся в файл.
+    let size_of = |line: &JournalLine| serde_json::to_string(line).map_or(0, |text| text.len() + 1);
+    let mut total: usize = lines
+        .iter()
+        .filter(|line| !dropped.contains(&id_of(line)))
+        .map(size_of)
+        .sum();
+    if total > MAX_BYTES {
+        let kept: Vec<&String> = sent.iter().filter(|id| !dropped.contains(*id)).collect();
+        for id in kept.iter().take(kept.len().saturating_sub(1)) {
+            if total <= MAX_BYTES {
+                break;
+            }
+            let freed: usize = lines
+                .iter()
+                .filter(|line| id_of(line) == **id)
+                .map(size_of)
+                .sum();
+            total = total.saturating_sub(freed);
+            dropped.insert((*id).clone());
+        }
+    }
+    if dropped.is_empty() {
         return lines;
     }
-    let dropped: std::collections::HashSet<String> = sent[..sent.len() - MAX_ENTRIES]
-        .iter()
-        .map(|id| (*id).to_owned())
-        .collect();
     lines
         .into_iter()
-        .filter(|line| {
-            let (JournalLine::Sent { id, .. } | JournalLine::Done { id, .. }) = line;
-            !dropped.contains(id)
-        })
+        .filter(|line| !dropped.contains(&id_of(line)))
         .collect()
 }
 

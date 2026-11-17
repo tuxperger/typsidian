@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiFailure,
+  AiSettings,
   Confidence,
   Language,
   LessonEvent,
   LessonView,
+  ResearchView,
   UserAnswer,
 } from "../wasm-core/typsidian_core.js";
 import type { VaultClient } from "../vault-client.js";
@@ -34,6 +36,10 @@ import { LessonPlan, planProgressOf } from "./LessonPlan.js";
 import { ProbeResultCard } from "./ProbeResult.js";
 import { awaitingNext, hintNumbers, PracticeForm, PracticeRow } from "./PracticeFeed.js";
 import { PracticeSummary } from "./PracticeSummary.js";
+import { ResearchCard } from "./ResearchCard.js";
+import { ResearchInput, type WebState } from "./ResearchInput.js";
+import { ResearchPdfDialog } from "./ResearchPdfDialog.js";
+import { useResearch } from "./useResearch.js";
 
 // Вкладка урока (фича 051, макет A–C, F, I). Формат, ход и продолжение решает ядро;
 // здесь — показ переписки, форма ответа и опрос потока: текст идущего ответа
@@ -41,6 +47,8 @@ import { PracticeSummary } from "./PracticeSummary.js";
 
 const PROGRESS_MS = 150;
 const CHECKPOINT_MS = 1000;
+/** Как часто вкладка перечитывает настройки ИИ (доступность поиска в вебе). */
+const SETTINGS_MS = 2000;
 /** Уже этой ширины вкладки план — лист со списком, а не колонка (052, макет E). */
 const NARROW_PX = 640;
 /** Ориентир замера в подписи стадии (инструкции учителя, 052 research §6). */
@@ -75,6 +83,8 @@ interface ActiveTurn {
 }
 
 type Failure = AiFailure["kind"] | "Unknown";
+
+const NO_RESEARCH: readonly ResearchView[] = [];
 
 export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   const { t, lang, formatNumber } = useI18n();
@@ -125,6 +135,53 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   });
   const startExtract = extract.start;
 
+  // Исследования (фича 056): вид перечитывается, пока что-то идёт. Во время хода урока
+  // обновляется только список исследований: события хода вид получит из ответа.
+  const lastResearch = useRef("");
+  const refreshResearch = useCallback(async (): Promise<void> => {
+    try {
+      const fresh = await client.lessons.open(path);
+      const stamp = `${fresh.events_len}:${JSON.stringify(fresh.research)}`;
+      if (stamp === lastResearch.current) return;
+      lastResearch.current = stamp;
+      if (running.current) {
+        setView((current) => (current === null ? current : { ...current, research: fresh.research }));
+      } else {
+        setView(fresh);
+      }
+    } catch {
+      // Следующий такт попробует снова.
+    }
+  }, [client, path]);
+  const research = useResearch(client, env.vaultId, path, view?.research ?? NO_RESEARCH, refreshResearch);
+  const [pdfDialog, setPdfDialog] = useState<string | null>(null);
+
+  // Настройки ИИ: доступность поиска в вебе для кнопки «В вебе».
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const reloadSettings = useRef<() => void>(() => undefined);
+  // Увеличивается, когда PDF запущен: поле «Исследовать…» очищается.
+  const [sent, setSent] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = (): void => {
+      client.ai
+        .settings()
+        .then((found) => alive && setAiSettings(found))
+        .catch(() => undefined);
+    };
+    load();
+    // Настройки правятся в другом разделе, а вкладка урока остаётся открытой: обновляем по
+    // таймеру, при возврате в окно и при касании поля «Исследовать…» (`onTouch`).
+    const timer = window.setInterval(load, SETTINGS_MS);
+    window.addEventListener("focus", load);
+    reloadSettings.current = load;
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", load);
+    };
+  }, [client]);
+
   const run = useCallback(
     async (answer: UserAnswer | undefined, base: LessonView | null = view): Promise<void> => {
       if (base === null || running.current) return;
@@ -135,7 +192,27 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       setChanged(false);
       let keepDraft = false;
       try {
-        const next = await client.lessons.answer(env.vaultId, path, requestId, answer, base.events_len);
+        // Исследование дописывает события в файл урока само: ответ с устаревшим числом событий
+        // отклоняется ядром (`LessonChanged`). Если после вида появились только события
+        // исследования, повторяем с новым числом — иначе это чужая правка, и решает ядро.
+        let expected = base.events_len;
+        let next: LessonView;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            next = await client.lessons.answer(env.vaultId, path, requestId, answer, expected);
+            break;
+          } catch (error) {
+            if (failureKind(error) !== "LessonChanged" || attempt >= 3) throw error;
+            const fresh = await client.lessons.open(path);
+            const added = fresh.events.slice(base.events_len);
+            const onlyResearch =
+              fresh.events.length >= base.events_len &&
+              added.length > 0 &&
+              added.every((event) => event.kind.startsWith("Research"));
+            if (!onlyResearch) throw error;
+            expected = fresh.events_len;
+          }
+        }
         setView(next);
         // Один раз на ответ хода, а не на каждое открытие вида (research 054 §8).
         if (next.knowledge_auto_due) startExtract();
@@ -408,8 +485,38 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
   // Итог замера ждёт «Начать обучение» — это не оборванный ответ.
   const retryShown = view.waiting === "Retry" && turn === null && !view.read_only && !probePending;
   const language = view.language;
-
   const failureText = (kind: Failure): string => t(`ai.failure.${kind}`);
+  // Совпадает с проверкой ядра (`web_search_available`): свой адрес поиска не получает.
+  const webState: WebState =
+    aiSettings?.web_research !== true ? "off" : aiSettings.provider === "Custom" ? "unavailable" : "ok";
+  const researchError =
+    research.error === null
+      ? null
+      : research.error === "SearchDisabled"
+        ? t("research.box.off")
+        : research.error === "SearchUnavailable"
+          ? t("research.box.unavailable")
+          : failureText(research.error);
+  const shownResearch = new Set(
+    view.events.flatMap((event) => (event.kind === "ResearchStarted" ? [event.id] : [])),
+  );
+  const renderResearch = (id: string): React.JSX.Element | null => {
+    const item = view.research.find((entry) => entry.id === id);
+    return item === undefined ? null : renderCard(item);
+  };
+  const renderCard = (item: ResearchView): React.JSX.Element => (
+    <ResearchCard
+      item={item}
+      client={client}
+      declined={research.isDeclined(item.id)}
+      onCancel={research.cancel}
+      onRetry={research.retry}
+      onOpenNote={env.openNote}
+      onConfirm={research.confirm}
+      onDecline={research.decline}
+    />
+  );
+
 
   return (
     <section
@@ -538,6 +645,7 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
               hintNumber={hintNumberOf.get(index)}
               onNext={practiceNext && index === lastVerdictIndex ? nextProblem : undefined}
               onOpenNote={env.openNote}
+              renderResearch={renderResearch}
               {...(probePending && index === lastProbeIndex
                 ? {
                     probeActions: {
@@ -549,6 +657,14 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
             />
           </div>
         ))}
+
+        {view.research
+          .filter((item) => !shownResearch.has(item.id))
+          .map((item) => (
+            <div key={`research:${item.id}`} className="ts-lesson__ev">
+              {renderCard(item)}
+            </div>
+          ))}
 
         {turn?.pending !== undefined && (
           <UserBubble answer={turn.pending} />
@@ -650,6 +766,30 @@ export function LessonTab({ client, path }: LessonTabProps): React.JSX.Element {
       </div>
 
       <KnowledgeJobs client={client} vaultId={env.vaultId} jobs={knowledgeJobs} source={path} />
+
+      {!view.read_only && (
+        <ResearchInput
+          web={webState}
+          error={researchError}
+          onWeb={(question) => research.start("Web", question)}
+          onPdf={(question) => setPdfDialog(question)}
+          onOpenSettings={env.openSettings}
+          onTouch={() => reloadSettings.current()}
+          clearToken={sent}
+        />
+      )}
+      {pdfDialog !== null && (
+        <ResearchPdfDialog
+          client={client}
+          question={pdfDialog}
+          onCancel={() => setPdfDialog(null)}
+          onStart={(pdf, question) => {
+            setPdfDialog(null);
+            setSent((count) => count + 1);
+            research.start("Pdf", question, pdf);
+          }}
+        />
+      )}
 
       {turn !== null && (
         <div className="ts-lesson__status" role="status">
@@ -759,6 +899,7 @@ function EventRow({
   hintNumber,
   onNext,
   onOpenNote,
+  renderResearch,
   probeActions,
 }: {
   event: LessonEvent;
@@ -770,6 +911,8 @@ function EventRow({
   /** «Следующая задача» под последним итогом практики. */
   onNext: (() => void) | undefined;
   onOpenNote(path: string): void;
+  /** Карточка исследования по id (фича 056). */
+  renderResearch(id: string): React.JSX.Element | null;
   /** Кнопки итога замера: только у последнего итога, после которого урок ждёт. */
   probeActions?: { onStart(): void; onShowPlan?: () => void };
 }): React.JSX.Element | null {
@@ -883,8 +1026,20 @@ function EventRow({
     case "HintRequest":
     case "GiveUp":
       return <UserBubble answer={{ text: "", action: event.kind }} />;
+    // События фичи 056 (исследование): карточки рисует лента по `view.research`, не события.
+    case "ResearchStarted":
+      return renderResearch(event.id);
+    case "ResearchDone":
+    case "ResearchFailed":
+      return null;
     case "PlanRejected":
-      if (event.tool === "pose_problem" || event.tool === "give_hint" || event.tool === "conclude") {
+      if (
+        event.tool === "pose_problem" ||
+        event.tool === "give_hint" ||
+        event.tool === "conclude" ||
+        event.tool === "research" ||
+        event.tool === "study_pdf"
+      ) {
         return null;
       }
       return (

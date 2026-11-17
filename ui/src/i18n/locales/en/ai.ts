@@ -88,6 +88,8 @@ export const ai = {
   "ai.failure.LessonChanged": "The lesson changed in another window or on another device. The conversation is refreshed; your answer was not sent.",
   "ai.failure.LessonUnreadable": "The lesson file cannot be read: it is damaged or newer than this version of the app.",
   "ai.failure.GoalEmpty": "Say what you want to understand: the goal of the lesson is empty.",
+  "ai.failure.SearchDisabled": "Web research is off. Turn it on in the AI learning settings.",
+  "ai.failure.SearchUnavailable": "This connection has no built-in search, so web research is unavailable. Reading PDFs still works.",
   "ai.lessonsFolder": "Lessons folder",
   "ai.lessonsFolderHint": "New lessons are saved here. Lessons moved elsewhere stay lessons.",
 } satisfies Entries;

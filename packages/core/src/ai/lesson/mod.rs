@@ -39,7 +39,7 @@ use file::{
 
 /// Символ категории Cf (управление направлением письма, невидимые разделители): в имени
 /// файла он подменил бы то, что видит пользователь (ревью безопасности 051, L7).
-fn is_format_char(c: char) -> bool {
+pub(crate) fn is_format_char(c: char) -> bool {
     matches!(c as u32,
         0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x08E2 | 0x180E
         | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F
@@ -64,7 +64,7 @@ fn is_reserved_name(name: &str) -> bool {
 }
 
 /// Имя файла из цели: без символов, которых нет в именах файлов, не длиннее 40 символов.
-fn file_stem(goal: &str) -> String {
+pub(crate) fn file_stem(goal: &str) -> String {
     let first_line = goal.lines().next().unwrap_or_default();
     let cleaned: String = first_line
         .chars()
@@ -357,7 +357,9 @@ pub async fn open_lesson<B: VaultBackend>(
             partial::clear_partial(backend, path).await;
         }
     }
-    Ok(crate::ai::knowledge::annotate(backend, view_of(path, parsed)).await)
+    Ok(crate::ai::research::annotate(
+        crate::ai::knowledge::annotate(backend, view_of(path, parsed)).await,
+    ))
 }
 
 /// Все уроки vault, не только из папки уроков (research.md §9); свежие первыми.

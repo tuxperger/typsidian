@@ -1115,3 +1115,8 @@ async fn import_reads_regular_files_only_and_never_past_the_limit() {
     );
     assert_eq!(read("../x").await.unwrap_err(), ReadError::NotFound);
 }
+
+#[tokio::test]
+async fn journal_is_bounded_in_bytes() {
+    cases::journal_is_bounded_in_bytes().await;
+}

@@ -401,3 +401,153 @@ async fn dropped_knowledge_extraction_releases_everything() {
     let again = tokio::time::timeout(std::time::Duration::from_millis(700), extract("k2")).await;
     assert!(again.is_err(), "повтор завершился: {again:?}");
 }
+
+/// 056: исследование в уроке держит фоновое место аккаунта на время вызова и общий предел
+/// запросов — на время одного запроса; клиент, оборвавший вызов посреди запроса, не оставляет
+/// ни задания «идёт», ни занятых мест.
+#[tokio::test]
+async fn dropped_research_releases_everything() {
+    use typsidian_server::MAX_AI_REQUESTS;
+
+    let port = hanging_model().await;
+    let server = Server::with_config(|config| {
+        config.ai_custom_endpoint = true;
+        config.sync_private_remotes = true;
+    })
+    .await;
+    let anna = server.enter("anna").await;
+    let (status, _, _) = server
+        .call(
+            Method::POST,
+            "/api/vaults",
+            Some(&anna),
+            Some(json!({ "name": "Общее имя" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let settings = json!({ "settings": {
+        "enabled": true,
+        "provider": "Custom",
+        "custom_endpoint": format!("http://127.0.0.1:{port}/v1"),
+        "model": "m",
+    }});
+    let (status, body) = server
+        .invoke(&anna, "Общее имя", "ai_settings_set", settings)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_approve_endpoint",
+            json!({ "insecureOk": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, created) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_create",
+            json!({ "goal": "Замыкания", "notes": [], "language": "ru", "start": "Teach", "now": 1 }),
+        )
+        .await;
+    let path = created.as_str().expect("путь урока").to_owned();
+    // PDF кладётся файлом в папку vault аккаунта: запись команды `write` принимает текст.
+    let account = server
+        .state
+        .store
+        .account_by_login("anna")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let dir = typsidian_server::vaults::vault_dir(&server.state, &account, "Общее имя").unwrap();
+    std::fs::write(
+        dir.join("Текст.pdf"),
+        include_bytes!("../../../packages/core/tests/fixtures/pdf/text.pdf"),
+    )
+    .unwrap();
+    // Оценка читает файл без сети.
+    let (status, estimate) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_estimate",
+            json!({ "pdf": "Текст.pdf" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{estimate}");
+    assert_eq!(estimate["problem"], Value::Null, "{estimate}");
+    assert_eq!(estimate["pages"], 2, "{estimate}");
+
+    let anna_id = server
+        .state
+        .store
+        .account_by_login("anna")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let start = |request: &'static str| {
+        server.invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_start",
+            json!({ "path": path, "requestId": request, "kind": "Pdf",
+                "question": "Что хранит замыкание?", "pdf": "Текст.pdf", "now": 5 }),
+        )
+    };
+    {
+        let watcher = async {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            assert_eq!(
+                server.state.ai_requests.available_permits(),
+                MAX_AI_REQUESTS - 1,
+                "запрос не занял общий предел"
+            );
+            assert!(server
+                .state
+                .ai_background
+                .lock()
+                .unwrap()
+                .contains_key(&anna_id));
+            let (_, jobs) = server
+                .invoke(&anna, "Общее имя", "ai_jobs", json!({}))
+                .await;
+            assert_eq!(jobs[0]["type"], "Research", "{jobs}");
+            assert_eq!(jobs[0]["state"], "Running", "{jobs}");
+        };
+        let (waiting, ()) = tokio::join!(
+            tokio::time::timeout(std::time::Duration::from_millis(1_000), start("r1")),
+            watcher
+        );
+        assert!(waiting.is_err(), "исследование завершилось: {waiting:?}");
+    }
+    // Вызов оборван: места возвращены, задание не «идёт».
+    assert_eq!(
+        server.state.ai_requests.available_permits(),
+        MAX_AI_REQUESTS
+    );
+    assert!(server.state.ai_background.lock().unwrap().is_empty());
+    assert!(server.state.ai_by_account.lock().unwrap().is_empty());
+    let (_, jobs) = server
+        .invoke(&anna, "Общее имя", "ai_jobs", json!({}))
+        .await;
+    assert_eq!(jobs[0]["id"], "r1", "{jobs}");
+    assert_eq!(jobs[0]["state"], "Cancelled", "{jobs}");
+    // В уроке итога нет: карточка «прервано».
+    let (_, lesson) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_lesson_open",
+            json!({ "path": path }),
+        )
+        .await;
+    assert_eq!(lesson["research"][0]["status"], "Interrupted", "{lesson}");
+
+    // Повторный запуск берёт места снова и не получает отказа.
+    let again = tokio::time::timeout(std::time::Duration::from_millis(800), start("r2")).await;
+    assert!(again.is_err(), "повтор завершился: {again:?}");
+}

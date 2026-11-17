@@ -2993,6 +2993,141 @@ pub fn ai_knowledge_jobs(vault_id: String) -> Vec<ai::knowledge::KnowledgeJob> {
     ai::knowledge::jobs(&vault_id)
 }
 
+// ── Исследование в уроке (фича 056) ─────────────────────────────────────────
+
+/// Оценка чтения PDF до отправки: объём, страницы, стоимость. Только чтение vault, без
+/// сети; закрытый для ИИ путь и не-PDF — отказ `Forbidden`.
+pub async fn ai_research_estimate(
+    state: &Vault,
+    pdf: String,
+) -> Answer<ai::research::ResearchEstimate, Failure<ai::AiFailure>> {
+    with_vault!(state, |backend| ai::research::research_estimate(
+        backend, &pdf
+    )
+    .await
+    .map_err(Failure::Core))
+}
+
+/// Все фоновые задания vault (пополнение графа знаний и исследования): идущие первыми.
+/// Интерфейс опрашивает; `ai_knowledge_jobs` оставлен для совместимости.
+pub fn ai_jobs(vault_id: String) -> Vec<ai::jobs::AnyJob> {
+    ai::jobs::all_jobs(&vault_id)
+}
+
+/// Исследование в уроке: весь цикл — запрос с поиском провайдера (или текстом PDF), продолжение
+/// после `pause_turn`, заметка Typst и событие в файле урока. Урок за это время не занят:
+/// vault держится только на шаги записи, не на сеть. Если мест среди одновременных
+/// исследований (`research_parallel`) нет, вызов ждёт очереди. Отменяется `ai_cancel` по
+/// `request_id`; состояние — `ai_jobs` и `LessonView.research`. Место под запрос берётся на
+/// один запрос к модели, как у пополнения графа.
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_research_start(
+    state: &Vault,
+    home: &SyncHome,
+    vault_id: String,
+    path: String,
+    request_id: String,
+    kind: ai::research::ResearchKind,
+    question: String,
+    pdf: Option<String>,
+    now: i64,
+    allow_custom: bool,
+) -> Answer<ai::research::ResearchView, Failure<ai::AiFailure>> {
+    // Ключа нет или адрес не одобрен здесь — ничего не записывается и не отправляется.
+    let settings = with_vault!(state, |backend| ai::settings::load_settings(backend).await);
+    if !settings.enabled {
+        return Err(Failure::Core(ai::AiFailure::Disabled));
+    }
+    let verified =
+        ai::client::Connection::verify(&settings, allow_custom).map_err(Failure::Core)?;
+    ai::client::require_approved(home.secrets(), &vault_id, &settings)
+        .await
+        .map_err(Failure::Core)?;
+    let key = ai::client::provider_key(home.secrets(), &vault_id, settings.provider)
+        .await
+        .map_err(Failure::Core)?;
+    // Задание с этим id уже есть (идёт или закончено): новое не заводится, а чужое охрана не
+    // должна трогать.
+    if ai::research::RESEARCH_JOBS
+        .get(&vault_id, &request_id)
+        .is_some()
+    {
+        return Err(Failure::Core(ai::AiFailure::Cancelled));
+    }
+    // Охрана заводится до первого `begin_research`: вызов, оборванный посреди него (закрыто
+    // соединение), отменяет заведённое задание, а не оставляет его идущим.
+    let mut guard = ai::research::ResearchGuard::new(&vault_id, &request_id);
+    let mut current: Option<ai::research::PreparedResearch> = None;
+    // Запросов не больше предела (его держит ядро) плюс ожидание очереди раз в 250 мс; задание,
+    // которое никто не продвигает, ядро бросает само через полчаса.
+    for _ in 0..(ai::research::MAX_ROUNDS as usize + 8_000) {
+        let prepared = match current.take() {
+            Some(prepared) => prepared,
+            None => {
+                let begun = with_vault!(state, |backend| ai::research::begin_research(
+                    backend,
+                    &vault_id,
+                    &path,
+                    &request_id,
+                    kind,
+                    &question,
+                    pdf.as_deref(),
+                    now,
+                    allow_custom,
+                    &verified
+                )
+                .await);
+                match begun {
+                    Ok(ai::research::ResearchBegin::Ready { prepared }) => prepared,
+                    Ok(ai::research::ResearchBegin::Queued) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        continue;
+                    }
+                    Ok(ai::research::ResearchBegin::Finished { research }) => {
+                        guard.disarm();
+                        return Ok(research);
+                    }
+                    // Задание ядро закончило само, если успело завести.
+                    Err(failure) => {
+                        guard.disarm();
+                        return Err(Failure::Core(failure));
+                    }
+                }
+            }
+        };
+        let outcome = match home.enter_request() {
+            Ok(held) => {
+                let outcome = ai::research::send_research(
+                    &ai::transport::DefaultTransport,
+                    &vault_id,
+                    &prepared,
+                    key.as_deref(),
+                    &verified,
+                )
+                .await;
+                drop(held);
+                outcome
+            }
+            Err(failure) => Err(failure),
+        };
+        let done = with_vault!(state, |backend| ai::research::finish_research(
+            backend, &vault_id, &prepared, now, outcome
+        )
+        .await
+        .map_err(Failure::Core))?;
+        match (done.next, done.prepared) {
+            (ai::lesson::Next::Continue, Some(next)) => current = Some(next),
+            _ => {
+                guard.disarm();
+                return Ok(done.research);
+            }
+        }
+    }
+    // Вышли из цикла: задание не должно остаться идущим.
+    drop(guard);
+    Err(Failure::Core(ai::AiFailure::Cancelled))
+}
+
 /// Удаляет утверждение (`id`) либо вклад источника (`source`); ровно одно из двух.
 /// `keep` — только для источника: `true` помечает его удалённым, оставив вклад.
 pub async fn ai_knowledge_remove(

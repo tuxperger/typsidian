@@ -29,6 +29,7 @@ use crate::ai::journal::{record_done, record_sent};
 use crate::ai::knowledge::{agent_results, graph_readable, visible_material, KnowledgeMaterial};
 use crate::ai::price::estimate_usd;
 use crate::ai::protocol::{authorize, check_status};
+use crate::ai::research::ResearchKind;
 use crate::ai::settings::{load_settings, AiProvider, AiSettings};
 use crate::ai::transport::{AiTransport, HttpMethod, HttpRequest};
 use crate::ai::AiFailure;
@@ -498,6 +499,28 @@ async fn build_context<B: VaultBackend>(
             );
         }
     }
+    // Готовые исследования помнит учитель: самые свежие, изложением и с пометкой «данные»
+    // (фича 056). Вопрос берётся из события начала с тем же `id`.
+    let questions: std::collections::HashMap<&str, &str> = parsed
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            LessonEvent::ResearchStarted { id, question, .. } => {
+                Some((id.as_str(), question.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    let remembered: Vec<usize> = parsed
+        .events
+        .iter()
+        .enumerate()
+        .skip(start)
+        .filter(|(_, event)| matches!(event, LessonEvent::ResearchDone { .. }))
+        .map(|(index, _)| index)
+        .rev()
+        .take(crate::ai::research::texts::TEACHER_RESULTS)
+        .collect();
     let mut previous_question: Option<&LessonQuestion> = None;
     let mut steps = 0usize;
     for (index, event) in parsed.events.iter().enumerate().skip(start) {
@@ -607,6 +630,33 @@ async fn build_context<B: VaultBackend>(
                     prompt::probe_done_result(language).to_owned(),
                 );
             }
+            // Исследование запущено: результат инструмента «запущено» уходит один раз,
+            // ход не ждёт. Готовое приходит позже отдельным сообщением.
+            LessonEvent::ResearchStarted {
+                research,
+                question,
+                by_user: false,
+                ..
+            } if last_teacher.is_none_or(|teacher| index > teacher) => push(
+                &mut messages,
+                Role::User,
+                crate::ai::research::texts::started_result(language, *research, question),
+            ),
+            LessonEvent::ResearchDone {
+                id,
+                summary,
+                sources,
+                ..
+            } if remembered.contains(&index) => push(
+                &mut messages,
+                Role::User,
+                crate::ai::research::texts::done_message(
+                    language,
+                    questions.get(id.as_str()).copied().unwrap_or_default(),
+                    summary,
+                    sources,
+                ),
+            ),
             LessonEvent::Problem { n, statement, .. } => push(
                 &mut messages,
                 Role::Assistant,
@@ -696,7 +746,7 @@ fn build_request(
     system: &str,
     messages: &[Message],
     tools: Option<ToolSet>,
-    knowledge: bool,
+    extras: prompt::Extras,
     max_tokens: u32,
 ) -> HttpRequest {
     let role = |role: Role| match role {
@@ -717,7 +767,7 @@ fn build_request(
                 "messages": list,
             });
             if let Some(set) = tools {
-                body["tools"] = prompt::tools_with(provider, set, knowledge);
+                body["tools"] = prompt::tools_for(provider, set, extras);
             }
             ("messages", body)
         }
@@ -731,7 +781,7 @@ fn build_request(
                 "messages": all,
             });
             if let Some(set) = tools {
-                body["tools"] = prompt::tools_with(provider, set, knowledge);
+                body["tools"] = prompt::tools_for(provider, set, extras);
             }
             ("chat/completions", body)
         }
@@ -839,7 +889,11 @@ pub async fn begin_turn<B: VaultBackend>(
             &context.system,
             &context.messages,
             Some(context.tools),
-            settings.knowledge_agent_reads,
+            prompt::Extras {
+                knowledge: settings.knowledge_agent_reads,
+                research: crate::ai::research::web_search_available(&settings),
+                study_pdf: settings.enabled && settings.research_agent_pdf,
+            },
             MAX_TOKENS_TEACH,
         ),
         TurnKind::Compact => {
@@ -860,7 +914,7 @@ pub async fn begin_turn<B: VaultBackend>(
                 &context.system,
                 &messages,
                 None,
-                false,
+                prompt::Extras::default(),
                 MAX_TOKENS_COMPACT,
             )
         }
@@ -944,6 +998,9 @@ struct Calls {
     plan_progress: Option<PlanProgressArgs>,
     practice: Option<PracticeCall>,
     knowledge_reads: Vec<String>,
+    /// Вопросы веб-исследования и пары (путь PDF, вопрос) этого хода (фича 056).
+    research: Vec<String>,
+    study: Vec<(String, String)>,
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -1024,6 +1081,8 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
         plan_progress: None,
         practice: None,
         knowledge_reads: Vec::new(),
+        research: Vec::new(),
+        study: Vec::new(),
     };
     for call in calls {
         let input: Value = if call.arguments.trim().is_empty() {
@@ -1076,6 +1135,42 @@ fn parse_calls(calls: &[ToolCall], set: ToolSet) -> Calls {
                 );
                 if !query.is_empty() && !parsed.knowledge_reads.contains(&query) {
                     parsed.knowledge_reads.push(query);
+                }
+            }
+            prompt::RESEARCH
+                if set == ToolSet::Teach
+                    && parsed.research.len() + parsed.study.len()
+                        < crate::ai::research::MAX_RESEARCH_PER_TURN =>
+            {
+                let question = clip(
+                    input["question"]
+                        .as_str()
+                        .map(str::trim)
+                        .unwrap_or_default(),
+                    crate::ai::research::QUESTION_MAX_CHARS,
+                );
+                if !question.is_empty() && !parsed.research.contains(&question) {
+                    parsed.research.push(question);
+                }
+            }
+            prompt::STUDY_PDF
+                if set == ToolSet::Teach
+                    && parsed.research.len() + parsed.study.len()
+                        < crate::ai::research::MAX_RESEARCH_PER_TURN =>
+            {
+                let path = clip(
+                    input["path"].as_str().map(str::trim).unwrap_or_default(),
+                    1_000,
+                );
+                let question = clip(
+                    input["question"]
+                        .as_str()
+                        .map(str::trim)
+                        .unwrap_or_default(),
+                    crate::ai::research::QUESTION_MAX_CHARS,
+                );
+                if !path.is_empty() && !question.is_empty() {
+                    parsed.study.push((path, question));
                 }
             }
             prompt::PLAN_SET if set == ToolSet::Teach && parsed.plan_set.is_none() => {
@@ -1146,6 +1241,7 @@ pub async fn finish_turn<B: VaultBackend>(
             let mut events: Vec<LessonEvent> = Vec::new();
             let mut did_tool = false;
             let mut asked = false;
+            let mut requested: Vec<String> = Vec::new();
             match prepared.kind {
                 TurnKind::Compact => events.push(LessonEvent::Summary {
                     at: now,
@@ -1195,6 +1291,77 @@ pub async fn finish_turn<B: VaultBackend>(
                                 outcome,
                             });
                         }
+                    }
+                    // Исследования (фича 056): учитель только запрашивает, результат инструмента
+                    // «запущено», а сам запуск делает клиент по признаку `launch_due`.
+                    // Инструмент, которого в запросе не было (поиск выключен, свой адрес),
+                    // не исполняется: модель могла вызвать его сама.
+                    let mut started = before
+                        .events
+                        .iter()
+                        .filter(|event| matches!(event, LessonEvent::ResearchStarted { .. }))
+                        .count();
+                    let web_ok = crate::ai::research::web_search_available(&settings);
+                    let pdf_ok = settings.enabled && settings.research_agent_pdf;
+                    let mut study = calls.study;
+                    if !pdf_ok {
+                        study.clear();
+                    }
+                    let questions = if web_ok { calls.research } else { Vec::new() };
+                    let mut asks: Vec<(ResearchKind, String, Option<String>)> = questions
+                        .into_iter()
+                        .map(|question| (ResearchKind::Web, question, None))
+                        .collect();
+                    for (path, question) in study {
+                        let path = normalize_folder(Path::new(&path)).unwrap_or(path);
+                        let readable = path.to_lowercase().ends_with(".pdf")
+                            && check_access_in(backend, &path, &settings).await;
+                        if readable {
+                            asks.push((ResearchKind::Pdf, question, Some(path)));
+                        } else {
+                            did_tool = true;
+                            events.push(LessonEvent::PlanRejected {
+                                at: now,
+                                tool: prompt::STUDY_PDF.to_owned(),
+                                reason: prompt::study_pdf_denied(language, &path),
+                            });
+                        }
+                    }
+                    for (research, question, path) in asks {
+                        did_tool = true;
+                        if started >= crate::ai::research::MAX_RESEARCH_PER_LESSON {
+                            events.push(LessonEvent::PlanRejected {
+                                at: now,
+                                tool: match research {
+                                    ResearchKind::Web => prompt::RESEARCH,
+                                    ResearchKind::Pdf => prompt::STUDY_PDF,
+                                }
+                                .to_owned(),
+                                reason: prompt::research_refused(
+                                    language,
+                                    match research {
+                                        ResearchKind::Web => prompt::RESEARCH,
+                                        ResearchKind::Pdf => prompt::STUDY_PDF,
+                                    },
+                                ),
+                            });
+                            continue;
+                        }
+                        started += 1;
+                        let id = crate::ai::research::new_id(
+                            now,
+                            before.events.len() + events.len(),
+                            &prepared.path,
+                        );
+                        requested.push(id.clone());
+                        events.push(LessonEvent::ResearchStarted {
+                            at: now,
+                            id,
+                            research,
+                            question,
+                            path,
+                            by_user: false,
+                        });
                     }
                     // Итог замера и план: проверяются ядром против файла урока.
                     let mut seen: Vec<LessonEvent> = Vec::new();
@@ -1291,6 +1458,9 @@ pub async fn finish_turn<B: VaultBackend>(
                 }
             }
             append_events(backend, &prepared.path, &events).await?;
+            for id in &requested {
+                crate::ai::research::mark_pending(&prepared.path, id);
+            }
             let _ = record_done(
                 backend,
                 &prepared.id,
@@ -1314,8 +1484,9 @@ pub async fn finish_turn<B: VaultBackend>(
                 TurnKind::Teach => Next::WaitUser,
             };
             Ok(TurnDone {
-                view: crate::ai::knowledge::annotate(backend, view_of(&prepared.path, parsed))
-                    .await,
+                view: crate::ai::research::annotate(
+                    crate::ai::knowledge::annotate(backend, view_of(&prepared.path, parsed)).await,
+                ),
                 next,
             })
         }

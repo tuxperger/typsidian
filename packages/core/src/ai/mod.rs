@@ -11,11 +11,13 @@ pub mod access;
 pub mod cancel;
 pub mod client;
 pub mod endpoint;
+pub mod jobs;
 pub mod journal;
 pub mod knowledge;
 pub mod lesson;
 pub mod price;
 pub mod protocol;
+pub mod research;
 pub mod settings;
 pub mod transport;
 #[cfg(target_arch = "wasm32")]
@@ -84,4 +86,10 @@ pub enum AiFailure {
     LessonUnreadable,
     #[error("цель урока пуста")]
     GoalEmpty,
+    /// Веб-исследование выключено в настройках (фича 056, FR-002).
+    #[error("веб-исследование выключено")]
+    SearchDisabled,
+    /// У подключения нет встроенного поиска (свой адрес), фича 056.
+    #[error("у подключения нет поиска")]
+    SearchUnavailable,
 }

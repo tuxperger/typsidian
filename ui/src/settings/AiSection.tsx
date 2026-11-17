@@ -575,6 +575,53 @@ export function AiSection({ client, vaultId }: AiSectionProps): React.JSX.Elemen
         </label>
       ))}
 
+      {/* Исследования в уроке (фича 056, макет E): поиск в вебе, очередь, PDF по инициативе учителя. */}
+      <div className="ts-eyebrow">{t("research.settings.title")}</div>
+      <label className="ts-srow">
+        <span className="ts-srow__text">
+          <span className="ts-srow__label">{t("research.settings.web")}</span>
+          <span className="ts-srow__hint">{t("research.settings.webHint")}</span>
+        </span>
+        <input
+          type="checkbox"
+          className="ts-switch"
+          role="switch"
+          checked={settings.web_research ?? false}
+          onChange={(event) => void save({ web_research: event.target.checked })}
+        />
+      </label>
+      <label className="ts-srow">
+        <span className="ts-srow__text">
+          <span className="ts-srow__label">{t("research.settings.parallel")}</span>
+          <span className="ts-srow__hint">{t("research.settings.parallelHint")}</span>
+        </span>
+        <input
+          type="number"
+          className="ts-field__input ts-ai__number"
+          min={1}
+          max={4}
+          step={1}
+          value={settings.research_parallel ?? 2}
+          onChange={(event) => {
+            const value = Math.round(Number(event.target.value));
+            if (Number.isFinite(value) && value >= 1 && value <= 4) void save({ research_parallel: value });
+          }}
+        />
+      </label>
+      <label className="ts-srow">
+        <span className="ts-srow__text">
+          <span className="ts-srow__label">{t("research.settings.agentPdf")}</span>
+          <span className="ts-srow__hint">{t("research.settings.agentPdfHint")}</span>
+        </span>
+        <input
+          type="checkbox"
+          className="ts-switch"
+          role="switch"
+          checked={settings.research_agent_pdf ?? false}
+          onChange={(event) => void save({ research_agent_pdf: event.target.checked })}
+        />
+      </label>
+
       {journalOpen && <AiJournal client={client} />}
     </div>
   );

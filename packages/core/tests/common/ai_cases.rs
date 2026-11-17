@@ -533,3 +533,50 @@ pub async fn probe_refuses_a_connection_that_changed_after_the_check() {
     );
     assert!(transport.sent.borrow().is_empty());
 }
+
+/// Журнал ограничен и в байтах (ревью 056, M2): старые запросы вытесняются целиком, последний
+/// и тела оставшихся остаются дословными.
+pub async fn journal_is_bounded_in_bytes() {
+    use typsidian_core::ai::journal::MAX_BYTES;
+    let mut vault = vault_with(&enabled(AiProvider::Anthropic, "m")).await;
+    let body = |tag: char| tag.to_string().repeat(MAX_BYTES / 4);
+    let mut text = String::new();
+    for (index, tag) in ['a', 'b', 'c', 'd'].into_iter().enumerate() {
+        let sent = serde_json::json!({
+            "line": "Sent", "id": format!("big-{tag}"), "at": index, "provider": AiProvider::Anthropic,
+            "model": "m", "endpoint": "https://api.anthropic.com/v1/messages", "request": body(tag),
+        });
+        let done = serde_json::json!({
+            "line": "Done", "id": format!("big-{tag}"), "at": index, "failure": null,
+            "input_tokens": null, "output_tokens": null, "cost_usd": null,
+        });
+        text.push_str(&format!("{sent}\n{done}\n"));
+    }
+    assert!(text.len() > MAX_BYTES, "заготовка больше предела");
+    vault.replace_externally(JOURNAL, text);
+    begin(&mut vault, "fresh", 9).await.unwrap();
+    let entries = journal_entries(&vault).await;
+    let ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(ids, ["fresh", "big-d", "big-c", "big-b"], "самая старая ушла целиком");
+    assert_eq!(entries[1].request, body('d'), "тела дословны");
+    assert_eq!(entries[1].state, JournalState::Done);
+    let size = vault.bytes_of(JOURNAL).unwrap().len();
+    assert!(size <= MAX_BYTES, "файл в пределе: {size}");
+    // Один запрос больше предела не вытесняет сам себя.
+    let mut huge = String::new();
+    huge.push_str(&format!(
+        "{}\n",
+        serde_json::json!({
+            "line": "Sent", "id": "huge", "at": 1, "provider": AiProvider::Anthropic, "model": "m",
+            "endpoint": "https://api.anthropic.com/v1/messages", "request": "x".repeat(MAX_BYTES + 10),
+        })
+    ));
+    vault.replace_externally(JOURNAL, huge);
+    begin(&mut vault, "after-huge", 10).await.unwrap();
+    let ids: Vec<String> = journal_entries(&vault)
+        .await
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, ["after-huge"]);
+}

@@ -902,6 +902,44 @@ async fn ai_knowledge_commands_are_per_user_and_extract_obeys_the_server_rules()
         .await;
     assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
 
+    // Исследование (056): подмены те же, адрес чужой — отказ до записи и сети; общий список
+    // заданий чужих заданий не показывает; оценка PDF — чтение vault, не-PDF — отказ.
+    let (_, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_start",
+            json!({ "vaultId": "поддельный", "path": "Уроки/а.lesson", "requestId": "r1",
+                "kind": "Pdf", "question": "что?", "pdf": "Книги/а.pdf", "now": 1,
+                "allowCustom": true }),
+        )
+        .await;
+    assert_eq!(refused["kind"], "CustomEndpointDisabled", "{refused}");
+    let (status, all) = server
+        .invoke(&anna, "Общее имя", "ai_jobs", json!({ "vaultId": "чужой" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{all}");
+    assert_eq!(all, json!([]));
+    let (_, not_pdf) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_estimate",
+            json!({ "pdf": "заметка.typ" }),
+        )
+        .await;
+    assert_eq!(not_pdf["kind"], "Forbidden", "{not_pdf}");
+    let (status, missing) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_estimate",
+            json!({ "pdf": "Книги/нет.pdf" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{missing}");
+    assert_eq!(missing["problem"], "Missing", "{missing}");
+
     // Удаление: ровно одно из `id`/`source`; урока нет — отказ, ничего не создано.
     let (_, bad) = server
         .invoke(
@@ -1061,6 +1099,26 @@ async fn knowledge_extraction_takes_a_background_slot_and_a_request_slot_per_bat
         .await;
     assert_eq!(freed["kind"], "Disabled", "{freed}");
     // Команда не оставила за собой занятого места.
+    drop(BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место свободно"));
+    // Исследование в уроке (056) — тоже фоновая команда: то же место аккаунта.
+    let research_args = json!({ "path": "Уроки/а.lesson", "requestId": "1", "kind": "Web",
+        "question": "что?", "now": 0 });
+    let background = BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место");
+    let (status, refused) = server
+        .invoke(
+            &anna,
+            "Общее имя",
+            "ai_research_start",
+            research_args.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(refused["kind"], "RateLimited", "{refused}");
+    drop(background);
+    let (_, freed) = server
+        .invoke(&anna, "Общее имя", "ai_research_start", research_args)
+        .await;
+    assert_eq!(freed["kind"], "Disabled", "{freed}");
     drop(BackgroundAiSlot::acquire(&server.state, &anna_id).expect("место свободно"));
 
     // Место под пачку: слот аккаунта и общий слот, оба возвращаются при сбросе.

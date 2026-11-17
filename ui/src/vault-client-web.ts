@@ -88,6 +88,11 @@ import {
   knowledgeProposition,
   knowledgeRemove,
   knowledgeSend,
+  aiJobs,
+  researchBegin,
+  researchEstimate,
+  researchFinish,
+  researchSend,
   lessonBegin,
   lessonCheckpoint,
   lessonCreate,
@@ -105,7 +110,9 @@ import {
   type AiFailure,
   type ImportEstimate,
   type KnowledgeJob,
+  type PreparedResearch,
   type ProbeReply,
+  type ResearchReply,
   type TurnReply,
   linksMentionsAvailability,
   linksMentionsCancel,
@@ -184,6 +191,9 @@ export const VAULT_POLL_INTERVAL_MS = 1000;
  * пользователя ждёт опроса не дольше этого, а не всего обхода vault.
  */
 const POLL_STEP_BUDGET_MS = 20;
+
+/** Пауза между повторами очереди исследований: место среди одновременных ещё занято. */
+const RESEARCH_QUEUE_MS = 250;
 
 /**
  * Оборачивает готовый `WebBackend` в оба интерфейса сразу.
@@ -678,6 +688,42 @@ export function webVaultClient(
             ? knowledgeRemove(backend, target.id, undefined, false, Date.now())
             : knowledgeRemove(backend, undefined, target.source, target.keep, Date.now()),
         ),
+    },
+
+    // ── Фоновое исследование (фича 056) ───────────────────────────────
+    // Тот же цикл, что у урока: сеть вне очереди. `Queued` — ждём места среди
+    // одновременных исследований и спрашиваем снова; `Continue` — продолжение после
+    // `pause_turn`. Отказ запроса тоже завершается: ядро запишет его в карточку.
+    research: {
+      estimate: (pdf) => call(() => researchEstimate(backend, pdf)),
+      jobs: async (vaultId) => aiJobs(vaultId),
+      start: async (vaultId, path, requestId, kind, question, pdf) => {
+        let prepared: PreparedResearch;
+        for (;;) {
+          const begun = await call(() =>
+            researchBegin(backend, vaultId, path, requestId, kind, question, pdf ?? null, Date.now()),
+          );
+          if (begun.step === "Finished") return begun.research;
+          if (begun.step === "Ready") {
+            prepared = begun.prepared;
+            break;
+          }
+          await new Promise<void>((done) => setTimeout(done, RESEARCH_QUEUE_MS));
+        }
+        for (;;) {
+          let reply: ResearchReply | undefined;
+          let failure: AiFailure | undefined;
+          try {
+            reply = await researchSend(vaultId, prepared);
+          } catch (error) {
+            failure = error as AiFailure;
+          }
+          const current = prepared;
+          const done = await call(() => researchFinish(backend, vaultId, current, Date.now(), reply, failure));
+          if (done.next === "WaitUser" || done.prepared === undefined) return done.research;
+          prepared = done.prepared;
+        }
+      },
     },
 
     // ── Снимки заметок (фича 029) ─────────────────────────────────────
